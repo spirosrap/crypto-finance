@@ -1,0 +1,54 @@
+//@version=4
+strategy("Improved Balanced RSI MACD Volume Strategy", overlay=true)
+
+// RSI Settings
+rsiPeriod = input(14, title="RSI Period")
+rsiOverbought = input(70, title="RSI Overbought Threshold")
+rsiOversold = input(35, title="RSI Oversold Threshold")
+rsiValue = rsi(close, rsiPeriod)
+
+// MACD Settings
+[macdLine, signalLine, _] = macd(close, 12, 26, 9)
+macdHist = macdLine - signalLine
+macdMA = sma(macdLine, 9) 
+
+// Volume Settings
+volumeMultiplier = input(1.2, title="Volume Multiplier")
+avgVolume = sma(volume, 50)
+highVolume = avgVolume * volumeMultiplier
+
+// Number of conditions required for a Buy or Sell signal
+minBuyConditions = input(2, title="Min Buy Conditions")
+minSellConditions = input(2, title="Min Sell Conditions")
+
+// Reset the counter at the beginning of each new bar
+var float buyConditions = 0
+var float sellConditions = 0
+
+// Buy Conditions
+if (crossover(macdLine, macdMA))
+    buyConditions := buyConditions + 1
+if (rsiValue < rsiOversold)
+    buyConditions := buyConditions + 1
+if (volume > highVolume)
+    buyConditions := buyConditions + 1
+
+// Sell Conditions
+if (crossunder(macdLine, signalLine))
+    sellConditions := sellConditions + 1
+if (rsiValue > rsiOverbought)
+    sellConditions := sellConditions + 1
+if (volume > highVolume)
+    sellConditions := sellConditions + 1
+
+// Buy or Sell when conditions are met
+shouldBuy = buyConditions >= minBuyConditions
+shouldSell = sellConditions >= minSellConditions
+
+// Reset the counter
+buyConditions := 0
+sellConditions := 0
+
+// Plotting signals on the chart
+plotshape(series=shouldBuy, title="Buy Signal", location=location.belowbar, color=color.green, style=shape.arrowup, text="Buy")
+plotshape(series=shouldSell, title="Sell Signal", location=location.abovebar, color=color.red, style=shape.arrowdown, text="Sell")
