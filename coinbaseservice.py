@@ -1,6 +1,8 @@
 from coinbase.rest import RESTClient
 from coinbase.rest import portfolios, products, market_data, orders
-from datetime import datetime
+from datetime import datetime, timedelta
+import time
+import uuid
 
 class CoinbaseService:
     def __init__(self, api_key, api_secret):
@@ -30,21 +32,27 @@ class CoinbaseService:
                 }
         return prices
 
-    def get_hourly_data(self, product_id):
+    def get_hourly_data(self, product_id, days=60):
         end = int(datetime.utcnow().timestamp())
-        start = end - 86400*12  # 12*24 hours in seconds
-        try:
-            candles = market_data.get_candles(
-                self.client,
-                product_id=product_id,
-                start=start,
-                end=end,
-                granularity="ONE_HOUR"
-            )
-            return [float(candle['close']) for candle in candles['candles']]
-        except requests.exceptions.HTTPError as e:
-            print(f"Error fetching candle data: {e}")
-            return []
+        all_candles = []
+        
+        for i in range(0, days, 14):
+            start = end - 86400 * min(14, days - i)
+            try:
+                candles = market_data.get_candles(
+                    self.client,
+                    product_id=product_id,
+                    start=start,
+                    end=end,
+                    granularity="ONE_HOUR"
+                )
+                all_candles = candles['candles'] + all_candles
+                end = start - 1  # Set end to 1 second before start for next iteration
+            except requests.exceptions.HTTPError as e:
+                print(f"Error fetching candle data: {e}")
+                break
+        print(f"Fetched {len(all_candles)} candles")
+        return [float(candle['close']) for candle in all_candles]
         
     def get_6h_data(self, product_id):
         end = int(datetime.utcnow().timestamp())
@@ -71,18 +79,40 @@ class CoinbaseService:
             base_size=str(size)
         )
         
-    def place_bracket_order(self, product_id, size, limit_price, stop_trigger_price):
+    def place_bracket_order(self, product_id, side, size, entry_price, take_profit_price, stop_loss_price):
         try:
-            end_time = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-            return orders.trigger_bracket_order_gtd_sell(
-                self.client,
-                client_order_id=f"spiros_bracket_{int(time.time())}",
-                product_id=product_id,
-                base_size=str(size),
-                limit_price=str(limit_price),
-                stop_trigger_price=str(stop_trigger_price),
-                end_time=end_time
-            )
+            # Generate a unique client_order_id
+            client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            # Set end time to 30 days from now
+            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+
+            if side.upper() == "BUY":
+                order = orders.trigger_bracket_order_gtd_buy(
+                    self.client,
+                    client_order_id=client_order_id,
+                    product_id=product_id,
+                    base_size=str(size),
+                    limit_price=str(entry_price),
+                    stop_trigger_price=str(stop_loss_price),
+                    take_profit_price=str(take_profit_price),
+                    end_time=end_time
+                )
+            elif side.upper() == "SELL":
+                order = orders.trigger_bracket_order_gtd_sell(
+                    self.client,
+                    client_order_id=client_order_id,
+                    product_id=product_id,
+                    base_size=str(size),
+                    limit_price=str(entry_price),
+                    stop_trigger_price=str(stop_loss_price),
+                    take_profit_price=str(take_profit_price),
+                    end_time=end_time
+                )
+            else:
+                raise ValueError("Invalid side. Must be 'BUY' or 'SELL'.")
+
+            return order
         except Exception as e:
             print(f"Error placing bracket order: {e}")
             return None            

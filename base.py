@@ -15,6 +15,14 @@ from sklearn.preprocessing import StandardScaler
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
 from sentimentanalysis import SentimentAnalysis
+import os
+import json
+import logging  # Add this import at the top
+from tqdm import tqdm  # Import tqdm for progress bar
+
+# Configure logging
+# logging.basicConfig(level=logging.INFO, format='%(asctime)s -%(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 class CryptoTrader:
     def __init__(self, api_key, api_secret):
@@ -22,11 +30,14 @@ class CryptoTrader:
         self.coinbase_service = CoinbaseService(api_key, api_secret)
         self.technical_analysis = TechnicalAnalysis(self.coinbase_service)
         self.sentiment_analysis = SentimentAnalysis()
+        logging.info("CryptoTrader initialized with API key.")
 
     def get_portfolio_info(self):
+        logging.info("Fetching portfolio info.")
         return self.coinbase_service.get_portfolio_info()
 
     def get_btc_prices(self):
+        logging.info("Fetching BTC prices.")
         return self.coinbase_service.get_btc_prices()
 
     def get_hourly_data(self, product_id):
@@ -38,8 +49,8 @@ class CryptoTrader:
     def compute_rsi(self, product_id, period=14):
         return self.technical_analysis.compute_rsi(product_id, period)
 
-    def compute_macd(self, product_id):
-        return self.technical_analysis.compute_macd(product_id)
+    def compute_macd(self, product_id, candles):
+        return self.technical_analysis.compute_macd(product_id, candles)
 
     def exponential_moving_average(self, data, span):
         return self.technical_analysis.exponential_moving_average(data, span)
@@ -76,27 +87,8 @@ class CryptoTrader:
         return self.generate_bollinger_bands_signal(prices)
 
 
-    def identify_trend(self, product_id, window=20):
-        prices = self.get_hourly_data(product_id)
-        if len(prices) < window:
-            return "Not enough data"
-        
-        # Calculate Simple Moving Average
-        sma = np.convolve(prices, np.ones(window), 'valid') / window
-        
-        # Calculate the slope of the SMA
-        slope = np.gradient(sma)
-        
-        # Determine the trend based on the recent slope
-        recent_slope = slope[-5:].mean()  # Use the average of the last 5 slope values
-        
-        if recent_slope > 0.01:  # Threshold can be adjusted
-            return "Uptrend"
-        elif recent_slope < -0.01:  # Threshold can be adjusted
-            return "Downtrend"
-        else:
-            return "Sideways"
-
+    def identify_trend(self, product_id, candles, window=20):
+        return self.technical_analysis.identify_trend(product_id, candles, window)
 
     def generate_combined_signal(self, rsi, macd, signal, histogram, candles):
         return self.technical_analysis.generate_combined_signal(rsi, macd, signal, histogram, candles) 
@@ -114,28 +106,43 @@ class CryptoTrader:
         max_retries = 1
         retry_delay = 60  # seconds
 
-        print(f"Placing bracket order with target price {target_price}.")
+        logging.info(f"Placing bracket order with target price {target_price}.")
         for attempt in range(max_retries):
             order = self.place_bracket_order(product_id, size, target_price * 1.02, target_price * 0.98)
             if order["success"] == True:
-                print(order, "Bracket order placed successfully.")
+                logging.info(f"{order}, Bracket order placed successfully.")
                 return
             else:
-                print(order, "Failed to place order.")
+                logging.error(f"{order}, Failed to place order.")
                 return
-            print(f"Failed to place order. Retrying in {retry_delay} seconds...")
+            logging.info(f"Failed to place order. Retrying in {retry_delay} seconds...")
             time.sleep(retry_delay)
-        print("Max retries reached. Unable to place bracket order.")
+        logging.info("Max retries reached. Unable to place bracket order.")
 
     def backtest(self, product_id: str, start_date: datetime, end_date: datetime, initial_balance: float) -> Tuple[float, List[dict]]:
         try:
-            # Fetch historical data
-            print(f"Fetching historical data from {start_date} to {end_date}...")
-            candles = self.get_historical_data(product_id, start_date, end_date)
-            print(f"Fetched {len(candles)} candles.")
+            logging.info(f"Starting backtest for {product_id} from {start_date} to {end_date}.")
+            # Create a filename based on the product_id and date range
+            filename = f"{product_id}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.json"
+            
+            if os.path.exists(filename):
+                # Load historical data from file if it exists
+                logging.info(f"Loading historical data from {filename}...")
+                with open(filename, 'r') as f:
+                    candles = json.load(f)
+            else:
+                # Fetch historical data if file doesn't exist
+                logging.info(f"Fetching historical data from {start_date} to {end_date}...")
+                candles = self.get_historical_data(product_id, start_date, end_date)
+                
+                # Save the fetched data to a file
+                with open(filename, 'w') as f:
+                    json.dump(candles, f)
+                logging.info(f"Saved historical data to {filename}")
+            logging.info(f"Fetched {len(candles)} candles.")
 
             if not candles:
-                print("No historical data available for backtesting.")
+                logging.info("No historical data available for backtesting.")
                 return initial_balance, []
 
             balance = initial_balance
@@ -143,73 +150,65 @@ class CryptoTrader:
             trades = []
             last_trade_time = None
 
-            for i, candle in enumerate(candles):
-                close_price = float(candle['close'])
-                current_time = int(candle['start'])
-                
-                # Calculate indicators
-                rsi = self.compute_rsi_for_backtest(candles[:i+1])
-                macd, signal, histogram = self.compute_macd_for_backtest(candles[:i+1])
-                
-                # Generate signal
-                combined_signal = self.generate_combined_signal(rsi, macd, signal, histogram, candles)
-                # ml_signal = self.generate_ml_signal(product_id, end=current_time)
-                # combined_signal = ml_signal
-                # # Force a HOLD signal if less than a day has passed since the last trade
-                # if last_trade_time and (current_time - last_trade_time) < 86400:  # 86400 seconds = 1 day
-                #     combined_signal = "HOLD"
-                # else:
-                #     combined_signal = ml_signal
-
-                # Execute trade based on signal
-                if combined_signal == "BUY" and balance > 0:
-                    # Get the actual fee percentage based on transaction summary
-                    transaction_summary = self.client.get_transaction_summary()
-                    fee_tier = transaction_summary.get('fee_tier', {})
-                    fee_rate = float(fee_tier.get('taker_fee_rate', 0.005))  # Default to 0.5% if not found
+            # Initialize tqdm progress bar for the entire loop
+            with tqdm(total=len(candles), desc="Processing candles") as pbar:
+                for i, candle in enumerate(candles):
+                    close_price = float(candle['close'])
+                    current_time = int(candle['start'])
                     
-                    btc_to_buy = (balance / close_price) / (1 + fee_rate)
-                    fee = balance - (btc_to_buy * close_price)
-                    balance = 0
-                    btc_balance += btc_to_buy
-                    trades.append({
-                        'date': current_time,
-                        'action': 'BUY',
-                        'price': close_price,
-                        'amount': btc_to_buy,
-                        'fee': fee
-                    })
-                    human_readable_date = datetime.utcfromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')
-                    print(human_readable_date,btc_balance,close_price,"BUY")
-                    last_trade_time = current_time
-
-                elif combined_signal == "SELL" and btc_balance > 0:
-                    # Get the actual fee percentage based on transaction summary
-                    transaction_summary = self.client.get_transaction_summary()
-                    fee_tier = transaction_summary.get('fee_tier', {})
-                    fee_rate = float(fee_tier.get('taker_fee_rate', 0.005))  # Default to 0.5% if not found
+                    # Calculate indicators without caching
+                    rsi = self.compute_rsi_for_backtest(candles[:i+1])
+                    macd, signal, histogram = self.compute_macd_for_backtest(candles[:i+1])
                     
-                    gross_sale = btc_balance * close_price
-                    fee = gross_sale * fee_rate
-                    balance += gross_sale - fee
-                    btc_balance = 0
-                    trades.append({
-                        'date': current_time,
-                        'action': 'SELL',
-                        'price': close_price,
-                        'amount': btc_balance,
-                        'fee': fee
-                    })
-                    human_readable_date = datetime.utcfromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')
-                    print(human_readable_date,balance,close_price,"SELL")
-                    last_trade_time = current_time
+                    # Generate signal
+                    combined_signal = self.generate_combined_signal(rsi, macd, signal, histogram, candles)
 
+                    # Execute trade based on signal
+                    if combined_signal == "BUY" and balance > 0:
+                        btc_to_buy, fee = self.calculate_trade_amounts(balance, close_price, is_buy=True)
+                        balance = 0
+                        btc_balance += btc_to_buy
+                        trades.append(self.create_trade_record(current_time, 'BUY', close_price, btc_to_buy, fee))
+                        last_trade_time = current_time
+
+                    elif combined_signal == "SELL" and btc_balance > 0:
+                        balance_to_add, fee = self.calculate_trade_amounts(btc_balance * close_price, close_price, is_buy=False)
+                        balance += balance_to_add
+                        trades.append(self.create_trade_record(current_time, 'SELL', close_price, btc_balance, fee))
+                        btc_balance = 0
+                        last_trade_time = current_time
+
+                    # Update the progress bar
+                    pbar.update(1)
             # Calculate final portfolio value
             final_value = balance + (btc_balance * float(candles[-1]['close']))
             return final_value, trades
         except Exception as e:
-            print(f"An error occurred during backtesting: {e}")
+            logging.error(f"An error occurred during backtesting: {e}")
             return initial_balance, []
+
+    def calculate_trade_amounts(self, amount: float, price: float, is_buy: bool) -> Tuple[float, float]:
+        transaction_summary = self.client.get_transaction_summary()
+        fee_tier = transaction_summary.get('fee_tier', {})
+        fee_rate = float(fee_tier.get('taker_fee_rate', 0.005))  # Default to 0.5% if not found
+        
+        if is_buy:
+            asset_amount = (amount / price) / (1 + fee_rate)
+            fee = amount - (asset_amount * price)
+        else:
+            fee = amount * fee_rate
+            asset_amount = amount - fee
+        
+        return asset_amount, fee
+
+    def create_trade_record(self, time: int, action: str, price: float, amount: float, fee: float) -> dict:
+        return {
+            'date': time,
+            'action': action,
+            'price': price,
+            'amount': amount,
+            'fee': fee
+        }
 
     def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime) -> List[dict]:
         all_candles = []
@@ -235,7 +234,7 @@ class CryptoTrader:
                 # Add a small delay to avoid rate limiting
                 time.sleep(0.5)
             except requests.exceptions.HTTPError as e:
-                print(f"Error fetching candle data: {e}")
+                logging.error(f"Error fetching candle data: {e}")
                 # You might want to add more sophisticated error handling here
 
         # with open('historical_data.txt', 'w') as f:
@@ -247,7 +246,7 @@ class CryptoTrader:
 
         # Sort the candles by their start time to ensure they are in chronological order
         all_candles.sort(key=lambda x: x['start'])
-        
+        logging.info(f"Number of candles: {len(all_candles)}")
         return all_candles
 
 
@@ -257,22 +256,27 @@ def main():
     api_key = API_KEY
     api_secret = API_SECRET
     
+    logging.info("Starting the trading bot.")
 
     trader = CryptoTrader(api_key, api_secret)
 
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=14)
+    candles = trader.get_historical_data("BTC-USD", start_date, end_date)
+
     fiat_usd, btc = trader.get_portfolio_info()
-    print(f"BTC: ${fiat_usd:.2f}, {btc} btc")
+    logging.info(f"BTC: ${fiat_usd:.2f}, {btc} btc")
 
     prices = trader.get_btc_prices()
     for currency, price in prices.items():
-        print(f"{currency}: Bid: {price['bid']:.2f}, Ask: {price['ask']:.2f}")
-    rsi = trader.compute_rsi("BTC-USD")
-    print(f"Current RSI for BTC-USD: {rsi:.2f}")
+        logging.info(f"{currency}: Bid: {price['bid']:.2f}, Ask: {price['ask']:.2f}")
+    rsi = trader.compute_rsi("BTC-USD", candles)
+    logging.info(f"Current RSI for BTC-USD: {rsi:.2f}")
 
     signal = trader.generate_signal(rsi)
-    print(f"Signal for BTC-USD: {signal}")
-    macd, signal, histogram = trader.compute_macd("BTC-USD")
-    print(f"Current MACD for BTC-USD: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}")
+    logging.info(f"Signal for BTC-USD: {signal}")
+    macd, signal, histogram = trader.compute_macd("BTC-USD", candles)
+    logging.info(f"Current MACD for BTC-USD: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}")
     
     # Calculate the value of 0.00187597 BTC in EUR including fees
     btc_amount = 0.00187597
@@ -287,15 +291,12 @@ def main():
     fees = float(eur_value_before_fees) * float(fee_percentage)
     eur_value_after_fees = eur_value_before_fees - fees
     
-    print(f"0.00187597 BTC is worth approximately {eur_value_after_fees:.2f} EUR (including {float(fee_percentage)*100}% fees)")
-    print(f"Fees: {fees:.2f} EUR")
-    # print(f"Value before fees: {eur_value_before_fees:.2f} EUR")
+    logging.info(f"0.00187597 BTC is worth approximately {eur_value_after_fees:.2f} EUR (including {float(fee_percentage)*100}% fees)")
+    logging.info(f"Fees: {fees:.2f} EUR")
+    # logging.info(f"Value before fees: {eur_value_before_fees:.2f} EUR")
     
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=14)
-    candles = trader.get_historical_data("BTC-USD", start_date, end_date)
     combined_signal = trader.generate_combined_signal(rsi, macd, signal, histogram, candles)
-    print(f"Combined signal for BTC-USD: {combined_signal}")
+    logging.info(f"Combined signal for BTC-USD: {combined_signal}")
 
     # Uncomment to place an order
     # if signal == "BUY":
@@ -305,18 +306,18 @@ def main():
 
     # trader.monitor_price_and_place_bracket_order("BTC-EUR", 60000, btc_amount)
     
-    trend = trader.identify_trend("BTC-USD") 
-    print(f"Current 1h (12 days) trend for BTC-USD: {trend}")
+    trend = trader.identify_trend("BTC-USD", candles) 
+    logging.info(f"Current 1h (12 days) trend for BTC-USD: {trend}")
 
     bitcoin_sentiment = trader.analyze_sentiment("Bitcoin")
-    print(f"Current sentiment for Bitcoin: {bitcoin_sentiment}")
+    logging.info(f"Current sentiment for Bitcoin: {bitcoin_sentiment}")
 
     # ml_signal = trader.generate_ml_signal("BTC-USD")
-    # print(f"ML Signal for BTC-USD: {ml_signal}")
+    # logging.info(f"ML Signal for BTC-USD: {ml_signal}")
 
     backtest = True
     if backtest == True:
-
+        logging.info("Starting backtesting.")
         # Add backtesting
  
         # # Bear market 2021: from $69000 to $15000
@@ -331,22 +332,20 @@ def main():
 
         final_value, trades = trader.backtest("BTC-USD", start_date, end_date, initial_balance)
         
-        print(f"Backtesting results:")
-        print(f"Initial balance: ${initial_balance}")
-        print(f"Final portfolio value: ${final_value:.2f}")
-        print(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")
-        print(f"Number of trades: {len(trades)}")
-        print("Trades executed during backtesting:")
+        logging.info(f"Backtesting results: Initial balance: ${initial_balance}, Final portfolio value: ${final_value:.2f}")
+        logging.info(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")
+        logging.info(f"Number of trades: {len(trades)}")
+        logging.info("Trades executed during backtesting:")
         
         sorted_trades = sorted(trades, key=lambda x: x['date'])
         for trade in sorted_trades:
             # f.write(f"Date: {datetime.utcfromtimestamp(int(candle['start'])).strftime('%Y-%m-%d %H:%M:%S')}, "
             human_readable_date = datetime.utcfromtimestamp(int(trade['date'])).strftime('%Y-%m-%d %H:%M:%S')
-            print(f"Date: {human_readable_date}, Action: {trade['action']}, Price: {trade['price']}, Amount: {trade['amount']}")
+            logging.info(f"Date: {human_readable_date}, Action: {trade['action']}, Price: {trade['price']}, Amount: {trade['amount']}")
 
     # # You can further analyze the trades list for more insights
     # # Test ML signal for the past 200 days
-    # print("\nTesting ML signal for the past 200 days:")
+    # logging.info("\nTesting ML signal for the past 200 days:")
     # end_date = datetime.now()
     # start_date = end_date - timedelta(days=200)
     
@@ -355,7 +354,7 @@ def main():
     #     timestamp = int(current_date.timestamp())
     #     ml_signal = trader.generate_ml_signal("BTC-USD", end=timestamp)
     #     human_readable_date = current_date.strftime('%Y-%m-%d')
-    #     print(f"Date: {human_readable_date}, ML Signal: {ml_signal}")
+    #     logging.info(f"Date: {human_readable_date}, ML Signal: {ml_signal}")
 
 if __name__ == "__main__":
     main()

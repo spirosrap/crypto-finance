@@ -18,14 +18,18 @@ class SentimentAnalysis:
             newsapi = NewsApiClient(api_key=NEWS_API_KEY)
             articles = newsapi.get_everything(q=keyword, language='en', sort_by='publishedAt', page_size=100)
             
-            # Initialize NLTK's VADER sentiment analyzer
-            sia = SentimentIntensityAnalyzer()
-            
             # Analyze sentiment for each article
             sentiments = []
             for article in articles['articles']:
-                sentiment = sia.polarity_scores(article['title'] + ' ' + article['description'])
-                sentiments.append(sentiment['compound'])
+                title = article.get('title', '')
+                description = article.get('description', '')
+                text = f"{title} {description}".strip()
+                if text:
+                    sentiment = self.sia.polarity_scores(text)
+                    sentiments.append(sentiment['compound'])
+            
+            if not sentiments:
+                return "Unable to analyze"
             
             # Calculate average sentiment
             avg_sentiment = sum(sentiments) / len(sentiments)

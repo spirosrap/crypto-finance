@@ -7,8 +7,8 @@ class TechnicalAnalysis:
     def __init__(self, coinbase_service: CoinbaseService):
         self.coinbase_service = coinbase_service
 
-    def compute_rsi(self, product_id, period=14):
-        prices = self.coinbase_service.get_hourly_data(product_id)
+    def compute_rsi(self, product_id, candles, period=14):
+        prices = [float(candle['close']) for candle in candles]
         deltas = np.diff(prices)
         seed = deltas[:period+1]
         up = seed[seed >= 0].sum()/period
@@ -32,8 +32,8 @@ class TechnicalAnalysis:
 
         return rsi[-1]
 
-    def identify_trend(self, product_id, window=20):
-        prices = self.coinbase_service.get_hourly_data(product_id)
+    def identify_trend(self, product_id, candles, window=20):
+        prices = [float(candle['close']) for candle in candles]
         if len(prices) < window:
             return "Not enough data"
         
@@ -53,8 +53,9 @@ class TechnicalAnalysis:
         else:
             return "Sideways"
 
-    def compute_macd(self, product_id):
-        prices = np.array(self.coinbase_service.get_hourly_data(product_id))
+    def compute_macd(self, product_id, candles):
+        prices = [float(candle['close']) for candle in candles]
+        print(f"length of prices: {len(prices)}")
         ema12 = self.exponential_moving_average(prices, 12)
         ema26 = self.exponential_moving_average(prices, 26)
         macd = ema12 - ema26
