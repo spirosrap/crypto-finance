@@ -15,6 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
 from sentimentanalysis import SentimentAnalysis
+from historicaldata import HistoricalData
 import os
 import json
 import logging
@@ -22,11 +23,8 @@ from tqdm import tqdm
 
 # Constants
 DEFAULT_FEE_RATE = 0.005  # 0.5%
-CHUNK_SIZE_HOURS = 300
 RETRY_DELAY_SECONDS = 60
 MAX_RETRIES = 1
-BRACKET_ORDER_TAKE_PROFIT_MULTIPLIER = 1.02
-BRACKET_ORDER_STOP_LOSS_MULTIPLIER = 0.98
 RSI_PERIOD = 14
 BOLLINGER_WINDOW = 20
 BOLLINGER_NUM_STD = 2
@@ -43,6 +41,7 @@ class CryptoTrader:
         self.coinbase_service = CoinbaseService(api_key, api_secret)
         self.technical_analysis = TechnicalAnalysis(self.coinbase_service)
         self.sentiment_analysis = SentimentAnalysis()
+        self.historical_data = HistoricalData(self.client)
         logger.info("CryptoTrader initialized with API key.")
 
     def get_portfolio_info(self):
@@ -54,11 +53,14 @@ class CryptoTrader:
         return self.coinbase_service.get_btc_prices()
 
     def get_hourly_data(self, product_id):
-        return self.coinbase_service.get_hourly_data(product_id)
- 
+        return self.historical_data.get_hourly_data(product_id)
+
     def get_6h_data(self, product_id):
-        return self.coinbase_service.get_6h_data(product_id)
- 
+        return self.historical_data.get_6h_data(product_id)
+
+    def get_historical_data(self, product_id, start_date, end_date):
+        return self.historical_data.get_historical_data(product_id, start_date, end_date)
+
     def compute_rsi(self, product_id, candles, period=RSI_PERIOD):
         return self.technical_analysis.compute_rsi(product_id, candles, period)
 
@@ -212,44 +214,6 @@ class CryptoTrader:
             'fee': fee
         }
 
-    def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime) -> List[dict]:
-        all_candles = []
-        current_start = start_date
-        chunk_size = timedelta(hours=CHUNK_SIZE_HOURS)
-
-        while current_start < end_date:
-            current_end = min(current_start + chunk_size, end_date)
-            start = int(current_start.timestamp())
-            end = int(current_end.timestamp())
-
-            try:
-                candles = market_data.get_candles(
-                    self.client,
-                    product_id=product_id,
-                    start=start,
-                    end=end,
-                    granularity="ONE_HOUR"
-                )
-                all_candles.extend(candles['candles'])
-                current_start = current_end
-
-                # Add a small delay to avoid rate limiting
-                time.sleep(0.5)
-            except requests.exceptions.HTTPError as e:
-                logger.error(f"Error fetching candle data: {e}", exc_info=True)
-                # You might want to add more sophisticated error handling here
-
-        # with open('historical_data.txt', 'w') as f:
-        #     f.write("# Historical Data\n")
-        #     for candle in all_candles:
-        #         f.write(f"Date: {datetime.utcfromtimestamp(int(candle['start'])).strftime('%Y-%m-%d %H:%M:%S')}, "
-        #                 f"Open: {candle['open']}, High: {candle['high']}, Low: {candle['low']}, "
-        #                 f"Close: {candle['close']}, Volume: {candle['volume']}\n")
-
-        # Sort the candles by their start time to ensure they are in chronological order
-        all_candles.sort(key=lambda x: x['start'])
-        logger.info(f"Fetched {len(all_candles)} candles for {product_id}.")
-        return all_candles
 
 def main():
     api_key = API_KEY
