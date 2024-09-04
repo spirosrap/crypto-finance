@@ -146,48 +146,114 @@ class TechnicalAnalysis:
         ma_crossover_signal = self.compute_moving_average_crossover(candles)
         stochastic_k, stochastic_d = self.compute_stochastic_oscillator(candles)
         
-        # Simplify trend identification
         trend = self.identify_trend(None, candles)
-
-        # Count buy and sell signals
-        signals = [rsi_signal, macd_signal, bollinger_signal, ma_crossover_signal]
-        buy_count = signals.count("BUY")
-        sell_count = signals.count("SELL")
-
+        volume_profile = self.compute_volume_profile(candles)
+        
         # Initialize signal strength
         signal_strength = 0
 
-        # Simplified decision making
-        if buy_count > sell_count:
+        # RSI
+        if rsi_signal == "BUY":
             signal_strength += 1
-        elif sell_count > buy_count:
+        elif rsi_signal == "SELL":
             signal_strength -= 1
 
-        # Consider trend
+        # MACD
+        if macd_signal == "BUY":
+            signal_strength += 1
+        elif macd_signal == "SELL":
+            signal_strength -= 1
+
+        # Bollinger Bands
+        if bollinger_signal == "BUY":
+            signal_strength += 1
+        elif bollinger_signal == "SELL":
+            signal_strength -= 1
+
+        # Moving Average Crossover
+        if ma_crossover_signal == "BUY":
+            signal_strength += 1
+        elif ma_crossover_signal == "SELL":
+            signal_strength -= 1
+
+        # Stochastic Oscillator
+        if stochastic_k > 80 and stochastic_d > 80:
+            signal_strength -= 1  # Overbought condition
+        elif stochastic_k < 20 and stochastic_d < 20:
+            signal_strength += 1  # Oversold condition
+
+        # Trend
         if trend == "Uptrend":
             signal_strength += 1
         elif trend == "Downtrend":
             signal_strength -= 1
 
-        # Consider Stochastic Oscillator
-        if stochastic_k > 70 and stochastic_d >70:
-            signal_strength -= 1  # Overbought condition
-        elif stochastic_k < 30 and stochastic_d < 30:
-            signal_strength += 1  # Oversold condition
+        # Volume Profile
+        current_price = float(candles[-1]['close'])
+        volume_resistance = max(volume_profile, key=lambda x: x[1])[0]
+        if current_price > volume_resistance:
+            signal_strength += 1
+        elif current_price < volume_resistance:
+            signal_strength -= 1
 
-        # Make final decision
-        if signal_strength >= 1:
-            final_signal = "BUY"
-        elif signal_strength <= -1:
-            final_signal = "SELL"
-        else:
-            final_signal = "HOLD"
-
-        # Update volatility history (keep this for potential future use)
-        atr = self.compute_atr(candles, period=14)
+        # ATR for volatility
+        atr = self.compute_atr(candles)
         avg_price = np.mean([float(candle['close']) for candle in candles[-14:]])
         volatility = atr / avg_price
         self.update_volatility_history(volatility)
+
+        # Adjust signal strength based on volatility
+        avg_volatility = np.mean([v['volatility'] for v in self.volatility_history[-10:]])
+        if volatility > avg_volatility * 1.2:  # If current volatility is 20% higher than average
+            signal_strength *= 0.8  # Reduce signal strength in high volatility
+
+        # Add trend-following component
+        short_ma = self.calculate_sma(candles, 10)
+        long_ma = self.calculate_sma(candles, 50)
+        trend = "Uptrend" if short_ma > long_ma else "Downtrend"
+
+        # Add dynamic support/resistance
+        current_price = float(candles[-1]['close'])
+        ma_200 = self.calculate_sma(candles, 200)
+
+        # Incorporate volume analysis
+        volume_signal = self.analyze_volume(candles)
+
+        # Implement pullback strategy
+        pullback_signal = self.detect_pullback(candles)
+
+        # Adjust signal strength based on new components
+        if trend == "Uptrend":
+            signal_strength += 1
+        else:
+            signal_strength -= 1
+
+        if current_price < ma_200:
+            signal_strength += 1  # Price below 200 MA might be a good buying opportunity
+        else:
+            signal_strength -= 1  # Price above 200 MA might be risky for buying
+
+        if volume_signal == "High":
+            signal_strength += 1
+        elif volume_signal == "Low":
+            signal_strength -= 1
+
+        if pullback_signal == "Buy":
+            signal_strength += 2
+        elif pullback_signal == "Sell":
+            signal_strength -= 2
+
+        # Adjust thresholds for more conservative buying
+        if signal_strength >= 4:
+            final_signal = "STRONG BUY"
+        elif 2 <= signal_strength < 4:
+            final_signal = "BUY"
+        elif -2 < signal_strength < 2:
+            final_signal = "HOLD"
+        elif -4 < signal_strength <= -2:
+            final_signal = "SELL"
+        else:
+            final_signal = "STRONG SELL"
 
         return final_signal
 
@@ -305,3 +371,28 @@ class TechnicalAnalysis:
         self.volatility_history.append({'timestamp': time.time(), 'volatility': volatility})
         # Keep only the last 100 volatility readings
         self.volatility_history = self.volatility_history[-100:]
+
+    def calculate_sma(self, candles, period):
+        prices = [float(candle['close']) for candle in candles[-period:]]
+        return sum(prices) / period
+
+    def analyze_volume(self, candles):
+        recent_volumes = [float(candle['volume']) for candle in candles[-10:]]
+        avg_volume = sum(recent_volumes) / len(recent_volumes)
+        current_volume = float(candles[-1]['volume'])
+        
+        if current_volume > avg_volume * 1.5:
+            return "High"
+        elif current_volume < avg_volume * 0.5:
+            return "Low"
+        else:
+            return "Normal"
+
+    def detect_pullback(self, candles):
+        recent_prices = [float(candle['close']) for candle in candles[-5:]]
+        if recent_prices[-1] < min(recent_prices[:-1]) and self.calculate_sma(candles, 20) > self.calculate_sma(candles, 50):
+            return "Buy"
+        elif recent_prices[-1] > max(recent_prices[:-1]) and self.calculate_sma(candles, 20) < self.calculate_sma(candles, 50):
+            return "Sell"
+        else:
+            return "Hold"

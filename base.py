@@ -132,13 +132,19 @@ class CryptoTrader:
                 end_date = datetime.strptime(end_date, '%Y-%m-%d')
 
             logger.info(f"Starting backtest for {product_id} from {start_date} to {end_date}.")
+
+            # Create a directory for candle files if it doesn't exist
+            candle_dir = "candle_data"
+            os.makedirs(candle_dir, exist_ok=True)
+
             # Create a filename based on the product_id and date range
             filename = f"{product_id}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.json"
+            filepath = os.path.join(candle_dir, filename)
             
-            if os.path.exists(filename):
+            if os.path.exists(filepath):
                 # Load historical data from file if it exists
-                logger.info(f"Loading historical data from {filename}...")
-                with open(filename, 'r') as f:
+                logger.info(f"Loading historical data from {filepath}...")
+                with open(filepath, 'r') as f:
                     candles = json.load(f)
             else:
                 # Fetch historical data if file doesn't exist
@@ -146,9 +152,9 @@ class CryptoTrader:
                 candles = self.get_historical_data(product_id, start_date, end_date)
                 
                 # Save the fetched data to a file
-                with open(filename, 'w') as f:
+                with open(filepath, 'w') as f:
                     json.dump(candles, f)
-                logger.info(f"Saved historical data to {filename}")
+                logger.info(f"Saved historical data to {filepath}")
             logger.info(f"Fetched {len(candles)} candles.")
 
             if not candles:
@@ -159,34 +165,73 @@ class CryptoTrader:
             btc_balance = 0
             trades = []
             last_trade_time = None
+            last_trade_price = None
+            
+            # Define a minimum number of candles required for analysis
+            min_candles = 50  # Adjust this value based on your longest indicator period
+
+            # Define constraints
+            cooldown_period = 24 * 60 * 60 * 3  # 3 days in seconds
+            max_trades_per_day = 1
+            min_price_change = 0.07  # 7% minimum price change
+            trades_today = 0
+            last_trade_date = None
+            last_buy_price = None
+            drawdown_threshold = 0.1  # 20% drawdown threshold
 
             # Initialize tqdm progress bar for the entire loop
             with tqdm(total=len(candles), desc="Processing candles") as pbar:
                 for i, candle in enumerate(candles):
                     close_price = float(candle['close'])
                     current_time = int(candle['start'])
+                    current_date = datetime.utcfromtimestamp(current_time).date()
                     
-                    # Calculate indicators without caching
-                    rsi = self.compute_rsi_for_backtest(candles[:i+1])
-                    macd, signal, histogram = self.compute_macd_for_backtest(candles[:i+1])
-                    
-                    # Generate signal
-                    combined_signal = self.generate_combined_signal(rsi, macd, signal, histogram, candles)
+                    # Reset trades_today if it's a new day
+                    if last_trade_date != current_date:
+                        trades_today = 0
+                        last_trade_date = current_date
 
-                    # Execute trade based on signal
-                    if combined_signal == "BUY" and balance > 0:
-                        btc_to_buy, fee = self.calculate_trade_amount_and_fee(balance, close_price, is_buy=True)
-                        balance = 0
-                        btc_balance += btc_to_buy
-                        trades.append(self.create_trade_record(current_time, 'BUY', close_price, btc_to_buy, fee))
-                        last_trade_time = current_time
+                    # Only generate signals if we have enough historical data and haven't exceeded max trades for the day
+                    if i >= min_candles and trades_today < max_trades_per_day:
+                        # Check if enough time has passed since the last trade
+                        if last_trade_time is None or (current_time - last_trade_time) >= cooldown_period:
+                            # Check if the price has changed enough since the last trade
+                            if last_trade_price is None or abs(close_price - last_trade_price) / last_trade_price >= min_price_change:
+                                # Calculate indicators and generate signal
+                                rsi = self.compute_rsi_for_backtest(candles[:i+1])
+                                macd, signal, histogram = self.compute_macd_for_backtest(candles[:i+1])
+                                combined_signal = self.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1])
 
-                    elif combined_signal == "SELL" and btc_balance > 0:
-                        balance_to_add, fee = self.calculate_trade_amount_and_fee(btc_balance * close_price, close_price, is_buy=False)
-                        balance += balance_to_add
-                        trades.append(self.create_trade_record(current_time, 'SELL', close_price, btc_balance, fee))
-                        btc_balance = 0
-                        last_trade_time = current_time
+                                # Execute trade based on signal
+                                if combined_signal in ["BUY", "STRONG BUY"] and balance > 0:
+                                    # Only buy if the current price is lower than the last buy price or if it's the first buy
+                                    if last_buy_price is None or close_price < last_buy_price:
+                                        if combined_signal == "STRONG BUY":
+                                            btc_to_buy, fee = self.calculate_trade_amount_and_fee(balance * 0.7, close_price, is_buy=True)
+                                            balance -= (btc_to_buy * close_price + fee)
+                                        else:  # Regular BUY
+                                            btc_to_buy, fee = self.calculate_trade_amount_and_fee(balance * 0.3, close_price, is_buy=True)
+                                            balance -= (btc_to_buy * close_price + fee)
+                                        
+                                        btc_balance += btc_to_buy
+                                        trades.append(self.create_trade_record(current_time, combined_signal, close_price, btc_to_buy, fee))
+                                        last_trade_time = current_time
+                                        last_trade_price = close_price
+                                        last_buy_price = close_price
+                                        trades_today += 1
+
+                                elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
+                                    # Implement a trailing stop loss
+                                    if last_buy_price and (close_price < last_buy_price * (1 - drawdown_threshold) or combined_signal == "STRONG SELL"):
+                                        amount_to_sell = btc_balance
+                                        balance_to_add, fee = self.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
+                                        balance += balance_to_add
+                                        btc_balance = 0
+                                        trades.append(self.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
+                                        last_trade_time = current_time
+                                        last_trade_price = close_price
+                                        last_buy_price = None
+                                        trades_today += 1
 
                     # Update the progress bar
                     pbar.update(1)
@@ -289,7 +334,7 @@ def main():
         # end_date = "2022-11-01"       
         #     
         # More recent backtesting 
-        start_date = "2024-1-01"
+        start_date = "2024-01-01"
         end_date = "2024-10-01"
         initial_balance = 10000  # USD
 
