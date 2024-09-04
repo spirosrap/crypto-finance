@@ -116,45 +116,10 @@ class CryptoTrader:
         return self.coinbase_service.place_bracket_order(product_id, size, limit_price, stop_trigger_price)
 
     def monitor_price_and_place_bracket_order(self, product_id, target_price, size):
-        logger.info(f"Placing bracket order with target price {target_price}.")
-        for attempt in range(MAX_RETRIES):
-            order = self.place_bracket_order(
-                product_id, 
-                size, 
-                target_price * BRACKET_ORDER_TAKE_PROFIT_MULTIPLIER, 
-                target_price * BRACKET_ORDER_STOP_LOSS_MULTIPLIER
-            )
-            if order["success"] == True:
-                logger.info(f"{order}, Bracket order placed successfully.")
-                return
-            else:
-                logger.error(f"{order}, Failed to place order.")
-                return
-            logger.info(f"Failed to place order. Retrying in {RETRY_DELAY_SECONDS} seconds...")
-            time.sleep(RETRY_DELAY_SECONDS)
-        logger.info("Max retries reached. Unable to place bracket order.")
+        return self.coinbase_service.monitor_price_and_place_bracket_order(product_id, target_price, size)
 
     def calculate_trade_amount_and_fee(self, balance: float, price: float, is_buy: bool) -> Tuple[float, float]:
-        """
-        Calculate the trade amount and fee for a given balance and price.
-        
-        :param balance: The available balance for the trade
-        :param price: The current price of the asset
-        :param is_buy: True if it's a buy order, False if it's a sell order
-        :return: A tuple of (trade_amount, fee)
-        """
-        transaction_summary = self.client.get_transaction_summary()
-        fee_tier = transaction_summary.get('fee_tier', {})
-        fee_rate = float(fee_tier.get('taker_fee_rate', DEFAULT_FEE_RATE))
-        
-        if is_buy:
-            trade_amount = (balance / price) / (1 + fee_rate)
-            fee = balance - (trade_amount * price)
-        else:
-            fee = balance * fee_rate
-            trade_amount = balance - fee
-        
-        return trade_amount, fee
+        return self.coinbase_service.calculate_trade_amount_and_fee(balance, price, is_buy)
 
     def backtest(self, product_id: str, start_date, end_date, initial_balance: float) -> Tuple[float, List[dict]]:
         try:

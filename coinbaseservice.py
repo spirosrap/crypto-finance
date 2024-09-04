@@ -3,10 +3,17 @@ from coinbase.rest import portfolios, products, market_data, orders
 from datetime import datetime, timedelta
 import time
 import uuid
+import logging
+from typing import Tuple
 
 class CoinbaseService:
     def __init__(self, api_key, api_secret):
         self.client = RESTClient(api_key=api_key, api_secret=api_secret)
+        self.DEFAULT_FEE_RATE = 0.005  # 0.5%
+        self.MAX_RETRIES = 1
+        self.RETRY_DELAY_SECONDS = 60
+        self.BRACKET_ORDER_TAKE_PROFIT_MULTIPLIER = 1.02
+        self.BRACKET_ORDER_STOP_LOSS_MULTIPLIER = 0.98
 
     def get_portfolio_info(self):
         ports = portfolios.get_portfolios(self.client)["portfolios"]
@@ -142,3 +149,47 @@ class CoinbaseService:
             print(f"Error placing bracket order: {e}")
             return None            
     # ... (other Coinbase-related methods)
+
+    def calculate_trade_amount_and_fee(self, balance: float, price: float, is_buy: bool) -> Tuple[float, float]:
+        """
+        Calculate the trade amount and fee for a given balance and price.
+        
+        :param balance: The available balance for the trade
+        :param price: The current price of the asset
+        :param is_buy: True if it's a buy order, False if it's a sell order
+        :return: A tuple of (trade_amount, fee)
+        """
+        transaction_summary = self.client.get_transaction_summary()
+        fee_tier = transaction_summary.get('fee_tier', {})
+        fee_rate = float(fee_tier.get('taker_fee_rate', self.DEFAULT_FEE_RATE))
+        
+        if is_buy:
+            trade_amount = (balance / price) / (1 + fee_rate)
+            fee = balance - (trade_amount * price)
+        else:
+            fee = balance * fee_rate
+            trade_amount = balance - fee
+        
+        return trade_amount, fee
+
+    def monitor_price_and_place_bracket_order(self, product_id, target_price, size):
+        logger = logging.getLogger(__name__)
+        logger.info(f"Placing bracket order with target price {target_price}.")
+        for attempt in range(self.MAX_RETRIES):
+            order = self.place_bracket_order(
+                product_id, 
+                size, 
+                target_price * self.BRACKET_ORDER_TAKE_PROFIT_MULTIPLIER, 
+                target_price * self.BRACKET_ORDER_STOP_LOSS_MULTIPLIER
+            )
+            if order["success"] == True:
+                logger.info(f"{order}, Bracket order placed successfully.")
+                return
+            else:
+                logger.error(f"{order}, Failed to place order.")
+                return
+            logger.info(f"Failed to place order. Retrying in {self.RETRY_DELAY_SECONDS} seconds...")
+            time.sleep(self.RETRY_DELAY_SECONDS)
+        logger.info("Max retries reached. Unable to place bracket order.")
+
+    # ... other existing methods ...
