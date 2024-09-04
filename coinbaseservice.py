@@ -41,7 +41,11 @@ class CoinbaseService:
                 }
         return prices
 
-    # Removed get_hourly_data and get_6h_data methods
+    def get_hourly_data(self, product_id, days=60):
+        return self.historical_data.get_hourly_data(product_id, days)
+
+    def get_6h_data(self, product_id):
+        return self.historical_data.get_6h_data(product_id)
 
     def place_order(self, product_id, side, size, order_type="MARKET", price=None, time_in_force="IOC"):
         try:
@@ -77,6 +81,43 @@ class CoinbaseService:
             print(f"Error placing order: {e}")
             return None
 
+    def place_bracket_order(self, product_id, side, size, entry_price, take_profit_price, stop_loss_price):
+        try:
+            # Generate a unique client_order_id
+            client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            # Set end time to 30 days from now
+            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+
+            if side.upper() == "BUY":
+                order = orders.trigger_bracket_order_gtd_buy(
+                    self.client,
+                    client_order_id=client_order_id,
+                    product_id=product_id,
+                    base_size=str(size),
+                    limit_price=str(entry_price),
+                    stop_trigger_price=str(stop_loss_price),
+                    take_profit_price=str(take_profit_price),
+                    end_time=end_time
+                )
+            elif side.upper() == "SELL":
+                order = orders.trigger_bracket_order_gtd_sell(
+                    self.client,
+                    client_order_id=client_order_id,
+                    product_id=product_id,
+                    base_size=str(size),
+                    limit_price=str(entry_price),
+                    stop_trigger_price=str(stop_loss_price),
+                    take_profit_price=str(take_profit_price),
+                    end_time=end_time
+                )
+            else:
+                raise ValueError("Invalid side. Must be 'BUY' or 'SELL'.")
+
+            return order
+        except Exception as e:
+            print(f"Error placing bracket order: {e}")
+            return None            
     # ... (other Coinbase-related methods)
 
     def calculate_trade_amount_and_fee(self, balance: float, price: float, is_buy: bool) -> Tuple[float, float]:

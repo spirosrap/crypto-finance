@@ -289,7 +289,7 @@ def main():
         # end_date = "2022-11-01"       
         #     
         # More recent backtesting 
-        start_date = "2024-01-01"
+        start_date = "2024-1-01"
         end_date = "2024-10-01"
         initial_balance = 10000  # USD
 
