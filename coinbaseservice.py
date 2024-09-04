@@ -70,15 +70,40 @@ class CoinbaseService:
             print(f"Error fetching 6-hour candle data: {e}")
             return []
 
-    def place_order(self, product_id, side, size):
-        return orders.market_order(
-            self.client,
-            client_order_id=f"spiros_{int(time.time())}",
-            product_id=product_id,
-            side=side,
-            base_size=str(size)
-        )
-        
+    def place_order(self, product_id, side, size, order_type="MARKET", price=None, time_in_force="IOC"):
+        try:
+            # Generate a unique client_order_id
+            client_order_id = f"order_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            order_params = {
+                "client_order_id": client_order_id,
+                "product_id": product_id,
+                "side": side.upper(),
+                "order_configuration": {
+                    order_type.lower(): {
+                        "quote_size" if side.upper() == "BUY" else "base_size": str(size)
+                    }
+                }
+            }
+
+            if order_type.upper() == "LIMIT":
+                if price is None:
+                    raise ValueError("Price must be specified for LIMIT orders")
+                order_params["order_configuration"]["limit"]["limit_price"] = str(price)
+                order_params["order_configuration"]["limit"]["post_only"] = False
+                order_params["order_configuration"]["limit"]["time_in_force"] = time_in_force
+
+            if order_type.upper() == "MARKET":
+                order_func = orders.market_order
+            elif order_type.upper() == "LIMIT":
+                order_func = orders.limit_order_gtc if time_in_force == "GTC" else orders.limit_order_ioc
+
+            order = order_func(self.client, **order_params)
+            return order
+        except Exception as e:
+            print(f"Error placing order: {e}")
+            return None
+
     def place_bracket_order(self, product_id, side, size, entry_price, take_profit_price, stop_loss_price):
         try:
             # Generate a unique client_order_id
