@@ -10,30 +10,40 @@ class TechnicalAnalysis:
         self.signal_history = []  # To store recent signals
         self.volatility_history = []  # To store recent volatility readings
 
-    def compute_rsi(self, product_id, candles, period=14):
-        prices = [float(candle['close']) for candle in candles]
+    def calculate_rsi(self, prices: List[float], period: int) -> float:
         deltas = np.diff(prices)
-        seed = deltas[:period+1]
-        up = seed[seed >= 0].sum()/period
-        down = -seed[seed < 0].sum()/period
-        rs = up/down
+        seed = deltas[:period + 1]
+        up = seed[seed >= 0].sum() / period
+        down = -seed[seed < 0].sum() / period
+
+        # Avoid division by zero
+        if down == 0:
+            rs = float('inf')
+        else:
+            rs = up / down
+
         rsi = np.zeros_like(prices)
-        rsi[:period] = 100. - 100./(1. + rs)
+        rsi[:period] = 100. - 100. / (1. + rs)
 
         for i in range(period, len(prices)):
-            delta = deltas[i-1]
-            if delta > 0:
-                upval = delta
-                downval = 0.
-            else:
-                upval = 0.
-                downval = -delta
-            up = (up*(period-1) + upval)/period
-            down = (down*(period-1) + downval)/period
-            rs = up/down
-            rsi[i] = 100. - 100./(1. + rs)
+            delta = deltas[i - 1]
+            upval = delta if delta > 0 else 0.
+            downval = -delta if delta < 0 else 0.
+            up = (up * (period - 1) + upval) / period
+            down = (down * (period - 1) + downval) / period
+
+            # Avoid division by zero
+            rs = up / down if down != 0 else float('inf')
+            rsi[i] = 100. - 100. / (1. + rs)
 
         return rsi[-1]
+
+    def compute_rsi(self, product_id, candles, period=14):
+        prices = [float(candle['close']) for candle in candles]
+        return self.calculate_rsi(prices, period)
+
+    def compute_rsi_from_prices(self, prices: List[float], period: int = 14) -> float:
+        return self.calculate_rsi(prices, period)
 
     def identify_trend(self, product_id, candles, window=20):
         prices = [float(candle['close']) for candle in candles]
@@ -58,15 +68,15 @@ class TechnicalAnalysis:
 
     def compute_macd(self, product_id, candles):
         prices = [float(candle['close']) for candle in candles]
-        print(f"length of prices: {len(prices)}")
+        return self.compute_macd_from_prices(prices)
+
+    def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
         ema12 = self.exponential_moving_average(prices, 12)
         ema26 = self.exponential_moving_average(prices, 26)
         macd = ema12 - ema26
         signal = self.exponential_moving_average(macd, 9)
         histogram = macd - signal
         return macd[-1], signal[-1], histogram[-1]
-
-
 
     def exponential_moving_average(self, data, span):
         return pd.Series(data).ewm(span=span, adjust=False).mean().values
@@ -93,50 +103,6 @@ class TechnicalAnalysis:
             return "BUY"
         else:
             return "HOLD"
-
-    def compute_rsi_from_prices(self, prices: List[float], period: int = 14) -> float:
-        deltas = np.diff(prices)
-        seed = deltas[:period+1]
-        up = seed[seed >= 0].sum()/period
-        down = -seed[seed < 0].sum()/period
-        
-        # Avoid division by zero
-        if down == 0:
-            rs = float('inf')
-        else:
-            rs = up/down
-        
-        rsi = np.zeros_like(prices)
-        rsi[:period] = 100. - 100./(1. + rs)
-
-        for i in range(period, len(prices)):
-            delta = deltas[i-1]
-            if delta > 0:
-                upval = delta
-                downval = 0.
-            else:
-                upval = 0.
-                downval = -delta
-            up = (up*(period-1) + upval)/period
-            down = (down*(period-1) + downval)/period
-            
-            # Avoid division by zero
-            if down == 0:
-                rs = float('inf')
-            else:
-                rs = up/down
-            
-            rsi[i] = 100. - 100./(1. + rs)
-
-        return rsi[-1]
-
-    def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
-        ema12 = self.exponential_moving_average(prices, 12)
-        ema26 = self.exponential_moving_average(prices, 26)
-        macd = ema12 - ema26
-        signal = self.exponential_moving_average(macd, 9)
-        histogram = macd - signal
-        return macd[-1], signal[-1], histogram[-1]
 
     def generate_combined_signal(self, rsi, macd, signal, histogram, candles):
         # Generate individual signals
