@@ -246,12 +246,7 @@ class TechnicalAnalysis:
         return list(zip(bin_centers, volume_profile))
 
     def generate_signal(self, rsi):
-        if rsi > 70:
-            return "SELL"
-        elif rsi < 30:
-            return "BUY"
-        else:
-            return "HOLD"
+        return "SELL" if rsi > 70 else "BUY" if rsi < 30 else "HOLD"
 
     def calculate_position_size(self, account_balance: float, risk_per_trade: float, stop_loss_percent: float) -> float:
         max_loss_amount = account_balance * risk_per_trade
@@ -309,12 +304,7 @@ class TechnicalAnalysis:
         short_ma = pd.Series(prices).rolling(window=short_period).mean().iloc[-1]
         long_ma = pd.Series(prices).rolling(window=long_period).mean().iloc[-1]
         
-        if short_ma > long_ma:
-            return "BUY"
-        elif short_ma < long_ma:
-            return "SELL"
-        else:
-            return "HOLD"
+        return "BUY" if short_ma > long_ma else "SELL" if short_ma < long_ma else "HOLD"
 
     def compute_atr(self, candles: List[dict], period: int = 14) -> float:
         if len(candles) < period + 1:
