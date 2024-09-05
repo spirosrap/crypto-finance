@@ -216,7 +216,7 @@ def main():
         end_date = "2024-10-01"
         initial_balance = 10000  # USD
         risk_per_trade = 0.02  # 2% risk per trade
-        trailing_stop_percent = 0.08  # 7% trailing stop
+        trailing_stop_percent = 0.08  # 8% trailing stop
 
         final_value, trades = trader.run_backtest("BTC-USD", start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
         

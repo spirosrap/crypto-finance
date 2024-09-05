@@ -64,7 +64,7 @@ class Backtester:
             trades_today = 0
             last_trade_date = None
             last_buy_price = None
-            drawdown_threshold = 0.1  # 20% drawdown threshold
+            drawdown_threshold = 0.1  # 10% drawdown threshold
 
             # Initialize tqdm progress bar for the entire loop
             with tqdm(total=len(candles), desc="Processing candles") as pbar:
