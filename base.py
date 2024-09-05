@@ -123,7 +123,7 @@ class CryptoTrader:
     def calculate_trade_amount_and_fee(self, balance: float, price: float, is_buy: bool) -> Tuple[float, float]:
         return self.coinbase_service.calculate_trade_amount_and_fee(balance, price, is_buy)
 
-    def backtest(self, product_id: str, start_date, end_date, initial_balance: float) -> Tuple[float, List[dict]]:
+    def backtest(self, product_id: str, start_date, end_date, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float) -> Tuple[float, List[dict]]:
         try:
             # Convert start_date and end_date to datetime objects if they're strings
             if isinstance(start_date, str):
@@ -181,6 +181,7 @@ class CryptoTrader:
 
             # Initialize tqdm progress bar for the entire loop
             with tqdm(total=len(candles), desc="Processing candles") as pbar:
+                highest_price_since_buy = 0  # Track the highest price since the last buy
                 for i, candle in enumerate(candles):
                     close_price = float(candle['close'])
                     current_time = int(candle['start'])
@@ -206,22 +207,26 @@ class CryptoTrader:
                                 if combined_signal in ["BUY", "STRONG BUY"] and balance > 0:
                                     # Only buy if the current price is lower than the last buy price or if it's the first buy
                                     if last_buy_price is None or close_price < last_buy_price:
-                                        if combined_signal == "STRONG BUY":
-                                            btc_to_buy, fee = self.calculate_trade_amount_and_fee(balance * 0.7, close_price, is_buy=True)
-                                            balance -= (btc_to_buy * close_price + fee)
-                                        else:  # Regular BUY
-                                            btc_to_buy, fee = self.calculate_trade_amount_and_fee(balance * 0.3, close_price, is_buy=True)
-                                            balance -= (btc_to_buy * close_price + fee)
-                                        
-                                        btc_balance += btc_to_buy
-                                        trades.append(self.create_trade_record(current_time, combined_signal, close_price, btc_to_buy, fee))
-                                        last_trade_time = current_time
-                                        last_trade_price = close_price
-                                        last_buy_price = close_price
-                                        trades_today += 1
+                                        # Check for additional entry conditions
+                                        trend = self.identify_trend(product_id, candles[:i+1])
+                                        volume_signal = self.technical_analysis.analyze_volume(candles[:i+1])
+                                        if trend == "Uptrend" and volume_signal == "High":  # Ensure trend and volume conditions are met
+                                            if combined_signal == "STRONG BUY":
+                                                btc_to_buy, fee = self.calculate_trade_amount_and_fee(balance * 0.7, close_price, is_buy=True)
+                                                balance -= (btc_to_buy * close_price + fee)
+                                            else:  # Regular BUY
+                                                btc_to_buy, fee = self.calculate_trade_amount_and_fee(balance * 0.3, close_price, is_buy=True)
+                                                balance -= (btc_to_buy * close_price + fee)
+
+                                            btc_balance += btc_to_buy
+                                            trades.append(self.create_trade_record(current_time, combined_signal, close_price, btc_to_buy, fee))
+                                            last_trade_time = current_time
+                                            last_trade_price = close_price
+                                            highest_price_since_buy = close_price  # Reset highest price after buying
+                                            trades_today += 1
 
                                 elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
-                                    # Implement a trailing stop loss
+                                    # Implement a trailing stop
                                     if last_buy_price and (close_price < last_buy_price * (1 - drawdown_threshold) or combined_signal == "STRONG SELL"):
                                         amount_to_sell = btc_balance
                                         balance_to_add, fee = self.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
@@ -230,8 +235,23 @@ class CryptoTrader:
                                         trades.append(self.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
                                         last_trade_time = current_time
                                         last_trade_price = close_price
-                                        last_buy_price = None
+                                        highest_price_since_buy = 0  # Reset after selling
                                         trades_today += 1
+
+                    # Update highest price for trailing stop
+                    if btc_balance > 0:
+                        highest_price_since_buy = max(highest_price_since_buy, close_price)  # Update highest price
+                        if close_price <= highest_price_since_buy * (1 - trailing_stop_percent):  # Check for trailing stop
+                            # Trigger trailing stop
+                            amount_to_sell = btc_balance
+                            balance_to_add, fee = self.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
+                            balance += balance_to_add
+                            btc_balance = 0
+                            trades.append(self.create_trade_record(current_time, "TRAILING STOP", close_price, amount_to_sell, fee))
+                            last_trade_time = current_time
+                            last_trade_price = close_price
+                            highest_price_since_buy = 0  # Reset after selling
+                            trades_today += 1
 
                     # Update the progress bar
                     pbar.update(1)
@@ -337,8 +357,10 @@ def main():
         start_date = "2024-01-01"
         end_date = "2024-10-01"
         initial_balance = 10000  # USD
+        risk_per_trade = 0.02  # 2% risk per trade
+        trailing_stop_percent = 0.08  # 7% trailing stop
 
-        final_value, trades = trader.backtest("BTC-USD", start_date, end_date, initial_balance)
+        final_value, trades = trader.backtest("BTC-USD", start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
         
         logger.info(f"Backtesting results: Initial balance: ${initial_balance}, Final portfolio value: ${final_value:.2f}")
         logger.info(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")

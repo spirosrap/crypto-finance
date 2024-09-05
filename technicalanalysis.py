@@ -228,11 +228,12 @@ class TechnicalAnalysis:
         position_size = max_loss_amount / stop_loss_percent
         return position_size
 
-    def backtest_strategy(self, product_id: str, start_date: str, end_date: str, initial_balance: float, risk_per_trade: float, stop_loss_percent: float):
+    def backtest_strategy(self, product_id: str, start_date: str, end_date: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
         candles = self.coinbase_service.get_product_candles(product_id, start_date, end_date)
         balance = initial_balance
         position = 0
         trades = []
+        highest_price_since_buy = 0  # Track the highest price since the last buy
 
         for i in range(len(candles) - 1):
             prices = [float(candle['close']) for candle in candles[:i+1]]
@@ -244,14 +245,25 @@ class TechnicalAnalysis:
             next_price = float(candles[i+1]['close'])
 
             if combined_signal == "BUY" and position == 0:
-                position_size = self.calculate_position_size(balance, risk_per_trade, stop_loss_percent)
+                position_size = self.calculate_position_size(balance, risk_per_trade, trailing_stop_percent)
                 position = position_size / current_price
                 balance -= position_size
                 trades.append(("BUY", current_price, position))
+                highest_price_since_buy = current_price  # Reset highest price after buying
             elif combined_signal == "SELL" and position > 0:
                 balance += position * current_price
                 trades.append(("SELL", current_price, position))
                 position = 0
+                highest_price_since_buy = 0  # Reset after selling
+
+            if position > 0:
+                highest_price_since_buy = max(highest_price_since_buy, current_price)  # Update highest price
+                if current_price <= highest_price_since_buy * (1 - trailing_stop_percent):  # Check for trailing stop
+                    # Trigger trailing stop
+                    balance += position * current_price
+                    trades.append(("TRAILING STOP", current_price, position))
+                    position = 0
+                    highest_price_since_buy = 0  # Reset after selling
 
         if position > 0:
             balance += position * next_price
