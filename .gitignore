@@ -2,3 +2,4 @@ config.py
 config.py
 __pycache__
 candle_data/
+.DS_Store
