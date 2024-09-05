@@ -119,28 +119,16 @@ class TechnicalAnalysis:
         signal_strength = 0
 
         # RSI
-        if rsi_signal == "BUY":
-            signal_strength += 1
-        elif rsi_signal == "SELL":
-            signal_strength -= 1
+        signal_strength += 1 if rsi_signal == "BUY" else -1 if rsi_signal == "SELL" else 0
 
         # MACD
-        if macd_signal == "BUY":
-            signal_strength += 1
-        elif macd_signal == "SELL":
-            signal_strength -= 1
+        signal_strength += 1 if macd_signal == "BUY" else -1 if macd_signal == "SELL" else 0
 
         # Bollinger Bands
-        if bollinger_signal == "BUY":
-            signal_strength += 1
-        elif bollinger_signal == "SELL":
-            signal_strength -= 1
+        signal_strength += 1 if bollinger_signal == "BUY" else -1 if bollinger_signal == "SELL" else 0
 
         # Moving Average Crossover
-        if ma_crossover_signal == "BUY":
-            signal_strength += 1
-        elif ma_crossover_signal == "SELL":
-            signal_strength -= 1
+        signal_strength += 1 if ma_crossover_signal == "BUY" else -1 if ma_crossover_signal == "SELL" else 0
 
         # Stochastic Oscillator
         if stochastic_k > 80 and stochastic_d > 80:
@@ -149,10 +137,7 @@ class TechnicalAnalysis:
             signal_strength += 1  # Oversold condition
 
         # Trend
-        if trend == "Uptrend":
-            signal_strength += 1
-        elif trend == "Downtrend":
-            signal_strength -= 1
+        signal_strength += 1 if trend == "Uptrend" else -1 if trend == "Downtrend" else 0
 
         # Volume Profile
         current_price = float(candles[-1]['close'])
@@ -189,25 +174,15 @@ class TechnicalAnalysis:
         pullback_signal = self.detect_pullback(candles)
 
         # Adjust signal strength based on new components
-        if trend == "Uptrend":
-            signal_strength += 1
-        else:
-            signal_strength -= 1
+        signal_strength += 1 if trend == "Uptrend" else -1
 
         if current_price < ma_200:
             signal_strength += 1  # Price below 200 MA might be a good buying opportunity
         else:
             signal_strength -= 1  # Price above 200 MA might be risky for buying
 
-        if volume_signal == "High":
-            signal_strength += 1
-        elif volume_signal == "Low":
-            signal_strength -= 1
-
-        if pullback_signal == "Buy":
-            signal_strength += 2
-        elif pullback_signal == "Sell":
-            signal_strength -= 2
+        signal_strength += 1 if volume_signal == "High" else -1 if volume_signal == "Low" else 0
+        signal_strength += 2 if pullback_signal == "Buy" else -2 if pullback_signal == "Sell" else 0
 
         # Adjust thresholds for more conservative buying
         if signal_strength >= 4:
