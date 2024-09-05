@@ -14,9 +14,9 @@ class Backtester:
         try:
             # Convert start_date and end_date to datetime objects if they're strings
             if isinstance(start_date, str):
-                start_date = datetime.strptime(start_date, '%Y-%m-%d')
+                start_date = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
             if isinstance(end_date, str):
-                end_date = datetime.strptime(end_date, '%Y-%m-%d')
+                end_date = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
 
             self.logger.info(f"Starting backtest for {product_id} from {start_date} to {end_date}.")
 
@@ -28,21 +28,24 @@ class Backtester:
             filename = f"{product_id}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.json"
             filepath = os.path.join(candle_dir, filename)
             
+            # Check if we need the most recent data
+            need_recent_data = end_date.date() == datetime.now().date()
+
             if os.path.exists(filepath):
-                # Load historical data from file if it exists
+                # Load existing historical data from file
                 self.logger.info(f"Loading historical data from {filepath}...")
                 with open(filepath, 'r') as f:
                     candles = json.load(f)
+                self.logger.info(f"Loaded {len(candles)} candles from file.")
             else:
-                # Fetch historical data if file doesn't exist
-                self.logger.info(f"Fetching historical data from {start_date} to {end_date}...")
+                # If file doesn't exist, fetch all historical data
+                self.logger.info(f"Fetching all historical data from {start_date} to {end_date}...")
                 candles = self.trader.get_historical_data(product_id, start_date, end_date)
                 
                 # Save the fetched data to a file
                 with open(filepath, 'w') as f:
                     json.dump(candles, f)
-                self.logger.info(f"Saved historical data to {filepath}")
-            self.logger.info(f"Fetched {len(candles)} candles.")
+                self.logger.info(f"Saved {len(candles)} candles to {filepath}")
 
             if not candles:
                 self.logger.warning("No historical data available for backtesting.")
