@@ -174,6 +174,14 @@ class TechnicalAnalysis:
         # Implement pullback strategy
         pullback_signal = self.detect_pullback(candles)
 
+        # Incorporate market conditions
+        market_conditions = self.analyze_market_conditions(candles)
+        
+        if market_conditions == "Bullish":
+            signal_strength += 1
+        elif market_conditions == "Bearish":
+            signal_strength -= 1
+        
         # Adjust signal strength based on new components
         signal_strength += 1 if trend == "Uptrend" else -1
 
@@ -298,3 +306,23 @@ class TechnicalAnalysis:
             return "Sell"
         else:
             return "Hold"
+
+    def analyze_market_conditions(self, candles: List[dict]) -> str:
+        # Analyze market conditions based on price action, volume, and volatility
+        prices = [float(candle['close']) for candle in candles]
+        volumes = [float(candle['volume']) for candle in candles]
+        
+        # Calculate price change and volume change
+        price_change = (prices[-1] - prices[0]) / prices[0]
+        volume_change = (volumes[-1] - volumes[0]) / volumes[0]
+        
+        # Calculate volatility (e.g., using Average True Range)
+        volatility = self.compute_atr(candles)
+        
+        # Define thresholds for market conditions
+        if price_change > 0.05 and volume_change > 0.1 and volatility > 0.03:
+            return "Bullish"
+        elif price_change < -0.05 and volume_change < -0.1 and volatility > 0.03:
+            return "Bearish"
+        else:
+            return "Neutral"

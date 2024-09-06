@@ -208,8 +208,8 @@ def main():
  
         # # Bear market 2021: from $69000 to $15000
         # initial_balance = 10000  # USD        
-        # start_date = "2021-11-01"
-        # end_date = "2022-11-01"       
+        # start_date = "2021-11-01 00:00:00"
+        # end_date = "2022-11-01 00:00:00"       
         #     
         # More recent backtesting 
         start_date = "2024-01-01 00:00:00"

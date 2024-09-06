@@ -93,6 +93,17 @@ class Backtester:
                                 macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
                                 combined_signal = self.trader.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1])
 
+                                # Incorporate market conditions
+                                market_conditions = self.trader.technical_analysis.analyze_market_conditions(candles[:i+1])
+
+                                # Adjust trade size based on market conditions
+                                if market_conditions == "Bullish":
+                                    trade_size_multiplier = 1.2  # Increase trade size in bullish conditions
+                                elif market_conditions == "Bearish":
+                                    trade_size_multiplier = 0.8  # Decrease trade size in bearish conditions
+                                else:
+                                    trade_size_multiplier = 1.0  # No change in neutral conditions
+
                                 # Execute trade based on signal
                                 if combined_signal in ["BUY", "STRONG BUY"] and balance > 0:
                                     # Only buy if the current price is lower than the last buy price or if it's the first buy
@@ -102,10 +113,10 @@ class Backtester:
                                         volume_signal = self.trader.technical_analysis.analyze_volume(candles[:i+1])
                                         if trend == "Uptrend" and volume_signal == "High":  # Ensure trend and volume conditions are met
                                             if combined_signal == "STRONG BUY":
-                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * 0.7, close_price, is_buy=True)
+                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * 0.7 * trade_size_multiplier, close_price, is_buy=True)
                                                 balance -= (btc_to_buy * close_price + fee)
                                             else:  # Regular BUY
-                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * 0.3, close_price, is_buy=True)
+                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * 0.3 * trade_size_multiplier, close_price, is_buy=True)
                                                 balance -= (btc_to_buy * close_price + fee)
 
                                             btc_balance += btc_to_buy
