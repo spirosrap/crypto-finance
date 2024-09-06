@@ -184,6 +184,10 @@ def main():
     combined_signal = trader.generate_combined_signal(rsi, macd, signal, histogram, candles)
     logger.info(f"Combined signal for BTC-USD: {combined_signal}")
 
+    # Add this block to print market conditions for the most current signal
+    current_market_conditions = trader.technical_analysis.analyze_market_conditions(candles)
+    logger.info(f"Current market conditions: {current_market_conditions}")
+
     # Uncomment to place an order
     # if signal == "BUY":
     #     trader.place_order("BTC-USD", "BUY", 0.001)
@@ -246,4 +250,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
