@@ -105,7 +105,10 @@ class TechnicalAnalysis:
         else:
             return "HOLD"
 
-    def generate_combined_signal(self, rsi, macd, signal, histogram, candles):
+    def generate_combined_signal(self, rsi, macd, signal, histogram, candles, market_conditions=None):
+        if market_conditions is None:
+            market_conditions = self.analyze_market_conditions(candles)
+        
         # Generate individual signals
         rsi_signal = self.generate_signal(rsi)
         macd_signal = self.generate_macd_signal(macd, signal, histogram)
@@ -175,8 +178,6 @@ class TechnicalAnalysis:
         pullback_signal = self.detect_pullback(candles)
 
         # Incorporate market conditions
-        market_conditions = self.analyze_market_conditions(candles)
-        
         if market_conditions == "Bear Market":
             signal_strength -= 2  # Strongly discourage buying in a bear market
         elif market_conditions == "Bull Market":

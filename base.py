@@ -107,8 +107,8 @@ class CryptoTrader:
     def identify_trend(self, product_id, candles, window=TREND_WINDOW):
         return self.technical_analysis.identify_trend(product_id, candles, window)
 
-    def generate_combined_signal(self, rsi, macd, signal, histogram, candles):
-        return self.technical_analysis.generate_combined_signal(rsi, macd, signal, histogram, candles) 
+    def generate_combined_signal(self, rsi, macd, signal, histogram, candles, market_conditions=None):
+        return self.technical_analysis.generate_combined_signal(rsi, macd, signal, histogram, candles, market_conditions) 
 
     def generate_signal(self, rsi):
         return self.technical_analysis.generate_signal(rsi)

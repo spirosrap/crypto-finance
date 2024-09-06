@@ -91,11 +91,10 @@ class Backtester:
                                 # Calculate indicators and generate signal
                                 rsi = self.trader.compute_rsi_for_backtest(candles[:i+1])
                                 macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
-                                combined_signal = self.trader.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1])
+                                market_conditions = self.trader.technical_analysis.analyze_market_conditions(candles[:i+1])
+                                combined_signal = self.trader.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1], market_conditions=market_conditions)
 
                                 # Incorporate market conditions
-                                market_conditions = self.trader.technical_analysis.analyze_market_conditions(candles[:i+1])
-
                                 # Adjust trade size based on market conditions
                                 if market_conditions == "Bullish":
                                     trade_size_multiplier = 1.2  # Increase trade size in bullish conditions
