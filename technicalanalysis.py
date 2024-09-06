@@ -177,7 +177,9 @@ class TechnicalAnalysis:
         # Incorporate market conditions
         market_conditions = self.analyze_market_conditions(candles)
         
-        if market_conditions == "Bullish":
+        if market_conditions == "Bear Market":
+            signal_strength -= 2  # Strongly discourage buying in a bear market
+        elif market_conditions == "Bullish":
             signal_strength += 1
         elif market_conditions == "Bearish":
             signal_strength -= 1
@@ -193,17 +195,27 @@ class TechnicalAnalysis:
         signal_strength += 1 if volume_signal == "High" else -1 if volume_signal == "Low" else 0
         signal_strength += 2 if pullback_signal == "Buy" else -2 if pullback_signal == "Sell" else 0
 
-        # Adjust thresholds for more conservative buying
-        if signal_strength >= 4:
-            final_signal = "STRONG BUY"
-        elif 2 <= signal_strength < 4:
-            final_signal = "BUY"
-        elif -2 < signal_strength < 2:
-            final_signal = "HOLD"
-        elif -4 < signal_strength <= -2:
-            final_signal = "SELL"
+        # Adjust thresholds for more conservative buying and selling in a bear market
+        if market_conditions == "Bear Market":
+            if signal_strength >= 5:
+                final_signal = "BUY"  # Require a higher threshold for buying in a bear market
+            elif 0 <= signal_strength < 5:
+                final_signal = "HOLD"
+            elif -5 < signal_strength < 0:
+                final_signal = "SELL"
+            else:
+                final_signal = "STRONG SELL"  # Stronger selling signal in a bear market
         else:
-            final_signal = "STRONG SELL"
+            if signal_strength >= 4:
+                final_signal = "STRONG BUY"
+            elif 2 <= signal_strength < 4:
+                final_signal = "BUY"
+            elif -2 < signal_strength < 2:
+                final_signal = "HOLD"
+            elif -4 < signal_strength <= -2:
+                final_signal = "SELL"
+            else:
+                final_signal = "STRONG SELL"
 
         return final_signal
 
@@ -308,6 +320,12 @@ class TechnicalAnalysis:
             return "Hold"
 
     def analyze_market_conditions(self, candles: List[dict]) -> str:
+        # Convert 50 days to hours
+        long_term_period = 200 * 24
+
+        # Calculate the long-term moving average
+        long_term_ma = self.calculate_sma(candles, long_term_period)
+
         # Analyze market conditions based on price action, volume, and volatility
         prices = [float(candle['close']) for candle in candles]
         volumes = [float(candle['volume']) for candle in candles]
@@ -319,8 +337,19 @@ class TechnicalAnalysis:
         # Calculate volatility (e.g., using Average True Range)
         volatility = self.compute_atr(candles)
         
-        # Define thresholds for market conditions
-        if price_change > 0.05 and volume_change > 0.1 and volatility > 0.03:
+        # Calculate percentage drawdown from peak
+        peak_price = max(prices)
+        current_price = prices[-1]
+        drawdown = (peak_price - current_price) / peak_price
+
+        # Define bear market thresholds
+        bear_market_drawdown_threshold = 0.2  # 20% drawdown
+        bear_market_price_threshold = 0.8  # Price below 80% of long-term MA
+
+        # Check for bear market conditions
+        if drawdown > bear_market_drawdown_threshold and current_price < bear_market_price_threshold * long_term_ma:
+            return "Bear Market"
+        elif price_change > 0.05 and volume_change > 0.1 and volatility > 0.03:
             return "Bullish"
         elif price_change < -0.05 and volume_change < -0.1 and volatility > 0.03:
             return "Bearish"
