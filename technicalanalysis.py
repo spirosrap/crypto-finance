@@ -179,6 +179,8 @@ class TechnicalAnalysis:
         
         if market_conditions == "Bear Market":
             signal_strength -= 2  # Strongly discourage buying in a bear market
+        elif market_conditions == "Bull Market":
+            signal_strength += 2  # Strongly encourage buying in a bull market
         elif market_conditions == "Bullish":
             signal_strength += 1
         elif market_conditions == "Bearish":
@@ -195,8 +197,19 @@ class TechnicalAnalysis:
         signal_strength += 1 if volume_signal == "High" else -1 if volume_signal == "Low" else 0
         signal_strength += 2 if pullback_signal == "Buy" else -2 if pullback_signal == "Sell" else 0
 
-        # Adjust thresholds for more conservative buying and selling in a bear market
-        if market_conditions == "Bear Market":
+        # Adjust thresholds for more aggressive buying and selling in a bull market
+        if market_conditions == "Bull Market":
+            if signal_strength >= 3:
+                final_signal = "STRONG BUY"  # Lower threshold for strong buying in a bull market
+            elif 1 <= signal_strength < 3:
+                final_signal = "BUY"
+            elif -1 < signal_strength < 1:
+                final_signal = "HOLD"
+            elif -3 < signal_strength <= -1:
+                final_signal = "SELL"
+            else:
+                final_signal = "STRONG SELL"
+        elif market_conditions == "Bear Market":
             if signal_strength >= 5:
                 final_signal = "BUY"  # Require a higher threshold for buying in a bear market
             elif 0 <= signal_strength < 5:
@@ -342,12 +355,30 @@ class TechnicalAnalysis:
         current_price = prices[-1]
         drawdown = (peak_price - current_price) / peak_price
 
+        # Calculate the shorter-term moving average (e.g., 50-day MA)
+        short_term_period = 50 * 24
+        short_term_ma = self.calculate_sma(candles, short_term_period)
+
+        # Calculate the average volume change during bull markets
+        bull_market_volume_change = self.calculate_average_bull_market_volume_change(candles)
+
+        # Determine the current market regime based on volatility
+        market_regime = self.determine_market_regime(candles)
+
+        # Define dynamic bull market thresholds
+        bull_market_price_threshold = short_term_ma * 1.2  # Price above 20% of short-term MA
+        bull_market_volume_threshold = bull_market_volume_change * 0.8  # 80% of average bull market volume change
+        bull_market_volatility_threshold = self.get_volatility_threshold(market_regime)
+
         # Define bear market thresholds
         bear_market_drawdown_threshold = 0.2  # 20% drawdown
         bear_market_price_threshold = 0.8  # Price below 80% of long-term MA
 
+        # Check for bull market conditions
+        if current_price > bull_market_price_threshold and volume_change > bull_market_volume_threshold and volatility < bull_market_volatility_threshold:
+            return "Bull Market"
         # Check for bear market conditions
-        if drawdown > bear_market_drawdown_threshold and current_price < bear_market_price_threshold * long_term_ma:
+        elif drawdown > bear_market_drawdown_threshold and current_price < bear_market_price_threshold * long_term_ma:
             return "Bear Market"
         elif price_change > 0.05 and volume_change > 0.1 and volatility > 0.03:
             return "Bullish"
@@ -355,3 +386,46 @@ class TechnicalAnalysis:
             return "Bearish"
         else:
             return "Neutral"
+
+    def calculate_average_bull_market_volume_change(self, candles: List[dict]) -> float:
+        prices = [float(candle['close']) for candle in candles]
+        volumes = [float(candle['volume']) for candle in candles]
+        
+        # Define bull market criteria (e.g., price increasing for 5 consecutive days)
+        bull_market_periods = []
+        for i in range(5, len(prices)):
+            if all(prices[j] < prices[j+1] for j in range(i-5, i)):
+                bull_market_periods.append(i)
+        
+        # Calculate volume changes during bull market periods
+        volume_changes = []
+        for period in bull_market_periods:
+            start_volume = volumes[period-5]
+            end_volume = volumes[period]
+            volume_change = (end_volume - start_volume) / start_volume
+            volume_changes.append(volume_change)
+        
+        # Return the average volume change during bull markets
+        return np.mean(volume_changes) if volume_changes else 0.1  # Default to 10% if no bull markets found
+
+    def determine_market_regime(self, candles: List[dict]) -> str:
+        # Calculate historical volatility using a 20-day rolling window
+        prices = [float(candle['close']) for candle in candles]
+        returns = np.log(np.array(prices[1:]) / np.array(prices[:-1]))
+        volatility = np.std(returns[-20:]) * np.sqrt(252)  # Annualized volatility
+        
+        # Define volatility thresholds
+        if volatility < 0.15:
+            return "Low Volatility"
+        elif 0.15 <= volatility < 0.30:
+            return "Medium Volatility"
+        else:
+            return "High Volatility"
+
+    def get_volatility_threshold(self, market_regime: str) -> float:
+        if market_regime == "Low Volatility":
+            return 0.01  # 1% daily volatility
+        elif market_regime == "Medium Volatility":
+            return 0.02  # 2% daily volatility
+        else:  # High Volatility
+            return 0.03  # 3% daily volatility

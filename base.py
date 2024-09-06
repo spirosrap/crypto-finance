@@ -218,6 +218,7 @@ def main():
         # More recent backtesting 
         start_date = "2024-01-01 00:00:00"
         end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # end_date = "2022-11-01 00:00:00"
         initial_balance = 10000  # USD
         risk_per_trade = 0.02  # 2% risk per trade
         trailing_stop_percent = 0.08  # 8% trailing stop
