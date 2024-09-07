@@ -152,8 +152,6 @@ def main():
     api_key = API_KEY
     api_secret = API_SECRET
     
-    logger.info("Starting the trading bot.")
-
     trader = CryptoTrader(api_key, api_secret)
 
     end_date = datetime.now()
