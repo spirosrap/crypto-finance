@@ -21,6 +21,7 @@ import json
 import logging
 from tqdm import tqdm
 from backtester import Backtester
+import argparse
 
 # Constants
 DEFAULT_FEE_RATE = 0.005  # 0.5%
@@ -139,6 +140,14 @@ class CryptoTrader:
 
 
 def main():
+    # Add command-line argument parsing
+    parser = argparse.ArgumentParser(description="Crypto Trading Bot")
+    parser.add_argument("--start_date", help="Start date for backtesting (YYYY-MM-DD)")
+    parser.add_argument("--end_date", help="End date for backtesting (YYYY-MM-DD)")
+    parser.add_argument("--bearmarket", action="store_true", help="Use bear market period (2021-11-01 to 2022-11-01)")
+    parser.add_argument("--bullmarket", action="store_true", help="Use bull market period (2020-10-01 to 2021-04-01)")
+    args = parser.parse_args()
+
     api_key = API_KEY
     api_secret = API_SECRET
     
@@ -208,16 +217,21 @@ def main():
     backtest = True
     if backtest:
         logger.info("Starting backtesting.")
-        # Add backtesting
- 
-        # # Bear market 2021: from $69000 to $15000
-        # initial_balance = 10000  # USD        
-        # start_date = "2021-11-01 00:00:00"
-        # end_date = "2022-11-01 00:00:00"
-        #     
-        # More recent backtesting 
-        start_date = "2024-01-01 00:00:00"
-        end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Use command-line arguments if provided, otherwise use default values
+        if args.bearmarket:
+            start_date = "2021-11-01 00:00:00"
+            end_date = "2022-11-01 23:59:59"
+        elif args.bullmarket:
+            start_date = "2020-10-01 00:00:00"
+            end_date = "2021-04-01 23:59:59"
+        elif args.start_date:
+            start_date = f"{args.start_date} 00:00:00"
+            end_date = f"{args.end_date} 23:59:59" if args.end_date else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            start_date = "2024-01-01 00:00:00"
+            end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         initial_balance = 10000  # USD
         risk_per_trade = 0.02  # 2% risk per trade
         trailing_stop_percent = 0.08  # 8% trailing stop
