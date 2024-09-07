@@ -146,7 +146,8 @@ def main():
     parser.add_argument("--end_date", help="End date for backtesting (YYYY-MM-DD)")
     parser.add_argument("--bearmarket", action="store_true", help="Use bear market period (2021-11-01 to 2022-11-01)")
     parser.add_argument("--bullmarket", action="store_true", help="Use bull market period (2020-10-01 to 2021-04-01)")
-    parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")  # {{ edit_1 }}
+    parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")
+    parser.add_argument("--live", action="store_true", help="Run live trading simulation")  # New argument
     args = parser.parse_args()
 
     api_key = API_KEY
@@ -210,8 +211,14 @@ def main():
     # ml_signal = trader.generate_ml_signal("BTC-USD")
     # logger.info(f"ML Signal for BTC-USD: {ml_signal}")
 
-    backtest = not args.skip_backtest  # {{ edit_2 }}
-    if backtest:
+    initial_balance = 10000  # USD
+    risk_per_trade = 0.02  # 2% risk per trade
+    trailing_stop_percent = 0.08  # 8% trailing stop
+
+    if args.live:
+        logger.info("Starting live trading simulation.")
+        trader.backtester.run_live("BTC-USD", initial_balance, risk_per_trade, trailing_stop_percent)
+    elif not args.skip_backtest:
         logger.info("Starting backtesting.")
 
         # Use command-line arguments if provided, otherwise use default values
@@ -227,10 +234,6 @@ def main():
         else:
             start_date = "2024-01-01 00:00:00"
             end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        initial_balance = 10000  # USD
-        risk_per_trade = 0.02  # 2% risk per trade
-        trailing_stop_percent = 0.08  # 8% trailing stop
 
         final_value, trades = trader.run_backtest("BTC-USD", start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
         
