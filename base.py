@@ -146,6 +146,7 @@ def main():
     parser.add_argument("--end_date", help="End date for backtesting (YYYY-MM-DD)")
     parser.add_argument("--bearmarket", action="store_true", help="Use bear market period (2021-11-01 to 2022-11-01)")
     parser.add_argument("--bullmarket", action="store_true", help="Use bull market period (2020-10-01 to 2021-04-01)")
+    parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")  # {{ edit_1 }}
     args = parser.parse_args()
 
     api_key = API_KEY
@@ -166,12 +167,10 @@ def main():
     for currency, price in prices.items():
         logger.info(f"{currency}: Bid: {price['bid']:.2f}, Ask: {price['ask']:.2f}")
     rsi = trader.compute_rsi("BTC-USD", candles, period=RSI_PERIOD)
-    logger.info(f"Current RSI for BTC-USD: {rsi:.2f}")
 
     signal = trader.generate_signal(rsi)
-    logger.info(f"Signal for BTC-USD: {signal}")
     macd, signal, histogram = trader.compute_macd("BTC-USD", candles)
-    logger.info(f"Current MACD for BTC-USD: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}")
+    logger.info(f"Current MACD for BTC-USD: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}, RSI: {rsi:.2f}")
     
     # Calculate the value of 0.00187597 BTC in EUR including fees
     btc_amount = 0.00187597
@@ -186,8 +185,7 @@ def main():
     fees = float(eur_value_before_fees) * float(fee_percentage)
     eur_value_after_fees = eur_value_before_fees - fees
     
-    logger.info(f"0.00187597 BTC is worth approximately {eur_value_after_fees:.2f} EUR (including {float(fee_percentage)*100}% fees)")
-    logger.info(f"Fees: {fees:.2f} EUR")
+    logger.info(f"0.00187597 BTC is worth approximately {eur_value_after_fees:.2f} EUR (including {float(fee_percentage)*100}% fees), Fees: {fees:.2f} EUR")
     # logger.info(f"Value before fees: {eur_value_before_fees:.2f} EUR")
     
     combined_signal = trader.generate_combined_signal(rsi, macd, signal, histogram, candles)
@@ -214,7 +212,7 @@ def main():
     # ml_signal = trader.generate_ml_signal("BTC-USD")
     # logger.info(f"ML Signal for BTC-USD: {ml_signal}")
 
-    backtest = True
+    backtest = not args.skip_backtest  # {{ edit_2 }}
     if backtest:
         logger.info("Starting backtesting.")
 
