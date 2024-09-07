@@ -6,11 +6,16 @@ from tqdm import tqdm
 import numpy as np
 from datetime import timedelta
 import time
+import requests
 
 class Backtester:
     def __init__(self, trader):
         self.trader = trader
         self.logger = logging.getLogger(__name__)
+        self.cooldown_period = 24 * 60 * 60 * 1  # 3 days in seconds
+        self.max_trades_per_day = 1
+        self.min_price_change = 0.08  # 8% minimum price change
+        self.drawdown_threshold = 0.1  # 10% drawdown threshold
 
     def backtest(self, product_id: str, start_date, end_date, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
         try:
@@ -63,13 +68,9 @@ class Backtester:
             min_candles = 50  # Adjust this value based on your longest indicator period
 
             # Define constraints
-            cooldown_period = 24 * 60 * 60 * 3  # 3 days in seconds
-            max_trades_per_day = 1
-            min_price_change = 0.08  # 7% minimum price change
             trades_today = 0
             last_trade_date = None
             last_buy_price = None
-            drawdown_threshold = 0.1  # 10% drawdown threshold
 
             # Initialize tqdm progress bar for the entire loop
             with tqdm(total=len(candles), desc="Processing candles") as pbar:
@@ -85,11 +86,11 @@ class Backtester:
                         last_trade_date = current_date
 
                     # Only generate signals if we have enough historical data and haven't exceeded max trades for the day
-                    if i >= min_candles and trades_today < max_trades_per_day:
+                    if i >= min_candles and trades_today < self.max_trades_per_day:
                         # Check if enough time has passed since the last trade
-                        if last_trade_time is None or (current_time - last_trade_time) >= cooldown_period:
+                        if last_trade_time is None or (current_time - last_trade_time) >= self.cooldown_period:
                             # Check if the price has changed enough since the last trade
-                            if last_trade_price is None or abs(close_price - last_trade_price) / last_trade_price >= min_price_change:
+                            if last_trade_price is None or abs(close_price - last_trade_price) / last_trade_price >= self.min_price_change:
                                 # Calculate indicators and generate signal
                                 rsi = self.trader.compute_rsi_for_backtest(candles[:i+1])
                                 macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
@@ -132,7 +133,7 @@ class Backtester:
 
                                 elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
                                     # Implement a trailing stop
-                                    if last_buy_price and (close_price < last_buy_price * (1 - drawdown_threshold) or combined_signal == "STRONG SELL"):
+                                    if last_buy_price and (close_price < last_buy_price * (1 - self.drawdown_threshold) or combined_signal == "STRONG SELL"):
                                         amount_to_sell = btc_balance
                                         balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
                                         balance += balance_to_add
@@ -221,10 +222,6 @@ class Backtester:
                 highest_price_since_buy = 0
                 trades = []
 
-            drawdown_threshold = 0.1  # 10% drawdown threshold
-            cooldown_period = 24 * 60 * 60 * 3  # 3 days in seconds
-            max_trades_per_day = 1
-            min_price_change = 0.08  # 8% minimum price change
             save_interval = 300  # Save state every 5 minutes
             last_save_time = time.time()
 
@@ -232,11 +229,16 @@ class Backtester:
                 end_date = datetime.now()
                 start_date = end_date - timedelta(hours=1)  # Get the last hour of data
 
-                # Fetch the most recent candles
-                candles = self.trader.get_historical_data(product_id, start_date, end_date)
+                try:
+                    # Fetch the most recent candles
+                    candles = self.trader.get_historical_data(product_id, start_date, end_date)
+                except (requests.exceptions.RequestException, ConnectionError) as e:
+                    self.logger.error(f"Network error occurred: {e}. Retrying in 60 seconds...")
+                    time.sleep(60)  # Wait for 60 seconds before retrying
+                    continue
 
                 if not candles:
-                    self.logger.warning("No recent historical data available.")
+                    self.logger.warning("No recent historical data available. Retrying in 60 seconds...")
                     time.sleep(60)  # Wait before trying again
                     continue  # Skip to the next iteration if no data
 
@@ -257,11 +259,11 @@ class Backtester:
                         last_trade_date = current_date
 
                     # Only generate signals if we have enough historical data and haven't exceeded max trades for the day
-                    if i >= min_candles and trades_today < max_trades_per_day:
+                    if i >= min_candles and trades_today < self.max_trades_per_day:
                         # Check if enough time has passed since the last trade
-                        if last_trade_time is None or (current_time - last_trade_time) >= cooldown_period:
+                        if last_trade_time is None or (current_time - last_trade_time) >= self.cooldown_period:
                             # Check if the price has changed enough since the last trade
-                            if last_trade_price is None or abs(close_price - last_trade_price) / last_trade_price >= min_price_change:
+                            if last_trade_price is None or abs(close_price - last_trade_price) / last_trade_price >= self.min_price_change:
                                 # Calculate indicators and generate signal
                                 rsi = self.trader.compute_rsi_for_backtest(candles[:i+1])
                                 macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
@@ -301,7 +303,7 @@ class Backtester:
                                             trades_today += 1
 
                                 elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
-                                    if last_buy_price and (close_price < last_buy_price * (1 - drawdown_threshold) or combined_signal == "STRONG SELL"):
+                                    if last_buy_price and (close_price < last_buy_price * (1 - self.drawdown_threshold) or combined_signal == "STRONG SELL"):
                                         amount_to_sell = btc_balance
                                         balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
                                         balance += balance_to_add
