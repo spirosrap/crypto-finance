@@ -94,12 +94,15 @@ class Backtester:
                                 market_conditions = self.trader.technical_analysis.analyze_market_conditions(candles[:i+1])
                                 combined_signal = self.trader.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1], market_conditions=market_conditions)
 
-                                # Incorporate market conditions
                                 # Adjust trade size based on market conditions
                                 if market_conditions == "Bullish":
                                     trade_size_multiplier = 1.2  # Increase trade size in bullish conditions
+                                elif market_conditions == "Bull Market":
+                                    trade_size_multiplier = 1.5  # Increase trade size in bull market conditions
                                 elif market_conditions == "Bearish":
                                     trade_size_multiplier = 0.8  # Decrease trade size in bearish conditions
+                                elif market_conditions == "Bear Market":
+                                    trade_size_multiplier = 0.5  # Decrease trade size in bear market conditions
                                 else:
                                     trade_size_multiplier = 1.0  # No change in neutral conditions
 
