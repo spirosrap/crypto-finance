@@ -34,14 +34,26 @@ def prepare_historical_data(candles):
     # Add volatility (20-hour rolling standard deviation of returns)
     df['volatility'] = df['pct_change'].rolling(window=20).std()
     
+    # Add moving averages
+    df['ma_50'] = df['close'].rolling(window=50).mean()
+    df['ma_200'] = df['close'].rolling(window=200).mean()
+    
+    # Add lagged features
+    df['lagged_close'] = df['close'].shift(1)
+    df['lagged_rsi'] = df['rsi'].shift(1)
+    df['lagged_macd'] = df['macd'].shift(1)
+
     # Add direction (1 for up, 0 for down or no change)
     df['direction'] = (df['close'].shift(-1) > df['close']).astype(int)
-    
+
+    # Add market condition (this is a placeholder, you may want to calculate it based on your analysis)
+    df['market_condition'] = 0  # Default value, you can modify this later based on your analysis
+
     return df.dropna().reset_index(drop=True)
 
 def main():
     # Initialize necessary classes
-    coinbase_service = CoinbaseService(API_KEY, API_SECRET)
+    coinbase_service = CoinbaseService(API_KEY, API_SECRET)  # Create CoinbaseService instance
     historical_data = HistoricalData(coinbase_service.client)
 
     # Fetch historical data (5 months of hourly data)
@@ -56,12 +68,12 @@ def main():
     print("\nShape of data:", df.shape)
 
     # Create and train the model
-    model = BitcoinPredictionModel()
+    model = BitcoinPredictionModel(coinbase_service)  # Pass coinbase_service to the model
     model.train(df)
     print("\nModel trained successfully.")
 
     # Make prediction for the next day
-    last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility']]
+    last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 'market_condition']]
     future_prediction = model.predict(pd.DataFrame([last_known_values]))
     print(future_prediction)
     print("\nPrediction for the next day:")
