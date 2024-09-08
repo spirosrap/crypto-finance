@@ -148,6 +148,7 @@ def main():
     parser.add_argument("--bullmarket", action="store_true", help="Use bull market period (2020-10-01 to 2021-04-01)")
     parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")
     parser.add_argument("--live", action="store_true", help="Run live trading simulation")  # New argument
+    parser.add_argument("--product_id", default="BTC-USD", help="Product ID for trading (default: BTC-USD)")  # New argument
     args = parser.parse_args()
 
     api_key = API_KEY
@@ -157,7 +158,7 @@ def main():
 
     end_date = datetime.now()
     start_date = end_date - timedelta(days=14)
-    candles = trader.get_historical_data("BTC-USD", start_date, end_date)
+    candles = trader.get_historical_data(args.product_id, start_date, end_date)
 
     fiat_usd, btc = trader.get_portfolio_info()
     logger.info(f"Portfolio: ${fiat_usd:.2f}, {btc} BTC")
@@ -165,11 +166,11 @@ def main():
     prices = trader.get_btc_prices()
     for currency, price in prices.items():
         logger.info(f"{currency}: Bid: {price['bid']:.2f}, Ask: {price['ask']:.2f}")
-    rsi = trader.compute_rsi("BTC-USD", candles, period=RSI_PERIOD)
+    rsi = trader.compute_rsi(args.product_id, candles, period=RSI_PERIOD)
 
     signal = trader.generate_signal(rsi)
-    macd, signal, histogram = trader.compute_macd("BTC-USD", candles)
-    logger.info(f"Current MACD for BTC-USD: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}, RSI: {rsi:.2f}")
+    macd, signal, histogram = trader.compute_macd(args.product_id, candles)
+    logger.info(f"Current MACD for {args.product_id}: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}, RSI: {rsi:.2f}")
     
     # Calculate the value of 0.00187597 BTC in EUR including fees
     btc_amount = 0.00187597
@@ -188,7 +189,7 @@ def main():
     # logger.info(f"Value before fees: {eur_value_before_fees:.2f} EUR")
     
     combined_signal = trader.generate_combined_signal(rsi, macd, signal, histogram, candles)
-    logger.info(f"Combined signal for BTC-USD: {combined_signal}")
+    logger.info(f"Combined signal for {args.product_id}: {combined_signal}")
 
     # Add this block to print market conditions for the most current signal
     current_market_conditions = trader.technical_analysis.analyze_market_conditions(candles)
@@ -202,11 +203,11 @@ def main():
 
     # trader.monitor_price_and_place_bracket_order("BTC-EUR", 60000, btc_amount)
     
-    trend = trader.identify_trend("BTC-USD", candles, window=TREND_WINDOW) 
-    logger.info(f"Current 1h (12 days) trend for BTC-USD: {trend}")
+    trend = trader.identify_trend(args.product_id, candles, window=TREND_WINDOW) 
+    logger.info(f"Current 1h (12 days) trend for {args.product_id}: {trend}")
 
     bitcoin_sentiment = trader.analyze_sentiment("Bitcoin")
-    logger.info(f"Current sentiment for Bitcoin: {bitcoin_sentiment}")
+    logger.info(f"Current sentiment for {args.product_id}: {bitcoin_sentiment}")
 
     # ml_signal = trader.generate_ml_signal("BTC-USD")
     # logger.info(f"ML Signal for BTC-USD: {ml_signal}")
@@ -217,7 +218,7 @@ def main():
 
     if args.live:
         logger.info("Starting live trading simulation.")
-        trader.backtester.run_live("BTC-USD", initial_balance, risk_per_trade, trailing_stop_percent)
+        trader.backtester.run_live(args.product_id, initial_balance, risk_per_trade, trailing_stop_percent)
     elif not args.skip_backtest:
         logger.info("Starting backtesting.")
 
@@ -235,7 +236,7 @@ def main():
             start_date = "2024-01-01 00:00:00"
             end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        final_value, trades = trader.run_backtest("BTC-USD", start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
+        final_value, trades = trader.run_backtest(args.product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
         
         logger.info(f"Backtesting results: Initial balance: ${initial_balance}, Final portfolio value: ${final_value:.2f}")
         logger.info(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")
