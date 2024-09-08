@@ -193,12 +193,16 @@ class Backtester:
         self.logger.info("State saved to disk")
 
     def load_state(self):
-        if os.path.exists('live_trading_state.json'):
-            with open('live_trading_state.json', 'r') as f:
-                state = json.load(f)
-            self.logger.info("State loaded from disk")
-            return state
-        return None
+        if not os.path.exists('live_trading_state.json'):
+            # Create the file if it doesn't exist
+            with open('live_trading_state.json', 'w') as f:
+                json.dump({}, f)  # Initialize with an empty JSON object
+            self.logger.info("State file created as it did not exist.")
+        
+        with open('live_trading_state.json', 'r') as f:
+            state = json.load(f)
+        self.logger.info("State loaded from disk")
+        return state
 
     def run_live(self, product_id: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
         try:
@@ -227,7 +231,7 @@ class Backtester:
 
             while True:  # Run continuously
                 end_date = datetime.now()
-                start_date = end_date - timedelta(hours=1)  # Get the last hour of data
+                start_date = end_date - timedelta(days=7)  # Get the last 1 hour of data
 
                 try:
                     # Fetch the most recent candles
@@ -265,6 +269,7 @@ class Backtester:
                             # Check if the price has changed enough since the last trade
                             if last_trade_price is None or abs(close_price - last_trade_price) / last_trade_price >= self.min_price_change:
                                 # Calculate indicators and generate signal
+
                                 rsi = self.trader.compute_rsi_for_backtest(candles[:i+1])
                                 macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
                                 market_conditions = self.trader.technical_analysis.analyze_market_conditions(candles[:i+1])
@@ -280,6 +285,8 @@ class Backtester:
                                     trade_size_multiplier = 0.8
                                 elif market_conditions == "Bear Market":
                                     trade_size_multiplier = 0.5
+                                else:
+                                    trade_size_multiplier = 1.0
 
                                 # Simulate trade execution based on signal
                                 if combined_signal in ["BUY", "STRONG BUY"] and balance > 0:
@@ -338,7 +345,12 @@ class Backtester:
                 # Log the current state
                 self.logger.info(f"Current balance: {balance:.2f}, BTC balance: {btc_balance:.8f}")
                 self.logger.info(f"Last trade: {trades[-1] if trades else 'No trades yet'}")
-
+                for trade in trades:
+                    usd_value = trade['amount'] * trade['price']
+                    self.logger.info(f"Date: {datetime.utcfromtimestamp(trade['date']).strftime('%Y-%m-%d %H:%M:%S')}, "
+                                f"Action: {trade['action']}, Price: {trade['price']:.2f}, "
+                                f"Amount: {trade['amount']:.8f}, Fee: {trade['fee']:.2f}, "
+                                f"USD Value: {(usd_value - trade['fee']):.2f}")
                 # Sleep for a while before the next iteration (e.g., 60 seconds)
                 time.sleep(60)
 
@@ -346,3 +358,4 @@ class Backtester:
             self.logger.error(f"An error occurred during live trading: {e}", exc_info=True)
             # Save state before exiting due to error
             self.save_state(product_id, balance, btc_balance, last_trade_time, last_trade_price, last_buy_price, highest_price_since_buy, trades)
+
