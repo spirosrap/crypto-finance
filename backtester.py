@@ -16,6 +16,8 @@ class Backtester:
         self.max_trades_per_day = 1
         self.min_price_change = 0.08  # 8% minimum price change
         self.drawdown_threshold = 0.1  # 10% drawdown threshold
+        self.strong_buy_percentage = 0.8  # 80% of balance for strong buy
+        self.buy_percentage = 0.25  # 25% of balance for regular buy
 
     def backtest(self, product_id: str, start_date, end_date, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
         try:
@@ -118,10 +120,10 @@ class Backtester:
                                         volume_signal = self.trader.technical_analysis.analyze_volume(candles[:i+1])
                                         if trend == "Uptrend" and volume_signal == "High":  # Ensure trend and volume conditions are met
                                             if combined_signal == "STRONG BUY":
-                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * 0.8 * trade_size_multiplier, close_price, is_buy=True)
+                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * self.strong_buy_percentage * trade_size_multiplier, close_price, is_buy=True)
                                                 balance -= (btc_to_buy * close_price + fee)
                                             else:  # Regular BUY
-                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * 0.25 * trade_size_multiplier, close_price, is_buy=True)
+                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * self.buy_percentage * trade_size_multiplier, close_price, is_buy=True)
                                                 balance -= (btc_to_buy * close_price + fee)
 
                                             btc_balance += btc_to_buy
@@ -231,7 +233,7 @@ class Backtester:
 
             while True:  # Run continuously
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=7)  # Get the last 1 hour of data
+                start_date = end_date - timedelta(days=14)  # Get the last 1 hour of data
 
                 try:
                     # Fetch the most recent candles
@@ -296,9 +298,9 @@ class Backtester:
                                         volume_signal = self.trader.technical_analysis.analyze_volume(candles[:i+1])
                                         if trend == "Uptrend" and volume_signal == "High":
                                             if combined_signal == "STRONG BUY":
-                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * 0.8 * trade_size_multiplier, close_price, is_buy=True)
+                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * self.strong_buy_percentage * trade_size_multiplier, close_price, is_buy=True)
                                             else:  # Regular BUY
-                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * 0.25 * trade_size_multiplier, close_price, is_buy=True)
+                                                btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * self.buy_percentage * trade_size_multiplier, close_price, is_buy=True)
                                             
                                             balance -= (btc_to_buy * close_price + fee)
                                             btc_balance += btc_to_buy
