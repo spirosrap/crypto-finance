@@ -64,7 +64,6 @@ def main():
     # Prepare the data
     df = prepare_historical_data(candles)
     print("Historical data fetched and prepared:")
-    print(df.head())
     print("\nShape of data:", df.shape)
 
     # Create and train the model

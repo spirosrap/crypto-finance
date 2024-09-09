@@ -4,3 +4,4 @@ __pycache__
 candle_data/
 .DS_Store
 *.png
+bitcoin_direction_prediction.png
