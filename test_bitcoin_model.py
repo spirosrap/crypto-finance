@@ -15,14 +15,14 @@ def prepare_historical_data(candles):
     df['close'] = df['close'].astype(float)
     df['volume'] = df['volume'].astype(float)
     
-    # Calculate RSI (14 hours)
+    # Calculate RSI (14 minutes)
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
     df['rsi'] = 100 - (100 / (1 + rs))
     
-    # Calculate MACD (12, 26, 9 hours)
+    # Calculate MACD (12, 26, 9 minutes)
     exp1 = df['close'].ewm(span=12, adjust=False).mean()
     exp2 = df['close'].ewm(span=26, adjust=False).mean()
     df['macd'] = exp1 - exp2
@@ -31,11 +31,11 @@ def prepare_historical_data(candles):
     # Add percentage change
     df['pct_change'] = df['close'].pct_change()
     
-    # Add volatility (20-hour rolling standard deviation of returns)
+    # Add volatility (20-minute rolling standard deviation of returns)
     df['volatility'] = df['pct_change'].rolling(window=20).std()
     
-    # Add direction (1 for up, 0 for down or no change) for 24 hours ahead
-    df['direction'] = (df['close'].shift(-24) > df['close']).astype(int)  # Shift by 24 hours
+    # Add direction (1 for up, 0 for down or no change) for 60 minutes ahead
+    df['direction'] = (df['close'].shift(-60) > df['close']).astype(int)  # Shift by 60 minutes
 
     # Add market condition (this is a placeholder, you may want to calculate it based on your analysis)
     df['market_condition'] = 0  # Default value, you can modify this later based on your analysis
@@ -56,11 +56,11 @@ def main():
     coinbase_service = CoinbaseService(API_KEY, API_SECRET)  # Create CoinbaseService instance
     historical_data = HistoricalData(coinbase_service.client)
 
-    # Fetch historical data (5 months of hourly data)
+    # Fetch historical data (e.g., 1 month of data with default granularity)
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=200)  # Get 5 months of data
-    candles = historical_data.get_historical_data("BTC-USD", start_date, end_date)
-    
+    start_date = end_date - timedelta(days=30)  # Get 1 month of data
+    candles = historical_data.get_historical_data("BTC-USD", start_date, end_date, granularity="ONE_MINUTE")  # Fetch data with minute granularity
+
     # Prepare the data
     df = prepare_historical_data(candles)
     print("Historical data fetched and prepared:")

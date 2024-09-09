@@ -5,7 +5,16 @@ import requests
 import logging
 import time
 from typing import List, Tuple
-CHUNK_SIZE_HOURS = 300
+CHUNK_SIZE_CANDLES = {
+    "ONE_MINUTE": 5,  # 300 minutes (5 hours)
+    "FIVE_MINUTE": 25,  # 120 candles (10 hours)
+    "TEN_MINUTE": 50,  # 60 candles (10 hours)
+    "FIFTEEN_MINUTE": 75,  # 40 candles (10 hours)
+    "THIRTY_MINUTE": 150,  # 20 candles (10 hours)
+    "ONE_HOUR": 300,  # 300 candles (300 hours)
+    "SIX_HOUR": 1800,  # 48 candles (12 days)
+    "ONE_DAY": 7200,  # 24 candles (12 days)
+}
 
 class HistoricalData:
     def __init__(self, client: RESTClient):
@@ -51,10 +60,11 @@ class HistoricalData:
             self.logger.error(f"Error fetching 6-hour candle data: {e}")
             return []
 
-    def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime) -> List[dict]:
+    def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime, granularity: str = "ONE_HOUR") -> List[dict]:
         all_candles = []
         current_start = start_date
-        chunk_size = timedelta(hours=CHUNK_SIZE_HOURS)
+        chunk_size_hours = CHUNK_SIZE_CANDLES.get(granularity, 300)  # Default to 300 hours for ONE_HOUR
+        chunk_size = timedelta(hours=chunk_size_hours)
 
         while current_start < end_date:
             current_end = min(current_start + chunk_size, end_date)
@@ -67,7 +77,7 @@ class HistoricalData:
                     product_id=product_id,
                     start=start,
                     end=end,
-                    granularity="ONE_HOUR"
+                    granularity=granularity  # Use the granularity parameter
                 )
                 all_candles.extend(candles['candles'])
                 current_start = current_end
