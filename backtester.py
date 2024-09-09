@@ -233,7 +233,7 @@ class Backtester:
 
             while True:  # Run continuously
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=14)  # Get the last 1 hour of data
+                start_date = end_date - timedelta(days=3)  # Get the last 1 hour of data
 
                 try:
                     # Fetch the most recent candles

@@ -34,20 +34,21 @@ def prepare_historical_data(candles):
     # Add volatility (20-hour rolling standard deviation of returns)
     df['volatility'] = df['pct_change'].rolling(window=20).std()
     
-    # Add moving averages
-    df['ma_50'] = df['close'].rolling(window=50).mean()
-    df['ma_200'] = df['close'].rolling(window=200).mean()
-    
-    # Add lagged features
-    df['lagged_close'] = df['close'].shift(1)
-    df['lagged_rsi'] = df['rsi'].shift(1)
-    df['lagged_macd'] = df['macd'].shift(1)
-
     # Add direction (1 for up, 0 for down or no change)
     df['direction'] = (df['close'].shift(-1) > df['close']).astype(int)
 
     # Add market condition (this is a placeholder, you may want to calculate it based on your analysis)
+    # For now, we can set it to a default value (e.g., 0 for Neutral)
     df['market_condition'] = 0  # Default value, you can modify this later based on your analysis
+
+    # Add lagged features
+    df['lagged_close'] = df['close'].shift(1)
+    df['lagged_volume'] = df['volume'].shift(1)
+    df['lagged_rsi'] = df['rsi'].shift(1)
+    df['lagged_macd'] = df['macd'].shift(1)
+    df['lagged_signal'] = df['signal'].shift(1)
+    df['lagged_pct_change'] = df['pct_change'].shift(1)
+    df['lagged_volatility'] = df['volatility'].shift(1)
 
     return df.dropna().reset_index(drop=True)
 
@@ -74,6 +75,10 @@ def main():
 
     # Make prediction for the next day
     last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 'market_condition']]
+    # Add lagged values
+    for col in ['close', 'volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility']:
+        last_known_values[f'lagged_{col}'] = df.iloc[-2][col]
+
     future_prediction = model.predict(pd.DataFrame([last_known_values]))
     print(future_prediction)
     print("\nPrediction for the next day:")
@@ -89,7 +94,7 @@ def main():
     # Calculate and print model performance metrics
     X, y = model.prepare_data(df)
     y_pred = model.predict(X)
-    y_pred_class = (y_pred >= 0.7).astype(int)  # Only consider "Up" if probability is 0.7 or higher
+    y_pred_class = (y_pred >= 0.5).astype(int)  # Only consider "Up" if probability is 0.5 or higher
     
     # Ensure all arrays have the same length
     min_len = min(len(df) - 1, len(y), len(y_pred_class))
