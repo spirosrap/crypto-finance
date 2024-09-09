@@ -233,7 +233,7 @@ def main():
             start_date = f"{args.start_date} 00:00:00"
             end_date = f"{args.end_date} 23:59:59" if args.end_date else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         else:
-            start_date = "2024-01-01 00:00:00"
+            start_date = "2023-09-01 00:00:00"
             end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         final_value, trades = trader.run_backtest(args.product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)

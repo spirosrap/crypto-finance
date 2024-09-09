@@ -94,7 +94,12 @@ def main():
     X, y = model.prepare_data(df)
     y_pred = model.predict(X)
     y_pred_class = (y_pred >= 0.5).astype(int)  # Only consider "Up" if probability is 0.5 or higher
-    
+
+    # Convert y_pred_class to a pandas Series for value_counts
+    class_distribution = pd.Series(y_pred_class).value_counts(normalize=True)  # Assuming 'direction' is your target variable
+    print("\nClass distribution (normalized):")
+    print(class_distribution)
+
     # Ensure all arrays have the same length
     min_len = min(len(df) - 1, len(y), len(y_pred_class))
     

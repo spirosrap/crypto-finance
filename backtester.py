@@ -40,21 +40,21 @@ class Backtester:
             # Check if we need the most recent data
             need_recent_data = end_date.date() == datetime.now().date()
 
-            if os.path.exists(filepath):
-                # Load existing historical data from file
-                self.logger.info(f"Loading historical data from {filepath}...")
-                with open(filepath, 'r') as f:
-                    candles = json.load(f)
-                self.logger.info(f"Loaded {len(candles)} candles from file.")
-            else:
+            # if os.path.exists(filepath):
+            #     # Load existing historical data from file
+            #     self.logger.info(f"Loading historical data from {filepath}...")
+            #     with open(filepath, 'r') as f:
+            #         candles = json.load(f)
+            #     self.logger.info(f"Loaded {len(candles)} candles from file.")
+            # else:
                 # If file doesn't exist, fetch all historical data
-                self.logger.info(f"Fetching all historical data from {start_date} to {end_date}...")
-                candles = self.trader.get_historical_data(product_id, start_date, end_date)
-                
-                # Save the fetched data to a file
-                with open(filepath, 'w') as f:
-                    json.dump(candles, f)
-                self.logger.info(f"Saved {len(candles)} candles to {filepath}")
+            self.logger.info(f"Fetching all historical data from {start_date} to {end_date}...")
+            candles = self.trader.get_historical_data(product_id, start_date, end_date)
+            
+            # Save the fetched data to a file
+            with open(filepath, 'w') as f:
+                json.dump(candles, f)
+            self.logger.info(f"Saved {len(candles)} candles to {filepath}")
 
             if not candles:
                 self.logger.warning("No historical data available for backtesting.")
@@ -87,6 +87,11 @@ class Backtester:
                         trades_today = 0
                         last_trade_date = current_date
 
+                    if current_date > datetime(2024, 9, 8).date():
+                        if 'combined_signal' in locals() and combined_signal is not None:
+                            self.logger.info(f"Combined signal for today: {combined_signal}")
+                            combined_signal = None  # Reset combined_signal after logging
+
                     # Only generate signals if we have enough historical data and haven't exceeded max trades for the day
                     if i >= min_candles and trades_today < self.max_trades_per_day:
                         # Check if enough time has passed since the last trade
@@ -114,11 +119,14 @@ class Backtester:
                                 # Execute trade based on signal
                                 if combined_signal in ["BUY", "STRONG BUY"] and balance > 0:
                                     # Only buy if the current price is lower than the last buy price or if it's the first buy
+
                                     if last_buy_price is None or close_price < last_buy_price:
+
                                         # Check for additional entry conditions
                                         trend = self.trader.identify_trend(product_id, candles[:i+1])
                                         volume_signal = self.trader.technical_analysis.analyze_volume(candles[:i+1])
-                                        if trend == "Uptrend" and volume_signal == "High":  # Ensure trend and volume conditions are met
+
+                                        if trend == "Uptrend" and volume_signal == "High":  # Ensure trend and volume conditions are met                                            
                                             if combined_signal == "STRONG BUY":
                                                 btc_to_buy, fee = self.trader.calculate_trade_amount_and_fee(balance * self.strong_buy_percentage * trade_size_multiplier, close_price, is_buy=True)
                                                 balance -= (btc_to_buy * close_price + fee)
@@ -233,7 +241,7 @@ class Backtester:
 
             while True:  # Run continuously
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=3)  # Get the last 1 hour of data
+                start_date = end_date - timedelta(days=30)  # Get the last 1 hour of data
 
                 try:
                     # Fetch the most recent candles

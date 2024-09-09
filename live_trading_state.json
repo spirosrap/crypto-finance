@@ -1,1 +1,1 @@
-{"product_id": "BTC-USD", "balance": 0, "btc_balance": 0.01037087, "last_trade_time": 1725634800, "last_trade_price": 60000, "last_buy_price": null, "highest_price_since_buy": 56868.69, "trades": []}
+{"product_id": "BTC-USD", "balance": 605.5151353598725, "btc_balance": 0, "last_trade_time": 1724803200, "last_trade_price": 59095.29, "last_buy_price": null, "highest_price_since_buy": 0, "trades": [{"date": 1724803200, "action": "TRAILING STOP", "price": 59095.29, "amount": 0.01037087, "fee": 7.354434842427602}]}
