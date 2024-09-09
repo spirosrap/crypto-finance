@@ -4,6 +4,7 @@ from sklearn.model_selection import train_test_split, cross_val_score, GridSearc
 from sklearn.preprocessing import StandardScaler
 from technicalanalysis import TechnicalAnalysis  # Import TechnicalAnalysis
 from coinbaseservice import CoinbaseService
+import statsmodels.api as sm  # Import statsmodels for ARIMA
 
 class BitcoinPredictionModel:
     def __init__(self, coinbase_service):
@@ -73,6 +74,18 @@ class BitcoinPredictionModel:
         
         print(f"Cross-validation scores: {cv_scores}")
         print(f"Mean CV score: {cv_scores.mean():.4f}")
+
+    def fit_arima(self, df):
+        # Fit an ARIMA model
+        model = sm.tsa.ARIMA(df['close'], order=(5, 1, 0))  # Adjust order as needed
+        model_fit = model.fit()
+        print(model_fit.summary())
+        return model_fit
+
+    def predict_arima(self, model_fit, steps=1):
+        # Forecast the next 'steps' time points
+        forecast = model_fit.forecast(steps=steps)
+        return forecast
 
     def predict(self, features):
         # Ensure all required features are present

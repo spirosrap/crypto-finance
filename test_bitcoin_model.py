@@ -34,11 +34,10 @@ def prepare_historical_data(candles):
     # Add volatility (20-hour rolling standard deviation of returns)
     df['volatility'] = df['pct_change'].rolling(window=20).std()
     
-    # Add direction (1 for up, 0 for down or no change)
-    df['direction'] = (df['close'].shift(-1) > df['close']).astype(int)
+    # Add direction (1 for up, 0 for down or no change) for 24 hours ahead
+    df['direction'] = (df['close'].shift(-24) > df['close']).astype(int)  # Shift by 24 hours
 
     # Add market condition (this is a placeholder, you may want to calculate it based on your analysis)
-    # For now, we can set it to a default value (e.g., 0 for Neutral)
     df['market_condition'] = 0  # Default value, you can modify this later based on your analysis
 
     # Add lagged features
@@ -73,16 +72,17 @@ def main():
     model.train(df)
     print("\nModel trained successfully.")
 
-    # Make prediction for the next day
+    # Make prediction for the next 24 hours
     last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 'market_condition']]
     # Add lagged values
     for col in ['close', 'volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility']:
         last_known_values[f'lagged_{col}'] = df.iloc[-2][col]
 
+    # Create a DataFrame for prediction
     future_prediction = model.predict(pd.DataFrame([last_known_values]))
     print(future_prediction)
-    print("\nPrediction for the next day:")
-    future_date = df['date'].iloc[-1] + timedelta(hours=1)
+    print("\nPrediction for the next 24 hours:")
+    future_date = df['date'].iloc[-1] + timedelta(hours=24)  # Adjust for 24 hours ahead
     if future_prediction[0] >= 0.7:
         predicted_direction = "Up"
     elif future_prediction[0] <= 0.3:
@@ -129,6 +129,13 @@ def main():
     plt.legend()
     plt.savefig('bitcoin_direction_prediction.png')
     print("\nDirection prediction plot saved as 'bitcoin_direction_prediction.png'")
+
+    # # Fit ARIMA model
+    # arima_model = model.fit_arima(df)
+
+    # # Make a prediction for the next hour
+    # arima_forecast = model.predict_arima(arima_model, steps=1)
+    # print(f"ARIMA forecast for the next hour: {arima_forecast}")
 
 if __name__ == "__main__":
     main()
