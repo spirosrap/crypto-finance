@@ -157,7 +157,7 @@ def main():
     trader = CryptoTrader(api_key, api_secret)
 
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=14)
+    start_date = end_date - timedelta(days=7)
     candles = trader.get_historical_data(args.product_id, start_date, end_date)
 
     fiat_usd, btc = trader.get_portfolio_info()

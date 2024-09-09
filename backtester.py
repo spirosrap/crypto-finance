@@ -87,10 +87,22 @@ class Backtester:
                         trades_today = 0
                         last_trade_date = current_date
 
-                    if current_date > datetime(2024, 9, 8).date():
-                        if 'combined_signal' in locals() and combined_signal is not None:
-                            self.logger.info(f"Combined signal for today: {combined_signal}")
-                            combined_signal = None  # Reset combined_signal after logging
+
+                    if i == len(candles) - 1:
+                        trend = self.trader.identify_trend(product_id, candles[:i+1])
+                        volume_signal = self.trader.technical_analysis.analyze_volume(candles[:i+1])
+                        market_conditions = self.trader.technical_analysis.analyze_market_conditions(candles[:i+1])
+                        rsi = self.trader.compute_rsi_for_backtest(candles[:i+1])
+                        macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
+                        combined_signal = self.trader.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1], market_conditions=market_conditions)
+
+                        current_datetime = datetime.utcfromtimestamp(current_time)  # Convert to datetime
+                        self.logger.info(f"(Current date: {current_datetime.strftime('%Y-%m-%d %H:%M')})")  # Print date to the hour
+                        self.logger.info(f"Combined signal for today: {combined_signal}")
+                        self.logger.info(f"Market conditions for today: {market_conditions}")
+                        self.logger.info(f"Trend for today: {trend}")
+                        self.logger.info(f"Volume signal for today: {volume_signal}")
+                        self.logger.info(f"Current Bitcoin value: {close_price:.2f} USD")
 
                     # Only generate signals if we have enough historical data and haven't exceeded max trades for the day
                     if i >= min_candles and trades_today < self.max_trades_per_day:
@@ -116,6 +128,7 @@ class Backtester:
                                 else:
                                     trade_size_multiplier = 1.0  # No change in neutral conditions
 
+                                        
                                 # Execute trade based on signal
                                 if combined_signal in ["BUY", "STRONG BUY"] and balance > 0:
                                     # Only buy if the current price is lower than the last buy price or if it's the first buy
@@ -176,12 +189,14 @@ class Backtester:
             final_value = balance + (btc_balance * float(candles[-1]['close']))
             self.logger.info(f"Backtest completed. Final value: {final_value:.2f}")
             self.logger.info("Trades:")
-            for trade in trades:
+
+            for trade in trades[-2:]: # Show only the last two trades.
                 usd_value = trade['amount'] * trade['price']
                 self.logger.info(f"Date: {datetime.utcfromtimestamp(trade['date']).strftime('%Y-%m-%d %H:%M:%S')}, "
                             f"Action: {trade['action']}, Price: {trade['price']:.2f}, "
                             f"Amount: {trade['amount']:.8f}, Fee: {trade['fee']:.2f}, "
                             f"USD Value: {(usd_value - trade['fee']):.2f}")
+                            
             return final_value, trades
         except Exception as e:
             self.logger.error(f"An error occurred during backtesting: {e}", exc_info=True)
