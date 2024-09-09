@@ -7,6 +7,8 @@ import numpy as np
 from datetime import timedelta
 import time
 import requests
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 class Backtester:
     def __init__(self, trader):
@@ -18,6 +20,42 @@ class Backtester:
         self.drawdown_threshold = 0.1  # 10% drawdown threshold
         self.strong_buy_percentage = 0.8  # 80% of balance for strong buy
         self.buy_percentage = 0.25  # 25% of balance for regular buy
+
+    def plot_trades(self, candles, trades, balance_history, btc_balance_history):
+        # Convert timestamps to datetime
+        dates = [datetime.utcfromtimestamp(float(candle['start'])) for candle in candles]
+        prices = [float(candle['close']) for candle in candles]
+
+        # Create the plot
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+
+        # Plot price
+        ax1.plot(dates, prices, label='Price')
+
+        # Plot trades
+        for trade in trades:
+            date = datetime.utcfromtimestamp(int(trade['date']))
+            if trade['action'] in ['BUY', 'STRONG BUY']:
+                ax1.plot(date, trade['price'], '^', color='g', markersize=10)
+            elif trade['action'] in ['SELL', 'STRONG SELL', 'STOP LOSS', 'TRAILING STOP']:
+                ax1.plot(date, trade['price'], 'v', color='r', markersize=10)
+
+        # Plot balances
+        ax2.plot(dates, balance_history, label='USD Balance')
+        ax2.plot(dates, btc_balance_history, label='BTC Balance (in USD)')
+
+        # Format the plot
+        ax1.set_title('Price and Trades')
+        ax1.legend()
+        ax2.set_title('Account Balance')
+        ax2.legend()
+
+        plt.xlabel('Date')
+        fig.autofmt_xdate()  # Rotate and align the tick labels
+
+        plt.tight_layout()
+        plt.savefig('trades_and_balance.png')
+        plt.close()
 
     def backtest(self, product_id: str, start_date, end_date, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
         try:
@@ -63,6 +101,8 @@ class Backtester:
             balance = initial_balance
             btc_balance = 0
             trades = []
+            balance_history = []
+            btc_balance_history = []
             last_trade_time = None
             last_trade_price = None
             
@@ -182,6 +222,10 @@ class Backtester:
                             highest_price_since_buy = 0  # Reset after selling
                             trades_today += 1
 
+                    # Update balance histories
+                    balance_history.append(balance)
+                    btc_balance_history.append(btc_balance * close_price)
+
                     # Update the progress bar
                     pbar.update(1)
 
@@ -196,6 +240,10 @@ class Backtester:
                             f"Action: {trade['action']}, Price: {trade['price']:.2f}, "
                             f"Amount: {trade['amount']:.8f}, Fee: {trade['fee']:.2f}, "
                             f"USD Value: {(usd_value - trade['fee']):.2f}")
+                            
+            # Plot the trades and balance history
+            self.plot_trades(candles, trades, balance_history, btc_balance_history)
+            self.logger.info("Trade and balance plot saved as 'trades_and_balance.png'")
                             
             return final_value, trades
         except Exception as e:
