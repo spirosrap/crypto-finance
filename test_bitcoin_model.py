@@ -59,7 +59,7 @@ def main():
 
     # Fetch historical data (5 months of hourly data)
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=150)  # Get 5 months of data
+    start_date = end_date - timedelta(days=200)  # Get 5 months of data
     candles = historical_data.get_historical_data("BTC-USD", start_date, end_date)
     
     # Prepare the data

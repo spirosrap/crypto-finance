@@ -1,9 +1,10 @@
 import pandas as pd
 import xgboost as xgb
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV  # Import cross_val_score and GridSearchCV
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit  # Import cross_val_score, GridSearchCV, and TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from technicalanalysis import TechnicalAnalysis  # Import TechnicalAnalysis
 from coinbaseservice import CoinbaseService
+
 class BitcoinPredictionModel:
     def __init__(self, coinbase_service):
         self.model = None
@@ -55,8 +56,9 @@ class BitcoinPredictionModel:
             'colsample_bytree': [0.8, 1.0]
         }
 
-        # Initialize GridSearchCV
-        grid_search = GridSearchCV(xgb.XGBClassifier(objective='binary:logistic'), param_grid, cv=5, scoring='accuracy')
+        # Initialize GridSearchCV with TimeSeriesSplit
+        tscv = TimeSeriesSplit(n_splits=5)
+        grid_search = GridSearchCV(xgb.XGBClassifier(objective='binary:logistic'), param_grid, cv=tscv, scoring='accuracy')
         grid_search.fit(X, y)
 
         # Print the best parameters found
@@ -66,8 +68,8 @@ class BitcoinPredictionModel:
         self.model = grid_search.best_estimator_
         self.model.fit(X, y)
 
-        # Perform cross-validation
-        cv_scores = cross_val_score(self.model, X, y, cv=5)  # 5-fold cross-validation
+        # Perform cross-validation using TimeSeriesSplit
+        cv_scores = cross_val_score(self.model, X, y, cv=tscv)  # Time series cross-validation
         
         print(f"Cross-validation scores: {cv_scores}")
         print(f"Mean CV score: {cv_scores.mean():.4f}")
