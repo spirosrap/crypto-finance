@@ -11,14 +11,18 @@ class BitcoinPredictionModel:
         self.model = None
         self.scaler = StandardScaler()
         self.tech_analysis = TechnicalAnalysis(coinbase_service)  # Initialize TechnicalAnalysis
-        # Add more hyperparameters for tuning
+        # Add regularization parameters
         self.params = {
             'objective': 'binary:logistic',
             'n_estimators': 200,
             'max_depth': 5,  # New hyperparameter
             'learning_rate': 0.1,  # New hyperparameter
             'subsample': 0.8,  # New hyperparameter
-            'colsample_bytree': 0.8  # New hyperparameter
+            'colsample_bytree': 0.8,  # New hyperparameter
+            'reg_alpha': 0.1,  # L1 regularization
+            'reg_lambda': 1.0,  # L2 regularization
+            'gamma': 0,  # Minimum loss reduction required to make a further partition
+            'min_child_weight': 1  # Minimum sum of instance weight needed in a child
         }
 
     def prepare_data(self, df):
@@ -56,18 +60,22 @@ class BitcoinPredictionModel:
         X, y = self.prepare_data(historical_data)
         X = self.scaler.fit_transform(X)
 
-        # Define the parameter grid for tuning
+        # Update the parameter grid for tuning
         param_grid = {
             'n_estimators': [100, 200],
-            'max_depth': [3, 5, 7],
-            'learning_rate': [0.01, 0.1, 0.2],
+            'max_depth': [3, 5],
+            'learning_rate': [0.01, 0.1],
             'subsample': [0.8, 1.0],
-            'colsample_bytree': [0.8, 1.0]
+            'colsample_bytree': [0.8, 1.0],
+            'reg_alpha': [0, 0.1],  # L1 regularization
+            'reg_lambda': [0.1, 1.0],  # L2 regularization
+            'gamma': [0, 0.1],
+            'min_child_weight': [1, 3]
         }
 
         # Initialize GridSearchCV with TimeSeriesSplit
         tscv = TimeSeriesSplit(n_splits=5)
-        grid_search = GridSearchCV(xgb.XGBClassifier(objective='binary:logistic'), param_grid, cv=tscv, scoring='accuracy')
+        grid_search = GridSearchCV(xgb.XGBClassifier(objective='binary:logistic'), param_grid, cv=tscv, scoring='accuracy', n_jobs=-1, verbose=2)
         grid_search.fit(X, y)
 
         # Print the best parameters found
@@ -82,6 +90,12 @@ class BitcoinPredictionModel:
         
         print(f"Cross-validation scores: {cv_scores}")
         print(f"Mean CV score: {cv_scores.mean():.4f}")
+
+        # Print feature importances
+        feature_importance = self.model.feature_importances_
+        feature_names = self.prepare_data(historical_data)[0].columns
+        for importance, name in sorted(zip(feature_importance, feature_names), reverse=True):
+            print(f"{name}: {importance:.4f}")
 
     def fit_arima(self, df):
         # Fit an ARIMA model

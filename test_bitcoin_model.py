@@ -69,6 +69,11 @@ def prepare_historical_data(candles, external_data):
         print("Warning: Unable to calculate hash_rate_ma due to missing hash_rate column")
         df['hash_rate_ma'] = np.nan
 
+    # Add percentage change for external data
+    df['hash_rate_pct_change'] = df['hash_rate'].pct_change()
+    df['total_market_cap_pct_change'] = df['total_crypto_market_cap'].pct_change()
+    df['sp500_pct_change'] = df['sp500'].pct_change()
+
     return df.dropna().reset_index(drop=True)
 
 def main():
@@ -78,7 +83,7 @@ def main():
 
     # Fetch historical data (e.g., 1 month of data with 5-minute granularity)
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=150)  # Get 1 month of data
+    start_date = end_date - timedelta(days=60)  # Get 2 months of data
     candles = historical_data.get_historical_data("BTC-USD", start_date, end_date, granularity="ONE_HOUR")  # Fetch data with 5-minute granularity
 
     # Fetch external data
@@ -93,8 +98,12 @@ def main():
     # Create and train the model
     model = BitcoinPredictionModel(coinbase_service)  # Pass coinbase_service to the model
     model.train(df)
-    print("\nModel trained successfully.")
-
+    # print("\nModel trained successfully.")
+    # print(df["total_crypto_market_cap"].unique())
+    # print(df["hash_rate"].unique())
+    # print(df["btc_dominance"].unique())
+    # print(df["sp500"].unique())
+    # exit()
     # Make prediction for the next 24 hours
     last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
                                      'market_condition', 'hash_rate', 'btc_dominance', 
