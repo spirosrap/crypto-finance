@@ -7,7 +7,7 @@ from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
 from config import API_KEY, API_SECRET
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from external_data import ExternalDataFetcher
 from sklearn.model_selection import train_test_split
 
@@ -105,50 +105,54 @@ def main():
 
     # Create and train the model
     model = BitcoinPredictionModel(coinbase_service)
-    model.train(train_df)
+    try:
+        model.train(train_df)
+    except Exception as e:
+        print(f"An error occurred during model training: {e}")
+        return
 
     # Evaluate the model on the training set
     train_df, X_train, y_train = model.prepare_data(train_df)
     y_train_pred = model.predict(X_train)
-    y_train_pred_class = (y_train_pred >= 0.5).astype(int)
-    train_direction_accuracy = (y_train == y_train_pred_class).mean()
-    print(f"\nDirection Accuracy on Training Set: {train_direction_accuracy:.4f}")
+    train_mse = mean_squared_error(y_train, y_train_pred)
+    train_mae = mean_absolute_error(y_train, y_train_pred)
+    train_r2 = r2_score(y_train, y_train_pred)
+    print(f"\nMSE on Training Set: {train_mse:.4f}")
+    print(f"MAE on Training Set: {train_mae:.4f}")
+    print(f"R2 on Training Set: {train_r2:.4f}")
 
     # Evaluate the model on the validation set
     val_df, X_val, y_val = model.prepare_data(val_df)
     y_val_pred = model.predict(X_val)
-    y_val_pred_class = (y_val_pred >= 0.5).astype(int)
-    val_direction_accuracy = (y_val == y_val_pred_class).mean()
-    print(f"Direction Accuracy on Validation Set: {val_direction_accuracy:.4f}")
+    val_mse = mean_squared_error(y_val, y_val_pred)
+    val_mae = mean_absolute_error(y_val, y_val_pred)
+    val_r2 = r2_score(y_val, y_val_pred)
+    print(f"\nMSE on Validation Set: {val_mse:.4f}")
+    print(f"MAE on Validation Set: {val_mae:.4f}")
+    print(f"R2 on Validation Set: {val_r2:.4f}")
 
     # Evaluate the model on the test set
     test_df, X_test, y_test = model.prepare_data(test_df)
     y_test_pred = model.predict(X_test)
-    y_test_pred_class = (y_test_pred >= 0.5).astype(int)
-    test_direction_accuracy = (y_test == y_test_pred_class).mean()
-    print(f"Direction Accuracy on Test Set: {test_direction_accuracy:.4f}")
+    test_mse = mean_squared_error(y_test, y_test_pred)
+    test_mae = mean_absolute_error(y_test, y_test_pred)
+    test_r2 = r2_score(y_test, y_test_pred)
+    print(f"\nMSE on Test Set: {test_mse:.4f}")
+    print(f"MAE on Test Set: {test_mae:.4f}")
+    print(f"R2 on Test Set: {test_r2:.4f}")
 
-    # Plot actual vs predicted directions for the test set
+    # Plot actual vs predicted prices for the test set
     plt.figure(figsize=(12, 6))
-    plot_df = test_df.copy()
-    plot_df['actual_up'] = y_test.values
-    plot_df['predicted_up'] = y_test_pred_class
-
-    plt.plot(plot_df['date'], plot_df['close'], label='Bitcoin Price')
-    plt.scatter(plot_df['date'][plot_df['actual_up'] == 1], 
-                plot_df['close'][plot_df['actual_up'] == 1], 
-                color='green', label='Actual Up', alpha=0.5)
-    plt.scatter(plot_df['date'][plot_df['predicted_up'] == 1], 
-                plot_df['close'][plot_df['predicted_up'] == 1], 
-                color='lime', label='Predicted Up (≥0.5)', alpha=0.5)
-    plt.title('Bitcoin Price and Direction Predictions (Test Set)')
+    plt.plot(test_df['date'], y_test, label='Actual Price')
+    plt.plot(test_df['date'], y_test_pred, label='Predicted Price')
+    plt.title('Bitcoin Price: Actual vs Predicted (Test Set)')
     plt.xlabel('Date')
     plt.ylabel('Price (USD)')
     plt.legend()
-    plt.savefig('bitcoin_direction_prediction_test.png')
-    print("\nDirection prediction plot for test set saved as 'bitcoin_direction_prediction_test.png'")
+    plt.savefig('bitcoin_price_prediction_test.png')
+    print("\nPrice prediction plot for test set saved as 'bitcoin_price_prediction_test.png'")
 
-    # Make prediction for the next 24 hours (using the last known values from the entire dataset)
+    # Make prediction for the next hour
     last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
                                      'market_condition', 'hash_rate', 'btc_dominance', 
                                      'total_crypto_market_cap', 'sp500']]
@@ -159,15 +163,9 @@ def main():
 
     # Create a DataFrame for prediction
     future_prediction = model.predict(pd.DataFrame([last_known_values]))
-    print("\nPrediction for the next 24 hours:")
-    future_date = df['date'].iloc[-1] + timedelta(hours=LOOK_AHEAD_HOURS)  # Adjust for 24 hours ahead
-    if future_prediction[0] >= 0.5:
-        predicted_direction = "Up"
-    elif future_prediction[0] < 0.5:
-        predicted_direction = "Down"
-    else:
-        predicted_direction = "Uncertain"
-    print(f"{future_date}: Predicted direction: {predicted_direction} (Probability: {future_prediction[0]:.2f})")
+    print("\nPrediction for the next hour:")
+    future_date = df['date'].iloc[-1] + timedelta(hours=1)
+    print(f"{future_date}: Predicted price: ${future_prediction[0]:.2f}")
 
     # Calculate and print model performance metrics
     df, X, y = model.prepare_data(df)
@@ -180,7 +178,6 @@ def main():
     y_pred_class = (y_pred >= 0.5).astype(int)
     direction_accuracy = (y == y_pred_class).mean()
 
-    print(f"\nDirection Accuracy on Full Dataset: {direction_accuracy:.4f}")
 
     # Plot actual vs predicted directions
     plt.figure(figsize=(12, 6))
