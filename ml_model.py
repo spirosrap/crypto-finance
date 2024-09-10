@@ -31,6 +31,12 @@ class BitcoinPredictionModel:
         df['lagged_pct_change'] = df['pct_change'].shift(1)
         df['lagged_volatility'] = df['volatility'].shift(1)
 
+        # Add lagged features for new external data
+        df['lagged_hash_rate'] = df['hash_rate'].shift(1)
+        df['lagged_btc_dominance'] = df['btc_dominance'].shift(1)
+        df['lagged_total_crypto_market_cap'] = df['total_crypto_market_cap'].shift(1)
+        df['lagged_sp500'] = df['sp500'].shift(1)
+
         # Drop rows with NaN values
         df = df.dropna().reset_index(drop=True)
 
@@ -38,7 +44,9 @@ class BitcoinPredictionModel:
         X = df[['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
                  'market_condition', 'lagged_close', 'lagged_volume', 
                  'lagged_rsi', 'lagged_macd', 'lagged_signal', 
-                 'lagged_pct_change', 'lagged_volatility']].copy()
+                 'lagged_pct_change', 'lagged_volatility',
+                 'hash_rate', 'btc_dominance', 'total_crypto_market_cap', 'sp500',
+                 'lagged_hash_rate', 'lagged_btc_dominance', 'lagged_total_crypto_market_cap', 'lagged_sp500']].copy()
 
         y = df['direction']  # Predict direction (1 for up, 0 for down or no change)
         
@@ -92,7 +100,9 @@ class BitcoinPredictionModel:
         required_features = ['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
                              'market_condition', 'lagged_close', 'lagged_volume', 
                              'lagged_rsi', 'lagged_macd', 'lagged_signal', 
-                             'lagged_pct_change', 'lagged_volatility']
+                             'lagged_pct_change', 'lagged_volatility',
+                             'hash_rate', 'btc_dominance', 'total_crypto_market_cap', 'sp500',
+                             'lagged_hash_rate', 'lagged_btc_dominance', 'lagged_total_crypto_market_cap', 'lagged_sp500']
         
         # Add missing features with default values (e.g., 0)
         for feature in required_features:

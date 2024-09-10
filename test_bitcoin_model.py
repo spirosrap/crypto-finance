@@ -8,10 +8,11 @@ from technicalanalysis import TechnicalAnalysis
 from config import API_KEY, API_SECRET
 import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from external_data import ExternalDataFetcher
 
-def prepare_historical_data(candles):
+def prepare_historical_data(candles, external_data):
     df = pd.DataFrame(candles)
-    df['date'] = pd.to_datetime(pd.to_numeric(df['start']), unit='s')  # Explicitly convert to numeric
+    df['date'] = pd.to_datetime(pd.to_numeric(df['start']), unit='s').dt.date  # Convert to date
     df['close'] = df['close'].astype(float)
     df['volume'] = df['volume'].astype(float)
     
@@ -49,6 +50,25 @@ def prepare_historical_data(candles):
     df['lagged_pct_change'] = df['pct_change'].shift(1)
     df['lagged_volatility'] = df['volatility'].shift(1)
 
+    # Convert external_data 'date' column to date type if it's not already
+    external_data['date'] = pd.to_datetime(external_data['date']).dt.date
+
+    # Add external data
+    df = pd.merge(df, external_data, on='date', how='left')
+
+    # Add new features
+    if 'btc_market_cap' in df.columns and 'total_crypto_market_cap' in df.columns:
+        df['btc_dominance'] = df['btc_market_cap'] / df['total_crypto_market_cap']
+    else:
+        print("Warning: Unable to calculate btc_dominance due to missing columns")
+        df['btc_dominance'] = np.nan
+
+    if 'hash_rate' in df.columns:
+        df['hash_rate_ma'] = df['hash_rate'].rolling(window=24).mean()  # 24-hour moving average
+    else:
+        print("Warning: Unable to calculate hash_rate_ma due to missing hash_rate column")
+        df['hash_rate_ma'] = np.nan
+
     return df.dropna().reset_index(drop=True)
 
 def main():
@@ -58,11 +78,15 @@ def main():
 
     # Fetch historical data (e.g., 1 month of data with 5-minute granularity)
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=200)  # Get 1 month of data
+    start_date = end_date - timedelta(days=150)  # Get 1 month of data
     candles = historical_data.get_historical_data("BTC-USD", start_date, end_date, granularity="ONE_HOUR")  # Fetch data with 5-minute granularity
 
+    # Fetch external data
+    external_data_fetcher = ExternalDataFetcher()
+    external_data = external_data_fetcher.get_data(start_date, end_date)
+
     # Prepare the data
-    df = prepare_historical_data(candles)
+    df = prepare_historical_data(candles, external_data)
     print("Historical data fetched and prepared:")
     print("\nShape of data:", df.shape)
 
@@ -72,9 +96,12 @@ def main():
     print("\nModel trained successfully.")
 
     # Make prediction for the next 24 hours
-    last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 'market_condition']]
+    last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
+                                     'market_condition', 'hash_rate', 'btc_dominance', 
+                                     'total_crypto_market_cap', 'sp500']]
     # Add lagged values
-    for col in ['close', 'volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility']:
+    for col in ['close', 'volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility',
+                'hash_rate', 'btc_dominance', 'total_crypto_market_cap', 'sp500']:
         last_known_values[f'lagged_{col}'] = df.iloc[-2][col]
 
     # Create a DataFrame for prediction
