@@ -11,7 +11,8 @@ from sklearn.ensemble import GradientBoostingRegressor
 class BitcoinPredictionModel:
     def __init__(self, coinbase_service):
         self.model = None
-        self.scaler = StandardScaler()
+        self.scaler_X = StandardScaler()  # Scaler for features
+        self.scaler_y = StandardScaler()  # Scaler for target variable
         self.tech_analysis = TechnicalAnalysis(coinbase_service)
         self.params = {
             'n_estimators': 200,
@@ -57,10 +58,15 @@ class BitcoinPredictionModel:
         X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
         X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.2, shuffle=False)
 
-        self.scaler.fit(X_train)
-        X_train_scaled = self.scaler.transform(X_train)
-        X_val_scaled = self.scaler.transform(X_val)
-        X_test_scaled = self.scaler.transform(X_test)
+        # Fit and transform the training data
+        X_train_scaled = self.scaler_X.fit_transform(X_train)
+        y_train_scaled = self.scaler_y.fit_transform(y_train.values.reshape(-1, 1)).ravel()
+
+        # Transform validation and test data
+        X_val_scaled = self.scaler_X.transform(X_val)
+        X_test_scaled = self.scaler_X.transform(X_test)
+        y_val_scaled = self.scaler_y.transform(y_val.values.reshape(-1, 1)).ravel()
+        y_test_scaled = self.scaler_y.transform(y_test.values.reshape(-1, 1)).ravel()
 
         param_grid = {
             'n_estimators': [100, 200],
@@ -80,27 +86,27 @@ class BitcoinPredictionModel:
                                    verbose=2)
         
         try:
-            grid_search.fit(X_train_scaled, y_train)
+            grid_search.fit(X_train_scaled, y_train_scaled)
             print("Best parameters:", grid_search.best_params_)
             self.model = grid_search.best_estimator_
         except Exception as e:
             print(f"An error occurred during grid search: {e}")
             print("Falling back to default parameters.")
             self.model = GradientBoostingRegressor(**self.params)
-            self.model.fit(X_train_scaled, y_train)
+            self.model.fit(X_train_scaled, y_train_scaled)
 
         val_predictions = self.model.predict(X_val_scaled)
-        val_mse = mean_squared_error(y_val, val_predictions)
-        val_mae = mean_absolute_error(y_val, val_predictions)
-        val_r2 = r2_score(y_val, val_predictions)
+        val_mse = mean_squared_error(y_val_scaled, val_predictions)
+        val_mae = mean_absolute_error(y_val_scaled, val_predictions)
+        val_r2 = r2_score(y_val_scaled, val_predictions)
         print(f"Validation set MSE: {val_mse:.4f}")
         print(f"Validation set MAE: {val_mae:.4f}")
         print(f"Validation set R2: {val_r2:.4f}")
 
         test_predictions = self.model.predict(X_test_scaled)
-        test_mse = mean_squared_error(y_test, test_predictions)
-        test_mae = mean_absolute_error(y_test, test_predictions)
-        test_r2 = r2_score(y_test, test_predictions)
+        test_mse = mean_squared_error(y_test_scaled, test_predictions)
+        test_mae = mean_absolute_error(y_test_scaled, test_predictions)
+        test_r2 = r2_score(y_test_scaled, test_predictions)
         print(f"Test set MSE: {test_mse:.4f}")
         print(f"Test set MAE: {test_mae:.4f}")
         print(f"Test set R2: {test_r2:.4f}")
@@ -132,5 +138,6 @@ class BitcoinPredictionModel:
         
         features = features[required_features]
         
-        features_scaled = self.scaler.transform(features)
-        return self.model.predict(features_scaled)
+        features_scaled = self.scaler_X.transform(features)
+        predictions_scaled = self.model.predict(features_scaled)
+        return self.scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()

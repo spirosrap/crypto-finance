@@ -7,7 +7,7 @@ from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
 from config import API_KEY, API_SECRET
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, mean_absolute_percentage_error
 from external_data import ExternalDataFetcher
 from sklearn.model_selection import train_test_split
 
@@ -80,6 +80,16 @@ def prepare_historical_data(candles, external_data):
 
     return df.dropna().reset_index(drop=True)
 
+def calculate_normalized_metrics(y_true, y_pred, scaler):
+    y_true_array = y_true.values.reshape(-1, 1)
+    y_pred_array = y_pred.reshape(-1, 1)
+    y_true_normalized = scaler.transform(y_true_array).ravel()
+    y_pred_normalized = scaler.transform(y_pred_array).ravel()
+    mse = mean_squared_error(y_true_normalized, y_pred_normalized)
+    mae = mean_absolute_error(y_true_normalized, y_pred_normalized)
+    r2 = r2_score(y_true_normalized, y_pred_normalized)
+    return mse, mae, r2
+
 def main():
     # Initialize necessary classes
     coinbase_service = CoinbaseService(API_KEY, API_SECRET)  # Create CoinbaseService instance
@@ -117,9 +127,13 @@ def main():
     train_mse = mean_squared_error(y_train, y_train_pred)
     train_mae = mean_absolute_error(y_train, y_train_pred)
     train_r2 = r2_score(y_train, y_train_pred)
-    print(f"\nMSE on Training Set: {train_mse:.4f}")
-    print(f"MAE on Training Set: {train_mae:.4f}")
-    print(f"R2 on Training Set: {train_r2:.4f}")
+    train_mape = mean_absolute_percentage_error(y_train, y_train_pred) * 100  # Convert to percentage
+    train_mse_norm, train_mae_norm, train_r2_norm = calculate_normalized_metrics(y_train, y_train_pred, model.scaler_y)
+    print(f"\nMetrics on Training Set:")
+    print(f"MSE: {train_mse:.4f} (Normalized: {train_mse_norm:.4f})")
+    print(f"MAE: {train_mae:.4f} (Normalized: {train_mae_norm:.4f})")
+    print(f"R2: {train_r2:.4f} (Normalized: {train_r2_norm:.4f})")
+    print(f"MAPE: {train_mape:.2f}%")
 
     # Evaluate the model on the validation set
     val_df, X_val, y_val = model.prepare_data(val_df)
@@ -127,9 +141,13 @@ def main():
     val_mse = mean_squared_error(y_val, y_val_pred)
     val_mae = mean_absolute_error(y_val, y_val_pred)
     val_r2 = r2_score(y_val, y_val_pred)
-    print(f"\nMSE on Validation Set: {val_mse:.4f}")
-    print(f"MAE on Validation Set: {val_mae:.4f}")
-    print(f"R2 on Validation Set: {val_r2:.4f}")
+    val_mape = mean_absolute_percentage_error(y_val, y_val_pred) * 100  # Convert to percentage
+    val_mse_norm, val_mae_norm, val_r2_norm = calculate_normalized_metrics(y_val, y_val_pred, model.scaler_y)
+    print(f"\nMetrics on Validation Set:")
+    print(f"MSE: {val_mse:.4f} (Normalized: {val_mse_norm:.4f})")
+    print(f"MAE: {val_mae:.4f} (Normalized: {val_mae_norm:.4f})")
+    print(f"R2: {val_r2:.4f} (Normalized: {val_r2_norm:.4f})")
+    print(f"MAPE: {val_mape:.2f}%")
 
     # Evaluate the model on the test set
     test_df, X_test, y_test = model.prepare_data(test_df)
@@ -137,9 +155,13 @@ def main():
     test_mse = mean_squared_error(y_test, y_test_pred)
     test_mae = mean_absolute_error(y_test, y_test_pred)
     test_r2 = r2_score(y_test, y_test_pred)
-    print(f"\nMSE on Test Set: {test_mse:.4f}")
-    print(f"MAE on Test Set: {test_mae:.4f}")
-    print(f"R2 on Test Set: {test_r2:.4f}")
+    test_mape = mean_absolute_percentage_error(y_test, y_test_pred) * 100  # Convert to percentage
+    test_mse_norm, test_mae_norm, test_r2_norm = calculate_normalized_metrics(y_test, y_test_pred, model.scaler_y)
+    print(f"\nMetrics on Test Set:")
+    print(f"MSE: {test_mse:.4f} (Normalized: {test_mse_norm:.4f})")
+    print(f"MAE: {test_mae:.4f} (Normalized: {test_mae_norm:.4f})")
+    print(f"R2: {test_r2:.4f} (Normalized: {test_r2_norm:.4f})")
+    print(f"MAPE: {test_mape:.2f}%")
 
     # Plot actual vs predicted prices for the test set
     plt.figure(figsize=(12, 6))
