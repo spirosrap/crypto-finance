@@ -9,9 +9,10 @@ from config import API_KEY, API_SECRET
 import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from external_data import ExternalDataFetcher
+from sklearn.model_selection import train_test_split
 
 DAYS_TO_TEST_MODEL = 200  # Global variable to define the number of days to test the model
-LOOK_AHEAD_HOURS = 24 # Global variable to define the number of hours to look ahead for prediction
+LOOK_AHEAD_HOURS = 48 # Global variable to define the number of hours to look ahead for prediction
 
 def prepare_historical_data(candles, external_data):
     df = pd.DataFrame(candles)
@@ -98,16 +99,44 @@ def main():
     print("Historical data fetched and prepared:")
     print("\nShape of data:", df.shape)
 
+    # Split the data into training and testing sets
+    train_df, test_df = train_test_split(df, test_size=0.2, shuffle=False)
+
     # Create and train the model
-    model = BitcoinPredictionModel(coinbase_service)  # Pass coinbase_service to the model
-    model.train(df)
-    # print("\nModel trained successfully.")
-    # print(df["total_crypto_market_cap"].unique())
-    # print(df["hash_rate"].unique())
-    # print(df["btc_dominance"].unique())
-    # print(df["sp500"].unique())
-    # exit()
-    # Make prediction for the next 24 hours
+    model = BitcoinPredictionModel(coinbase_service)
+    model.train(train_df)
+
+    # Evaluate the model on the test set
+    test_df, X_test, y_test = model.prepare_data(test_df)
+    y_pred = model.predict(X_test)
+    
+    # Calculate direction accuracy
+    y_pred_class = (y_pred >= 0.5).astype(int)
+    direction_accuracy = (y_test == y_pred_class).mean()
+
+    print(f"\nDirection Accuracy on Test Set: {direction_accuracy:.4f}")
+
+    # Plot actual vs predicted directions for the test set
+    plt.figure(figsize=(12, 6))
+    plot_df = test_df.copy()
+    plot_df['actual_up'] = y_test.values
+    plot_df['predicted_up'] = y_pred_class
+
+    plt.plot(plot_df['date'], plot_df['close'], label='Bitcoin Price')
+    plt.scatter(plot_df['date'][plot_df['actual_up'] == 1], 
+                plot_df['close'][plot_df['actual_up'] == 1], 
+                color='green', label='Actual Up', alpha=0.5)
+    plt.scatter(plot_df['date'][plot_df['predicted_up'] == 1], 
+                plot_df['close'][plot_df['predicted_up'] == 1], 
+                color='lime', label='Predicted Up (≥0.5)', alpha=0.5)
+    plt.title('Bitcoin Price and Direction Predictions (Test Set)')
+    plt.xlabel('Date')
+    plt.ylabel('Price (USD)')
+    plt.legend()
+    plt.savefig('bitcoin_direction_prediction_test.png')
+    print("\nDirection prediction plot for test set saved as 'bitcoin_direction_prediction_test.png'")
+
+    # Make prediction for the next 24 hours (using the last known values from the entire dataset)
     last_known_values = df.iloc[-1][['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
                                      'market_condition', 'hash_rate', 'btc_dominance', 
                                      'total_crypto_market_cap', 'sp500']]
@@ -130,23 +159,23 @@ def main():
     print(f"{future_date}: Predicted direction: {predicted_direction} (Probability: {future_prediction[0]:.2f})")
 
     # Calculate and print model performance metrics
-    X, y = model.prepare_data(df)
+    df, X, y = model.prepare_data(df)
     y_pred = model.predict(X)
     
     # Define min_len
-    min_len = min(len(y), len(y_pred))
+    min_len = len(y)
 
     # Calculate direction accuracy
-    y_pred_class = (y_pred[:min_len] >= 0.5).astype(int)
-    direction_accuracy = (y[:min_len] == y_pred_class).mean()
+    y_pred_class = (y_pred >= 0.5).astype(int)
+    direction_accuracy = (y == y_pred_class).mean()
 
-    print(f"\nDirection Accuracy: {direction_accuracy:.4f}")
+    print(f"\nDirection Accuracy on Full Dataset: {direction_accuracy:.4f}")
 
     # Plot actual vs predicted directions
     plt.figure(figsize=(12, 6))
-    plot_df = df.iloc[1:min_len+1].copy()
-    plot_df['actual_up'] = y[:min_len].values
-    plot_df['predicted_up'] = y_pred_class  # Use y_pred_class here
+    plot_df = df.copy()
+    plot_df['actual_up'] = y.values
+    plot_df['predicted_up'] = y_pred_class
 
     plt.plot(plot_df['date'], plot_df['close'], label='Bitcoin Price')
     plt.scatter(plot_df['date'][plot_df['actual_up'] == 1], 

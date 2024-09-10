@@ -57,21 +57,18 @@ class BitcoinPredictionModel:
 
         y = df['direction']  # Predict direction (1 for up, 0 for down or no change)
         
-        return X, y  # Return X and y without further modification
+        return df, X, y  # Return the adjusted DataFrame along with X and y
 
     def direction_accuracy(self, y_true, y_pred):
         """Custom scoring function to evaluate direction prediction."""
         return (y_true == (y_pred >= 0.5).astype(int)).mean()
 
     def train(self, historical_data):
-        X, y = self.prepare_data(historical_data)
+        df, X, y = self.prepare_data(historical_data)
         X = self.scaler.fit_transform(X)
 
         # Calculate class weights
         class_weights = dict(zip(np.unique(y), compute_class_weight('balanced', classes=np.unique(y), y=y)))
-        
-        # Print class weights
-        print("Class weights:", class_weights)
 
         # Update the parameter grid for tuning
         param_grid = {
