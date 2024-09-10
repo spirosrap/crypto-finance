@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from external_data import ExternalDataFetcher
 
+DAYS_TO_TEST_MODEL = 200  # Global variable to define the number of days to test the model
+LOOK_AHEAD_HOURS = 24 # Global variable to define the number of hours to look ahead for prediction
+
 def prepare_historical_data(candles, external_data):
     df = pd.DataFrame(candles)
     df['date'] = pd.to_datetime(pd.to_numeric(df['start']), unit='s').dt.date  # Convert to date
@@ -83,7 +86,7 @@ def main():
 
     # Fetch historical data (e.g., 1 month of data with 5-minute granularity)
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=60)  # Get 2 months of data
+    start_date = end_date - timedelta(days=DAYS_TO_TEST_MODEL)  # Get 2 months of data
     candles = historical_data.get_historical_data("BTC-USD", start_date, end_date, granularity="ONE_HOUR")  # Fetch data with 5-minute granularity
 
     # Fetch external data
@@ -117,10 +120,10 @@ def main():
     future_prediction = model.predict(pd.DataFrame([last_known_values]))
     print(future_prediction)
     print("\nPrediction for the next 24 hours:")
-    future_date = df['date'].iloc[-1] + timedelta(hours=24)  # Adjust for 24 hours ahead
-    if future_prediction[0] >= 0.7:
+    future_date = df['date'].iloc[-1] + timedelta(hours=LOOK_AHEAD_HOURS)  # Adjust for 24 hours ahead
+    if future_prediction[0] >= 0.5:
         predicted_direction = "Up"
-    elif future_prediction[0] <= 0.3:
+    elif future_prediction[0] < 0.5:
         predicted_direction = "Down"
     else:
         predicted_direction = "Uncertain"
@@ -129,32 +132,21 @@ def main():
     # Calculate and print model performance metrics
     X, y = model.prepare_data(df)
     y_pred = model.predict(X)
-    y_pred_class = (y_pred >= 0.5).astype(int)  # Only consider "Up" if probability is 0.5 or higher
-
-    # Convert y_pred_class to a pandas Series for value_counts
-    class_distribution = pd.Series(y_pred_class).value_counts(normalize=True)  # Assuming 'direction' is your target variable
-    print("\nClass distribution (normalized):")
-    print(class_distribution)
-
-    # Ensure all arrays have the same length
-    min_len = min(len(df) - 1, len(y), len(y_pred_class))
     
-    accuracy = accuracy_score(y[:min_len], y_pred_class[:min_len])
-    precision = precision_score(y[:min_len], y_pred_class[:min_len])
-    recall = recall_score(y[:min_len], y_pred_class[:min_len])
-    f1 = f1_score(y[:min_len], y_pred_class[:min_len])
-    
-    print("\nModel Performance Metrics:")
-    print(f"Accuracy: {accuracy:.4f}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall: {recall:.4f}")
-    print(f"F1 Score: {f1:.4f}")
+    # Define min_len
+    min_len = min(len(y), len(y_pred))
+
+    # Calculate direction accuracy
+    y_pred_class = (y_pred[:min_len] >= 0.5).astype(int)
+    direction_accuracy = (y[:min_len] == y_pred_class).mean()
+
+    print(f"\nDirection Accuracy: {direction_accuracy:.4f}")
 
     # Plot actual vs predicted directions
     plt.figure(figsize=(12, 6))
     plot_df = df.iloc[1:min_len+1].copy()
     plot_df['actual_up'] = y[:min_len].values
-    plot_df['predicted_up'] = y_pred_class[:min_len]
+    plot_df['predicted_up'] = y_pred_class  # Use y_pred_class here
 
     plt.plot(plot_df['date'], plot_df['close'], label='Bitcoin Price')
     plt.scatter(plot_df['date'][plot_df['actual_up'] == 1], 
@@ -162,7 +154,7 @@ def main():
                 color='green', label='Actual Up', alpha=0.5)
     plt.scatter(plot_df['date'][plot_df['predicted_up'] == 1], 
                 plot_df['close'][plot_df['predicted_up'] == 1], 
-                color='lime', label='Predicted Up (≥0.7)', alpha=0.5)
+                color='lime', label='Predicted Up (≥0.5)', alpha=0.5)
     plt.title('Bitcoin Price and Direction Predictions')
     plt.xlabel('Date')
     plt.ylabel('Price (USD)')

@@ -1,10 +1,13 @@
 import pandas as pd
+import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit  # Import cross_val_score, GridSearchCV, and TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 from technicalanalysis import TechnicalAnalysis  # Import TechnicalAnalysis
 from coinbaseservice import CoinbaseService
 import statsmodels.api as sm  # Import statsmodels for ARIMA
+from sklearn.utils.class_weight import compute_class_weight  # Import for class weights
+from sklearn.metrics import make_scorer
 
 class BitcoinPredictionModel:
     def __init__(self, coinbase_service):
@@ -56,9 +59,16 @@ class BitcoinPredictionModel:
         
         return X, y  # Return X and y without further modification
 
+    def direction_accuracy(self, y_true, y_pred):
+        """Custom scoring function to evaluate direction prediction."""
+        return (y_true == (y_pred >= 0.5).astype(int)).mean()
+
     def train(self, historical_data):
         X, y = self.prepare_data(historical_data)
         X = self.scaler.fit_transform(X)
+
+        # Calculate class weights
+        class_weights = dict(zip(np.unique(y), compute_class_weight('balanced', classes=np.unique(y), y=y)))
 
         # Update the parameter grid for tuning
         param_grid = {
@@ -70,12 +80,22 @@ class BitcoinPredictionModel:
             'reg_alpha': [0, 0.1],  # L1 regularization
             'reg_lambda': [0.1, 1.0],  # L2 regularization
             'gamma': [0, 0.1],
-            'min_child_weight': [1, 3]
+            'min_child_weight': [1, 3],
+            'scale_pos_weight': [1, class_weights[1]/class_weights[0]]  # Add this line
         }
 
-        # Initialize GridSearchCV with TimeSeriesSplit
+        # Create a custom scorer without using needs_proba
+        direction_scorer = make_scorer(self.direction_accuracy, greater_is_better=True)
+
+        # Initialize GridSearchCV with TimeSeriesSplit and custom scorer
         tscv = TimeSeriesSplit(n_splits=5)
-        grid_search = GridSearchCV(xgb.XGBClassifier(objective='binary:logistic'), param_grid, cv=tscv, scoring='accuracy', n_jobs=-1, verbose=2)
+        grid_search = GridSearchCV(xgb.XGBClassifier(objective='binary:logistic'), 
+                                   param_grid, 
+                                   cv=tscv, 
+                                   scoring=direction_scorer,
+                                   refit='direction_accuracy',
+                                   n_jobs=-1, 
+                                   verbose=2)
         grid_search.fit(X, y)
 
         # Print the best parameters found
@@ -85,11 +105,11 @@ class BitcoinPredictionModel:
         self.model = grid_search.best_estimator_
         self.model.fit(X, y)
 
-        # Perform cross-validation using TimeSeriesSplit
-        cv_scores = cross_val_score(self.model, X, y, cv=tscv)  # Time series cross-validation
+        # Perform cross-validation using TimeSeriesSplit and custom scorer
+        cv_scores = cross_val_score(self.model, X, y, cv=tscv, scoring=direction_scorer)
         
-        print(f"Cross-validation scores: {cv_scores}")
-        print(f"Mean CV score: {cv_scores.mean():.4f}")
+        print(f"Cross-validation scores (Direction Accuracy): {cv_scores}")
+        print(f"Mean CV score (Direction Accuracy): {cv_scores.mean():.4f}")
 
         # Print feature importances
         feature_importance = self.model.feature_importances_
