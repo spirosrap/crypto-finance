@@ -51,9 +51,9 @@ class BitcoinPredictionModel:
         X = df[['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
                  'market_condition', 'lagged_close', 'lagged_volume', 
                  'lagged_rsi', 'lagged_macd', 'lagged_signal', 
-                 'lagged_pct_change', 'lagged_volatility',
-                 'hash_rate', 'btc_dominance', 'total_crypto_market_cap', 'sp500',
-                 'lagged_hash_rate', 'lagged_btc_dominance', 'lagged_total_crypto_market_cap', 'lagged_sp500']].copy()
+                 'lagged_pct_change', 'lagged_volatility']].copy()
+                #  'hash_rate', 'btc_dominance', 'total_crypto_market_cap', 'sp500',
+                #  'lagged_hash_rate', 'lagged_btc_dominance', 'lagged_total_crypto_market_cap', 'lagged_sp500']].copy()
 
         y = df['direction']  # Predict direction (1 for up, 0 for down or no change)
         
@@ -69,6 +69,9 @@ class BitcoinPredictionModel:
 
         # Calculate class weights
         class_weights = dict(zip(np.unique(y), compute_class_weight('balanced', classes=np.unique(y), y=y)))
+        
+        # Print class weights
+        print("Class weights:", class_weights)
 
         # Update the parameter grid for tuning
         param_grid = {
@@ -134,9 +137,9 @@ class BitcoinPredictionModel:
         required_features = ['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
                              'market_condition', 'lagged_close', 'lagged_volume', 
                              'lagged_rsi', 'lagged_macd', 'lagged_signal', 
-                             'lagged_pct_change', 'lagged_volatility',
-                             'hash_rate', 'btc_dominance', 'total_crypto_market_cap', 'sp500',
-                             'lagged_hash_rate', 'lagged_btc_dominance', 'lagged_total_crypto_market_cap', 'lagged_sp500']
+                             'lagged_pct_change', 'lagged_volatility']
+                            #  'hash_rate', 'btc_dominance', 'total_crypto_market_cap', 'sp500',
+                            #  'lagged_hash_rate', 'lagged_btc_dominance', 'lagged_total_crypto_market_cap', 'lagged_sp500']
         
         # Add missing features with default values (e.g., 0)
         for feature in required_features:
