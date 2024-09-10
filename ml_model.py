@@ -65,26 +65,35 @@ class BitcoinPredictionModel:
 
     def train(self, historical_data):
         df, X, y = self.prepare_data(historical_data)
-        X = self.scaler.fit_transform(X)
+        
+        # Split the data into train, validation, and test sets
+        X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+        X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.2, shuffle=False)
+
+        # Scale the features
+        self.scaler.fit(X_train)
+        X_train_scaled = self.scaler.transform(X_train)
+        X_val_scaled = self.scaler.transform(X_val)
+        X_test_scaled = self.scaler.transform(X_test)
 
         # Calculate class weights
-        class_weights = dict(zip(np.unique(y), compute_class_weight('balanced', classes=np.unique(y), y=y)))
+        class_weights = dict(zip(np.unique(y_train), compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)))
 
         # Update the parameter grid for tuning
         param_grid = {
-            'n_estimators': [100, 200],
-            'max_depth': [3, 5],
-            'learning_rate': [0.01, 0.1],
+            'n_estimators': [200],
+            'max_depth': [5, 10],
+            'learning_rate': [0.001],
             'subsample': [0.8, 1.0],
             'colsample_bytree': [0.8, 1.0],
-            'reg_alpha': [0, 0.1],  # L1 regularization
-            'reg_lambda': [0.1, 1.0],  # L2 regularization
-            'gamma': [0, 0.1],
+            'reg_alpha': [3.0],
+            'reg_lambda': [1.0],
+            'gamma': [0.1],
             'min_child_weight': [1, 3],
-            'scale_pos_weight': [1, class_weights[1]/class_weights[0]]  # Add this line
+            'scale_pos_weight': [1, class_weights[1]/class_weights[0]]
         }
 
-        # Create a custom scorer without using needs_proba
+        # Create a custom scorer
         direction_scorer = make_scorer(self.direction_accuracy, greater_is_better=True)
 
         # Initialize GridSearchCV with TimeSeriesSplit and custom scorer
@@ -96,24 +105,34 @@ class BitcoinPredictionModel:
                                    refit='direction_accuracy',
                                    n_jobs=-1, 
                                    verbose=2)
-        grid_search.fit(X, y)
+        grid_search.fit(X_train_scaled, y_train)
 
         # Print the best parameters found
         print("Best parameters:", grid_search.best_params_)
 
-        # Fit the model on the entire dataset using the best parameters
+        # Fit the model on the entire training dataset using the best parameters
         self.model = grid_search.best_estimator_
-        self.model.fit(X, y)
+        self.model.fit(X_train_scaled, y_train)
 
-        # Perform cross-validation using TimeSeriesSplit and custom scorer
-        cv_scores = cross_val_score(self.model, X, y, cv=tscv, scoring=direction_scorer)
+        # Evaluate on validation set
+        val_predictions = self.model.predict(X_val_scaled)
+        val_accuracy = self.direction_accuracy(y_val, val_predictions)
+        print(f"Validation set accuracy: {val_accuracy:.4f}")
+
+        # Evaluate on test set
+        test_predictions = self.model.predict(X_test_scaled)
+        test_accuracy = self.direction_accuracy(y_test, test_predictions)
+        print(f"Test set accuracy: {test_accuracy:.4f}")
+
+        # Perform cross-validation using TimeSeriesSplit and custom scorer on the training set
+        cv_scores = cross_val_score(self.model, X_train_scaled, y_train, cv=tscv, scoring=direction_scorer)
         
         print(f"Cross-validation scores (Direction Accuracy): {cv_scores}")
         print(f"Mean CV score (Direction Accuracy): {cv_scores.mean():.4f}")
 
         # Print feature importances
         feature_importance = self.model.feature_importances_
-        feature_names = self.prepare_data(historical_data)[0].columns
+        feature_names = X.columns
         for importance, name in sorted(zip(feature_importance, feature_names), reverse=True):
             print(f"{name}: {importance:.4f}")
 

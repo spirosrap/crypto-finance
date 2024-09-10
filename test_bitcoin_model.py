@@ -12,7 +12,7 @@ from external_data import ExternalDataFetcher
 from sklearn.model_selection import train_test_split
 
 DAYS_TO_TEST_MODEL = 200  # Global variable to define the number of days to test the model
-LOOK_AHEAD_HOURS = 48 # Global variable to define the number of hours to look ahead for prediction
+LOOK_AHEAD_HOURS = 24 # Global variable to define the number of hours to look ahead for prediction
 
 def prepare_historical_data(candles, external_data):
     df = pd.DataFrame(candles)
@@ -99,28 +99,40 @@ def main():
     print("Historical data fetched and prepared:")
     print("\nShape of data:", df.shape)
 
-    # Split the data into training and testing sets
-    train_df, test_df = train_test_split(df, test_size=0.2, shuffle=False)
+    # Split the data into training, validation, and testing sets
+    train_df, temp_df = train_test_split(df, test_size=0.3, shuffle=False)
+    val_df, test_df = train_test_split(temp_df, test_size=0.5, shuffle=False)
 
     # Create and train the model
     model = BitcoinPredictionModel(coinbase_service)
     model.train(train_df)
 
+    # Evaluate the model on the training set
+    train_df, X_train, y_train = model.prepare_data(train_df)
+    y_train_pred = model.predict(X_train)
+    y_train_pred_class = (y_train_pred >= 0.5).astype(int)
+    train_direction_accuracy = (y_train == y_train_pred_class).mean()
+    print(f"\nDirection Accuracy on Training Set: {train_direction_accuracy:.4f}")
+
+    # Evaluate the model on the validation set
+    val_df, X_val, y_val = model.prepare_data(val_df)
+    y_val_pred = model.predict(X_val)
+    y_val_pred_class = (y_val_pred >= 0.5).astype(int)
+    val_direction_accuracy = (y_val == y_val_pred_class).mean()
+    print(f"Direction Accuracy on Validation Set: {val_direction_accuracy:.4f}")
+
     # Evaluate the model on the test set
     test_df, X_test, y_test = model.prepare_data(test_df)
-    y_pred = model.predict(X_test)
-    
-    # Calculate direction accuracy
-    y_pred_class = (y_pred >= 0.5).astype(int)
-    direction_accuracy = (y_test == y_pred_class).mean()
-
-    print(f"\nDirection Accuracy on Test Set: {direction_accuracy:.4f}")
+    y_test_pred = model.predict(X_test)
+    y_test_pred_class = (y_test_pred >= 0.5).astype(int)
+    test_direction_accuracy = (y_test == y_test_pred_class).mean()
+    print(f"Direction Accuracy on Test Set: {test_direction_accuracy:.4f}")
 
     # Plot actual vs predicted directions for the test set
     plt.figure(figsize=(12, 6))
     plot_df = test_df.copy()
     plot_df['actual_up'] = y_test.values
-    plot_df['predicted_up'] = y_pred_class
+    plot_df['predicted_up'] = y_test_pred_class
 
     plt.plot(plot_df['date'], plot_df['close'], label='Bitcoin Price')
     plt.scatter(plot_df['date'][plot_df['actual_up'] == 1], 
@@ -147,7 +159,6 @@ def main():
 
     # Create a DataFrame for prediction
     future_prediction = model.predict(pd.DataFrame([last_known_values]))
-    print(future_prediction)
     print("\nPrediction for the next 24 hours:")
     future_date = df['date'].iloc[-1] + timedelta(hours=LOOK_AHEAD_HOURS)  # Adjust for 24 hours ahead
     if future_prediction[0] >= 0.5:
