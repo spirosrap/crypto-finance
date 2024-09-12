@@ -234,7 +234,7 @@ class Backtester:
             self.logger.info(f"Backtest completed. Final value: {final_value:.2f}")
             self.logger.info("Trades:")
 
-            for trade in trades[-3:]: # Show only the last three trades.
+            for trade in trades: # Show only the last three trades.
                 usd_value = trade['amount'] * trade['price']
                 self.logger.info(f"Date: {datetime.fromtimestamp(trade['date'], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}, "
                             f"Action: {trade['action']}, Price: {trade['price']:.2f}, "

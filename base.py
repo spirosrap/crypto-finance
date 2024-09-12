@@ -146,9 +146,10 @@ def main():
     parser.add_argument("--end_date", help="End date for backtesting (YYYY-MM-DD)")
     parser.add_argument("--bearmarket", action="store_true", help="Use bear market period (2021-11-01 to 2022-11-01)")
     parser.add_argument("--bullmarket", action="store_true", help="Use bull market period (2020-10-01 to 2021-04-01)")
+    parser.add_argument("--ytd", action="store_true", help="Use year-to-date period (2024-01-01 to current date)")
     parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")
-    parser.add_argument("--live", action="store_true", help="Run live trading simulation")  # New argument
-    parser.add_argument("--product_id", default="BTC-USD", help="Product ID for trading (default: BTC-USD)")  # New argument
+    parser.add_argument("--live", action="store_true", help="Run live trading simulation")
+    parser.add_argument("--product_id", default="BTC-USD", help="Product ID for trading (default: BTC-USD)")
     args = parser.parse_args()
 
     api_key = API_KEY
@@ -229,6 +230,9 @@ def main():
         elif args.bullmarket:
             start_date = "2020-10-01 00:00:00"
             end_date = "2021-04-01 23:59:59"
+        elif args.ytd:
+            start_date = "2024-01-01 00:00:00"
+            end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         elif args.start_date:
             start_date = f"{args.start_date} 00:00:00"
             end_date = f"{args.end_date} 23:59:59" if args.end_date else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
