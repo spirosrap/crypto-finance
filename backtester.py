@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import json
 import logging
@@ -23,7 +23,7 @@ class Backtester:
 
     def plot_trades(self, candles, trades, balance_history, btc_balance_history):
         # Convert timestamps to datetime
-        dates = [datetime.utcfromtimestamp(float(candle['start'])) for candle in candles]
+        dates = [datetime.fromtimestamp(float(candle['start']), tz=timezone.utc) for candle in candles]
         prices = [float(candle['close']) for candle in candles]
 
         # Create the plot
@@ -34,7 +34,7 @@ class Backtester:
 
         # Plot trades
         for trade in trades:
-            date = datetime.utcfromtimestamp(int(trade['date']))
+            date = datetime.fromtimestamp(int(trade['date']), tz=timezone.utc)
             if trade['action'] in ['BUY', 'STRONG BUY']:
                 ax1.plot(date, trade['price'], '^', color='g', markersize=10)
             elif trade['action'] in ['SELL', 'STRONG SELL', 'STOP LOSS', 'TRAILING STOP']:
@@ -120,7 +120,7 @@ class Backtester:
                 for i, candle in enumerate(candles):
                     close_price = float(candle['close'])
                     current_time = int(candle['start'])
-                    current_date = datetime.utcfromtimestamp(current_time).date()
+                    current_date = datetime.fromtimestamp(current_time, tz=timezone.utc).date()
                     
                     # Reset trades_today if it's a new day
                     if last_trade_date != current_date:
@@ -136,7 +136,7 @@ class Backtester:
                         macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
                         combined_signal = self.trader.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1], market_conditions=market_conditions)
 
-                        current_datetime = datetime.utcfromtimestamp(current_time)  # Convert to datetime
+                        current_datetime = datetime.fromtimestamp(current_time, tz=timezone.utc)  # Convert to datetime
                         self.logger.info(f"(Current date: {current_datetime.strftime('%Y-%m-%d %H:%M')})")  # Print date to the hour
                         self.logger.info(f"Combined signal for today: {combined_signal}")
                         self.logger.info(f"Market conditions for today: {market_conditions}")
@@ -236,7 +236,7 @@ class Backtester:
 
             for trade in trades[-3:]: # Show only the last three trades.
                 usd_value = trade['amount'] * trade['price']
-                self.logger.info(f"Date: {datetime.utcfromtimestamp(trade['date']).strftime('%Y-%m-%d %H:%M:%S')}, "
+                self.logger.info(f"Date: {datetime.fromtimestamp(trade['date'], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}, "
                             f"Action: {trade['action']}, Price: {trade['price']:.2f}, "
                             f"Amount: {trade['amount']:.8f}, Fee: {trade['fee']:.2f}, "
                             f"USD Value: {(usd_value - trade['fee']):.2f}")
@@ -328,7 +328,7 @@ class Backtester:
                 for i, candle in enumerate(candles):
                     close_price = float(candle['close'])
                     current_time = int(candle['start'])
-                    current_date = datetime.utcfromtimestamp(current_time).date()
+                    current_date = datetime.fromtimestamp(current_time, tz=timezone.utc).date()
 
                     # Reset trades_today if it's a new day
                     if last_trade_date != current_date:
@@ -420,7 +420,7 @@ class Backtester:
                 self.logger.info(f"Last trade: {trades[-1] if trades else 'No trades yet'}")
                 for trade in trades:
                     usd_value = trade['amount'] * trade['price']
-                    self.logger.info(f"Date: {datetime.utcfromtimestamp(trade['date']).strftime('%Y-%m-%d %H:%M:%S')}, "
+                    self.logger.info(f"Date: {datetime.fromtimestamp(trade['date'], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}, "
                                 f"Action: {trade['action']}, Price: {trade['price']:.2f}, "
                                 f"Amount: {trade['amount']:.8f}, Fee: {trade['fee']:.2f}, "
                                 f"USD Value: {(usd_value - trade['fee']):.2f}")

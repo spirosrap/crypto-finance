@@ -91,6 +91,7 @@ def calculate_normalized_metrics(y_true, y_pred, scaler):
     return mse, mae, r2
 
 def main():
+    print("Starting main function")
     # Initialize necessary classes
     coinbase_service = CoinbaseService(API_KEY, API_SECRET)  # Create CoinbaseService instance
     historical_data = HistoricalData(coinbase_service.client)
