@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, mean_absolute_percentage_error
 from external_data import ExternalDataFetcher
 from sklearn.model_selection import train_test_split
+import schedule
+import time
 
 DAYS_TO_TEST_MODEL = 200  # Global variable to define the number of days to test the model
 LOOK_AHEAD_HOURS = 24 # Global variable to define the number of hours to look ahead for prediction
@@ -230,4 +232,10 @@ def main():
     # print(f"ARIMA forecast for the next hour: {arima_forecast}")
 
 if __name__ == "__main__":
-    main()
+    # Schedule the main function to run every 1 minute
+    schedule.every(1).minute.do(main)
+    
+    # Keep the script running
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
