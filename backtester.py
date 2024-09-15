@@ -14,7 +14,7 @@ class Backtester:
     def __init__(self, trader):
         self.trader = trader
         self.logger = logging.getLogger(__name__)
-        self.cooldown_period = 24 * 60 * 60 * 1  # 3 days in seconds
+        self.cooldown_period = 24 * 60 * 60 * 1  # 1 day in seconds
         self.max_trades_per_day = 1
         self.min_price_change = 0.08  # 8% minimum price change
         self.drawdown_threshold = 0.1  # 10% drawdown threshold
