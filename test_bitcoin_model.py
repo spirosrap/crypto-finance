@@ -237,5 +237,10 @@ if __name__ == "__main__":
     
     # Keep the script running
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        try:
+            schedule.run_pending()
+        except Exception as e:
+            print(f"Network error: {e}. Retrying in 1 minute...")
+            time.sleep(60)  # Wait for 1 minute before retrying
+        else:
+            time.sleep(3)

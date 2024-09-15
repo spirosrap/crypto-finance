@@ -242,8 +242,8 @@ class Backtester:
                             f"USD Value: {(usd_value - trade['fee']):.2f}")
                             
             # Plot the trades and balance history
-            self.plot_trades(candles, trades, balance_history, btc_balance_history)
-            self.logger.info("Trade and balance plot saved as 'trades_and_balance.png'")
+            # self.plot_trades(candles, trades, balance_history, btc_balance_history)
+            # self.logger.info("Trade and balance plot saved as 'trades_and_balance.png'")
                             
             return final_value, trades
         except Exception as e:
