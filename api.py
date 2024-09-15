@@ -32,9 +32,23 @@ def run_backtest():
         elif request.args.get('ytd'):
             start_date = "2024-01-01 00:00:00"
             end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        elif not start_date:
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d 00:00:00")
-            end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            # If no special case and no dates provided, use last year as default
+            if not start_date and not end_date:
+                start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d 00:00:00")
+                end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # If only start_date is provided, set end_date to now
+            elif start_date and not end_date:
+                end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # If only end_date is provided, set start_date to one year before
+            elif not start_date and end_date:
+                start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=365)).strftime("%Y-%m-%d 00:00:00")
+
+        # Ensure start_date and end_date are in the correct format
+        if start_date and len(start_date) == 10:  # If only date is provided
+            start_date += " 00:00:00"
+        if end_date and len(end_date) == 10:  # If only date is provided
+            end_date += " 23:59:59"
 
         app.logger.info(f"Running backtest from {start_date} to {end_date}")
         final_value, trades = trader.run_backtest(product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
