@@ -54,6 +54,39 @@ def run_backtest():
         final_value, trades = trader.run_backtest(product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
         app.logger.info("Backtest completed")
 
+        # Get the latest available candle data
+        try:
+            current_date = datetime.now()
+            latest_candles = trader.get_historical_data(product_id, current_date - timedelta(days=1), current_date)
+            if latest_candles:
+                latest_candle = latest_candles[-1]
+                close_price = float(latest_candle['close'])
+                
+                # Calculate signals and market conditions
+                rsi = trader.compute_rsi_for_backtest(latest_candles)
+                macd, signal, histogram = trader.compute_macd_for_backtest(latest_candles)
+                market_conditions = trader.technical_analysis.analyze_market_conditions(latest_candles)
+                combined_signal = trader.generate_combined_signal(rsi, macd, signal, histogram, latest_candles, market_conditions=market_conditions)
+                trend = trader.identify_trend(product_id, latest_candles)
+                volume_signal = trader.technical_analysis.analyze_volume(latest_candles)
+
+                current_info = {
+                    "combined_signal": combined_signal,
+                    "market_conditions": market_conditions,
+                    "trend": trend,
+                    "volume_signal": volume_signal,
+                    "current_bitcoin_value": close_price,
+                    "data_as_of": latest_candle['start']
+                }
+            else:
+                current_info = {
+                    "error": "No recent data available. Unable to calculate current market information."
+                }
+        except Exception as data_error:
+            current_info = {
+                "error": f"Failed to fetch latest market data: {str(data_error)}"
+            }
+
         result = {
             "initial_balance": initial_balance,
             "final_value": final_value,
@@ -66,7 +99,8 @@ def run_backtest():
                     "price": trade['price'],
                     "amount": trade['amount']
                 } for trade in trades
-            ]
+            ],
+            "current_market_info": current_info
         }
 
         app.logger.info("Sending response")
