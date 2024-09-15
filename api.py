@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from base import CryptoTrader
 from config import API_KEY, API_SECRET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import traceback
 
 app = Flask(__name__)
@@ -94,7 +94,7 @@ def run_backtest():
             "number_of_trades": len(trades),
             "trades": [
                 {
-                    "date": datetime.utcfromtimestamp(int(trade['date'])).strftime('%Y-%m-%d %H:%M:%S'),
+                    "date": datetime.fromtimestamp(int(trade['date']), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S'),
                     "action": trade['action'],
                     "price": trade['price'],
                     "amount": trade['amount']
