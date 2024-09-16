@@ -430,3 +430,8 @@ class TechnicalAnalysis:
             return 0.02  # 2% daily volatility
         else:  # High Volatility
             return 0.03  # 3% daily volatility
+        
+    def calculate_atr_position_size(self, balance: float, price: float, atr: float) -> float:
+        risk_amount = balance * self.risk_per_trade
+        position_size = risk_amount / (self.atr_multiplier * atr)
+        return min(position_size * price, balance)  # Ensure we don't exceed available balance        
