@@ -1,37 +1,39 @@
 # Bitcoin Trading Bot
 
-* Trading strategy using traditional signals.
-* Price prediction using ml models (xgboost).
+## Overview
 
-## Backtester
+This Bitcoin Trading Bot implements a sophisticated trading strategy using traditional technical analysis signals and machine learning models (XGBoost) for price prediction. It offers both backtesting capabilities and live trading simulations.
 
-The Backtester is a crucial component of our trading system, allowing for historical performance analysis and live trading simulations. It's implemented in the `backtester.py` file.
+## Key Components
 
-### Key Features
+1. **Backtester**: Allows historical performance analysis and live trading simulations.
+2. **Technical Analysis**: Implements various technical indicators and analysis methods.
+3. **CoinbaseService**: Handles interactions with the Coinbase API.
+4. **HistoricalData**: Manages retrieval and storage of historical price data.
+5. **API**: Provides an interface for external interactions with the trading bot.
 
-- Performs backtesting over specified date ranges
-- Runs live trading simulations using real-time market data
-- Implements various trading constraints:
-  - Cooldown period between trades
-  - Maximum trades per day
-  - Minimum price change threshold
-  - Drawdown threshold for stop-loss
-- Adjusts trade size based on market conditions
-- Uses trailing stop-loss for risk management
-- Saves and loads trading state for continuity
-- Generates visual plots of trades and balance history
+## Features
 
-### Usage
+- Backtesting over specified date ranges
+- Live (paper) trading simulations
+- Multiple technical indicators (RSI, MACD, Bollinger Bands, etc.)
+- Market condition analysis (Bull/Bear market detection)
+- Dynamic trade sizing based on market conditions
+- Risk management with trailing stop-loss
+- State persistence for continuous operation
+- Visual trade and balance history plots
 
-To use the Backtester, you'll need to initialize it with a Trader object:
+## Installation
 
-## Running the Trading Bot
+(Add installation instructions here, including any dependencies)
 
-The main program for the Bitcoin Trading Bot is `base.py`. It provides various options for backtesting and live trading simulation. Here are some examples of how to run the program:
+## Usage
 
-### Basic Usage
+The main program for the Bitcoin Trading Bot is `base.py`. Here are some common usage scenarios:
 
-To run the program with default settings (1-year backtest):
+### Basic Backtesting
+
+Run a 1-year backtest with default settings:
 
 ### Backtesting Options
 
@@ -55,16 +57,14 @@ To run the program with default settings (1-year backtest):
    python base.py --ytd
    ```
 
-### Live (paper) trading simulation (just paper trades. no real trades are executed)
+### Live Trading Simulation
 
-It assumes the trades started a few weeks ago, to gather more historical data. 
-You use the live trader to see when it will perform the next buy or sell live. 
-It could be modified in the future to trade with real money.
+The live trading simulation mode doesn't execute real-time trades. Instead, it simulates trades as if they had started a few weeks ago, providing a more extensive historical context. This allows you to observe when the bot would perform its next buy or sell action based on current market conditions.
 
-To run the program in live trading mode:
+To run the program in live trading simulation mode:
 
 ```bash
-python base.py --live
+python base.py
 ```
 
 ### Additional Options
