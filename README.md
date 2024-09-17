@@ -25,7 +25,29 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 
 ## Installation
 
-(Add installation instructions here, including any dependencies)
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/bitcoin-trading-bot.git
+   cd bitcoin-trading-bot
+   ```
+
+2. Install the required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Create a `config.py` file in the root directory of the project with your API keys:
+   ```python
+   API_KEY = "your_coinbase_api_key"
+   API_SECRET = "your_coinbase_api_secret"
+   NEWS_API_KEY = "your_news_api_key"
+   ```
+
+   Replace `your_coinbase_api_key`, `your_coinbase_api_secret`, and `your_news_api_key` with your actual API keys from Coinbase and NewsAPI respectively.
+
+   Note: Keep your `config.py` file secure and never share it publicly or commit it to version control.
+
+4. You're now ready to use the Bitcoin Trading Bot!
 
 ## Usage
 
