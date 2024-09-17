@@ -55,7 +55,11 @@ To run the program with default settings (1-year backtest):
    python base.py --ytd
    ```
 
-### Live Trading Simulation
+### Live (paper) trading simulation (just paper trades. no real trades are executed)
+
+It assumes the trades started a few weeks ago, to gather more historical data. 
+You use the live trader to see when it will perform the next buy or sell live. 
+It could be modified in the future to trade with real money.
 
 To run the program in live trading mode:
 
