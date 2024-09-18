@@ -157,10 +157,14 @@ class TechnicalAnalysis:
         volatility = atr / avg_price
         self.update_volatility_history(volatility)
 
+        # Get dynamic volatility thresholds
+        high_volatility, very_high_volatility = self.get_dynamic_volatility_threshold()
+
         # Adjust signal strength based on volatility
-        avg_volatility = np.mean([v['volatility'] for v in self.volatility_history[-10:]])
-        if volatility > avg_volatility * 1.2:  # If current volatility is 20% higher than average
-            signal_strength *= 0.8  # Reduce signal strength in high volatility
+        if volatility > very_high_volatility:
+            signal_strength *= 0.5  # Significantly reduce signal strength in very high volatility
+        elif volatility > high_volatility:
+            signal_strength *= 0.75  # Moderately reduce signal strength in high volatility
 
         # Add trend-following component
         short_ma = self.calculate_sma(candles, 10)
@@ -307,6 +311,17 @@ class TechnicalAnalysis:
         self.volatility_history.append({'timestamp': time.time(), 'volatility': volatility})
         # Keep only the last 100 volatility readings
         self.volatility_history = self.volatility_history[-100:]
+
+    def get_dynamic_volatility_threshold(self) -> Tuple[float, float]:
+        volatilities = [v['volatility'] for v in self.volatility_history]
+        mean_volatility = np.mean(volatilities)
+        std_volatility = np.std(volatilities)
+        
+        # Set thresholds at 1 and 2 standard deviations above the mean
+        high_threshold = mean_volatility + std_volatility
+        very_high_threshold = mean_volatility + 2 * std_volatility
+        
+        return high_threshold, very_high_threshold
 
     def calculate_sma(self, candles, period):
         prices = [float(candle['close']) for candle in candles[-period:]]
