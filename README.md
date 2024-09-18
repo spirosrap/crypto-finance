@@ -23,6 +23,14 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 - State persistence for continuous operation
 - Visual trade and balance history plots
 
+## Prerequisites
+
+```
+pip install coinbase-advanced-py
+pip install yfinance
+pip install newsapi-python
+```
+
 ## Installation
 
 1. Clone the repository:
@@ -170,12 +178,3 @@ macd = ta.compute_macd(candles)
 signal = ta.compute_signal(candles)
 histogram = ta.compute_histogram(candles)
 ```
-
-## Installation
-
-```
-pip install coinbase-advanced-py
-pip install yfinance
-pip install newsapi-python
-```
-
