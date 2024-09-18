@@ -19,7 +19,7 @@ class Backtester:
         self.min_price_change = 0.08  # 8% minimum price change
         self.drawdown_threshold = 0.1  # 10% drawdown threshold
         self.strong_buy_percentage = 0.8  # 80% of balance for strong buy
-        self.buy_percentage = 0.25  # 25% of balance for regular buy
+        self.buy_percentage = 0.4  # 40% of balance for regular buy
 
     def plot_trades(self, candles, trades, balance_history, btc_balance_history):
         # Convert timestamps to datetime
