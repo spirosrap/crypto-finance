@@ -171,4 +171,11 @@ signal = ta.compute_signal(candles)
 histogram = ta.compute_histogram(candles)
 ```
 
+## Installation
+
+```
+pip install coinbase-advanced-py
+pip install yfinance
+pip install newsapi-python
+```
 

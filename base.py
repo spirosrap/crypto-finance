@@ -1,5 +1,5 @@
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from coinbase.rest import RESTClient
 from coinbase.rest import portfolios, products, market_data, orders
 import numpy as np
@@ -254,8 +254,7 @@ def main():
         
         sorted_trades = sorted(trades, key=lambda x: x['date'])
         for trade in sorted_trades:
-            # f.write(f"Date: {datetime.utcfromtimestamp(int(candle['start'])).strftime('%Y-%m-%d %H:%M:%S')}, "
-            human_readable_date = datetime.utcfromtimestamp(int(trade['date'])).strftime('%Y-%m-%d %H:%M:%S')
+            human_readable_date = datetime.fromtimestamp(int(trade['date']), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
             logger.debug(f"Date: {human_readable_date}, Action: {trade['action']}, Price: {trade['price']}, Amount: {trade['amount']}")
 
     # # You can further analyze the trades list for more insights
