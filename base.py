@@ -111,8 +111,8 @@ class CryptoTrader:
     def generate_combined_signal(self, rsi, macd, signal, histogram, candles, market_conditions=None):
         return self.technical_analysis.generate_combined_signal(rsi, macd, signal, histogram, candles, market_conditions) 
 
-    def generate_signal(self, rsi):
-        return self.technical_analysis.generate_signal(rsi)
+    def generate_signal(self, rsi, volatility):
+        return self.technical_analysis.generate_signal(rsi, volatility)
 
     def place_order(self, product_id, side, size):
         return self.coinbase_service.place_order(product_id, side, size)
@@ -169,7 +169,12 @@ def main():
         logger.info(f"{currency}: Bid: {price['bid']:.2f}, Ask: {price['ask']:.2f}")
     rsi = trader.compute_rsi(args.product_id, candles, period=RSI_PERIOD)
 
-    signal = trader.generate_signal(rsi)
+    # Calculate volatility
+    prices = [float(candle['close']) for candle in candles[-20:]]  # Use last 20 candles
+    returns = np.diff(np.log(prices))
+    volatility = np.std(returns) * np.sqrt(252)  # Annualized volatility
+
+    signal = trader.generate_signal(rsi, volatility)
     macd, signal, histogram = trader.compute_macd(args.product_id, candles)
     logger.info(f"Current MACD for {args.product_id}: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}, RSI: {rsi:.2f}")
     

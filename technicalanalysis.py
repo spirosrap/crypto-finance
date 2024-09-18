@@ -10,6 +10,9 @@ class TechnicalAnalysis:
         self.coinbase_service = coinbase_service
         self.signal_history = []  # To store recent signals
         self.volatility_history = []  # To store recent volatility readings
+        self.rsi_overbought = 70
+        self.rsi_oversold = 30
+        self.volatility_threshold = 0.03  # 3% daily volatility threshold
 
     def calculate_rsi(self, prices: List[float], period: int) -> float:
         deltas = np.diff(prices)
@@ -109,8 +112,13 @@ class TechnicalAnalysis:
         if market_conditions is None:
             market_conditions = self.analyze_market_conditions(candles)
         
+        # Calculate volatility
+        prices = [float(candle['close']) for candle in candles[-20:]]  # Use last 20 candles
+        returns = np.diff(np.log(prices))
+        volatility = np.std(returns) * np.sqrt(365)  # Annualized volatility
+
         # Generate individual signals
-        rsi_signal = self.generate_signal(rsi)
+        rsi_signal = self.generate_signal(rsi, volatility)
         macd_signal = self.generate_macd_signal(macd, signal, histogram)
         bollinger_signal = self.generate_bollinger_bands_signal(candles)
         ma_crossover_signal = self.compute_moving_average_crossover(candles)
@@ -259,8 +267,16 @@ class TechnicalAnalysis:
         
         return list(zip(bin_centers, volume_profile))
 
-    def generate_signal(self, rsi):
-        return "SELL" if rsi > 70 else "BUY" if rsi < 30 else "HOLD"
+    def generate_signal(self, rsi, volatility):
+        # Adjust RSI levels based on volatility
+        if volatility > self.volatility_threshold:
+            adjusted_overbought = self.rsi_overbought + 10  # More room for upside in volatile markets
+            adjusted_oversold = self.rsi_oversold - 10  # More room for downside in volatile markets
+        else:
+            adjusted_overbought = self.rsi_overbought
+            adjusted_oversold = self.rsi_oversold
+
+        return "SELL" if rsi > adjusted_overbought else "BUY" if rsi < adjusted_oversold else "HOLD"
 
     def calculate_position_size(self, account_balance: float, risk_per_trade: float, stop_loss_percent: float) -> float:
         max_loss_amount = account_balance * risk_per_trade
