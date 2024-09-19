@@ -109,6 +109,9 @@ class TechnicalAnalysis:
             return "HOLD"
 
     def generate_combined_signal(self, rsi, macd, signal, histogram, candles, market_conditions=None):
+        # Calculate current price once
+        current_price = float(candles[-1]['close'])
+
         if market_conditions is None:
             market_conditions = self.analyze_market_conditions(candles)
         
@@ -152,7 +155,6 @@ class TechnicalAnalysis:
         signal_strength += 1 if trend == "Uptrend" else -1 if trend == "Downtrend" else 0
 
         # Volume Profile
-        current_price = float(candles[-1]['close'])
         volume_resistance = max(volume_profile, key=lambda x: x[1])[0]
         if current_price > volume_resistance:
             signal_strength += 1
@@ -180,7 +182,6 @@ class TechnicalAnalysis:
         trend = "Uptrend" if short_ma > long_ma else "Downtrend"
 
         # Add dynamic support/resistance
-        current_price = float(candles[-1]['close'])
         ma_200 = self.calculate_sma(candles, 200)
 
         # Incorporate volume analysis
