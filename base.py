@@ -22,6 +22,7 @@ import logging
 from tqdm import tqdm
 from backtester import Backtester
 import argparse
+from dataclasses import dataclass
 
 # Constants
 DEFAULT_FEE_RATE = 0.005  # 0.5%
@@ -36,6 +37,14 @@ TREND_WINDOW = 20
 #logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
+
+@dataclass
+class TradeRecord:
+    date: int
+    action: str
+    price: float
+    amount: float
+    fee: float
 
 class CryptoTrader:
     def __init__(self, api_key, api_secret):
@@ -129,14 +138,8 @@ class CryptoTrader:
     def run_backtest(self, product_id: str, start_date, end_date, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
         return self.backtester.backtest(product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
 
-    def create_trade_record(self, time: int, action: str, price: float, amount: float, fee: float) -> dict:
-        return {
-            'date': time,
-            'action': action,
-            'price': price,
-            'amount': amount,
-            'fee': fee
-        }
+    def create_trade_record(self, time: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
+        return TradeRecord(date=time, action=action, price=price, amount=amount, fee=fee)
 
 
 def main():
@@ -252,10 +255,10 @@ def main():
         logger.info(f"Number of trades: {len(trades)}")
         logger.debug("Trades executed during backtesting:")
         
-        sorted_trades = sorted(trades, key=lambda x: x['date'])
+        sorted_trades = sorted(trades, key=lambda x: x.date)
         for trade in sorted_trades:
-            human_readable_date = datetime.fromtimestamp(int(trade['date']), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            logger.debug(f"Date: {human_readable_date}, Action: {trade['action']}, Price: {trade['price']}, Amount: {trade['amount']}")
+            human_readable_date = datetime.fromtimestamp(int(trade.date), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            logger.debug(f"Date: {human_readable_date}, Action: {trade.action}, Price: {trade.price}, Amount: {trade.amount}")
 
     # # You can further analyze the trades list for more insights
     # # Test ML signal for the past 200 days

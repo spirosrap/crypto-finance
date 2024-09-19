@@ -9,6 +9,15 @@ import time
 import requests
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from dataclasses import dataclass
+
+@dataclass
+class TradeRecord:
+    date: int
+    action: str
+    price: float
+    amount: float
+    fee: float
 
 class Backtester:
     def __init__(self, trader):
@@ -20,6 +29,9 @@ class Backtester:
         self.drawdown_threshold = 0.1  # 10% drawdown threshold
         self.strong_buy_percentage = 0.8  # 80% of balance for strong buy
         self.buy_percentage = 0.4  # 40% of balance for regular buy
+
+    def create_trade_record(self, date: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
+        return TradeRecord(date, action, price, amount, fee)
 
     def plot_trades(self, candles, trades, balance_history, btc_balance_history):
         # Convert timestamps to datetime
@@ -34,11 +46,11 @@ class Backtester:
 
         # Plot trades
         for trade in trades:
-            date = datetime.fromtimestamp(int(trade['date']), tz=timezone.utc)
-            if trade['action'] in ['BUY', 'STRONG BUY']:
-                ax1.plot(date, trade['price'], '^', color='g', markersize=10)
-            elif trade['action'] in ['SELL', 'STRONG SELL', 'STOP LOSS', 'TRAILING STOP']:
-                ax1.plot(date, trade['price'], 'v', color='r', markersize=10)
+            date = datetime.fromtimestamp(int(trade.date), tz=timezone.utc)
+            if trade.action in ['BUY', 'STRONG BUY']:
+                ax1.plot(date, trade.price, '^', color='g', markersize=10)
+            elif trade.action in ['SELL', 'STRONG SELL', 'STOP LOSS', 'TRAILING STOP']:
+                ax1.plot(date, trade.price, 'v', color='r', markersize=10)
 
         # Plot balances
         ax2.plot(dates, balance_history, label='USD Balance')
@@ -188,7 +200,7 @@ class Backtester:
                                                 balance -= (btc_to_buy * close_price + fee)
 
                                             btc_balance += btc_to_buy
-                                            trades.append(self.trader.create_trade_record(current_time, combined_signal, close_price, btc_to_buy, fee))
+                                            trades.append(self.create_trade_record(current_time, combined_signal, close_price, btc_to_buy, fee))
                                             last_trade_time = current_time
                                             last_trade_price = close_price
                                             highest_price_since_buy = close_price  # Reset highest price after buying
@@ -201,7 +213,7 @@ class Backtester:
                                         balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
                                         balance += balance_to_add
                                         btc_balance = 0
-                                        trades.append(self.trader.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
+                                        trades.append(self.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
                                         last_trade_time = current_time
                                         last_trade_price = close_price
                                         highest_price_since_buy = 0  # Reset after selling
@@ -216,7 +228,7 @@ class Backtester:
                             balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
                             balance += balance_to_add
                             btc_balance = 0
-                            trades.append(self.trader.create_trade_record(current_time, "TRAILING STOP", close_price, amount_to_sell, fee))
+                            trades.append(self.create_trade_record(current_time, "TRAILING STOP", close_price, amount_to_sell, fee))
                             last_trade_time = current_time
                             last_trade_price = close_price
                             highest_price_since_buy = 0  # Reset after selling
@@ -235,11 +247,11 @@ class Backtester:
             self.logger.info("Trades:")
 
             for trade in trades: # Show only the last three trades.
-                usd_value = trade['amount'] * trade['price']
-                self.logger.info(f"Date: {datetime.fromtimestamp(trade['date'], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}, "
-                            f"Action: {trade['action']}, Price: {trade['price']:.2f}, "
-                            f"Amount: {trade['amount']:.8f}, Fee: {trade['fee']:.2f}, "
-                            f"USD Value: {(usd_value - trade['fee']):.2f}")
+                usd_value = trade.amount * trade.price
+                self.logger.info(f"Date: {datetime.fromtimestamp(trade.date, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}, "
+                            f"Action: {trade.action}, Price: {trade.price:.2f}, "
+                            f"Amount: {trade.amount:.8f}, Fee: {trade.fee:.2f}, "
+                            f"USD Value: {(usd_value - trade.fee):.2f}")
                             
             # Plot the trades and balance history
             # self.plot_trades(candles, trades, balance_history, btc_balance_history)
@@ -259,7 +271,7 @@ class Backtester:
             'last_trade_price': last_trade_price,
             'last_buy_price': last_buy_price,
             'highest_price_since_buy': highest_price_since_buy,
-            'trades': trades
+            'trades': [trade.__dict__ for trade in trades]
         }
         with open('live_trading_state.json', 'w') as f:
             json.dump(state, f)
@@ -288,7 +300,7 @@ class Backtester:
                 last_trade_price = saved_state['last_trade_price']
                 last_buy_price = saved_state['last_buy_price']
                 highest_price_since_buy = saved_state['highest_price_since_buy']
-                trades = saved_state['trades']
+                trades = [TradeRecord(**trade) for trade in saved_state['trades']]
                 self.logger.info("Resuming from saved state")
             else:
                 balance = initial_balance
@@ -375,7 +387,7 @@ class Backtester:
                                             
                                             balance -= (btc_to_buy * close_price + fee)
                                             btc_balance += btc_to_buy
-                                            trades.append(self.trader.create_trade_record(current_time, combined_signal, close_price, btc_to_buy, fee))
+                                            trades.append(self.create_trade_record(current_time, combined_signal, close_price, btc_to_buy, fee))
                                             last_trade_time = current_time
                                             last_trade_price = close_price
                                             last_buy_price = close_price
@@ -388,7 +400,7 @@ class Backtester:
                                         balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
                                         balance += balance_to_add
                                         btc_balance = 0
-                                        trades.append(self.trader.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
+                                        trades.append(self.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
                                         last_trade_time = current_time
                                         last_trade_price = close_price
                                         highest_price_since_buy = 0
@@ -403,7 +415,7 @@ class Backtester:
                             balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
                             balance += balance_to_add
                             btc_balance = 0
-                            trades.append(self.trader.create_trade_record(current_time, "TRAILING STOP", close_price, amount_to_sell, fee))
+                            trades.append(self.create_trade_record(current_time, "TRAILING STOP", close_price, amount_to_sell, fee))
                             last_trade_time = current_time
                             last_trade_price = close_price
                             highest_price_since_buy = 0
@@ -419,11 +431,11 @@ class Backtester:
                 self.logger.info(f"Current balance: {balance:.2f}, BTC balance: {btc_balance:.8f}")
                 self.logger.info(f"Last trade: {trades[-1] if trades else 'No trades yet'}")
                 for trade in trades:
-                    usd_value = trade['amount'] * trade['price']
-                    self.logger.info(f"Date: {datetime.fromtimestamp(trade['date'], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}, "
-                                f"Action: {trade['action']}, Price: {trade['price']:.2f}, "
-                                f"Amount: {trade['amount']:.8f}, Fee: {trade['fee']:.2f}, "
-                                f"USD Value: {(usd_value - trade['fee']):.2f}")
+                    usd_value = trade.amount * trade.price
+                    self.logger.info(f"Date: {datetime.fromtimestamp(trade.date, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}, "
+                                f"Action: {trade.action}, Price: {trade.price:.2f}, "
+                                f"Amount: {trade.amount:.8f}, Fee: {trade.fee:.2f}, "
+                                f"USD Value: {(usd_value - trade.fee):.2f}")
                 # Sleep for a while before the next iteration (e.g., 60 seconds)
                 time.sleep(60)
 
