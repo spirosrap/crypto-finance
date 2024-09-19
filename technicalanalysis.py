@@ -115,13 +115,13 @@ class TechnicalAnalysis:
         if market_conditions is None:
             market_conditions = self.analyze_market_conditions(candles)
         
-        # Calculate volatility
+        # Calculate volatility using standard deviation of returns
         prices = [float(candle['close']) for candle in candles[-20:]]  # Use last 20 candles
         returns = np.diff(np.log(prices))
-        volatility = np.std(returns) * np.sqrt(365)  # Annualized volatility
+        volatility_std = np.std(returns) * np.sqrt(365)  # Annualized volatility
 
         # Generate individual signals
-        rsi_signal = self.generate_signal(rsi, volatility)
+        rsi_signal = self.generate_signal(rsi, volatility_std)
         macd_signal = self.generate_macd_signal(macd, signal, histogram)
         bollinger_signal = self.generate_bollinger_bands_signal(candles)
         ma_crossover_signal = self.compute_moving_average_crossover(candles)
@@ -164,16 +164,16 @@ class TechnicalAnalysis:
         # ATR for volatility
         atr = self.compute_atr(candles)
         avg_price = np.mean([float(candle['close']) for candle in candles[-14:]])
-        volatility = atr / avg_price
-        self.update_volatility_history(volatility)
+        volatility_atr = atr / avg_price
+        self.update_volatility_history(volatility_atr)
 
         # Get dynamic volatility thresholds
         high_volatility, very_high_volatility = self.get_dynamic_volatility_threshold()
 
         # Adjust signal strength based on volatility
-        if volatility > very_high_volatility:
+        if volatility_atr > very_high_volatility:
             signal_strength *= 0.5  # Significantly reduce signal strength in very high volatility
-        elif volatility > high_volatility:
+        elif volatility_atr > high_volatility:
             signal_strength *= 0.75  # Moderately reduce signal strength in high volatility
 
         # Add trend-following component
