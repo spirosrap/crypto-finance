@@ -29,6 +29,7 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 pip install coinbase-advanced-py
 pip install yfinance
 pip install newsapi-python
+pip install schedule
 ```
 
 ## Installation
