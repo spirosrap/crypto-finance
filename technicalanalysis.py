@@ -127,7 +127,7 @@ class TechnicalAnalysis:
         ma_crossover_signal = self.compute_moving_average_crossover(candles)
         stochastic_k, stochastic_d = self.compute_stochastic_oscillator(candles)
         
-        trend = self.identify_trend(None, candles)
+        price_trend = self.identify_trend(None, candles)
         volume_profile = self.compute_volume_profile(candles)
         
         # Initialize signal strength
@@ -152,7 +152,7 @@ class TechnicalAnalysis:
             signal_strength += 1  # Oversold condition
 
         # Trend
-        signal_strength += 1 if trend == "Uptrend" else -1 if trend == "Downtrend" else 0
+        signal_strength += 1 if price_trend == "Uptrend" else -1 if price_trend == "Downtrend" else 0
 
         # Volume Profile
         volume_resistance = max(volume_profile, key=lambda x: x[1])[0]
@@ -179,7 +179,7 @@ class TechnicalAnalysis:
         # Add trend-following component
         short_ma = self.calculate_sma(candles, 10)
         long_ma = self.calculate_sma(candles, 50)
-        trend = "Uptrend" if short_ma > long_ma else "Downtrend"
+        ma_trend = "Uptrend" if short_ma > long_ma else "Downtrend"
 
         # Add dynamic support/resistance
         ma_200 = self.calculate_sma(candles, 200)
@@ -201,7 +201,7 @@ class TechnicalAnalysis:
             signal_strength -= 1
         
         # Adjust signal strength based on new components
-        signal_strength += 1 if trend == "Uptrend" else -1
+        signal_strength += 1 if ma_trend == "Uptrend" else -1
 
         if current_price < ma_200:
             signal_strength += 1  # Price below 200 MA might be a good buying opportunity
