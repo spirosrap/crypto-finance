@@ -141,9 +141,7 @@ class CryptoTrader:
     def create_trade_record(self, time: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date=time, action=action, price=price, amount=amount, fee=fee)
 
-
-def main():
-    # Add command-line argument parsing
+def parse_arguments():
     parser = argparse.ArgumentParser(description="Crypto Trading Bot")
     parser.add_argument("--start_date", help="Start date for backtesting (YYYY-MM-DD)")
     parser.add_argument("--end_date", help="End date for backtesting (YYYY-MM-DD)")
@@ -153,39 +151,43 @@ def main():
     parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")
     parser.add_argument("--live", action="store_true", help="Run live trading simulation")
     parser.add_argument("--product_id", default="BTC-USD", help="Product ID for trading (default: BTC-USD)")
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    api_key = API_KEY
-    api_secret = API_SECRET
-    
-    trader = CryptoTrader(api_key, api_secret)
-
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=7)
-    candles = trader.get_historical_data(args.product_id, start_date, end_date)
-
+def display_portfolio_info(trader, product_id):
     fiat_usd, btc = trader.get_portfolio_info()
     logger.info(f"Portfolio: ${fiat_usd:.2f}, {btc} BTC")
 
     prices = trader.get_btc_prices()
     for currency, price in prices.items():
         logger.info(f"{currency}: Bid: {price['bid']:.2f}, Ask: {price['ask']:.2f}")
-    rsi = trader.compute_rsi(args.product_id, candles, period=RSI_PERIOD)
 
-    # Calculate volatility
-    prices = [float(candle['close']) for candle in candles[-20:]]  # Use last 20 candles
+def display_technical_indicators(trader, product_id, candles):
+    rsi = trader.compute_rsi(product_id, candles, period=RSI_PERIOD)
+    prices = [float(candle['close']) for candle in candles[-20:]]
     returns = np.diff(np.log(prices))
-    volatility = np.std(returns) * np.sqrt(252)  # Annualized volatility
+    volatility = np.std(returns) * np.sqrt(252)
 
     signal = trader.generate_signal(rsi, volatility)
-    macd, signal, histogram = trader.compute_macd(args.product_id, candles)
-    logger.info(f"Current MACD for {args.product_id}: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}, RSI: {rsi:.2f}")
-    
-    # Calculate the value of 0.00187597 BTC in EUR including fees
+    macd, signal, histogram = trader.compute_macd(product_id, candles)
+    logger.info(f"Current MACD for {product_id}: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}, RSI: {rsi:.2f}")
+
+    combined_signal = trader.generate_combined_signal(rsi, macd, signal, histogram, candles)
+    logger.info(f"Combined signal for {product_id}: {combined_signal}")
+
+    current_market_conditions = trader.technical_analysis.analyze_market_conditions(candles)
+    logger.info(f"Current market conditions: {current_market_conditions}")
+
+    trend = trader.identify_trend(product_id, candles, window=TREND_WINDOW) 
+    logger.info(f"Current 1h (12 days) trend for {product_id}: {trend}")
+
+def display_sentiment_analysis(trader, product_id):
+    bitcoin_sentiment = trader.analyze_sentiment("Bitcoin")
+    logger.info(f"Current sentiment for {product_id}: {bitcoin_sentiment}")
+
+def calculate_btc_eur_value(trader):
     btc_amount = 0.00187597
     btc_eur_price = trader.get_btc_prices().get('BTC-EUR', {}).get('bid', 0)
     
-    # Get the actual fee percentage based on transaction summary
     transaction_summary = trader.client.get_transaction_summary()
     fee_tier = transaction_summary.get('fee_tier', {})
     fee_percentage = fee_tier.get('taker_fee_rate', DEFAULT_FEE_RATE)
@@ -195,31 +197,48 @@ def main():
     eur_value_after_fees = eur_value_before_fees - fees
     
     logger.info(f"0.00187597 BTC is worth approximately {eur_value_after_fees:.2f} EUR (including {float(fee_percentage)*100}% fees), Fees: {fees:.2f} EUR")
-    # logger.info(f"Value before fees: {eur_value_before_fees:.2f} EUR")
+
+def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent):
+    if args.bearmarket:
+        start_date = "2021-11-01 00:00:00"
+        end_date = "2022-11-01 23:59:59"
+    elif args.bullmarket:
+        start_date = "2020-10-01 00:00:00"
+        end_date = "2021-04-01 23:59:59"
+    elif args.ytd:
+        start_date = "2024-01-01 00:00:00"
+        end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    elif args.start_date:
+        start_date = f"{args.start_date} 00:00:00"
+        end_date = f"{args.end_date} 23:59:59" if args.end_date else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d 00:00:00")
+        end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    final_value, trades = trader.run_backtest(args.product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
     
-    combined_signal = trader.generate_combined_signal(rsi, macd, signal, histogram, candles)
-    logger.info(f"Combined signal for {args.product_id}: {combined_signal}")
-
-    # Add this block to print market conditions for the most current signal
-    current_market_conditions = trader.technical_analysis.analyze_market_conditions(candles)
-    logger.info(f"Current market conditions: {current_market_conditions}")
-
-    # Uncomment to place an order
-    # if signal == "BUY":
-    #     trader.place_order("BTC-USD", "BUY", 0.001)
-    # elif signal == "SELL":
-    #     trader.place_order("BTC-USD", "SELL", 0.001)
-
-    # trader.monitor_price_and_place_bracket_order("BTC-EUR", 60000, btc_amount)
+    logger.info(f"Backtesting results: Initial balance: ${initial_balance}, Final portfolio value: ${final_value:.2f}")
+    logger.info(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")
+    logger.info(f"Number of trades: {len(trades)}")
+    logger.debug("Trades executed during backtesting:")
     
-    trend = trader.identify_trend(args.product_id, candles, window=TREND_WINDOW) 
-    logger.info(f"Current 1h (12 days) trend for {args.product_id}: {trend}")
+    sorted_trades = sorted(trades, key=lambda x: x.date)
+    for trade in sorted_trades:
+        human_readable_date = datetime.fromtimestamp(int(trade.date), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+        logger.debug(f"Date: {human_readable_date}, Action: {trade.action}, Price: {trade.price}, Amount: {trade.amount}")
 
-    bitcoin_sentiment = trader.analyze_sentiment("Bitcoin")
-    logger.info(f"Current sentiment for {args.product_id}: {bitcoin_sentiment}")
+def main():
+    args = parse_arguments()
+    trader = CryptoTrader(API_KEY, API_SECRET)
 
-    # ml_signal = trader.generate_ml_signal("BTC-USD")
-    # logger.info(f"ML Signal for BTC-USD: {ml_signal}")
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=7)
+    candles = trader.get_historical_data(args.product_id, start_date, end_date)
+
+    display_portfolio_info(trader, args.product_id)
+    display_technical_indicators(trader, args.product_id, candles)
+    calculate_btc_eur_value(trader)
+    display_sentiment_analysis(trader, args.product_id)
 
     initial_balance = 10000  # USD
     risk_per_trade = 0.02  # 2% risk per trade
@@ -230,48 +249,7 @@ def main():
         trader.backtester.run_live(args.product_id, initial_balance, risk_per_trade, trailing_stop_percent)
     elif not args.skip_backtest:
         logger.info("Starting backtesting.")
-
-        # Use command-line arguments if provided, otherwise use default values
-        if args.bearmarket:
-            start_date = "2021-11-01 00:00:00"
-            end_date = "2022-11-01 23:59:59"
-        elif args.bullmarket:
-            start_date = "2020-10-01 00:00:00"
-            end_date = "2021-04-01 23:59:59"
-        elif args.ytd:
-            start_date = "2024-01-01 00:00:00"
-            end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        elif args.start_date:
-            start_date = f"{args.start_date} 00:00:00"
-            end_date = f"{args.end_date} 23:59:59" if args.end_date else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d 00:00:00")
-            end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        final_value, trades = trader.run_backtest(args.product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
-        
-        logger.info(f"Backtesting results: Initial balance: ${initial_balance}, Final portfolio value: ${final_value:.2f}")
-        logger.info(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")
-        logger.info(f"Number of trades: {len(trades)}")
-        logger.debug("Trades executed during backtesting:")
-        
-        sorted_trades = sorted(trades, key=lambda x: x.date)
-        for trade in sorted_trades:
-            human_readable_date = datetime.fromtimestamp(int(trade.date), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-            logger.debug(f"Date: {human_readable_date}, Action: {trade.action}, Price: {trade.price}, Amount: {trade.amount}")
-
-    # # You can further analyze the trades list for more insights
-    # # Test ML signal for the past 200 days
-    # logger.info("\nTesting ML signal for the past 200 days:")
-    # end_date = datetime.now()
-    # start_date = end_date - timedelta(days=200)
-    
-    # for i in range(200):
-    #     current_date = end_date - timedelta(days=i)
-    #     timestamp = int(current_date.timestamp())
-    #     ml_signal = trader.generate_ml_signal("BTC-USD", end=timestamp)
-    #     human_readable_date = current_date.strftime('%Y-%m-%d')
-    #     logger.info(f"Date: {human_readable_date}, ML Signal: {ml_signal}")
+        run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent)
 
 if __name__ == "__main__":
     main()
