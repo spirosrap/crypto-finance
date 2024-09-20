@@ -7,7 +7,7 @@ import pandas as pd
 import requests
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import nltk
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any, Optional
 from config import API_KEY, API_SECRET, NEWS_API_KEY
 #nltk.download('vader_lexicon')
 from sklearn.ensemble import RandomForestClassifier
@@ -47,7 +47,7 @@ class TradeRecord:
     fee: float
 
 class CryptoTrader:
-    def __init__(self, api_key, api_secret):
+    def __init__(self, api_key: str, api_secret: str):
         self.client = RESTClient(api_key=api_key, api_secret=api_secret)
         self.coinbase_service = CoinbaseService(api_key, api_secret)
         self.technical_analysis = TechnicalAnalysis(self.coinbase_service)
@@ -56,30 +56,30 @@ class CryptoTrader:
         self.backtester = Backtester(self)
         logger.info("CryptoTrader initialized with API key.")
 
-    def get_portfolio_info(self):
+    def get_portfolio_info(self) -> Tuple[float, float]:
         logger.debug("Fetching portfolio info.")
         return self.coinbase_service.get_portfolio_info()
 
-    def get_btc_prices(self):
+    def get_btc_prices(self) -> Dict[str, Dict[str, float]]:
         logger.debug("Fetching BTC prices.")
         return self.coinbase_service.get_btc_prices()
 
-    def get_hourly_data(self, product_id):
+    def get_hourly_data(self, product_id: str) -> List[Dict[str, str]]:
         return self.historical_data.get_hourly_data(product_id)
 
-    def get_6h_data(self, product_id):
+    def get_6h_data(self, product_id: str) -> List[Dict[str, str]]:
         return self.historical_data.get_6h_data(product_id)
 
-    def get_historical_data(self, product_id, start_date, end_date):
+    def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime) -> List[Dict[str, str]]:
         return self.historical_data.get_historical_data(product_id, start_date, end_date)
 
-    def compute_rsi(self, product_id, candles, period=RSI_PERIOD):
+    def compute_rsi(self, product_id: str, candles: List[Dict[str, str]], period: int = RSI_PERIOD) -> float:
         return self.technical_analysis.compute_rsi(product_id, candles, period)
 
-    def compute_macd(self, product_id, candles):
+    def compute_macd(self, product_id: str, candles: List[Dict[str, str]]) -> Tuple[float, float, float]:
         return self.technical_analysis.compute_macd(product_id, candles)
 
-    def exponential_moving_average(self, data, span):
+    def exponential_moving_average(self, data: List[float], span: int) -> List[float]:
         return self.technical_analysis.exponential_moving_average(data, span)
 
     def compute_bollinger_bands(self, candles: List[dict], window: int = BOLLINGER_WINDOW, num_std: float = BOLLINGER_NUM_STD) -> Tuple[float, float, float]:
@@ -94,7 +94,7 @@ class CryptoTrader:
     def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
         return self.technical_analysis.compute_macd_from_prices(prices)
 
-    def analyze_sentiment(self, keyword):
+    def analyze_sentiment(self, keyword: str) -> Dict[str, float]:
         return self.sentiment_analysis.analyze_sentiment(keyword)
 
     def compute_rsi_for_backtest(self, candles: List[dict], period: int = RSI_PERIOD) -> float:
@@ -114,28 +114,28 @@ class CryptoTrader:
         return self.generate_bollinger_bands_signal(prices)
 
 
-    def identify_trend(self, product_id, candles, window=TREND_WINDOW):
+    def identify_trend(self, product_id: str, candles: List[dict], window: int = TREND_WINDOW) -> str:
         return self.technical_analysis.identify_trend(product_id, candles, window)
 
-    def generate_combined_signal(self, rsi, macd, signal, histogram, candles, market_conditions=None):
+    def generate_combined_signal(self, rsi: float, macd: float, signal: float, histogram: float, candles: List[dict], market_conditions: Optional[Dict[str, str]] = None) -> str:
         return self.technical_analysis.generate_combined_signal(rsi, macd, signal, histogram, candles, market_conditions) 
 
-    def generate_signal(self, rsi, volatility):
+    def generate_signal(self, rsi: float, volatility: float) -> str:
         return self.technical_analysis.generate_signal(rsi, volatility)
 
-    def place_order(self, product_id, side, size):
+    def place_order(self, product_id: str, side: str, size: float) -> Dict[str, Any]:
         return self.coinbase_service.place_order(product_id, side, size)
         
-    def place_bracket_order(self, product_id, size, limit_price, stop_trigger_price):
+    def place_bracket_order(self, product_id: str, size: float, limit_price: float, stop_trigger_price: float) -> Dict[str, Any]:
         return self.coinbase_service.place_bracket_order(product_id, size, limit_price, stop_trigger_price)
 
-    def monitor_price_and_place_bracket_order(self, product_id, target_price, size):
+    def monitor_price_and_place_bracket_order(self, product_id: str, target_price: float, size: float) -> None:
         return self.coinbase_service.monitor_price_and_place_bracket_order(product_id, target_price, size)
 
     def calculate_trade_amount_and_fee(self, balance: float, price: float, is_buy: bool) -> Tuple[float, float]:
         return self.coinbase_service.calculate_trade_amount_and_fee(balance, price, is_buy)
 
-    def run_backtest(self, product_id: str, start_date, end_date, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
+    def run_backtest(self, product_id: str, start_date: str, end_date: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float) -> Tuple[float, List[TradeRecord]]:
         return self.backtester.backtest(product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
 
     def create_trade_record(self, time: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:

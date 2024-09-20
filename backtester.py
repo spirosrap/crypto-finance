@@ -1,15 +1,15 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 import json
 import logging
 from tqdm import tqdm
 import numpy as np
-from datetime import timedelta
 import time
 import requests
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from dataclasses import dataclass
+from typing import List, Tuple, Dict, Any, Optional
 
 @dataclass
 class TradeRecord:
@@ -20,20 +20,20 @@ class TradeRecord:
     fee: float
 
 class Backtester:
-    def __init__(self, trader):
+    def __init__(self, trader: Any):
         self.trader = trader
         self.logger = logging.getLogger(__name__)
-        self.cooldown_period = 24 * 60 * 60 * 1  # 1 day in seconds
-        self.max_trades_per_day = 1
-        self.min_price_change = 0.08  # 8% minimum price change
-        self.drawdown_threshold = 0.1  # 10% drawdown threshold
-        self.strong_buy_percentage = 0.8  # 80% of balance for strong buy
-        self.buy_percentage = 0.4  # 40% of balance for regular buy
+        self.cooldown_period: int = 24 * 60 * 60 * 1  # 1 day in seconds
+        self.max_trades_per_day: int = 1
+        self.min_price_change: float = 0.08  # 8% minimum price change
+        self.drawdown_threshold: float = 0.1  # 10% drawdown threshold
+        self.strong_buy_percentage: float = 0.8  # 80% of balance for strong buy
+        self.buy_percentage: float = 0.4  # 40% of balance for regular buy
 
     def create_trade_record(self, date: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date, action, price, amount, fee)
 
-    def plot_trades(self, candles, trades, balance_history, btc_balance_history):
+    def plot_trades(self, candles: List[Dict[str, Any]], trades: List[TradeRecord], balance_history: List[float], btc_balance_history: List[float]) -> None:
         # Convert timestamps to datetime
         dates = [datetime.fromtimestamp(float(candle['start']), tz=timezone.utc) for candle in candles]
         prices = [float(candle['close']) for candle in candles]
@@ -69,7 +69,7 @@ class Backtester:
         plt.savefig('trades_and_balance.png')
         plt.close()
 
-    def backtest(self, product_id: str, start_date, end_date, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
+    def backtest(self, product_id: str, start_date: datetime, end_date: datetime, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float) -> Tuple[float, List[TradeRecord]]:
         try:
             # Convert start_date and end_date to datetime objects if they're strings
             if isinstance(start_date, str):
@@ -90,14 +90,7 @@ class Backtester:
             # Check if we need the most recent data
             need_recent_data = end_date.date() == datetime.now().date()
 
-            # if os.path.exists(filepath):
-            #     # Load existing historical data from file
-            #     self.logger.info(f"Loading historical data from {filepath}...")
-            #     with open(filepath, 'r') as f:
-            #         candles = json.load(f)
-            #     self.logger.info(f"Loaded {len(candles)} candles from file.")
-            # else:
-                # If file doesn't exist, fetch all historical data
+            # If file doesn't exist, fetch all historical data
             self.logger.info(f"Fetching all historical data from {start_date} to {end_date}...")
             candles = self.trader.get_historical_data(product_id, start_date, end_date)
             
@@ -112,19 +105,19 @@ class Backtester:
 
             balance = initial_balance
             btc_balance = 0
-            trades = []
-            balance_history = []
-            btc_balance_history = []
-            last_trade_time = None
-            last_trade_price = None
+            trades: List[TradeRecord] = []
+            balance_history: List[float] = []
+            btc_balance_history: List[float] = []
+            last_trade_time: Optional[int] = None
+            last_trade_price: Optional[float] = None
             
             # Define a minimum number of candles required for analysis
             min_candles = 50  # Adjust this value based on your longest indicator period
 
             # Define constraints
             trades_today = 0
-            last_trade_date = None
-            last_buy_price = None
+            last_trade_date: Optional[datetime.date] = None
+            last_buy_price: Optional[float] = None
 
             # Initialize tqdm progress bar for the entire loop
             with tqdm(total=len(candles), desc="Processing candles") as pbar:
@@ -262,8 +255,8 @@ class Backtester:
             self.logger.error(f"An error occurred during backtesting: {e}", exc_info=True)
             return initial_balance, []
 
-    def save_state(self, product_id, balance, btc_balance, last_trade_time, last_trade_price, last_buy_price, highest_price_since_buy, trades):
-        state = {
+    def save_state(self, product_id: str, balance: float, btc_balance: float, last_trade_time: Optional[int], last_trade_price: Optional[float], last_buy_price: Optional[float], highest_price_since_buy: float, trades: List[TradeRecord]) -> None:
+        state: Dict[str, Any] = {
             'product_id': product_id,
             'balance': balance,
             'btc_balance': btc_balance,
@@ -277,7 +270,7 @@ class Backtester:
             json.dump(state, f)
         self.logger.info("State saved to disk")
 
-    def load_state(self):
+    def load_state(self) -> Dict[str, Any]:
         if not os.path.exists('live_trading_state.json'):
             # Create the file if it doesn't exist
             with open('live_trading_state.json', 'w') as f:
@@ -285,11 +278,11 @@ class Backtester:
             self.logger.info("State file created as it did not exist.")
         
         with open('live_trading_state.json', 'r') as f:
-            state = json.load(f)
+            state: Dict[str, Any] = json.load(f)
         self.logger.info("State loaded from disk")
         return state
 
-    def run_live(self, product_id: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float):
+    def run_live(self, product_id: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float) -> None:
         try:
             # Try to load saved state
             saved_state = self.load_state()
@@ -334,7 +327,7 @@ class Backtester:
                 # Initialize variables for trading logic
                 min_candles = 50  # Adjust this value based on your longest indicator period
                 trades_today = 0
-                last_trade_date = None
+                last_trade_date: Optional[datetime.date] = None
 
                 # Process the most recent candles
                 for i, candle in enumerate(candles):

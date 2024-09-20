@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Optional
 from coinbaseservice import CoinbaseService
 import time
-import yfinance as yf  # Add this import
+import yfinance as yf
 
 class TechnicalAnalysis:
     def __init__(self, coinbase_service: CoinbaseService):
@@ -42,14 +42,14 @@ class TechnicalAnalysis:
 
         return rsi[-1]
 
-    def compute_rsi(self, product_id, candles, period=14):
+    def compute_rsi(self, product_id: str, candles: List[Dict], period: int = 14) -> float:
         prices = [float(candle['close']) for candle in candles]
         return self.calculate_rsi(prices, period)
 
     def compute_rsi_from_prices(self, prices: List[float], period: int = 14) -> float:
         return self.calculate_rsi(prices, period)
 
-    def identify_trend(self, product_id, candles, window=20):
+    def identify_trend(self, product_id: str, candles: List[Dict], window: int = 20) -> str:
         prices = [float(candle['close']) for candle in candles]
         if len(prices) < window:
             return "Not enough data"
@@ -70,7 +70,7 @@ class TechnicalAnalysis:
         else:
             return "Sideways"
 
-    def compute_macd(self, product_id, candles):
+    def compute_macd(self, product_id: str, candles: List[Dict]) -> Tuple[float, float, float]:
         prices = [float(candle['close']) for candle in candles]
         return self.compute_macd_from_prices(prices)
 
@@ -82,10 +82,10 @@ class TechnicalAnalysis:
         histogram = macd - signal
         return macd[-1], signal[-1], histogram[-1]
 
-    def exponential_moving_average(self, data, span):
+    def exponential_moving_average(self, data: List[float], span: int) -> np.ndarray:
         return pd.Series(data).ewm(span=span, adjust=False).mean().values
 
-    def compute_bollinger_bands(self, candles: List[dict], window: int = 20, num_std: float = 2) -> Tuple[float, float, float]:
+    def compute_bollinger_bands(self, candles: List[Dict], window: int = 20, num_std: float = 2) -> Tuple[float, float, float]:
         prices = [float(candle['close']) for candle in candles]
         prices_series = pd.Series(prices)
         
@@ -97,7 +97,7 @@ class TechnicalAnalysis:
         
         return upper_band.iloc[-1], rolling_mean.iloc[-1], lower_band.iloc[-1]
 
-    def generate_bollinger_bands_signal(self, candles: List[dict]) -> str:
+    def generate_bollinger_bands_signal(self, candles: List[Dict]) -> str:
         upper_band, middle_band, lower_band = self.compute_bollinger_bands(candles)
         current_price = float(candles[-1]['close'])
         
@@ -108,7 +108,8 @@ class TechnicalAnalysis:
         else:
             return "HOLD"
 
-    def generate_combined_signal(self, rsi, macd, signal, histogram, candles, market_conditions=None):
+    def generate_combined_signal(self, rsi: float, macd: float, signal: float, histogram: float, 
+                                 candles: List[Dict], market_conditions: Optional[str] = None) -> str:
         # Calculate current price once
         current_price = float(candles[-1]['close'])
 
@@ -246,7 +247,7 @@ class TechnicalAnalysis:
 
         return final_signal
 
-    def generate_macd_signal(self, macd, signal, histogram):
+    def generate_macd_signal(self, macd: float, signal: float, histogram: float) -> str:
         if macd > signal or histogram >= 0:
             return "BUY"
         elif macd < signal or histogram <= 0:
@@ -254,7 +255,7 @@ class TechnicalAnalysis:
         else:
             return "HOLD"
 
-    def compute_volume_profile(self, candles: List[dict], num_bins: int = 10) -> List[Tuple[float, float]]:
+    def compute_volume_profile(self, candles: List[Dict], num_bins: int = 10) -> List[Tuple[float, float]]:
         prices = [float(candle['close']) for candle in candles]
         volumes = [float(candle['volume']) for candle in candles]
         
@@ -268,7 +269,7 @@ class TechnicalAnalysis:
         
         return list(zip(bin_centers, volume_profile))
 
-    def generate_signal(self, rsi, volatility):
+    def generate_signal(self, rsi: float, volatility: float) -> str:
         # Adjust RSI levels based on volatility
         if volatility > self.volatility_threshold:
             adjusted_overbought = self.rsi_overbought + 10  # More room for upside in volatile markets
@@ -285,7 +286,7 @@ class TechnicalAnalysis:
         return position_size
 
 
-    def compute_stochastic_oscillator(self, candles: List[dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
+    def compute_stochastic_oscillator(self, candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
         prices = pd.DataFrame({
             'high': [float(candle['high']) for candle in candles],
             'low': [float(candle['low']) for candle in candles],
@@ -300,14 +301,14 @@ class TechnicalAnalysis:
         
         return k.iloc[-1], d.iloc[-1]
 
-    def compute_moving_average_crossover(self, candles: List[dict], short_period: int = 50, long_period: int = 200) -> str:
+    def compute_moving_average_crossover(self, candles: List[Dict], short_period: int = 50, long_period: int = 200) -> str:
         prices = [float(candle['close']) for candle in candles]
         short_ma = pd.Series(prices).rolling(window=short_period).mean().iloc[-1]
         long_ma = pd.Series(prices).rolling(window=long_period).mean().iloc[-1]
         
         return "BUY" if short_ma > long_ma else "SELL" if short_ma < long_ma else "HOLD"
 
-    def compute_atr(self, candles: List[dict], period: int = 14) -> float:
+    def compute_atr(self, candles: List[Dict], period: int = 14) -> float:
         if len(candles) < period + 1:
             return 0  # or some other default value
 
@@ -340,11 +341,11 @@ class TechnicalAnalysis:
         
         return high_threshold, very_high_threshold
 
-    def calculate_sma(self, candles, period):
+    def calculate_sma(self, candles: List[Dict], period: int) -> float:
         prices = [float(candle['close']) for candle in candles[-period:]]
         return sum(prices) / period
 
-    def analyze_volume(self, candles):
+    def analyze_volume(self, candles: List[Dict]) -> str:
         recent_volumes = [float(candle['volume']) for candle in candles[-10:]]
         avg_volume = sum(recent_volumes) / len(recent_volumes)
         current_volume = float(candles[-1]['volume'])
@@ -356,7 +357,7 @@ class TechnicalAnalysis:
         else:
             return "Normal"
 
-    def detect_pullback(self, candles):
+    def detect_pullback(self, candles: List[Dict]) -> str:
         recent_prices = [float(candle['close']) for candle in candles[-5:]]
         if recent_prices[-1] < min(recent_prices[:-1]) and self.calculate_sma(candles, 20) > self.calculate_sma(candles, 50):
             return "Buy"
@@ -365,7 +366,7 @@ class TechnicalAnalysis:
         else:
             return "Hold"
 
-    def analyze_market_conditions(self, candles: List[dict]) -> str:
+    def analyze_market_conditions(self, candles: List[Dict]) -> str:
         # Convert 50 days to hours
         long_term_period = 200 * 24
 
@@ -420,7 +421,7 @@ class TechnicalAnalysis:
         else:
             return "Neutral"
 
-    def calculate_average_bull_market_volume_change(self, candles: List[dict]) -> float:
+    def calculate_average_bull_market_volume_change(self, candles: List[Dict]) -> float:
         prices = [float(candle['close']) for candle in candles]
         volumes = [float(candle['volume']) for candle in candles]
         
@@ -441,7 +442,7 @@ class TechnicalAnalysis:
         # Return the average volume change during bull markets
         return np.mean(volume_changes) if volume_changes else 0.1  # Default to 10% if no bull markets found
 
-    def determine_market_regime(self, candles: List[dict]) -> str:
+    def determine_market_regime(self, candles: List[Dict]) -> str:
         # Calculate historical volatility using a 20-day rolling window
         prices = [float(candle['close']) for candle in candles]
         returns = np.log(np.array(prices[1:]) / np.array(prices[:-1]))
