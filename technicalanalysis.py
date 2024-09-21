@@ -5,7 +5,7 @@ from coinbaseservice import CoinbaseService
 import time
 import yfinance as yf
 from hmmlearn.hmm import GaussianHMM
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import MinMaxScaler
 
 class TechnicalAnalysis:
     def __init__(self, coinbase_service: CoinbaseService):
@@ -17,40 +17,71 @@ class TechnicalAnalysis:
         self.volatility_threshold = 0.03  # 3% daily volatility threshold
         self.hmm_model = None  # Initialize HMM model attribute
         self.scaler = None     # Scaler for feature normalization
+        self.n_components = 4  # Increase the number of hidden states
 
-    def train_hmm(self, candles: List[Dict], n_components: int = 3):
+    def train_hmm(self, candles: List[Dict], n_components: int = 4):
         prices = np.array([float(candle['close']) for candle in candles])
         volumes = np.array([float(candle['volume']) for candle in candles])
 
-        # Calculate log returns
+        # Calculate log returns and percentage volume changes
         log_returns = np.diff(np.log(prices))
-        volumes = volumes[1:]
+        volume_changes = np.diff(volumes) / volumes[:-1]
 
         # Prepare features
-        X = np.column_stack([log_returns, volumes])
+        X = np.column_stack([log_returns, volume_changes])
 
         # Check for NaNs or infinite values
         if np.any(np.isnan(X)) or np.any(np.isinf(X)):
             raise ValueError("NaNs or infinite values detected in the data.")
 
         # Scale features
-        scaler = StandardScaler()
+        scaler = MinMaxScaler()
         X_scaled = scaler.fit_transform(X)
 
         # Train HMM
+        np.random.seed(42)
         self.hmm_model = GaussianHMM(
             n_components=n_components,
-            covariance_type="diag",
-            n_iter=2000,
-            tol=0.001,
-            init_params="stmc",
+            covariance_type="tied",  # Try different covariance types
+            n_iter=2000,  # Increase number of iterations
+            random_state=42,
+            tol=0.001,  # Adjust tolerance
+            init_params="random",  # Try different initialization
             params="stmc"
         )
-        self.hmm_model.fit(X_scaled)
-        # print("HMM model trained with {} hidden states.".format(n_components))
+        
+        # Try fitting with different numbers of components
+        best_score = float('-inf')
+        best_model = None
+        for n in range(2, 6):  # Try 2 to 5 components
+            model = GaussianHMM(
+                n_components=n,
+                covariance_type="tied",
+                n_iter=2000,
+                random_state=42,
+                tol=0.001,
+                init_params="random",
+                params="stmc"
+            )
+            try:
+                model.fit(X_scaled)
+                score = model.score(X_scaled)
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+            except:
+                print(f"Failed to converge with {n} components")
+        
+        if best_model is None:
+            raise ValueError("Failed to train HMM with any number of components")
+        
+        self.hmm_model = best_model
+        self.n_components = best_model.n_components
 
         # Save scaler for future use
         self.scaler = scaler
+
+        # print(f"HMM trained successfully with {self.n_components} components")
 
     def predict_hmm_state(self, candles: List[Dict]) -> int:
         if self.hmm_model is None or self.scaler is None:
@@ -60,9 +91,9 @@ class TechnicalAnalysis:
         volumes = np.array([float(candle['volume']) for candle in candles])
 
         log_returns = np.diff(np.log(prices))
-        volumes = volumes[1:]
+        volume_changes = np.diff(volumes) / volumes[:-1]
 
-        X = np.column_stack([log_returns, volumes])
+        X = np.column_stack([log_returns, volume_changes])
 
         # Check for NaNs or infinite values
         if np.any(np.isnan(X)) or np.any(np.isinf(X)):
@@ -72,18 +103,19 @@ class TechnicalAnalysis:
         X_scaled = self.scaler.transform(X)
 
         hidden_states = self.hmm_model.predict(X_scaled)
-        # Return the last hidden state
         return hidden_states[-1]
-        
+
     def interpret_hidden_states(self):
         if self.hmm_model is None:
             raise ValueError("HMM model is not trained. Please call train_hmm() first.")
 
-        print("Means and variances of hidden states:")
-        for i in range(self.hmm_model.n_components):
+        print("Means and covariances of hidden states:")
+        for i in range(self.n_components):
             state_mean = self.hmm_model.means_[i]
-            state_var = np.diag(self.hmm_model.covars_[i])
-            print("Hidden State {}: Mean = {}, Variance = {}".format(i, state_mean, state_var))   
+            state_cov = self.hmm_model.covars_[i]
+            print(f"Hidden State {i}:")
+            print(f"  Mean = {state_mean}")
+            print(f"  Covariance = \n{state_cov}\n")
 
     def calculate_rsi(self, prices: List[float], period: int) -> float:
         deltas = np.diff(prices)
@@ -289,20 +321,20 @@ class TechnicalAnalysis:
         try:
             hmm_state = ta.predict_hmm_state(candles)
         except ValueError as e:
-            print(e)
-            hmm_state = None  # Default if HMM is not trained
+            print(f"HMM prediction error: {e}")
+            hmm_state = None
 
         # Map hidden states to market regimes
         hidden_state_signal_map = {
-            0: {"name": "Bullish", "adjustment": 2},
-            1: {"name": "Bearish", "adjustment": -2},
-            2: {"name": "Volatile Up", "adjustment": 1},
-            # Add more states if necessary
+            0: {"name": "Bearish", "adjustment": -2},
+            1: {"name": "Neutral", "adjustment": 0},
+            2: {"name": "Bullish", "adjustment": 2},
+            3: {"name": "Volatile", "adjustment": 1},
         }
 
         if hmm_state is not None:
-            state_info = hidden_state_signal_map.get(hmm_state, {"name": "Neutral", "adjustment": 0})
-            # print("HMM State: {}, Regime: {}".format(hmm_state, state_info["name"]))
+            state_info = hidden_state_signal_map.get(hmm_state, {"name": "Unknown", "adjustment": 0})
+            # print(f"HMM State: {hmm_state}, Regime: {state_info['name']}")
             signal_strength += state_info["adjustment"]
 
 
