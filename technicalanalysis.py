@@ -16,10 +16,15 @@ class TechnicalAnalysis:
         self.rsi_oversold = 30
         self.volatility_threshold = 0.03  # 3% daily volatility threshold
         self.hmm_model = None  # Initialize HMM model attribute
-        self.scaler = None     # Scaler for feature normalization
-        self.n_components = 4  # Increase the number of hidden states
+        self.scaler = MinMaxScaler()  # Scaler for feature normalization
+        self.last_train_time = 0
+        self.train_frequency = 3600  # Train once per hour
 
-    def train_hmm(self, candles: List[Dict], n_components: int = 4):
+    def train_hmm(self, candles: List[Dict]):
+        current_time = time.time()
+        if self.hmm_model is not None and current_time - self.last_train_time < self.train_frequency:
+            return  # Use existing model if it's recent enough
+
         prices = np.array([float(candle['close']) for candle in candles])
         volumes = np.array([float(candle['volume']) for candle in candles])
 
@@ -35,58 +40,25 @@ class TechnicalAnalysis:
             raise ValueError("NaNs or infinite values detected in the data.")
 
         # Scale features
-        scaler = MinMaxScaler()
-        X_scaled = scaler.fit_transform(X)
+        X_scaled = self.scaler.fit_transform(X)
 
-        # Train HMM
-        np.random.seed(42)
+        # Train HMM with fixed number of components
         self.hmm_model = GaussianHMM(
-            n_components=n_components,
-            covariance_type="tied",  # Try different covariance types
-            n_iter=2000,  # Increase number of iterations
+            n_components=3,  # Fixed number of components
+            covariance_type="diag",  # Faster covariance type
+            n_iter=1000,  # Reduced number of iterations
             random_state=42,
-            tol=0.001,  # Adjust tolerance
-            init_params="random",  # Try different initialization
-            params="stmc"
+            tol=0.01,  # Increased tolerance for faster convergence
+            init_params="kmeans",
         )
         
-        # Try fitting with different numbers of components
-        best_score = float('-inf')
-        best_model = None
-        for n in range(2, 6):  # Try 2 to 5 components
-            model = GaussianHMM(
-                n_components=n,
-                covariance_type="tied",
-                n_iter=2000,
-                random_state=42,
-                tol=0.001,
-                init_params="random",
-                params="stmc"
-            )
-            try:
-                model.fit(X_scaled)
-                score = model.score(X_scaled)
-                if score > best_score:
-                    best_score = score
-                    best_model = model
-            except:
-                print(f"Failed to converge with {n} components")
-        
-        if best_model is None:
-            raise ValueError("Failed to train HMM with any number of components")
-        
-        self.hmm_model = best_model
-        self.n_components = best_model.n_components
-
-        # Save scaler for future use
-        self.scaler = scaler
-
-        # print(f"HMM trained successfully with {self.n_components} components")
+        self.hmm_model.fit(X_scaled)
+        self.last_train_time = current_time
 
     def predict_hmm_state(self, candles: List[Dict]) -> int:
-        if self.hmm_model is None or self.scaler is None:
-            raise ValueError("HMM model is not trained. Please call train_hmm() first.")
-
+        if self.hmm_model is None:
+            self.train_hmm(candles)
+        
         prices = np.array([float(candle['close']) for candle in candles])
         volumes = np.array([float(candle['volume']) for candle in candles])
 
@@ -94,12 +66,6 @@ class TechnicalAnalysis:
         volume_changes = np.diff(volumes) / volumes[:-1]
 
         X = np.column_stack([log_returns, volume_changes])
-
-        # Check for NaNs or infinite values
-        if np.any(np.isnan(X)) or np.any(np.isinf(X)):
-            raise ValueError("NaNs or infinite values detected in the data.")
-
-        # Scale features using the previously fitted scaler
         X_scaled = self.scaler.transform(X)
 
         hidden_states = self.hmm_model.predict(X_scaled)
@@ -110,7 +76,7 @@ class TechnicalAnalysis:
             raise ValueError("HMM model is not trained. Please call train_hmm() first.")
 
         print("Means and covariances of hidden states:")
-        for i in range(self.n_components):
+        for i in range(self.hmm_model.n_components):
             state_mean = self.hmm_model.means_[i]
             state_cov = self.hmm_model.covars_[i]
             print(f"Hidden State {i}:")
@@ -315,11 +281,10 @@ class TechnicalAnalysis:
         signal_strength += 1 if volume_signal == "High" else -1 if volume_signal == "Low" else 0
         signal_strength += 2 if pullback_signal == "Buy" else -2 if pullback_signal == "Sell" else 0
 
-        ta = TechnicalAnalysis(self.coinbase_service)
-        ta.train_hmm(candles)        
+        self.train_hmm(candles)  # This will only retrain if necessary
 
         try:
-            hmm_state = ta.predict_hmm_state(candles)
+            hmm_state = self.predict_hmm_state(candles)
         except ValueError as e:
             print(f"HMM prediction error: {e}")
             hmm_state = None
@@ -329,14 +294,11 @@ class TechnicalAnalysis:
             0: {"name": "Bearish", "adjustment": -2},
             1: {"name": "Neutral", "adjustment": 0},
             2: {"name": "Bullish", "adjustment": 2},
-            3: {"name": "Volatile", "adjustment": 1},
         }
 
         if hmm_state is not None:
             state_info = hidden_state_signal_map.get(hmm_state, {"name": "Unknown", "adjustment": 0})
-            # print(f"HMM State: {hmm_state}, Regime: {state_info['name']}")
             signal_strength += state_info["adjustment"]
-
 
         # Adjust thresholds for more aggressive buying and selling in a bull market
         if market_conditions == "Bull Market":
