@@ -30,6 +30,9 @@ pip install coinbase-advanced-py
 pip install yfinance
 pip install newsapi-python
 pip install schedule
+pip install hmmlearn
+pip install scikit-learn scikit-fuzzy
+pip install xgboost
 ```
 
 ## Installation
