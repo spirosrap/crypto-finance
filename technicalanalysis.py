@@ -22,7 +22,7 @@ class TechnicalAnalysis:
 
     def train_hmm(self, candles: List[Dict]):
         current_time = time.time()
-        if self.hmm_model is not None and current_time - self.last_train_time < self.train_frequency:
+        if self.hmm_model is not None:
             return  # Use existing model if it's recent enough
 
         prices = np.array([float(candle['close']) for candle in candles])
