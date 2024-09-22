@@ -192,58 +192,41 @@ class TechnicalAnalysis:
         pullback_signal = self.detect_pullback(candles)
 
         # Incorporate market conditions
-        if market_conditions == "Bear Market":
-            signal_strength -= 2  # Strongly discourage buying in a bear market
-        elif market_conditions == "Bull Market":
-            signal_strength += 2  # Strongly encourage buying in a bull market
-        elif market_conditions == "Bullish":
-            signal_strength += 1
-        elif market_conditions == "Bearish":
-            signal_strength -= 1
+        market_condition_weights = {
+            "Bear Market": -2,
+            "Bull Market": 2,
+            "Bullish": 1,
+            "Bearish": -1
+        }
+        signal_strength += market_condition_weights.get(market_conditions, 0)
         
         # Adjust signal strength based on new components
         signal_strength += 1 if ma_trend == "Uptrend" else -1
-
-        if current_price < ma_200:
-            signal_strength += 1  # Price below 200 MA might be a good buying opportunity
-        else:
-            signal_strength -= 1  # Price above 200 MA might be risky for buying
-
+        signal_strength += 1 if current_price < ma_200 else -1
         signal_strength += 1 if volume_signal == "High" else -1 if volume_signal == "Low" else 0
         signal_strength += 2 if pullback_signal == "Buy" else -2 if pullback_signal == "Sell" else 0
 
-        # Adjust thresholds for more aggressive buying and selling in a bull market
-        if market_conditions == "Bull Market":
-            if signal_strength >= 3:
-                final_signal = "STRONG BUY"  # Lower threshold for strong buying in a bull market
-            elif 1 <= signal_strength < 3:
-                final_signal = "BUY"
-            elif -1 < signal_strength < 1:
-                final_signal = "HOLD"
-            elif -3 < signal_strength <= -1:
-                final_signal = "SELL"
-            else:
-                final_signal = "STRONG SELL"
-        elif market_conditions == "Bear Market":
-            if signal_strength >= 5:
-                final_signal = "BUY"  # Require a higher threshold for buying in a bear market
-            elif 0 <= signal_strength < 5:
-                final_signal = "HOLD"
-            elif -5 < signal_strength < 0:
-                final_signal = "SELL"
-            else:
-                final_signal = "STRONG SELL"  # Stronger selling signal in a bear market
+        # Define thresholds for different market conditions
+        thresholds = {
+            "Bull Market": {"STRONG BUY": 3, "BUY": 1, "SELL": -1, "STRONG SELL": -3},
+            "Bear Market": {"BUY": 5, "SELL": 0, "STRONG SELL": -5},
+            "Normal": {"STRONG BUY": 4, "BUY": 2, "SELL": -2, "STRONG SELL": -4}
+        }
+
+        # Select appropriate thresholds based on market conditions
+        current_thresholds = thresholds.get(market_conditions, thresholds["Normal"])
+
+        # Determine final signal based on thresholds
+        if signal_strength >= current_thresholds.get("STRONG BUY", float('inf')):
+            final_signal = "STRONG BUY"
+        elif signal_strength >= current_thresholds.get("BUY", float('inf')):
+            final_signal = "BUY"
+        elif signal_strength > current_thresholds.get("SELL", float('-inf')):
+            final_signal = "HOLD"
+        elif signal_strength > current_thresholds.get("STRONG SELL", float('-inf')):
+            final_signal = "SELL"
         else:
-            if signal_strength >= 4:
-                final_signal = "STRONG BUY"
-            elif 2 <= signal_strength < 4:
-                final_signal = "BUY"
-            elif -2 < signal_strength < 2:
-                final_signal = "HOLD"
-            elif -4 < signal_strength <= -2:
-                final_signal = "SELL"
-            else:
-                final_signal = "STRONG SELL"
+            final_signal = "STRONG SELL"
 
         return final_signal
 
