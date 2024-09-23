@@ -123,6 +123,7 @@ class Backtester:
             trades: List[TradeRecord] = []
             balance_history: List[float] = []
             btc_balance_history: List[float] = []
+            portfolio_values: List[float] = []  # New list to store daily portfolio values
             last_trade_time: Optional[int] = None
             last_trade_price: Optional[float] = None
             
@@ -257,9 +258,10 @@ class Backtester:
                             highest_price_since_buy = 0  # Reset after selling
                             trades_today += 1
 
-                    # Update balance histories
+                    # Update balance histories and portfolio value
                     balance_history.append(balance)
                     btc_balance_history.append(btc_balance * close_price)
+                    portfolio_values.append(balance + btc_balance * close_price)
 
                     # Update the progress bar
                     pbar.update(1)
@@ -269,17 +271,28 @@ class Backtester:
             self.logger.info(f"Backtest completed. Final value: {final_value:.2f}")
             self.logger.info("Trades:")
 
-            for trade in trades: # Show only the last three trades.
+            for trade in trades:
                 usd_value = trade.amount * trade.price
                 self.logger.info(f"Date: {datetime.fromtimestamp(trade.date, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}, "
                             f"Action: {trade.action}, Price: {trade.price:.2f}, "
                             f"Amount: {trade.amount:.8f}, Fee: {trade.fee:.2f}, "
                             f"USD Value: {(usd_value - trade.fee):.2f}")
-                            
-            # Plot the trades and balance history
-            # self.plot_trades(candles, trades, balance_history, btc_balance_history)
-            # self.logger.info("Trade and balance plot saved as 'trades_and_balance.png'")
-                            
+
+            # Calculate and print Sharpe ratio
+            daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
+            sharpe_ratio = np.sqrt(252) * daily_returns.mean() / daily_returns.std()
+            self.logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+
+            # Calculate and print total return
+            total_return = (final_value - initial_balance) / initial_balance * 100
+            self.logger.info(f"Total Return: {total_return:.2f}%")
+
+            # Calculate and print maximum drawdown
+            cumulative_max = np.maximum.accumulate(portfolio_values)
+            drawdown = (cumulative_max - portfolio_values) / cumulative_max
+            max_drawdown = drawdown.max() * 100
+            self.logger.info(f"Maximum Drawdown: {max_drawdown:.2f}%")
+
             return final_value, trades
         except Exception as e:
             self.logger.error(f"An error occurred during backtesting: {e}", exc_info=True)
