@@ -54,9 +54,11 @@ class TechnicalAnalysis:
         try:
             prices = self.extract_prices(candles)
             return self.calculate_rsi(prices, period)
+        except IndexError as e:
+            print(f"Error computing RSI: Not enough data for product {product_id}. {e}")
         except Exception as e:
-            print(f"Error computing RSI: {e}")
-            return 0.0
+            print(f"Error computing RSI for product {product_id}: {e}")
+        return 0.0
 
     def compute_rsi_from_prices(self, prices: List[float], period: int = 14) -> float:
         return self.calculate_rsi(prices, period)
@@ -136,74 +138,94 @@ class TechnicalAnalysis:
 
     def calculate_signal_strength(self, rsi: float, macd: float, signal: float, histogram: float, market_conditions: str,
                                   candles: List[Dict], volatility_std: float) -> int:
+        """
+        Calculate the overall signal strength based on various technical indicators.
+
+        :param rsi: RSI value.
+        :param macd: MACD value.
+        :param signal: Signal line value.
+        :param histogram: MACD histogram value.
+        :param market_conditions: Current market conditions.
+        :param candles: List of historical candle data.
+        :param volatility_std: Standard deviation of volatility.
+        :return: Signal strength.
+        """
         current_price = float(candles[-1]['close'])
         signal_strength = 0
 
-        # RSI
+        signal_strength += self.evaluate_rsi_signal(rsi, volatility_std)
+        signal_strength += self.evaluate_macd_signal(macd, signal, histogram)
+        signal_strength += self.evaluate_bollinger_signal(candles)
+        signal_strength += self.evaluate_ma_crossover_signal(candles)
+        signal_strength += self.evaluate_stochastic_signal(candles)
+        signal_strength += self.evaluate_trend_signal(candles)
+        signal_strength += self.evaluate_volume_profile_signal(candles, current_price)
+        signal_strength = self.adjust_signal_for_volatility(signal_strength, candles)
+        signal_strength = self.adjust_signal_for_market_conditions(signal_strength, market_conditions, current_price, candles)
+
+        return signal_strength
+
+    def evaluate_rsi_signal(self, rsi: float, volatility_std: float) -> int:
         rsi_signal = self.generate_signal(rsi, volatility_std)
-        signal_strength += 1 if rsi_signal == "BUY" else -1 if rsi_signal == "SELL" else 0
+        return 1 if rsi_signal == "BUY" else -1 if rsi_signal == "SELL" else 0
 
-        # MACD
+    def evaluate_macd_signal(self, macd: float, signal: float, histogram: float) -> int:
         macd_signal = self.generate_macd_signal(macd, signal, histogram)
-        signal_strength += 1 if macd_signal == "BUY" else -1 if macd_signal == "SELL" else 0
+        return 1 if macd_signal == "BUY" else -1 if macd_signal == "SELL" else 0
 
-        # Bollinger Bands
+    def evaluate_bollinger_signal(self, candles: List[Dict]) -> int:
         bollinger_signal = self.generate_bollinger_bands_signal(candles)
-        signal_strength += 1 if bollinger_signal == "BUY" else -1 if bollinger_signal == "SELL" else 0
+        return 1 if bollinger_signal == "BUY" else -1 if bollinger_signal == "SELL" else 0
 
-        # Moving Average Crossover
+    def evaluate_ma_crossover_signal(self, candles: List[Dict]) -> int:
         ma_crossover_signal = self.compute_moving_average_crossover(candles)
-        signal_strength += 1 if ma_crossover_signal == "BUY" else -1 if ma_crossover_signal == "SELL" else 0
+        return 1 if ma_crossover_signal == "BUY" else -1 if ma_crossover_signal == "SELL" else 0
 
-        # Stochastic Oscillator
+    def evaluate_stochastic_signal(self, candles: List[Dict]) -> int:
         stochastic_k, stochastic_d = self.compute_stochastic_oscillator(candles)
         if stochastic_k > 80 and stochastic_d > 80:
-            signal_strength -= 1  # Overbought condition
+            return -1  # Overbought condition
         elif stochastic_k < 20 and stochastic_d < 20:
-            signal_strength += 1  # Oversold condition
+            return 1  # Oversold condition
+        return 0
 
-        # Trend
+    def evaluate_trend_signal(self, candles: List[Dict]) -> int:
         price_trend = self.identify_trend(None, candles)
-        signal_strength += 1 if price_trend == "Uptrend" else -1 if price_trend == "Downtrend" else 0
+        return 1 if price_trend == "Uptrend" else -1 if price_trend == "Downtrend" else 0
 
-        # Volume Profile
+    def evaluate_volume_profile_signal(self, candles: List[Dict], current_price: float) -> int:
         volume_profile = self.compute_volume_profile(candles)
         volume_resistance = max(volume_profile, key=lambda x: x[1])[0]
         if current_price > volume_resistance:
-            signal_strength += 1
+            return 1
         elif current_price < volume_resistance:
-            signal_strength -= 1
+            return -1
+        return 0
 
-        # ATR for volatility
+    def adjust_signal_for_volatility(self, signal_strength: int, candles: List[Dict]) -> int:
         atr = self.compute_atr(candles)
         avg_price = np.mean(self.extract_prices(candles)[-14:])
         volatility_atr = atr / avg_price
         self.update_volatility_history(volatility_atr)
 
-        # Get dynamic volatility thresholds
         high_volatility, very_high_volatility = self.get_dynamic_volatility_threshold()
 
-        # Adjust signal strength based on volatility
         if volatility_atr > very_high_volatility:
-            signal_strength *= 0.5  # Significantly reduce signal strength in very high volatility
+            return int(signal_strength * 0.5)  # Significantly reduce signal strength in very high volatility
         elif volatility_atr > high_volatility:
-            signal_strength *= 0.75  # Moderately reduce signal strength in high volatility
+            return int(signal_strength * 0.75)  # Moderately reduce signal strength in high volatility
+        return signal_strength
 
-        # Add trend-following component
+    def adjust_signal_for_market_conditions(self, signal_strength: int, market_conditions: str, 
+                                            current_price: float, candles: List[Dict]) -> int:
         short_ma = self.calculate_sma(candles, 10)
         long_ma = self.calculate_sma(candles, 50)
         ma_trend = "Uptrend" if short_ma > long_ma else "Downtrend"
 
-        # Add dynamic support/resistance
         ma_200 = self.calculate_sma(candles, 200)
-
-        # Incorporate volume analysis
         volume_signal = self.analyze_volume(candles)
-
-        # Implement pullback strategy
         pullback_signal = self.detect_pullback(candles)
 
-        # Incorporate market conditions
         market_condition_weights = {
             "Bear Market": -2,
             "Bull Market": 2,
@@ -211,8 +233,6 @@ class TechnicalAnalysis:
             "Bearish": -1
         }
         signal_strength += market_condition_weights.get(market_conditions, 0)
-        
-        # Adjust signal strength based on new components
         signal_strength += 1 if ma_trend == "Uptrend" else -1
         signal_strength += 1 if current_price < ma_200 else -1
         signal_strength += 1 if volume_signal == "High" else -1 if volume_signal == "Low" else 0
