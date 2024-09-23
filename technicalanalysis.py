@@ -15,17 +15,19 @@ class TechnicalAnalysis:
         self.volatility_threshold = 0.03  # 3% daily volatility threshold
 
     def calculate_rsi(self, prices: List[float], period: int) -> float:
+        """
+        Calculate the Relative Strength Index (RSI) for a given list of prices.
+
+        :param prices: List of prices.
+        :param period: Period for RSI calculation.
+        :return: RSI value.
+        """
         deltas = np.diff(prices)
         seed = deltas[:period + 1]
         up = seed[seed >= 0].sum() / period
         down = -seed[seed < 0].sum() / period
 
-        # Avoid division by zero
-        if down == 0:
-            rs = float('inf')
-        else:
-            rs = up / down
-
+        rs = up / down if down != 0 else float('inf')
         rsi = np.zeros_like(prices)
         rsi[:period] = 100. - 100. / (1. + rs)
 
@@ -35,22 +37,32 @@ class TechnicalAnalysis:
             downval = -delta if delta < 0 else 0.
             up = (up * (period - 1) + upval) / period
             down = (down * (period - 1) + downval) / period
-
-            # Avoid division by zero
             rs = up / down if down != 0 else float('inf')
             rsi[i] = 100. - 100. / (1. + rs)
 
         return rsi[-1]
 
     def compute_rsi(self, product_id: str, candles: List[Dict], period: int = 14) -> float:
-        prices = [float(candle['close']) for candle in candles]
-        return self.calculate_rsi(prices, period)
+        """
+        Compute the RSI for a given product using its historical candle data.
+
+        :param product_id: Product identifier.
+        :param candles: List of historical candle data.
+        :param period: Period for RSI calculation.
+        :return: RSI value.
+        """
+        try:
+            prices = self.extract_prices(candles)
+            return self.calculate_rsi(prices, period)
+        except Exception as e:
+            print(f"Error computing RSI: {e}")
+            return 0.0
 
     def compute_rsi_from_prices(self, prices: List[float], period: int = 14) -> float:
         return self.calculate_rsi(prices, period)
 
     def identify_trend(self, product_id: str, candles: List[Dict], window: int = 20) -> str:
-        prices = [float(candle['close']) for candle in candles]
+        prices = self.extract_prices(candles)
         if len(prices) < window:
             return "Not enough data"
         
@@ -71,7 +83,7 @@ class TechnicalAnalysis:
             return "Sideways"
 
     def compute_macd(self, product_id: str, candles: List[Dict]) -> Tuple[float, float, float]:
-        prices = [float(candle['close']) for candle in candles]
+        prices = self.extract_prices(candles)
         return self.compute_macd_from_prices(prices)
 
     def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
@@ -86,7 +98,7 @@ class TechnicalAnalysis:
         return pd.Series(data).ewm(span=span, adjust=False).mean().values
 
     def compute_bollinger_bands(self, candles: List[Dict], window: int = 20, num_std: float = 2) -> Tuple[float, float, float]:
-        prices = [float(candle['close']) for candle in candles]
+        prices = self.extract_prices(candles)
         prices_series = pd.Series(prices)
         
         rolling_mean = prices_series.rolling(window=window).mean()
@@ -99,7 +111,7 @@ class TechnicalAnalysis:
 
     def generate_bollinger_bands_signal(self, candles: List[Dict]) -> str:
         upper_band, middle_band, lower_band = self.compute_bollinger_bands(candles)
-        current_price = float(candles[-1]['close'])
+        current_price = self.extract_prices(candles)[-1]
         
         if current_price > upper_band:
             return "SELL"
@@ -110,52 +122,52 @@ class TechnicalAnalysis:
 
     def generate_combined_signal(self, rsi: float, macd: float, signal: float, histogram: float, 
                                  candles: List[Dict], market_conditions: Optional[str] = None) -> str:
-        # Calculate current price once
         current_price = float(candles[-1]['close'])
+        market_conditions = market_conditions or self.analyze_market_conditions(candles)
+        volatility_std = self.calculate_volatility(candles)
+        signal_strength = self.calculate_signal_strength(rsi, macd, signal, histogram, market_conditions, candles, volatility_std)
+        final_signal = self.determine_final_signal(signal_strength, market_conditions, current_price, candles)
+        return final_signal
 
-        if market_conditions is None:
-            market_conditions = self.analyze_market_conditions(candles)
-        
-        # Calculate volatility using standard deviation of returns
-        prices = [float(candle['close']) for candle in candles[-20:]]  # Use last 20 candles
+    def calculate_volatility(self, candles: List[Dict]) -> float:
+        prices = self.extract_prices(candles[-20:])
         returns = np.diff(np.log(prices))
-        volatility_std = np.std(returns) * np.sqrt(365)  # Annualized volatility
+        return np.std(returns) * np.sqrt(365)
 
-        # Generate individual signals
-        rsi_signal = self.generate_signal(rsi, volatility_std)
-        macd_signal = self.generate_macd_signal(macd, signal, histogram)
-        bollinger_signal = self.generate_bollinger_bands_signal(candles)
-        ma_crossover_signal = self.compute_moving_average_crossover(candles)
-        stochastic_k, stochastic_d = self.compute_stochastic_oscillator(candles)
-        
-        price_trend = self.identify_trend(None, candles)
-        volume_profile = self.compute_volume_profile(candles)
-        
-        # Initialize signal strength
+    def calculate_signal_strength(self, rsi: float, macd: float, signal: float, histogram: float, market_conditions: str,
+                                  candles: List[Dict], volatility_std: float) -> int:
+        current_price = float(candles[-1]['close'])
         signal_strength = 0
 
         # RSI
+        rsi_signal = self.generate_signal(rsi, volatility_std)
         signal_strength += 1 if rsi_signal == "BUY" else -1 if rsi_signal == "SELL" else 0
 
         # MACD
+        macd_signal = self.generate_macd_signal(macd, signal, histogram)
         signal_strength += 1 if macd_signal == "BUY" else -1 if macd_signal == "SELL" else 0
 
         # Bollinger Bands
+        bollinger_signal = self.generate_bollinger_bands_signal(candles)
         signal_strength += 1 if bollinger_signal == "BUY" else -1 if bollinger_signal == "SELL" else 0
 
         # Moving Average Crossover
+        ma_crossover_signal = self.compute_moving_average_crossover(candles)
         signal_strength += 1 if ma_crossover_signal == "BUY" else -1 if ma_crossover_signal == "SELL" else 0
 
         # Stochastic Oscillator
+        stochastic_k, stochastic_d = self.compute_stochastic_oscillator(candles)
         if stochastic_k > 80 and stochastic_d > 80:
             signal_strength -= 1  # Overbought condition
         elif stochastic_k < 20 and stochastic_d < 20:
             signal_strength += 1  # Oversold condition
 
         # Trend
+        price_trend = self.identify_trend(None, candles)
         signal_strength += 1 if price_trend == "Uptrend" else -1 if price_trend == "Downtrend" else 0
 
         # Volume Profile
+        volume_profile = self.compute_volume_profile(candles)
         volume_resistance = max(volume_profile, key=lambda x: x[1])[0]
         if current_price > volume_resistance:
             signal_strength += 1
@@ -164,7 +176,7 @@ class TechnicalAnalysis:
 
         # ATR for volatility
         atr = self.compute_atr(candles)
-        avg_price = np.mean([float(candle['close']) for candle in candles[-14:]])
+        avg_price = np.mean(self.extract_prices(candles)[-14:])
         volatility_atr = atr / avg_price
         self.update_volatility_history(volatility_atr)
 
@@ -206,6 +218,10 @@ class TechnicalAnalysis:
         signal_strength += 1 if volume_signal == "High" else -1 if volume_signal == "Low" else 0
         signal_strength += 2 if pullback_signal == "Buy" else -2 if pullback_signal == "Sell" else 0
 
+        return signal_strength
+
+    def determine_final_signal(self, signal_strength: int, market_conditions: str, 
+                               current_price: float, candles: List[Dict]) -> str:
         # Define thresholds for different market conditions
         thresholds = {
             "Bull Market": {"STRONG BUY": 3, "BUY": 1, "SELL": -1, "STRONG SELL": -3},
@@ -239,8 +255,8 @@ class TechnicalAnalysis:
             return "HOLD"
 
     def compute_volume_profile(self, candles: List[Dict], num_bins: int = 10) -> List[Tuple[float, float]]:
-        prices = [float(candle['close']) for candle in candles]
-        volumes = [float(candle['volume']) for candle in candles]
+        prices = self.extract_prices(candles)
+        volumes = self.extract_prices(candles, 'volume')
         
         min_price, max_price = min(prices), max(prices)
         bins = np.linspace(min_price, max_price, num_bins + 1)
@@ -271,9 +287,9 @@ class TechnicalAnalysis:
 
     def compute_stochastic_oscillator(self, candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
         prices = pd.DataFrame({
-            'high': [float(candle['high']) for candle in candles],
-            'low': [float(candle['low']) for candle in candles],
-            'close': [float(candle['close']) for candle in candles]
+            'high': self.extract_prices(candles, 'high'),
+            'low': self.extract_prices(candles, 'low'),
+            'close': self.extract_prices(candles)
         })
         
         low_min = prices['low'].rolling(window=k_period).min()
@@ -285,7 +301,7 @@ class TechnicalAnalysis:
         return k.iloc[-1], d.iloc[-1]
 
     def compute_moving_average_crossover(self, candles: List[Dict], short_period: int = 50, long_period: int = 200) -> str:
-        prices = [float(candle['close']) for candle in candles]
+        prices = self.extract_prices(candles)
         short_ma = pd.Series(prices).rolling(window=short_period).mean().iloc[-1]
         long_ma = pd.Series(prices).rolling(window=long_period).mean().iloc[-1]
         
@@ -295,9 +311,9 @@ class TechnicalAnalysis:
         if len(candles) < period + 1:
             return 0  # or some other default value
 
-        high = [float(candle['high']) for candle in candles]
-        low = [float(candle['low']) for candle in candles]
-        close = [float(candle['close']) for candle in candles]
+        high = self.extract_prices(candles, 'high')
+        low = self.extract_prices(candles, 'low')
+        close = self.extract_prices(candles)
         
         tr1 = [high[i] - low[i] for i in range(len(high))]
         tr2 = [abs(high[i] - close[i-1]) for i in range(1, len(high))]
@@ -325,13 +341,13 @@ class TechnicalAnalysis:
         return high_threshold, very_high_threshold
 
     def calculate_sma(self, candles: List[Dict], period: int) -> float:
-        prices = [float(candle['close']) for candle in candles[-period:]]
+        prices = self.extract_prices(candles)[-period:]
         return sum(prices) / period
 
     def analyze_volume(self, candles: List[Dict]) -> str:
-        recent_volumes = [float(candle['volume']) for candle in candles[-10:]]
+        recent_volumes = self.extract_prices(candles, 'volume')[-10:]
         avg_volume = sum(recent_volumes) / len(recent_volumes)
-        current_volume = float(candles[-1]['volume'])
+        current_volume = self.extract_prices(candles, 'volume')[-1]
         
         if current_volume > avg_volume * 1.5:
             return "High"
@@ -339,9 +355,20 @@ class TechnicalAnalysis:
             return "Low"
         else:
             return "Normal"
+        
+    def extract_prices(self, candles: List[Dict], key: str = 'close') -> List[float]:
+        """
+        Extract prices from candle data.
+
+        :param candles: List of historical candle data.
+        :param key: Key to extract from each candle (default is 'close').
+        :return: List of prices.
+        """
+        return [float(candle[key]) for candle in candles]
+
 
     def detect_pullback(self, candles: List[Dict]) -> str:
-        recent_prices = [float(candle['close']) for candle in candles[-5:]]
+        recent_prices = self.extract_prices(candles)[-5:]
         if recent_prices[-1] < min(recent_prices[:-1]) and self.calculate_sma(candles, 20) > self.calculate_sma(candles, 50):
             return "Buy"
         elif recent_prices[-1] > max(recent_prices[:-1]) and self.calculate_sma(candles, 20) < self.calculate_sma(candles, 50):
@@ -357,8 +384,8 @@ class TechnicalAnalysis:
         long_term_ma = self.calculate_sma(candles, long_term_period)
 
         # Analyze market conditions based on price action, volume, and volatility
-        prices = [float(candle['close']) for candle in candles]
-        volumes = [float(candle['volume']) for candle in candles]
+        prices = self.extract_prices(candles)
+        volumes = self.extract_prices(candles, 'volume')
         
         # Calculate price change and volume change
         price_change = (prices[-1] - prices[0]) / prices[0]
@@ -405,8 +432,8 @@ class TechnicalAnalysis:
             return "Neutral"
 
     def calculate_average_bull_market_volume_change(self, candles: List[Dict]) -> float:
-        prices = [float(candle['close']) for candle in candles]
-        volumes = [float(candle['volume']) for candle in candles]
+        prices = self.extract_prices(candles)
+        volumes = self.extract_prices(candles, 'volume')
         
         # Define bull market criteria (e.g., price increasing for 5 consecutive days)
         bull_market_periods = []
@@ -427,7 +454,7 @@ class TechnicalAnalysis:
 
     def determine_market_regime(self, candles: List[Dict]) -> str:
         # Calculate historical volatility using a 20-day rolling window
-        prices = [float(candle['close']) for candle in candles]
+        prices = self.extract_prices(candles)
         returns = np.log(np.array(prices[1:]) / np.array(prices[:-1]))
         volatility = np.std(returns[-20:]) * np.sqrt(252)  # Annualized volatility
         
@@ -450,4 +477,4 @@ class TechnicalAnalysis:
     def calculate_atr_position_size(self, balance: float, price: float, atr: float) -> float:
         risk_amount = balance * self.risk_per_trade
         position_size = risk_amount / (self.atr_multiplier * atr)
-        return min(position_size * price, balance)  # Ensure we don't exceed available balance        
+        return min(position_size * price, balance)  # Ensure we don't exceed available balance
