@@ -4,15 +4,16 @@ from typing import List, Tuple, Dict, Optional
 from coinbaseservice import CoinbaseService
 import time
 import yfinance as yf
+import talib
 
 class TechnicalAnalysis:
     def __init__(self, coinbase_service: CoinbaseService):
         self.coinbase_service = coinbase_service
-        self.signal_history = []  # To store recent signals
-        self.volatility_history = []  # To store recent volatility readings
+        self.signal_history = []
+        self.volatility_history = []
         self.rsi_overbought = 70
         self.rsi_oversold = 30
-        self.volatility_threshold = 0.03  # 3% daily volatility threshold
+        self.volatility_threshold = 0.03
         self.rsi_period = 14
         self.macd_fast = 12
         self.macd_slow = 26
@@ -22,31 +23,9 @@ class TechnicalAnalysis:
 
     def calculate_rsi(self, prices: List[float], period: int) -> float:
         """
-        Calculate the Relative Strength Index (RSI) for a given list of prices.
-
-        :param prices: List of prices.
-        :param period: Period for RSI calculation.
-        :return: RSI value.
+        Calculate the Relative Strength Index (RSI) using TA-Lib.
         """
-        deltas = np.diff(prices)
-        seed = deltas[:period + 1]
-        up = seed[seed >= 0].sum() / period
-        down = -seed[seed < 0].sum() / period
-
-        rs = up / down if down != 0 else float('inf')
-        rsi = np.zeros_like(prices)
-        rsi[:period] = 100. - 100. / (1. + rs)
-
-        for i in range(period, len(prices)):
-            delta = deltas[i - 1]
-            upval = delta if delta > 0 else 0.
-            downval = -delta if delta < 0 else 0.
-            up = (up * (period - 1) + upval) / period
-            down = (down * (period - 1) + downval) / period
-            rs = up / down if down != 0 else float('inf')
-            rsi[i] = 100. - 100. / (1. + rs)
-
-        return rsi[-1]
+        return talib.RSI(np.array(prices), timeperiod=period)[-1]
 
     def compute_rsi(self, product_id: str, candles: List[Dict], period: int = None) -> float:
         """
@@ -100,11 +79,10 @@ class TechnicalAnalysis:
         return self.compute_macd_from_prices(prices)
 
     def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
-        ema12 = self.exponential_moving_average(prices, self.macd_fast)
-        ema26 = self.exponential_moving_average(prices, self.macd_slow)
-        macd = ema12 - ema26
-        signal = self.exponential_moving_average(macd, self.macd_signal)
-        histogram = macd - signal
+        macd, signal, histogram = talib.MACD(np.array(prices), 
+                                             fastperiod=self.macd_fast, 
+                                             slowperiod=self.macd_slow, 
+                                             signalperiod=self.macd_signal)
         return macd[-1], signal[-1], histogram[-1]
 
     def exponential_moving_average(self, data: List[float], span: int) -> np.ndarray:
@@ -113,16 +91,11 @@ class TechnicalAnalysis:
     def compute_bollinger_bands(self, candles: List[Dict], window: int = None, num_std: float = None) -> Tuple[float, float, float]:
         window = window or self.bollinger_window
         num_std = num_std or self.bollinger_std
-        prices = self.extract_prices(candles)
-        prices_series = pd.Series(prices)
+        prices = np.array(self.extract_prices(candles))
         
-        rolling_mean = prices_series.rolling(window=window).mean()
-        rolling_std = prices_series.rolling(window=window).std()
+        upper, middle, lower = talib.BBANDS(prices, timeperiod=window, nbdevup=num_std, nbdevdn=num_std)
         
-        upper_band = rolling_mean + (rolling_std * num_std)
-        lower_band = rolling_mean - (rolling_std * num_std)
-        
-        return upper_band.iloc[-1], rolling_mean.iloc[-1], lower_band.iloc[-1]
+        return upper[-1], middle[-1], lower[-1]
 
     def generate_bollinger_bands_signal(self, candles: List[Dict]) -> str:
         upper_band, middle_band, lower_band = self.compute_bollinger_bands(candles)
@@ -318,19 +291,13 @@ class TechnicalAnalysis:
 
 
     def compute_stochastic_oscillator(self, candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
-        prices = pd.DataFrame({
-            'high': self.extract_prices(candles, 'high'),
-            'low': self.extract_prices(candles, 'low'),
-            'close': self.extract_prices(candles)
-        })
+        high = np.array(self.extract_prices(candles, 'high'))
+        low = np.array(self.extract_prices(candles, 'low'))
+        close = np.array(self.extract_prices(candles))
         
-        low_min = prices['low'].rolling(window=k_period).min()
-        high_max = prices['high'].rolling(window=k_period).max()
+        k, d = talib.STOCH(high, low, close, fastk_period=k_period, slowk_period=d_period, slowd_period=d_period)
         
-        k = 100 * (prices['close'] - low_min) / (high_max - low_min)
-        d = k.rolling(window=d_period).mean()
-        
-        return k.iloc[-1], d.iloc[-1]
+        return k[-1], d[-1]
 
     def compute_moving_average_crossover(self, candles: List[Dict], short_period: int = 50, long_period: int = 200) -> str:
         prices = self.extract_prices(candles)
@@ -340,21 +307,13 @@ class TechnicalAnalysis:
         return "BUY" if short_ma > long_ma else "SELL" if short_ma < long_ma else "HOLD"
 
     def compute_atr(self, candles: List[Dict], period: int = 14) -> float:
-        if len(candles) < period + 1:
-            return 0  # or some other default value
-
-        high = self.extract_prices(candles, 'high')
-        low = self.extract_prices(candles, 'low')
-        close = self.extract_prices(candles)
+        high = np.array(self.extract_prices(candles, 'high'))
+        low = np.array(self.extract_prices(candles, 'low'))
+        close = np.array(self.extract_prices(candles))
         
-        tr1 = [high[i] - low[i] for i in range(len(high))]
-        tr2 = [abs(high[i] - close[i-1]) for i in range(1, len(high))]
-        tr3 = [abs(low[i] - close[i-1]) for i in range(1, len(low))]
+        atr = talib.ATR(high, low, close, timeperiod=period)
         
-        tr = [max(tr1[i], tr2[i-1], tr3[i-1]) for i in range(1, len(tr1))]
-        atr = sum(tr[-period:]) / period
-        
-        return atr
+        return atr[-1]
 
     def update_volatility_history(self, volatility: float):
         self.volatility_history.append({'timestamp': time.time(), 'volatility': volatility})
