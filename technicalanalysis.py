@@ -13,6 +13,12 @@ class TechnicalAnalysis:
         self.rsi_overbought = 70
         self.rsi_oversold = 30
         self.volatility_threshold = 0.03  # 3% daily volatility threshold
+        self.rsi_period = 14
+        self.macd_fast = 12
+        self.macd_slow = 26
+        self.macd_signal = 9
+        self.bollinger_window = 20
+        self.bollinger_std = 2
 
     def calculate_rsi(self, prices: List[float], period: int) -> float:
         """
@@ -42,7 +48,7 @@ class TechnicalAnalysis:
 
         return rsi[-1]
 
-    def compute_rsi(self, product_id: str, candles: List[Dict], period: int = 14) -> float:
+    def compute_rsi(self, product_id: str, candles: List[Dict], period: int = None) -> float:
         """
         Compute the RSI for a given product using its historical candle data.
 
@@ -51,6 +57,7 @@ class TechnicalAnalysis:
         :param period: Period for RSI calculation.
         :return: RSI value.
         """
+        period = period or self.rsi_period
         try:
             prices = self.extract_prices(candles)
             return self.calculate_rsi(prices, period)
@@ -71,11 +78,15 @@ class TechnicalAnalysis:
         # Calculate Simple Moving Average
         sma = np.convolve(prices, np.ones(window), 'valid') / window
         
+        # Check if we have enough data points to calculate the gradient
+        if len(sma) < 2:
+            return "Not enough data"
+        
         # Calculate the slope of the SMA
         slope = np.gradient(sma)
         
         # Determine the trend based on the recent slope
-        recent_slope = slope[-5:].mean()  # Use the average of the last 5 slope values
+        recent_slope = slope[-5:].mean() if len(slope) >= 5 else slope.mean()
         
         if recent_slope > 0.01:  # Threshold can be adjusted
             return "Uptrend"
@@ -89,17 +100,19 @@ class TechnicalAnalysis:
         return self.compute_macd_from_prices(prices)
 
     def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
-        ema12 = self.exponential_moving_average(prices, 12)
-        ema26 = self.exponential_moving_average(prices, 26)
+        ema12 = self.exponential_moving_average(prices, self.macd_fast)
+        ema26 = self.exponential_moving_average(prices, self.macd_slow)
         macd = ema12 - ema26
-        signal = self.exponential_moving_average(macd, 9)
+        signal = self.exponential_moving_average(macd, self.macd_signal)
         histogram = macd - signal
         return macd[-1], signal[-1], histogram[-1]
 
     def exponential_moving_average(self, data: List[float], span: int) -> np.ndarray:
         return pd.Series(data).ewm(span=span, adjust=False).mean().values
 
-    def compute_bollinger_bands(self, candles: List[Dict], window: int = 20, num_std: float = 2) -> Tuple[float, float, float]:
+    def compute_bollinger_bands(self, candles: List[Dict], window: int = None, num_std: float = None) -> Tuple[float, float, float]:
+        window = window or self.bollinger_window
+        num_std = num_std or self.bollinger_std
         prices = self.extract_prices(candles)
         prices_series = pd.Series(prices)
         
@@ -138,18 +151,6 @@ class TechnicalAnalysis:
 
     def calculate_signal_strength(self, rsi: float, macd: float, signal: float, histogram: float, market_conditions: str,
                                   candles: List[Dict], volatility_std: float) -> int:
-        """
-        Calculate the overall signal strength based on various technical indicators.
-
-        :param rsi: RSI value.
-        :param macd: MACD value.
-        :param signal: Signal line value.
-        :param histogram: MACD histogram value.
-        :param market_conditions: Current market conditions.
-        :param candles: List of historical candle data.
-        :param volatility_std: Standard deviation of volatility.
-        :return: Signal strength.
-        """
         current_price = float(candles[-1]['close'])
         signal_strength = 0
 
@@ -163,7 +164,24 @@ class TechnicalAnalysis:
         signal_strength = self.adjust_signal_for_volatility(signal_strength, candles)
         signal_strength = self.adjust_signal_for_market_conditions(signal_strength, market_conditions, current_price, candles)
 
-        return signal_strength
+        # Add more weight to recent performance
+        short_term_trend = self.identify_trend(None, candles[-20:])
+        long_term_trend = self.identify_trend(None, candles)
+        
+        if short_term_trend != "Not enough data" and long_term_trend != "Not enough data":
+            if short_term_trend == "Uptrend" and long_term_trend == "Uptrend":
+                signal_strength += 2
+            elif short_term_trend == "Downtrend" and long_term_trend == "Downtrend":
+                signal_strength -= 2
+        
+        # Consider volume
+        volume_signal = self.analyze_volume(candles)
+        if volume_signal == "High":
+            signal_strength += 1
+        elif volume_signal == "Low":
+            signal_strength -= 1
+        
+        return signal_strength  # Return an integer
 
     def evaluate_rsi_signal(self, rsi: float, volatility_std: float) -> int:
         rsi_signal = self.generate_signal(rsi, volatility_std)
@@ -242,29 +260,23 @@ class TechnicalAnalysis:
 
     def determine_final_signal(self, signal_strength: int, market_conditions: str, 
                                current_price: float, candles: List[Dict]) -> str:
-        # Define thresholds for different market conditions
-        thresholds = {
-            "Bull Market": {"STRONG BUY": 3, "BUY": 1, "SELL": -1, "STRONG SELL": -3},
-            "Bear Market": {"BUY": 5, "SELL": 0, "STRONG SELL": -5},
-            "Normal": {"STRONG BUY": 4, "BUY": 2, "SELL": -2, "STRONG SELL": -4}
-        }
-
-        # Select appropriate thresholds based on market conditions
-        current_thresholds = thresholds.get(market_conditions, thresholds["Normal"])
-
-        # Determine final signal based on thresholds
-        if signal_strength >= current_thresholds.get("STRONG BUY", float('inf')):
-            final_signal = "STRONG BUY"
-        elif signal_strength >= current_thresholds.get("BUY", float('inf')):
-            final_signal = "BUY"
-        elif signal_strength > current_thresholds.get("SELL", float('-inf')):
-            final_signal = "HOLD"
-        elif signal_strength > current_thresholds.get("STRONG SELL", float('-inf')):
-            final_signal = "SELL"
+        # Adjust thresholds based on market conditions
+        if market_conditions == "Bull Market":
+            buy_threshold = 2
+            sell_threshold = -3
+        elif market_conditions == "Bear Market":
+            buy_threshold = 3
+            sell_threshold = -2
         else:
-            final_signal = "STRONG SELL"
-
-        return final_signal
+            buy_threshold = 3
+            sell_threshold = -3
+        
+        if signal_strength >= buy_threshold:
+            return "STRONG BUY" if signal_strength >= buy_threshold + 2 else "BUY"
+        elif signal_strength <= sell_threshold:
+            return "STRONG SELL" if signal_strength <= sell_threshold - 2 else "SELL"
+        else:
+            return "HOLD"
 
     def generate_macd_signal(self, macd: float, signal: float, histogram: float) -> str:
         if macd > signal or histogram >= 0:

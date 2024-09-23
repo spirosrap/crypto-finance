@@ -29,6 +29,8 @@ class Backtester:
         self.drawdown_threshold: float = 0.1  # 10% drawdown threshold
         self.strong_buy_percentage: float = 0.8  # 80% of balance for strong buy
         self.buy_percentage: float = 0.4  # 40% of balance for regular buy
+        self.atr_period = 14
+        self.atr_multiplier = 2
 
     def create_trade_record(self, date: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date, action, price, amount, fee)
@@ -68,6 +70,19 @@ class Backtester:
         plt.tight_layout()
         plt.savefig('trades_and_balance.png')
         plt.close()
+
+    def calculate_dynamic_stop_loss(self, candles: List[Dict], entry_price: float) -> float:
+        atr = self.trader.technical_analysis.compute_atr(candles, self.atr_period)
+        return entry_price - (atr * self.atr_multiplier)
+
+    def calculate_dynamic_take_profit(self, candles: List[Dict], entry_price: float) -> float:
+        atr = self.trader.technical_analysis.compute_atr(candles, self.atr_period)
+        return entry_price + (atr * self.atr_multiplier * 1.5)  # 1.5x the stop-loss distance
+
+    def calculate_position_size(self, balance: float, entry_price: float, stop_loss: float, risk_per_trade: float) -> float:
+        risk_amount = balance * risk_per_trade
+        risk_per_coin = entry_price - stop_loss
+        return risk_amount / risk_per_coin
 
     def backtest(self, product_id: str, start_date: datetime, end_date: datetime, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float) -> Tuple[float, List[TradeRecord]]:
         try:
@@ -198,6 +213,10 @@ class Backtester:
                                             last_trade_price = close_price
                                             highest_price_since_buy = close_price  # Reset highest price after buying
                                             trades_today += 1
+                                            stop_loss = self.calculate_dynamic_stop_loss(candles[:i+1], close_price)
+                                            take_profit = self.calculate_dynamic_take_profit(candles[:i+1], close_price)
+                                            position_size = self.calculate_position_size(balance, close_price, stop_loss, risk_per_trade)
+                                            btc_to_buy = min(position_size, balance / close_price)  # Ensure we don't exceed available balance
 
                                 elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
                                     # Implement a trailing stop
@@ -207,6 +226,17 @@ class Backtester:
                                         balance += balance_to_add
                                         btc_balance = 0
                                         trades.append(self.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
+                                        last_trade_time = current_time
+                                        last_trade_price = close_price
+                                        highest_price_since_buy = 0  # Reset after selling
+                                        trades_today += 1
+                                    if close_price <= stop_loss or close_price >= take_profit:
+                                        # Execute the sell
+                                        amount_to_sell = btc_balance
+                                        balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
+                                        balance += balance_to_add
+                                        btc_balance = 0
+                                        trades.append(self.create_trade_record(current_time, "TAKE PROFIT" if close_price >= take_profit else "STOP LOSS", close_price, amount_to_sell, fee))
                                         last_trade_time = current_time
                                         last_trade_price = close_price
                                         highest_price_since_buy = 0  # Reset after selling
@@ -386,6 +416,8 @@ class Backtester:
                                             last_buy_price = close_price
                                             highest_price_since_buy = close_price
                                             trades_today += 1
+                                            stop_loss = self.calculate_dynamic_stop_loss(candles[:i+1], close_price)
+                                            take_profit = self.calculate_dynamic_take_profit(candles[:i+1], close_price)
 
                                 elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
                                     if last_buy_price and (close_price < last_buy_price * (1 - self.drawdown_threshold) or combined_signal == "STRONG SELL"):
@@ -394,6 +426,17 @@ class Backtester:
                                         balance += balance_to_add
                                         btc_balance = 0
                                         trades.append(self.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
+                                        last_trade_time = current_time
+                                        last_trade_price = close_price
+                                        highest_price_since_buy = 0
+                                        trades_today += 1
+                                    if close_price <= stop_loss or close_price >= take_profit:
+                                        # Execute the sell
+                                        amount_to_sell = btc_balance
+                                        balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
+                                        balance += balance_to_add
+                                        btc_balance = 0
+                                        trades.append(self.create_trade_record(current_time, "TAKE PROFIT" if close_price >= take_profit else "STOP LOSS", close_price, amount_to_sell, fee))
                                         last_trade_time = current_time
                                         last_trade_price = close_price
                                         highest_price_since_buy = 0
