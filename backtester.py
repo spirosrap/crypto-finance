@@ -143,6 +143,10 @@ class Backtester:
                     current_time = int(candle['start'])
                     current_date = datetime.fromtimestamp(current_time, tz=timezone.utc).date()
                     
+                    # Ensure the current candle's timestamp is greater than the last trade time
+                    if last_trade_time is not None and current_time <= last_trade_time:
+                        continue
+
                     # Reset trades_today if it's a new day
                     if last_trade_date != current_date:
                         trades_today = 0
@@ -352,7 +356,7 @@ class Backtester:
 
             while True:  # Run continuously
                 end_date = datetime.now()
-                start_date = end_date - timedelta(days=30)  # Get the last 1 hour of data
+                start_date = end_date - timedelta(days=3)  # Get the last 1 hour of data
 
                 try:
                     # Fetch the most recent candles
@@ -377,6 +381,10 @@ class Backtester:
                     close_price = float(candle['close'])
                     current_time = int(candle['start'])
                     current_date = datetime.fromtimestamp(current_time, tz=timezone.utc).date()
+
+                    # Ensure the current candle's timestamp is greater than the last trade time
+                    if last_trade_time is not None and current_time <= last_trade_time:
+                        continue
 
                     # Reset trades_today if it's a new day
                     if last_trade_date != current_date:
