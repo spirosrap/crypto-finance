@@ -158,12 +158,12 @@ class Backtester:
                         combined_signal = self.trader.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1], market_conditions=market_conditions)
 
                         current_datetime = datetime.fromtimestamp(current_time, tz=timezone.utc)  # Convert to datetime
-                        self.logger.info(f"(Current date: {current_datetime.strftime('%Y-%m-%d %H:%M')})")  # Print date to the hour
-                        self.logger.info(f"Combined signal for today: {combined_signal}")
-                        self.logger.info(f"Market conditions for today: {market_conditions}")
-                        self.logger.info(f"Trend for today: {trend}")
-                        self.logger.info(f"Volume signal for today: {volume_signal}")
-                        self.logger.info(f"Current Bitcoin value: {close_price:.2f} USD")
+                        self.logger.debug(f"(Current date: {current_datetime.strftime('%Y-%m-%d %H:%M')})")  # Print date to the hour
+                        self.logger.debug(f"Combined signal for today: {combined_signal}")
+                        self.logger.debug(f"Market conditions for today: {market_conditions}")
+                        self.logger.debug(f"Trend for today: {trend}")
+                        self.logger.debug(f"Volume signal for today: {volume_signal}")
+                        self.logger.debug(f"Current Bitcoin value: {close_price:.2f} USD")
 
                     # Only generate signals if we have enough historical data and haven't exceeded max trades for the day
                     if i >= min_candles and trades_today < self.max_trades_per_day:

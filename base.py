@@ -169,10 +169,10 @@ def display_technical_indicators(trader, product_id, candles):
 
     signal = trader.generate_signal(rsi, volatility)
     macd, signal, histogram = trader.compute_macd(product_id, candles)
-    logger.info(f"Current MACD for {product_id}: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}, RSI: {rsi:.2f}")
+    logger.debug(f"Current MACD for {product_id}: MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {histogram:.2f}, RSI: {rsi:.2f}")
 
     combined_signal = trader.generate_combined_signal(rsi, macd, signal, histogram, candles)
-    logger.info(f"Combined signal for {product_id}: {combined_signal}")
+    logger.debug(f"Combined signal for {product_id}: {combined_signal}")
 
     current_market_conditions = trader.technical_analysis.analyze_market_conditions(candles)
     logger.info(f"Current market conditions: {current_market_conditions}")
@@ -182,7 +182,7 @@ def display_technical_indicators(trader, product_id, candles):
 
 def display_sentiment_analysis(trader, product_id):
     bitcoin_sentiment = trader.analyze_sentiment("Bitcoin")
-    logger.info(f"Current sentiment for {product_id}: {bitcoin_sentiment}")
+    logger.debug(f"Current sentiment for {product_id}: {bitcoin_sentiment}")
 
 def calculate_btc_eur_value(trader):
     btc_amount = 0.00187597
