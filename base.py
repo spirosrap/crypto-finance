@@ -150,7 +150,7 @@ def parse_arguments():
     parser.add_argument("--ytd", action="store_true", help="Use year-to-date period (2024-01-01 to current date)")
     parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")
     parser.add_argument("--live", action="store_true", help="Run live trading simulation")
-    parser.add_argument("--product_id", default="BTC-USD", help="Product ID for trading (default: BTC-USD)")
+    parser.add_argument("--product_id", default="BTC-USDC", help="Product ID for trading (default: BTC-USDC)")
     return parser.parse_args()
 
 def display_portfolio_info(trader, product_id):
