@@ -4,11 +4,11 @@ import subprocess
 commands = [
     "python base.py --start_date 2024-08-23",
     "python base.py --start_date 2024-05-01",
+    "python base.py --bearmarket",
     "python base.py --start_date 2023-06-01",
     "python base.py --ytd",
     "python base.py",
     "python base.py --bullmarket",
-    "python base.py --bearmarket"
 ]
 
 # Run each command and capture the output in real-time

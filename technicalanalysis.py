@@ -127,13 +127,33 @@ class TechnicalAnalysis:
         current_price = float(candles[-1]['close'])
         signal_strength = 0
 
-        signal_strength += self.evaluate_rsi_signal(rsi, volatility_std)
-        signal_strength += self.evaluate_macd_signal(macd, signal, histogram)
-        signal_strength += self.evaluate_bollinger_signal(candles)
-        signal_strength += self.evaluate_ma_crossover_signal(candles)
-        signal_strength += self.evaluate_stochastic_signal(candles)
-        signal_strength += self.evaluate_trend_signal(candles)
-        signal_strength += self.evaluate_volume_profile_signal(candles, current_price)
+        # Define weights for each signal
+        weights = {
+            'rsi': 2,
+            'macd': 2,
+            'bollinger': 1,
+            'ma_crossover': 1,
+            'stochastic': 1,
+            'trend': 2,
+            'volume_profile': 1,
+            'short_term_trend': 2,
+            'long_term_trend': 1,
+            'volume': 1
+        }
+
+        # Adjust weights for bear markets
+        if market_conditions in [ "Bear Market", "Bearish"]:
+            weights['rsi'] *= 1.25
+            weights['trend'] *= 1.25
+            weights['bollinger'] *= 2
+
+        signal_strength += weights['rsi'] * self.evaluate_rsi_signal(rsi, volatility_std)
+        signal_strength += weights['macd'] * self.evaluate_macd_signal(macd, signal, histogram)
+        signal_strength += weights['bollinger'] * self.evaluate_bollinger_signal(candles)
+        signal_strength += weights['ma_crossover'] * self.evaluate_ma_crossover_signal(candles)
+        signal_strength += weights['stochastic'] * self.evaluate_stochastic_signal(candles)
+        signal_strength += weights['trend'] * self.evaluate_trend_signal(candles)
+        signal_strength += weights['volume_profile'] * self.evaluate_volume_profile_signal(candles, current_price)
         signal_strength = self.adjust_signal_for_volatility(signal_strength, candles)
         signal_strength = self.adjust_signal_for_market_conditions(signal_strength, market_conditions, current_price, candles)
 
@@ -143,16 +163,16 @@ class TechnicalAnalysis:
         
         if short_term_trend != "Not enough data" and long_term_trend != "Not enough data":
             if short_term_trend == "Uptrend" and long_term_trend == "Uptrend":
-                signal_strength += 2
+                signal_strength += weights['short_term_trend'] * 2
             elif short_term_trend == "Downtrend" and long_term_trend == "Downtrend":
-                signal_strength -= 2
+                signal_strength -= weights['short_term_trend'] * 2
         
         # Consider volume
         volume_signal = self.analyze_volume(candles)
         if volume_signal == "High":
-            signal_strength += 1
+            signal_strength += weights['volume']
         elif volume_signal == "Low":
-            signal_strength -= 1
+            signal_strength -= weights['volume']
         
         return signal_strength  # Return an integer
 
