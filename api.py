@@ -11,7 +11,7 @@ trader = CryptoTrader(API_KEY, API_SECRET)
 def run_backtest():
     try:
         app.logger.info("Backtest request received")
-        product_id = request.args.get('product_id', 'BTC-USD')
+        product_id = request.args.get('product_id', 'BTC-USDC')
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         initial_balance = float(request.args.get('initial_balance', 10000))

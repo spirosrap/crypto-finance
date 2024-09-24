@@ -101,7 +101,7 @@ def main():
     # Fetch historical data (e.g., 1 month of data with 5-minute granularity)
     end_date = datetime.now()
     start_date = end_date - timedelta(days=DAYS_TO_TEST_MODEL)  # Get 2 months of data
-    candles = historical_data.get_historical_data("BTC-USD", start_date, end_date, granularity="ONE_HOUR")  # Fetch data with 5-minute granularity
+    candles = historical_data.get_historical_data("BTC-USDC", start_date, end_date, granularity="ONE_HOUR")  # Fetch data with 5-minute granularity
 
     # Fetch external data
     external_data_fetcher = ExternalDataFetcher()

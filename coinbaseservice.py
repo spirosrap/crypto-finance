@@ -34,7 +34,7 @@ class CoinbaseService:
         prices = {}
     
         for p in products.get_best_bid_ask(self.client)["pricebooks"]:
-            if p["product_id"] in ["BTC-EUR", "BTC-USD"]:
+            if p["product_id"] in ["BTC-EUR", "BTC-USDC"]:
                 prices[p["product_id"]] = {
                     "bid": float(p["bids"][0]["price"]),
                     "ask": float(p["asks"][0]["price"])

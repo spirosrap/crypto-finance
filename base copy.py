@@ -49,7 +49,7 @@ def main():
             print("€"+"\033[1;32m{:.2f}\033[0m".format(0.00187597*btc_euro_ask) + "  0.00187597 btc" )
             # print("{:.2f}".format(btc_euro) + " euro" )
 
-        if p["product_id"] == "BTC-USD":
+        if p["product_id"] == "BTC-USDC":
             btc_usd = float(p["bids"][0]["price"])
             btc_usd_ask = float(p["asks"][0]["price"])
             print("$"+"{:.2f}".format(btc_usd))
@@ -105,8 +105,8 @@ def main():
         return rsi
 
     # Example usage:
-    rsi = compute_rsi(client, "BTC-USD")
-    print(f"Current RSI for BTC-USD: {rsi:.2f}")
+    rsi = compute_rsi(client, "BTC-USDC")
+    print(f"Current RSI for BTC-USDC: {rsi:.2f}")
 
     def generate_signal(rsi):
         if rsi < 30:
@@ -118,7 +118,7 @@ def main():
 
     # Generate signal based on computed RSI
     signal = generate_signal(rsi)
-    print(f"Signal for BTC-USD: {signal}")
+    print(f"Signal for BTC-USDC: {signal}")
 
     # print(products.get_products(client))
 

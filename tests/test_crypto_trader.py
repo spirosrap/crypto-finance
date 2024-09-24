@@ -29,8 +29,8 @@ class TestCryptoTrader(unittest.TestCase):
         }
         
         prices = self.trader.get_btc_prices()
-        self.assertEqual(prices["BTC-USD"]["bid"], 60000.0)
-        self.assertEqual(prices["BTC-USD"]["ask"], 60001.0)
+        self.assertEqual(prices["BTC-USDC"]["bid"], 60000.0)
+        self.assertEqual(prices["BTC-USDC"]["ask"], 60001.0)
 
     def test_calculate_trade_amount_and_fee_buy(self):
         balance = 1000.0
@@ -59,7 +59,7 @@ class TestCryptoTrader(unittest.TestCase):
             {'close': 62000, 'start': 1610007200},
         ]
 
-        final_value, trades = self.trader.backtest("BTC-USD", "2021-01-01", "2021-01-03", 1000.0)
+        final_value, trades = self.trader.backtest("BTC-USDC", "2021-01-01", "2021-01-03", 1000.0)
         self.assertGreater(final_value, 1000.0)  # Expecting a profit
         self.assertIsInstance(trades, list)  # Ensure trades is a list
 

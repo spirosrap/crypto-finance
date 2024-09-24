@@ -109,7 +109,7 @@ python base.py
   python base.py --skip_backtest
   ```
 
-- Specify a different product ID (default is BTC-USD):
+- Specify a different product ID (default is BTC-USDC):
   ```bash
   python base.py --product_id ETH-USD
   ```
