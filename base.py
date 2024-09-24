@@ -217,11 +217,11 @@ def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_pe
 
     final_value, trades = trader.run_backtest(args.product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
     
-    logger.info(f"Backtesting results: Initial balance: ${initial_balance}, Final portfolio value: ${final_value:.2f}")
-    logger.info(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")
+    logger.info(f"Initial: ${initial_balance}, Final value: ${final_value:.2f}")
     logger.info(f"Number of trades: {len(trades)}")
     logger.debug("Trades executed during backtesting:")
-    
+    logger.info(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")
+
     sorted_trades = sorted(trades, key=lambda x: x.date)
     for trade in sorted_trades:
         human_readable_date = datetime.fromtimestamp(int(trade.date), tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')

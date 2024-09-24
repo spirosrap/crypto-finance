@@ -268,8 +268,8 @@ class Backtester:
 
             # Calculate final portfolio value
             final_value = balance + (btc_balance * float(candles[-1]['close']))
-            self.logger.info(f"Backtest completed. Final value: {final_value:.2f}")
-            self.logger.info("Trades:")
+            # self.logger.info(f"Backtest completed. Final value: {final_value:.2f}")
+            self.logger.info(f"Trades: ({len(trades)})")
 
             for trade in trades:
                 usd_value = trade.amount * trade.price
@@ -283,9 +283,9 @@ class Backtester:
             sharpe_ratio = np.sqrt(252) * daily_returns.mean() / daily_returns.std()
             self.logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f}")
 
-            # Calculate and print total return
-            total_return = (final_value - initial_balance) / initial_balance * 100
-            self.logger.info(f"Total Return: {total_return:.2f}%")
+            # # Calculate and print total return
+            # total_return = (final_value - initial_balance) / initial_balance * 100
+            # self.logger.info(f"Total Return: {total_return:.2f}%")
 
             # Calculate and print maximum drawdown
             cumulative_max = np.maximum.accumulate(portfolio_values)
