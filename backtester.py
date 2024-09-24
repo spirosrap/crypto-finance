@@ -280,7 +280,7 @@ class Backtester:
 
             # Calculate and print Sharpe ratio
             daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
-            sharpe_ratio = np.sqrt(252) * daily_returns.mean() / daily_returns.std()
+            sharpe_ratio = np.sqrt(365) * daily_returns.mean() / daily_returns.std() # Adjusted for daily returns in a 24/7/365 market
             self.logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f}")
 
             # # Calculate and print total return
