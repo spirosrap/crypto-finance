@@ -138,7 +138,9 @@ class TechnicalAnalysis:
             'volume_profile': 1,
             'short_term_trend': 2,
             'long_term_trend': 1,
-            'volume': 1
+            'volume': 1,
+            'fibonacci': 0,
+            'ichimoku': 0.75
         }
 
         # Adjust weights for bear markets
@@ -153,6 +155,8 @@ class TechnicalAnalysis:
             weights['macd'] = 1
             weights['stochastic'] = 1
             weights['ma_crossover'] = 1
+            weights['ichimoku'] = 0
+            weights['fibonacci'] = 0
 
         signal_strength += weights['rsi'] * self.evaluate_rsi_signal(rsi, volatility_std)
         signal_strength += weights['macd'] * self.evaluate_macd_signal(macd, signal, histogram)
@@ -161,6 +165,9 @@ class TechnicalAnalysis:
         signal_strength += weights['stochastic'] * self.evaluate_stochastic_signal(candles)
         signal_strength += weights['trend'] * self.evaluate_trend_signal(candles)
         signal_strength += weights['volume_profile'] * self.evaluate_volume_profile_signal(candles, current_price)
+        signal_strength += weights['fibonacci'] * self.evaluate_fibonacci_signal(candles)
+        signal_strength += weights['ichimoku'] * self.evaluate_ichimoku_signal(candles)
+
         signal_strength = self.adjust_signal_for_volatility(signal_strength, candles)
         signal_strength = self.adjust_signal_for_market_conditions(signal_strength, market_conditions, current_price, candles)
 
@@ -182,6 +189,57 @@ class TechnicalAnalysis:
             signal_strength -= weights['volume']
         
         return signal_strength  # Return an integer
+
+
+    def calculate_ichimoku_cloud(self, candles: List[Dict]) -> Dict[str, float]:
+        highs = self.extract_prices(candles, 'high')
+        lows = self.extract_prices(candles, 'low')
+        
+        tenkan_sen = (max(highs[-9:]) + min(lows[-9:])) / 2
+        kijun_sen = (max(highs[-26:]) + min(lows[-26:])) / 2
+        senkou_span_a = (tenkan_sen + kijun_sen) / 2
+        senkou_span_b = (max(highs[-52:]) + min(lows[-52:])) / 2
+        
+        return {
+            "tenkan_sen": tenkan_sen,
+            "kijun_sen": kijun_sen,
+            "senkou_span_a": senkou_span_a,
+            "senkou_span_b": senkou_span_b
+        }
+
+    def evaluate_ichimoku_signal(self, candles: List[Dict]) -> int:
+        current_price = self.extract_prices(candles)[-1]
+        ichimoku = self.calculate_ichimoku_cloud(candles)
+        
+        if current_price > ichimoku['senkou_span_a'] and current_price > ichimoku['senkou_span_b']:
+            return 1  # Bullish
+        elif current_price < ichimoku['senkou_span_a'] and current_price < ichimoku['senkou_span_b']:
+            return -1  # Bearish
+        return 0  # Neutral
+
+
+    def evaluate_fibonacci_signal(self, candles: List[Dict]) -> int:
+        prices = self.extract_prices(candles)
+        high, low = max(prices), min(prices)
+        current_price = prices[-1]
+        fib_levels = self.calculate_fibonacci_levels(high, low)
+        
+        for level, price in fib_levels.items():
+            if abs(current_price - price) / price < 0.01:  # Within 1% of a Fibonacci level
+                return 1 if current_price > price else -1
+        return 0
+
+    def calculate_fibonacci_levels(self, high: float, low: float) -> Dict[str, float]:
+        diff = high - low
+        levels = {
+            "23.6%": low + 0.236 * diff,
+            "38.2%": low + 0.382 * diff,
+            "50.0%": low + 0.5 * diff,
+            "61.8%": low + 0.618 * diff,
+            "78.6%": low + 0.786 * diff
+        }
+        return levels
+
 
     def evaluate_rsi_signal(self, rsi: float, volatility_std: float) -> int:
         rsi_signal = self.generate_signal(rsi, volatility_std)
