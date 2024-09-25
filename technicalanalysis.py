@@ -143,9 +143,16 @@ class TechnicalAnalysis:
 
         # Adjust weights for bear markets
         if market_conditions in [ "Bear Market", "Bearish"]:
-            weights['rsi'] *= 1.25
-            weights['trend'] *= 1.25
-            weights['bollinger'] *= 2
+            weights['rsi'] = 1
+            weights['trend'] = 1
+            weights['bollinger'] = 1
+            weights['volume_profile'] = 1
+            weights['short_term_trend'] = 1
+            weights['long_term_trend'] = 1
+            weights['volume'] = 1
+            weights['macd'] = 1
+            weights['stochastic'] = 1
+            weights['ma_crossover'] = 1
 
         signal_strength += weights['rsi'] * self.evaluate_rsi_signal(rsi, volatility_std)
         signal_strength += weights['macd'] * self.evaluate_macd_signal(macd, signal, histogram)
