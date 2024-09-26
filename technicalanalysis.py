@@ -1,33 +1,65 @@
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Union
 from coinbaseservice import CoinbaseService
 import time
 import yfinance as yf
 import talib
+import logging
+from functools import lru_cache
+from dataclasses import dataclass
+
+@dataclass
+class TechnicalAnalysisConfig:
+    rsi_overbought: float = 70
+    rsi_oversold: float = 30
+    volatility_threshold: float = 0.03
+    rsi_period: int = 14
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    bollinger_window: int = 20
+    bollinger_std: float = 2
+    risk_per_trade: float = 0.01
+    atr_multiplier: float = 2
 
 class TechnicalAnalysis:
-    def __init__(self, coinbase_service: CoinbaseService):
+    """
+    A class for performing technical analysis on cryptocurrency data.
+
+    This class provides methods for calculating various technical indicators
+    and generating trading signals based on those indicators.
+    """
+
+    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None):
+        """
+        Initialize the TechnicalAnalysis class.
+
+        Args:
+            coinbase_service (CoinbaseService): An instance of the CoinbaseService class.
+            config (Optional[TechnicalAnalysisConfig]): Configuration for the technical analysis.
+        """
         self.coinbase_service = coinbase_service
+        self.config = config or TechnicalAnalysisConfig()
         self.signal_history = []
         self.volatility_history = []
-        self.rsi_overbought = 70
-        self.rsi_oversold = 30
-        self.volatility_threshold = 0.03
-        self.rsi_period = 14
-        self.macd_fast = 12
-        self.macd_slow = 26
-        self.macd_signal = 9
-        self.bollinger_window = 20
-        self.bollinger_std = 2
+        self.logger = logging.getLogger(__name__)
 
-    def calculate_rsi(self, prices: List[float], period: int) -> float:
+    @lru_cache(maxsize=100)
+    def calculate_rsi(self, prices: Tuple[float, ...], period: int) -> float:
         """
-        Calculate the Relative Strength Index (RSI) using TA-Lib.
+        Calculate the Relative Strength Index (RSI) for a given set of prices.
+
+        Args:
+            prices (Tuple[float, ...]): A tuple of historical prices.
+            period (int): The period over which to calculate the RSI.
+
+        Returns:
+            float: The calculated RSI value.
         """
         return talib.RSI(np.array(prices), timeperiod=period)[-1]
 
-    def compute_rsi(self, product_id: str, candles: List[Dict], period: int = None) -> float:
+    def compute_rsi(self, product_id: str, candles: List[Dict], period: Optional[int] = None) -> float:
         """
         Compute the RSI for a given product using its historical candle data.
 
@@ -36,20 +68,20 @@ class TechnicalAnalysis:
         :param period: Period for RSI calculation.
         :return: RSI value.
         """
-        period = period or self.rsi_period
+        period = period or self.config.rsi_period
         try:
-            prices = self.extract_prices(candles)
+            prices = tuple(self.extract_prices(candles))  # Convert to tuple for caching
             return self.calculate_rsi(prices, period)
         except IndexError as e:
-            print(f"Error computing RSI: Not enough data for product {product_id}. {e}")
+            self.logger.error(f"Error computing RSI: Not enough data for product {product_id}. {e}")
         except Exception as e:
-            print(f"Error computing RSI for product {product_id}: {e}")
+            self.logger.error(f"Error computing RSI for product {product_id}: {e}")
         return 0.0
 
     def compute_rsi_from_prices(self, prices: List[float], period: int = 14) -> float:
-        return self.calculate_rsi(prices, period)
+        return self.calculate_rsi(tuple(prices), period)
 
-    def identify_trend(self, product_id: str, candles: List[Dict], window: int = 20) -> str:
+    def identify_trend(self, product_id: Optional[str], candles: List[Dict], window: int = 20) -> str:
         prices = self.extract_prices(candles)
         if len(prices) < window:
             return "Not enough data"
@@ -80,17 +112,17 @@ class TechnicalAnalysis:
 
     def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
         macd, signal, histogram = talib.MACD(np.array(prices), 
-                                             fastperiod=self.macd_fast, 
-                                             slowperiod=self.macd_slow, 
-                                             signalperiod=self.macd_signal)
+                                             fastperiod=self.config.macd_fast, 
+                                             slowperiod=self.config.macd_slow, 
+                                             signalperiod=self.config.macd_signal)
         return macd[-1], signal[-1], histogram[-1]
 
     def exponential_moving_average(self, data: List[float], span: int) -> np.ndarray:
         return pd.Series(data).ewm(span=span, adjust=False).mean().values
 
-    def compute_bollinger_bands(self, candles: List[Dict], window: int = None, num_std: float = None) -> Tuple[float, float, float]:
-        window = window or self.bollinger_window
-        num_std = num_std or self.bollinger_std
+    def compute_bollinger_bands(self, candles: List[Dict], window: Optional[int] = None, num_std: Optional[float] = None) -> Tuple[float, float, float]:
+        window = window or self.config.bollinger_window
+        num_std = num_std or self.config.bollinger_std
         prices = np.array(self.extract_prices(candles))
         
         upper, middle, lower = talib.BBANDS(prices, timeperiod=window, nbdevup=num_std, nbdevdn=num_std)
@@ -360,12 +392,12 @@ class TechnicalAnalysis:
 
     def generate_signal(self, rsi: float, volatility: float) -> str:
         # Adjust RSI levels based on volatility
-        if volatility > self.volatility_threshold:
-            adjusted_overbought = self.rsi_overbought + 10  # More room for upside in volatile markets
-            adjusted_oversold = self.rsi_oversold - 10  # More room for downside in volatile markets
+        if volatility > self.config.volatility_threshold:
+            adjusted_overbought = self.config.rsi_overbought + 10  # More room for upside in volatile markets
+            adjusted_oversold = self.config.rsi_oversold - 10  # More room for downside in volatile markets
         else:
-            adjusted_overbought = self.rsi_overbought
-            adjusted_oversold = self.rsi_oversold
+            adjusted_overbought = self.config.rsi_overbought
+            adjusted_oversold = self.config.rsi_oversold
 
         return "SELL" if rsi > adjusted_overbought else "BUY" if rsi < adjusted_oversold else "HOLD"
 
@@ -551,6 +583,6 @@ class TechnicalAnalysis:
             return 0.03  # 3% daily volatility
         
     def calculate_atr_position_size(self, balance: float, price: float, atr: float) -> float:
-        risk_amount = balance * self.risk_per_trade
-        position_size = risk_amount / (self.atr_multiplier * atr)
+        risk_amount = balance * self.config.risk_per_trade
+        position_size = risk_amount / (self.config.atr_multiplier * atr)
         return min(position_size * price, balance)  # Ensure we don't exceed available balance
