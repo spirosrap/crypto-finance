@@ -449,8 +449,11 @@ class TechnicalAnalysis:
         return high_threshold, very_high_threshold
 
     def calculate_sma(self, candles: List[Dict], period: int) -> float:
-        prices = self.extract_prices(candles)[-period:]
-        return sum(prices) / period
+        # prices = self.extract_prices(candles)[-period:]
+        # return sum(prices) / period
+        prices = np.array(self.extract_prices(candles))
+        sma = talib.SMA(prices, timeperiod=period)
+        return sma[-1] if sma[-1] is not None else 0.0
 
     def analyze_volume(self, candles: List[Dict]) -> str:
         recent_volumes = self.extract_prices(candles, 'volume')[-10:]
