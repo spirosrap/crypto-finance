@@ -31,7 +31,7 @@ class TechnicalAnalysis:
     and generating trading signals based on those indicators.
     """
 
-    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None):
+    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None, candle_interval: str = '1H'):
         """
         Initialize the TechnicalAnalysis class.
 
@@ -44,6 +44,16 @@ class TechnicalAnalysis:
         self.signal_history = []
         self.volatility_history = []
         self.logger = logging.getLogger(__name__)
+        self.candle_interval = candle_interval
+        self.intervals_per_day = self.calculate_intervals_per_day()
+
+    def calculate_intervals_per_day(self) -> int:
+        interval_map = {
+            '1m': 1440, '5m': 288, '15m': 96, '30m': 48,
+            '1H': 24, '2H': 12, '4H': 6, '6H': 4,
+            '8H': 3, '12H': 2, '1D': 1
+        }
+        return interval_map.get(self.candle_interval, 24)  # Default to 24 if unknown
 
     @lru_cache(maxsize=100)
     def calculate_rsi(self, prices: Tuple[float, ...], period: int) -> float:
@@ -417,6 +427,8 @@ class TechnicalAnalysis:
         return k[-1], d[-1]
 
     def compute_moving_average_crossover(self, candles: List[Dict], short_period: int = 50, long_period: int = 200) -> str:
+        short_period = max(1, int(short_period * self.intervals_per_day / 24))
+        long_period = max(1, int(long_period * self.intervals_per_day / 24))
         prices = self.extract_prices(candles)
         short_ma = talib.SMA(prices, timeperiod=short_period)[-1]
         long_ma = talib.SMA(prices, timeperiod=long_period)[-1]
@@ -449,10 +461,10 @@ class TechnicalAnalysis:
         return high_threshold, very_high_threshold
 
     def calculate_sma(self, candles: List[Dict], period: int) -> float:
-        # prices = self.extract_prices(candles)[-period:]
-        # return sum(prices) / period
+        # Adjust period based on candle interval
+        adjusted_period = max(1, int(period * self.intervals_per_day / 24))
         prices = self.extract_prices(candles)
-        sma = talib.SMA(prices, timeperiod=period)
+        sma = talib.SMA(prices, timeperiod=adjusted_period)
         return sma[-1] if sma[-1] is not None else 0.0
 
     def analyze_volume(self, candles: List[Dict]) -> str:
@@ -480,16 +492,18 @@ class TechnicalAnalysis:
 
     def detect_pullback(self, candles: List[Dict]) -> str:
         recent_prices = self.extract_prices(candles)[-5:]
-        if recent_prices[-1] < np.min(recent_prices[:-1]) and self.calculate_sma(candles, 20) > self.calculate_sma(candles, 50):
+        short_ma = self.calculate_sma(candles, 20)
+        long_ma = self.calculate_sma(candles, 50)
+        if recent_prices[-1] < np.min(recent_prices[:-1]) and short_ma > long_ma:
             return "Buy"
-        elif recent_prices[-1] > np.max(recent_prices[:-1]) and self.calculate_sma(candles, 20) < self.calculate_sma(candles, 50):
+        elif recent_prices[-1] > np.max(recent_prices[:-1]) and short_ma < long_ma:
             return "Sell"
         else:
             return "Hold"
 
     def analyze_market_conditions(self, candles: List[Dict]) -> str:
-        # Convert 50 days to hours
-        long_term_period = 200 * 24
+        # Convert 200 days to the appropriate number of intervals
+        long_term_period = 200 * self.intervals_per_day
 
         # Calculate the long-term moving average
         long_term_ma = self.calculate_sma(candles, long_term_period)
@@ -511,7 +525,7 @@ class TechnicalAnalysis:
         drawdown = (peak_price - current_price) / peak_price
 
         # Calculate the shorter-term moving average (e.g., 50-day MA)
-        short_term_period = 50 * 24
+        short_term_period = 50 * self.intervals_per_day
         short_term_ma = self.calculate_sma(candles, short_term_period)
 
         # Calculate the average volume change during bull markets
@@ -564,10 +578,10 @@ class TechnicalAnalysis:
         return np.mean(volume_changes) if volume_changes else 0.1  # Default to 10% if no bull markets found
 
     def determine_market_regime(self, candles: List[Dict]) -> str:
-        # Calculate historical volatility using a 20-day rolling window
+        # Adjust the volatility calculation based on candle interval
         prices = self.extract_prices(candles)
         returns = np.log(prices[1:] / prices[:-1])
-        volatility = np.std(returns[-20:]) * np.sqrt(252)  # Annualized volatility
+        volatility = np.std(returns[-20:]) * np.sqrt(252 * (self.intervals_per_day / 24))  # Annualized volatility
         
         # Define volatility thresholds
         if volatility < 0.15:
