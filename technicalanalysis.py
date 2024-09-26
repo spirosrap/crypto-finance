@@ -123,7 +123,7 @@ class TechnicalAnalysis:
     def compute_bollinger_bands(self, candles: List[Dict], window: Optional[int] = None, num_std: Optional[float] = None) -> Tuple[float, float, float]:
         window = window or self.config.bollinger_window
         num_std = num_std or self.config.bollinger_std
-        prices = np.array(self.extract_prices(candles))
+        prices = self.extract_prices(candles)
         
         upper, middle, lower = talib.BBANDS(prices, timeperiod=window, nbdevup=num_std, nbdevdn=num_std)
         
@@ -380,11 +380,11 @@ class TechnicalAnalysis:
         prices = self.extract_prices(candles)
         volumes = self.extract_prices(candles, 'volume')
         
-        min_price, max_price = min(prices), max(prices)
+        min_price, max_price = np.min(prices), np.max(prices)
         bins = np.linspace(min_price, max_price, num_bins + 1)
         
         digitized = np.digitize(prices, bins)
-        volume_profile = [sum(volumes[i] for i in range(len(volumes)) if digitized[i] == j) for j in range(1, len(bins))]
+        volume_profile = [np.sum(volumes[digitized == i]) for i in range(1, len(bins))]
         
         bin_centers = (bins[:-1] + bins[1:]) / 2
         
@@ -408,9 +408,9 @@ class TechnicalAnalysis:
 
 
     def compute_stochastic_oscillator(self, candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
-        high = np.array(self.extract_prices(candles, 'high'))
-        low = np.array(self.extract_prices(candles, 'low'))
-        close = np.array(self.extract_prices(candles))
+        high = self.extract_prices(candles, 'high')
+        low = self.extract_prices(candles, 'low')
+        close = self.extract_prices(candles)
         
         k, d = talib.STOCH(high, low, close, fastk_period=k_period, slowk_period=d_period, slowd_period=d_period)
         
@@ -418,15 +418,15 @@ class TechnicalAnalysis:
 
     def compute_moving_average_crossover(self, candles: List[Dict], short_period: int = 50, long_period: int = 200) -> str:
         prices = self.extract_prices(candles)
-        short_ma = pd.Series(prices).rolling(window=short_period).mean().iloc[-1]
-        long_ma = pd.Series(prices).rolling(window=long_period).mean().iloc[-1]
+        short_ma = talib.SMA(prices, timeperiod=short_period)[-1]
+        long_ma = talib.SMA(prices, timeperiod=long_period)[-1]
         
         return "BUY" if short_ma > long_ma else "SELL" if short_ma < long_ma else "HOLD"
 
     def compute_atr(self, candles: List[Dict], period: int = 14) -> float:
-        high = np.array(self.extract_prices(candles, 'high'))
-        low = np.array(self.extract_prices(candles, 'low'))
-        close = np.array(self.extract_prices(candles))
+        high = self.extract_prices(candles, 'high')
+        low = self.extract_prices(candles, 'low')
+        close = self.extract_prices(candles)
         
         atr = talib.ATR(high, low, close, timeperiod=period)
         
@@ -451,7 +451,7 @@ class TechnicalAnalysis:
     def calculate_sma(self, candles: List[Dict], period: int) -> float:
         # prices = self.extract_prices(candles)[-period:]
         # return sum(prices) / period
-        prices = np.array(self.extract_prices(candles))
+        prices = self.extract_prices(candles)
         sma = talib.SMA(prices, timeperiod=period)
         return sma[-1] if sma[-1] is not None else 0.0
 
@@ -467,22 +467,22 @@ class TechnicalAnalysis:
         else:
             return "Normal"
         
-    def extract_prices(self, candles: List[Dict], key: str = 'close') -> List[float]:
+    def extract_prices(self, candles: List[Dict], key: str = 'close') -> np.ndarray:
         """
         Extract prices from candle data.
 
         :param candles: List of historical candle data.
         :param key: Key to extract from each candle (default is 'close').
-        :return: List of prices.
+        :return: NumPy array of prices.
         """
-        return [float(candle[key]) for candle in candles]
+        return np.array([float(candle[key]) for candle in candles])
 
 
     def detect_pullback(self, candles: List[Dict]) -> str:
         recent_prices = self.extract_prices(candles)[-5:]
-        if recent_prices[-1] < min(recent_prices[:-1]) and self.calculate_sma(candles, 20) > self.calculate_sma(candles, 50):
+        if recent_prices[-1] < np.min(recent_prices[:-1]) and self.calculate_sma(candles, 20) > self.calculate_sma(candles, 50):
             return "Buy"
-        elif recent_prices[-1] > max(recent_prices[:-1]) and self.calculate_sma(candles, 20) < self.calculate_sma(candles, 50):
+        elif recent_prices[-1] > np.max(recent_prices[:-1]) and self.calculate_sma(candles, 20) < self.calculate_sma(candles, 50):
             return "Sell"
         else:
             return "Hold"
@@ -506,7 +506,7 @@ class TechnicalAnalysis:
         volatility = self.compute_atr(candles)
         
         # Calculate percentage drawdown from peak
-        peak_price = max(prices)
+        peak_price = np.max(prices)
         current_price = prices[-1]
         drawdown = (peak_price - current_price) / peak_price
 
@@ -549,7 +549,7 @@ class TechnicalAnalysis:
         # Define bull market criteria (e.g., price increasing for 5 consecutive days)
         bull_market_periods = []
         for i in range(5, len(prices)):
-            if all(prices[j] < prices[j+1] for j in range(i-5, i)):
+            if np.all(prices[i-5:i] < prices[i]):
                 bull_market_periods.append(i)
         
         # Calculate volume changes during bull market periods
@@ -566,7 +566,7 @@ class TechnicalAnalysis:
     def determine_market_regime(self, candles: List[Dict]) -> str:
         # Calculate historical volatility using a 20-day rolling window
         prices = self.extract_prices(candles)
-        returns = np.log(np.array(prices[1:]) / np.array(prices[:-1]))
+        returns = np.log(prices[1:] / prices[:-1])
         volatility = np.std(returns[-20:]) * np.sqrt(252)  # Annualized volatility
         
         # Define volatility thresholds
