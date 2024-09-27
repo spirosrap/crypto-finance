@@ -41,12 +41,6 @@ class CoinbaseService:
                 }
         return prices
 
-    def get_hourly_data(self, product_id, days=60):
-        return self.historical_data.get_hourly_data(product_id, days)
-
-    def get_6h_data(self, product_id):
-        return self.historical_data.get_6h_data(product_id)
-
     def place_order(self, product_id, side, size, order_type="MARKET", price=None, time_in_force="IOC"):
         try:
             # Generate a unique client_order_id

@@ -64,12 +64,6 @@ class CryptoTrader:
         logger.debug("Fetching BTC prices.")
         return self.coinbase_service.get_btc_prices()
 
-    def get_hourly_data(self, product_id: str) -> List[Dict[str, str]]:
-        return self.historical_data.get_hourly_data(product_id)
-
-    def get_6h_data(self, product_id: str) -> List[Dict[str, str]]:
-        return self.historical_data.get_6h_data(product_id)
-
     def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime, granularity: str = "ONE_HOUR") -> List[Dict[str, str]]:
         return self.historical_data.get_historical_data(product_id, start_date, end_date, granularity)
 
