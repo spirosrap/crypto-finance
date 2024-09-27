@@ -22,8 +22,8 @@ for command in commands:
         if output == '' and process.poll() is not None:
             break
         if output:
-            # Print lines containing "Total return:" and "Number of trades:"
-            if "Total return:" in output or "Number of trades:" in output:
+            # Print lines containing specific metrics
+            if any(metric in output for metric in ["Total return:", "Number of trades:", "Sharpe Ratio:", "Maximum Drawdown:"]):
                 print(f"RESULTS: {output.strip()}")
     
     print("\n" + "="*50 + "\n")
