@@ -77,7 +77,7 @@ class HistoricalData:
                     product_id=product_id,
                     start=start,
                     end=end,
-                    granularity=granularity  # Use the granularity parameter
+                    granularity=granularity
                 )
                 all_candles.extend(candles['candles'])
                 current_start = current_end
@@ -89,7 +89,7 @@ class HistoricalData:
 
         # Sort the candles by their start time to ensure they are in chronological order
         all_candles.sort(key=lambda x: x['start'])
-        self.logger.info(f"Fetched {len(all_candles)} candles for {product_id}.")
+        self.logger.info(f"Fetched {len(all_candles)} candles for {product_id} with granularity {granularity}.")
         return all_candles
 
     # Additional methods related to historical data can be added here

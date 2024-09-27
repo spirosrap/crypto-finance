@@ -70,8 +70,8 @@ class CryptoTrader:
     def get_6h_data(self, product_id: str) -> List[Dict[str, str]]:
         return self.historical_data.get_6h_data(product_id)
 
-    def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime) -> List[Dict[str, str]]:
-        return self.historical_data.get_historical_data(product_id, start_date, end_date)
+    def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime, granularity: str = "ONE_HOUR") -> List[Dict[str, str]]:
+        return self.historical_data.get_historical_data(product_id, start_date, end_date, granularity)
 
     def compute_rsi(self, product_id: str, candles: List[Dict[str, str]], period: int = RSI_PERIOD) -> float:
         return self.technical_analysis.compute_rsi(product_id, candles, period)
@@ -135,8 +135,8 @@ class CryptoTrader:
     def calculate_trade_amount_and_fee(self, balance: float, price: float, is_buy: bool) -> Tuple[float, float]:
         return self.coinbase_service.calculate_trade_amount_and_fee(balance, price, is_buy)
 
-    def run_backtest(self, product_id: str, start_date: str, end_date: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float) -> Tuple[float, List[TradeRecord]]:
-        return self.backtester.backtest(product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
+    def run_backtest(self, product_id: str, start_date: str, end_date: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float, granularity: str = "ONE_HOUR") -> Tuple[float, List[TradeRecord]]:
+        return self.backtester.backtest(product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent, granularity)
 
     def create_trade_record(self, time: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date=time, action=action, price=price, amount=amount, fee=fee)
@@ -151,6 +151,10 @@ def parse_arguments():
     parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")
     parser.add_argument("--live", action="store_true", help="Run live trading simulation")
     parser.add_argument("--product_id", default="BTC-USDC", help="Product ID for trading (default: BTC-USDC)")
+    parser.add_argument("--granularity", default="ONE_HOUR", choices=[
+        "ONE_MINUTE", "FIVE_MINUTE", "TEN_MINUTE", "FIFTEEN_MINUTE", 
+        "THIRTY_MINUTE", "ONE_HOUR", "SIX_HOUR", "ONE_DAY"
+    ], help="Granularity for candle data (default: ONE_HOUR)")
     return parser.parse_args()
 
 def display_portfolio_info(trader, product_id):
@@ -198,7 +202,7 @@ def calculate_btc_eur_value(trader):
     
     logger.info(f"0.00187597 BTC is worth approximately {eur_value_after_fees:.2f} EUR (including {float(fee_percentage)*100}% fees), Fees: {fees:.2f} EUR")
 
-def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent):
+def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent, granularity):
     if args.bearmarket:
         start_date = "2021-11-01 00:00:00"
         end_date = "2022-11-01 23:59:59"
@@ -215,7 +219,7 @@ def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_pe
         start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d 00:00:00")
         end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    final_value, trades = trader.run_backtest(args.product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent)
+    final_value, trades = trader.run_backtest(args.product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent, granularity)
     
     logger.info(f"Initial: ${initial_balance}, Final value: ${final_value:.2f}")
     logger.info(f"Number of trades: {len(trades)}")
@@ -233,7 +237,7 @@ def main():
 
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)
-    candles = trader.get_historical_data(args.product_id, start_date, end_date)
+    candles = trader.get_historical_data(args.product_id, start_date, end_date, args.granularity)
 
     display_portfolio_info(trader, args.product_id)
     display_technical_indicators(trader, args.product_id, candles)
@@ -246,10 +250,10 @@ def main():
 
     if args.live:
         logger.info("Starting live trading simulation.")
-        trader.backtester.run_live(args.product_id, initial_balance, risk_per_trade, trailing_stop_percent)
+        trader.backtester.run_live(args.product_id, initial_balance, risk_per_trade, trailing_stop_percent, granularity=args.granularity)
     elif not args.skip_backtest:
         logger.info("Starting backtesting.")
-        run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent)
+        run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent, granularity=args.granularity)
 
 if __name__ == "__main__":
     main()

@@ -84,7 +84,7 @@ class Backtester:
         risk_per_coin = entry_price - stop_loss
         return risk_amount / risk_per_coin
 
-    def backtest(self, product_id: str, start_date: datetime, end_date: datetime, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float) -> Tuple[float, List[TradeRecord]]:
+    def backtest(self, product_id: str, start_date: str, end_date: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float, granularity: str = "ONE_HOUR") -> Tuple[float, List[TradeRecord]]:
         try:
             # Convert start_date and end_date to datetime objects if they're strings
             if isinstance(start_date, str):
@@ -92,22 +92,22 @@ class Backtester:
             if isinstance(end_date, str):
                 end_date = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
 
-            self.logger.info(f"Starting backtest for {product_id} from {start_date} to {end_date}.")
+            self.logger.info(f"Starting backtest for {product_id} from {start_date} to {end_date} with granularity {granularity}.")
 
             # Create a directory for candle files if it doesn't exist
             candle_dir = "candle_data"
             os.makedirs(candle_dir, exist_ok=True)
 
-            # Create a filename based on the product_id and date range
-            filename = f"{product_id}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.json"
+            # Create a filename based on the product_id, date range, and granularity
+            filename = f"{product_id}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}_{granularity}.json"
             filepath = os.path.join(candle_dir, filename)
             
             # Check if we need the most recent data
             need_recent_data = end_date.date() == datetime.now().date()
 
             # If file doesn't exist, fetch all historical data
-            self.logger.info(f"Fetching all historical data from {start_date} to {end_date}...")
-            candles = self.trader.get_historical_data(product_id, start_date, end_date)
+            self.logger.info(f"Fetching all historical data from {start_date} to {end_date} with granularity {granularity}...")
+            candles = self.trader.get_historical_data(product_id, start_date, end_date, granularity)
             
             # Save the fetched data to a file
             with open(filepath, 'w') as f:
