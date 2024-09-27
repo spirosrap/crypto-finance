@@ -31,7 +31,7 @@ class TechnicalAnalysis:
     and generating trading signals based on those indicators.
     """
 
-    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None, candle_interval: str = '1H'):
+    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None, candle_interval: str = 'ONE_HOUR'):
         """
         Initialize the TechnicalAnalysis class.
 
@@ -49,9 +49,14 @@ class TechnicalAnalysis:
 
     def calculate_intervals_per_day(self) -> int:
         interval_map = {
-            '1m': 1440, '5m': 288, '15m': 96, '30m': 48,
-            '1H': 24, '2H': 12, '4H': 6, '6H': 4,
-            '8H': 3, '12H': 2, '1D': 1
+            "ONE_MINUTE": 1440,  # 1440 intervals in a day
+            "FIVE_MINUTE": 288,   # 288 intervals in a day
+            "TEN_MINUTE": 144,    # 144 intervals in a day
+            "FIFTEEN_MINUTE": 96,  # 96 intervals in a day
+            "THIRTY_MINUTE": 48,   # 48 intervals in a day
+            "ONE_HOUR": 24,        # 24 intervals in a day
+            "SIX_HOUR": 4,         # 4 intervals in a day
+            "ONE_DAY": 1           # 1 interval in a day
         }
         return interval_map.get(self.candle_interval, 24)  # Default to 24 if unknown
 
