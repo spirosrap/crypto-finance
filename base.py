@@ -149,6 +149,8 @@ def parse_arguments():
         "ONE_MINUTE", "FIVE_MINUTE", "TEN_MINUTE", "FIFTEEN_MINUTE", 
         "THIRTY_MINUTE", "ONE_HOUR", "SIX_HOUR", "ONE_DAY"
     ], help="Granularity for candle data (default: ONE_HOUR)")
+    parser.add_argument("--continuous", action="store_true", help="Run continuous backtesting simulation")
+    parser.add_argument("--update_interval", type=int, default=3600, help="Update interval for continuous backtesting (in seconds, default: 3600)")
     return parser.parse_args()
 
 def display_portfolio_info(trader, product_id):
@@ -245,6 +247,9 @@ def main():
     if args.live:
         logger.info("Starting live trading simulation.")
         trader.backtester.run_live(args.product_id, initial_balance, risk_per_trade, trailing_stop_percent, granularity=args.granularity)
+    elif args.continuous:
+        logger.info("Starting continuous backtesting simulation.")
+        trader.backtester.run_continuous_backtest(args.product_id, initial_balance, risk_per_trade, trailing_stop_percent, update_interval=args.update_interval)
     elif not args.skip_backtest:
         logger.info("Starting backtesting.")
         run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent, granularity=args.granularity)

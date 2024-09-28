@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Union
 from coinbase.rest import RESTClient
 from historicaldata import HistoricalData
 from technicalanalysis import TechnicalAnalysis
@@ -8,6 +8,7 @@ from sentimentanalysis import SentimentAnalysis
 from coinbaseservice import CoinbaseService
 from config import API_KEY, API_SECRET, NEWS_API_KEY
 import numpy as np
+from scipy import stats
 
 class HighFrequencyStrategy:
     def __init__(self, api_key: str, api_secret: str, product_id: str):
@@ -30,40 +31,103 @@ class HighFrequencyStrategy:
         return np.array([float(candle[key]) for candle in candles])        
 
     def get_signals(self, candles: List[Dict]) -> Dict[str, float]:
-        # Calculate technical indicators
-        close_prices = tuple(self.extract_prices(candles, key='close'))
-        volumes = tuple(self.extract_prices(candles, key='volume'))
+        close_prices = self.extract_prices(candles, key='close')
+        volumes = self.extract_prices(candles, key='volume')
 
-        rsi = self.technical_analysis.calculate_rsi(close_prices, period=14)
+        # Calculate technical indicators
+        rsi = self.technical_analysis.calculate_rsi(tuple(close_prices), period=14)
         macd, signal, _ = self.technical_analysis.compute_macd(self.product_id, candles)
-        bollinger_upper, bollinger_lower, _ = self.technical_analysis.compute_bollinger_bands(candles)
-        obv = self.technical_analysis.compute_on_balance_volume(close_prices, volumes)  # Changed method name here
+        bollinger_upper, bollinger_lower, bollinger_mid = self.technical_analysis.compute_bollinger_bands(candles)
+        obv = self.technical_analysis.compute_on_balance_volume(tuple(close_prices), tuple(volumes))
 
         # Get the most recent values
         current_price = close_prices[-1]
-        current_rsi = rsi
-        current_macd = macd
-        current_signal = signal
-        current_bollinger_upper = bollinger_upper
-        current_bollinger_lower = bollinger_lower
-        current_obv = obv[-1]
+        current_rsi = rsi if isinstance(rsi, (int, float)) else rsi[-1]
+        current_macd = macd[-1] if isinstance(macd, np.ndarray) else macd
+        current_signal = signal[-1] if isinstance(signal, np.ndarray) else signal
+        current_bollinger_upper = bollinger_upper[-1] if isinstance(bollinger_upper, np.ndarray) else bollinger_upper
+        current_bollinger_lower = bollinger_lower[-1] if isinstance(bollinger_lower, np.ndarray) else bollinger_lower
+        current_bollinger_mid = bollinger_mid[-1] if isinstance(bollinger_mid, np.ndarray) else bollinger_mid
+        current_obv = obv[-1] if isinstance(obv, np.ndarray) else obv
 
-        # Calculate signals
-        rsi_signal = 1 if current_rsi < 30 else (-1 if current_rsi > 70 else 0)
-        macd_signal = 1 if current_macd > current_signal else -1
-        bollinger_signal = 1 if current_price < current_bollinger_lower else (-1 if current_price > current_bollinger_upper else 0)
-        obv_signal = 1 if current_obv > obv[-2] else -1
+        # Calculate improved signals
+        rsi_signal = self.get_rsi_signal(current_rsi)
+        macd_signal = self.get_macd_signal(macd, signal)
+        bollinger_signal = self.get_bollinger_signal(current_price, current_bollinger_upper, current_bollinger_lower, current_bollinger_mid)
+        obv_signal = self.get_obv_signal(obv)
+        
+        # Add new signals
+        price_momentum = self.get_price_momentum(close_prices)
+        volume_trend = self.get_volume_trend(volumes)
 
-        # Combine signals
-        combined_signal = (rsi_signal + macd_signal + bollinger_signal + obv_signal) / 4
+        # Combine signals with weights
+        weights = {
+            'rsi': 0.2,
+            'macd': 0.2,
+            'bollinger': 0.2,
+            'obv': 0.1,
+            'price_momentum': 0.2,
+            'volume_trend': 0.1
+        }
+
+        combined_signal = (
+            rsi_signal * weights['rsi'] +
+            macd_signal * weights['macd'] +
+            bollinger_signal * weights['bollinger'] +
+            obv_signal * weights['obv'] +
+            price_momentum * weights['price_momentum'] +
+            volume_trend * weights['volume_trend']
+        )
 
         return {
             "rsi": rsi_signal,
             "macd": macd_signal,
             "bollinger": bollinger_signal,
             "obv": obv_signal,
+            "price_momentum": price_momentum,
+            "volume_trend": volume_trend,
             "combined": combined_signal
         }
+
+    def get_rsi_signal(self, rsi: float) -> float:
+        if rsi < 30:
+            return 1 - (rsi / 30)  # Stronger buy signal as RSI approaches 0
+        elif rsi > 70:
+            return -((rsi - 70) / 30)  # Stronger sell signal as RSI approaches 100
+        else:
+            return 0
+
+    def get_macd_signal(self, macd: Union[np.ndarray, float], signal: Union[np.ndarray, float]) -> float:
+        if isinstance(macd, np.ndarray) and isinstance(signal, np.ndarray):
+            diff = macd[-1] - signal[-1]
+        else:
+            diff = macd - signal
+        return np.tanh(diff)  # Use hyperbolic tangent to normalize the signal
+
+    def get_bollinger_signal(self, price: float, upper: float, lower: float, mid: float) -> float:
+        if price < lower:
+            return (lower - price) / (mid - lower)  # Stronger buy signal as price drops below lower band
+        elif price > upper:
+            return -((price - upper) / (upper - mid))  # Stronger sell signal as price rises above upper band
+        else:
+            return 0
+
+    def get_obv_signal(self, obv: Union[np.ndarray, float]) -> float:
+        if isinstance(obv, np.ndarray):
+            obv_sma = np.mean(obv[-20:])  # 20-period SMA of OBV
+            return np.tanh((obv[-1] - obv_sma) / obv_sma)  # Normalize using hyperbolic tangent
+        else:
+            return 0  # Return 0 if OBV is a scalar, as we can't calculate a trend
+
+    def get_price_momentum(self, prices: np.ndarray) -> float:
+        returns = np.diff(prices) / prices[:-1]
+        z_score = stats.zscore(returns)[-1]
+        return np.tanh(z_score)  # Normalize using hyperbolic tangent
+
+    def get_volume_trend(self, volumes: np.ndarray) -> float:
+        short_ma = np.mean(volumes[-10:])
+        long_ma = np.mean(volumes[-30:])
+        return np.tanh((short_ma - long_ma) / long_ma)  # Normalize using hyperbolic tangent
 
     def run_strategy(self, lookback_hours: int = 24):
         end_date = datetime.now()
@@ -131,7 +195,7 @@ class HighFrequencyStrategy:
             self.logger.info(f"Date: {current_date}, Price: {current_price}, Signal: {final_signal}")
             self.logger.info(f"Current balance: ${balance:.2f}, BTC balance: {btc_balance:.8f}")
 
-            if final_signal > 0.2 and balance > 0:  # Buy signal
+            if final_signal > 0.4 and balance > 0:  # Buy signal
                 btc_to_buy = (balance * 0.1) / current_price  # Buy with 10% of available balance
                 fee = btc_to_buy * current_price * fee_rate
                 if balance >= (btc_to_buy * current_price + fee):
@@ -176,5 +240,5 @@ if __name__ == "__main__":
     
     # Run backtest
     start_date = datetime(2024, 8, 1)  # Changed to a past date
-    end_date = datetime(2024, 8, 30)
+    end_date = datetime(2024, 9, 28)
     final_balance, roi, trades = strategy.backtest(start_date, end_date)

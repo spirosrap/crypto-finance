@@ -501,3 +501,68 @@ class Backtester:
             # Save state before exiting due to error
             self.save_state(product_id, balance, btc_balance, last_trade_time, last_trade_price, last_buy_price, highest_price_since_buy, trades)
 
+    def run_continuous_backtest(self, product_id: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float, update_interval: int = 3600) -> None:
+        while True:
+            try:
+                self.logger.info(f"Starting continuous backtest for {product_id}")
+                
+                balance = initial_balance
+                btc_balance = 0
+                last_trade_time = None
+                last_trade_price = None
+                last_buy_price = None
+                highest_price_since_buy = 0
+                trades = []
+
+                end_date = datetime.now(timezone.utc)
+                start_date = end_date - timedelta(days=365)  # One year of data
+
+                # Fetch historical data
+                candles = self.trader.get_historical_data(product_id, start_date, end_date, "ONE_HOUR")
+
+                if not candles:
+                    self.logger.warning("No historical data available. Retrying in 60 seconds...")
+                    time.sleep(60)
+                    continue
+
+                # Run backtest on the last year of data
+                final_balance, new_trades = self.backtest(product_id, start_date, end_date, balance, risk_per_trade, trailing_stop_percent)
+
+                # Check for new trades
+                if new_trades:
+                    latest_trade = new_trades[-1]
+                    if not trades or latest_trade.date > trades[-1].date:
+                        self.logger.info(f"New trade detected: {latest_trade}")
+                        trades.append(latest_trade)
+
+                        # Update balance and btc_balance based on the new trade
+                        if latest_trade.action in ["BUY", "STRONG BUY"]:
+                            btc_balance += latest_trade.amount
+                            balance -= (latest_trade.amount * latest_trade.price + latest_trade.fee)
+                            last_buy_price = latest_trade.price
+                            highest_price_since_buy = latest_trade.price
+                        elif latest_trade.action in ["SELL", "STRONG SELL", "STOP LOSS", "TRAILING STOP"]:
+                            balance += (latest_trade.amount * latest_trade.price - latest_trade.fee)
+                            btc_balance -= latest_trade.amount
+                            last_buy_price = None
+                            highest_price_since_buy = 0
+
+                        last_trade_time = latest_trade.date
+                        last_trade_price = latest_trade.price
+
+                # Log current state
+                current_price = float(candles[-1]['close'])
+                portfolio_value = balance + (btc_balance * current_price)
+                self.logger.info(f"Current balance: {balance:.2f} USD")
+                self.logger.info(f"Current BTC balance: {btc_balance:.8f} BTC")
+                self.logger.info(f"Current portfolio value: {portfolio_value:.2f} USD")
+                self.logger.info(f"Current BTC price: {current_price:.2f} USD")
+
+                # Sleep for the specified update interval
+                self.logger.info(f"Sleeping for {update_interval} seconds before next update...")
+                time.sleep(update_interval)
+
+            except Exception as e:
+                self.logger.error(f"An error occurred during continuous backtesting: {e}", exc_info=True)
+                # Wait and continue running
+                time.sleep(60)
