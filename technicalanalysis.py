@@ -608,3 +608,21 @@ class TechnicalAnalysis:
         risk_amount = balance * self.config.risk_per_trade
         position_size = risk_amount / (self.config.atr_multiplier * atr)
         return min(position_size * price, balance)  # Ensure we don't exceed available balance
+
+    def compute_on_balance_volume(self, close_prices: List[float], volumes: List[float]) -> List[float]:
+        """
+        Calculate On-Balance Volume (OBV) indicator.
+
+        :param close_prices: List of closing prices.
+        :param volumes: List of volume data.
+        :return: List of OBV values.
+        """
+        obv = [0]
+        for i in range(1, len(close_prices)):
+            if close_prices[i] > close_prices[i-1]:
+                obv.append(obv[-1] + volumes[i])
+            elif close_prices[i] < close_prices[i-1]:
+                obv.append(obv[-1] - volumes[i])
+            else:
+                obv.append(obv[-1])
+        return obv
