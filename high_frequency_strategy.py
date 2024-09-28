@@ -107,6 +107,7 @@ class HighFrequencyStrategy:
         balance = initial_balance
         btc_balance = 0
         trades = []
+        fee_rate = 0.0075  # 0.75% fee
 
         while current_date <= end_date:
             lookback_start = current_date - timedelta(hours=24)
@@ -123,28 +124,35 @@ class HighFrequencyStrategy:
                 continue
 
             signals = self.get_signals(candles)
-            # For backtesting, we'll use a constant sentiment score or implement historical sentiment
-            sentiment_score = 0  # Replace with historical sentiment if available
-            final_signal = (signals['combined'] + sentiment_score) / 2
+            final_signal = signals['combined']
 
             current_price = float(candles[-1]['close'])
 
             self.logger.info(f"Date: {current_date}, Price: {current_price}, Signal: {final_signal}")
-            self.logger.info(f"Current balance: ${balance}, BTC balance: {btc_balance}")
+            self.logger.info(f"Current balance: ${balance:.2f}, BTC balance: {btc_balance:.8f}")
 
-            # Implement a more flexible trading strategy
-            if final_signal > 0.3 and balance > 0:  # Lowered threshold for buying
+            if final_signal > 0.2 and balance > 0:  # Buy signal
                 btc_to_buy = (balance * 0.1) / current_price  # Buy with 10% of available balance
-                balance -= btc_to_buy * current_price
-                btc_balance += btc_to_buy
-                trades.append(('buy', current_date, current_price, btc_to_buy))
-                self.logger.info(f"Bought {btc_to_buy} BTC at {current_price} on {current_date}")
-            elif final_signal < -0.3 and btc_balance > 0:  # Lowered threshold for selling
+                fee = btc_to_buy * current_price * fee_rate
+                if balance >= (btc_to_buy * current_price + fee):
+                    balance -= btc_to_buy * current_price + fee
+                    btc_balance += btc_to_buy
+                    trades.append(('buy', current_date, current_price, btc_to_buy))
+                    self.logger.info(f"Bought {btc_to_buy:.8f} BTC at {current_price} on {current_date}")
+                    self.logger.info(f"Fee paid: ${fee:.2f}")
+                else:
+                    self.logger.info("Insufficient balance to buy including fee")
+
+            elif final_signal < -0.2 and btc_balance > 0:  # Sell signal
                 btc_to_sell = btc_balance * 0.1  # Sell 10% of BTC holdings
-                balance += btc_to_sell * current_price
+                gross_sale = btc_to_sell * current_price
+                fee = gross_sale * fee_rate
+                net_sale = gross_sale - fee
+                balance += net_sale
                 btc_balance -= btc_to_sell
                 trades.append(('sell', current_date, current_price, btc_to_sell))
-                self.logger.info(f"Sold {btc_to_sell} BTC at {current_price} on {current_date}")
+                self.logger.info(f"Sold {btc_to_sell:.8f} BTC at {current_price} on {current_date}")
+                self.logger.info(f"Fee paid: ${fee:.2f}")
 
             current_date += timedelta(hours=1)
 
@@ -152,8 +160,8 @@ class HighFrequencyStrategy:
         roi = (final_balance - initial_balance) / initial_balance * 100
 
         self.logger.info(f"Backtesting completed")
-        self.logger.info(f"Initial balance: ${initial_balance}")
-        self.logger.info(f"Final balance: ${final_balance}")
+        self.logger.info(f"Initial balance: ${initial_balance:.2f}")
+        self.logger.info(f"Final balance: ${final_balance:.2f}")
         self.logger.info(f"ROI: {roi:.2f}%")
         self.logger.info(f"Number of trades: {len(trades)}")
 
@@ -167,6 +175,6 @@ if __name__ == "__main__":
     strategy = HighFrequencyStrategy(API_KEY, API_SECRET, "BTC-USDC")
     
     # Run backtest
-    start_date = datetime(2023, 1, 1)
-    end_date = datetime(2023, 1, 7)  # Reduced to one week for faster testing
+    start_date = datetime(2024, 8, 1)  # Changed to a past date
+    end_date = datetime(2024, 8, 30)
     final_balance, roi, trades = strategy.backtest(start_date, end_date)
