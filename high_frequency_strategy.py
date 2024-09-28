@@ -100,10 +100,73 @@ class HighFrequencyStrategy:
         else:
             self.logger.info("Hold or no clear signal")
 
+        return final_signal
+
+    def backtest(self, start_date: datetime, end_date: datetime, initial_balance: float = 10000):
+        current_date = start_date
+        balance = initial_balance
+        btc_balance = 0
+        trades = []
+
+        while current_date <= end_date:
+            lookback_start = current_date - timedelta(hours=24)
+            candles = self.historical_data.get_historical_data(
+                self.product_id,
+                lookback_start,
+                current_date,
+                granularity="FIVE_MINUTE"
+            )
+
+            if not candles:
+                self.logger.warning(f"No data available for {current_date}")
+                current_date += timedelta(hours=1)
+                continue
+
+            signals = self.get_signals(candles)
+            # For backtesting, we'll use a constant sentiment score or implement historical sentiment
+            sentiment_score = 0  # Replace with historical sentiment if available
+            final_signal = (signals['combined'] + sentiment_score) / 2
+
+            current_price = float(candles[-1]['close'])
+
+            self.logger.info(f"Date: {current_date}, Price: {current_price}, Signal: {final_signal}")
+            self.logger.info(f"Current balance: ${balance}, BTC balance: {btc_balance}")
+
+            # Implement a more flexible trading strategy
+            if final_signal > 0.3 and balance > 0:  # Lowered threshold for buying
+                btc_to_buy = (balance * 0.1) / current_price  # Buy with 10% of available balance
+                balance -= btc_to_buy * current_price
+                btc_balance += btc_to_buy
+                trades.append(('buy', current_date, current_price, btc_to_buy))
+                self.logger.info(f"Bought {btc_to_buy} BTC at {current_price} on {current_date}")
+            elif final_signal < -0.3 and btc_balance > 0:  # Lowered threshold for selling
+                btc_to_sell = btc_balance * 0.1  # Sell 10% of BTC holdings
+                balance += btc_to_sell * current_price
+                btc_balance -= btc_to_sell
+                trades.append(('sell', current_date, current_price, btc_to_sell))
+                self.logger.info(f"Sold {btc_to_sell} BTC at {current_price} on {current_date}")
+
+            current_date += timedelta(hours=1)
+
+        final_balance = balance + btc_balance * current_price
+        roi = (final_balance - initial_balance) / initial_balance * 100
+
+        self.logger.info(f"Backtesting completed")
+        self.logger.info(f"Initial balance: ${initial_balance}")
+        self.logger.info(f"Final balance: ${final_balance}")
+        self.logger.info(f"ROI: {roi:.2f}%")
+        self.logger.info(f"Number of trades: {len(trades)}")
+
+        return final_balance, roi, trades
+
 if __name__ == "__main__":
     # Set up logging
     logging.basicConfig(level=logging.INFO)
 
     # Initialize the strategy with your API key and secret
     strategy = HighFrequencyStrategy(API_KEY, API_SECRET, "BTC-USDC")
-    strategy.run_strategy()
+    
+    # Run backtest
+    start_date = datetime(2023, 1, 1)
+    end_date = datetime(2023, 1, 7)  # Reduced to one week for faster testing
+    final_balance, roi, trades = strategy.backtest(start_date, end_date)
