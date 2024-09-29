@@ -186,8 +186,8 @@ class TechnicalAnalysis:
             'short_term_trend': 2,
             'long_term_trend': 1,
             'volume': 1,
-            'fibonacci': 0,
-            'ichimoku': 0.75
+            'ichimoku': 0.75,
+            'fibonacci': 0
         }
 
         # Adjust weights for bear markets
