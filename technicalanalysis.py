@@ -60,6 +60,7 @@ class TechnicalAnalysis:
         }
         return interval_map.get(self.candle_interval, 24)  # Default to 24 if unknown
 
+    # RSI Methods
     @lru_cache(maxsize=100)
     def calculate_rsi(self, prices: Tuple[float, ...], period: int) -> float:
         """
@@ -96,6 +97,102 @@ class TechnicalAnalysis:
     def compute_rsi_from_prices(self, prices: List[float], period: int = 14) -> float:
         return self.calculate_rsi(tuple(prices), period)
 
+    def evaluate_rsi_signal(self, rsi: float, volatility_std: float) -> int:
+        rsi_signal = self.generate_signal(rsi, volatility_std)
+        return 1 if rsi_signal == "BUY" else -1 if rsi_signal == "SELL" else 0
+
+    # MACD Methods
+    def compute_macd(self, product_id: str, candles: List[Dict]) -> Tuple[float, float, float]:
+        prices = self.extract_prices(candles)
+        return self.compute_macd_from_prices(prices)
+
+    def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
+        macd, signal, histogram = talib.MACD(np.array(prices), 
+                                             fastperiod=self.config.macd_fast, 
+                                             slowperiod=self.config.macd_slow, 
+                                             signalperiod=self.config.macd_signal)
+        return macd[-1], signal[-1], histogram[-1]
+
+    def generate_macd_signal(self, macd: float, signal: float, histogram: float) -> str:
+        if macd > signal or histogram >= 0:
+            return "BUY"
+        elif macd < signal or histogram <= 0:
+            return "SELL"
+        else:
+            return "HOLD"
+
+    def evaluate_macd_signal(self, macd: float, signal: float, histogram: float) -> int:
+        macd_signal = self.generate_macd_signal(macd, signal, histogram)
+        return 1 if macd_signal == "BUY" else -1 if macd_signal == "SELL" else 0
+
+    # Bollinger Bands Methods
+    def compute_bollinger_bands(self, candles: List[Dict], window: Optional[int] = None, num_std: Optional[float] = None) -> Tuple[float, float, float]:
+        window = window or self.config.bollinger_window
+        num_std = num_std or self.config.bollinger_std
+        prices = self.extract_prices(candles)
+        
+        upper, middle, lower = talib.BBANDS(prices, timeperiod=window, nbdevup=num_std, nbdevdn=num_std)
+        
+        return upper[-1], middle[-1], lower[-1]
+
+    def generate_bollinger_bands_signal(self, candles: List[Dict]) -> str:
+        upper_band, middle_band, lower_band = self.compute_bollinger_bands(candles)
+        current_price = self.extract_prices(candles)[-1]
+        
+        if current_price > upper_band:
+            return "SELL"
+        elif current_price < lower_band:
+            return "BUY"
+        else:
+            return "HOLD"
+
+    def evaluate_bollinger_signal(self, candles: List[Dict]) -> int:
+        bollinger_signal = self.generate_bollinger_bands_signal(candles)
+        return 1 if bollinger_signal == "BUY" else -1 if bollinger_signal == "SELL" else 0
+
+    # Moving Average Methods
+    def exponential_moving_average(self, data: List[float], span: int) -> np.ndarray:
+        return pd.Series(data).ewm(span=span, adjust=False).mean().values
+
+    def calculate_sma(self, candles: List[Dict], period: int) -> float:
+        # Adjust period based on candle interval
+        adjusted_period = max(1, int(period * self.intervals_per_day / 24))
+        prices = self.extract_prices(candles)
+        sma = talib.SMA(prices, timeperiod=adjusted_period)
+        return sma[-1] if sma[-1] is not None else 0.0
+
+    def compute_moving_average_crossover(self, candles: List[Dict], short_period: int = 50, long_period: int = 200) -> str:
+        short_period = max(1, int(short_period * self.intervals_per_day / 24))
+        long_period = max(1, int(long_period * self.intervals_per_day / 24))
+        prices = self.extract_prices(candles)
+        short_ma = talib.SMA(prices, timeperiod=short_period)[-1]
+        long_ma = talib.SMA(prices, timeperiod=long_period)[-1]
+        
+        return "BUY" if short_ma > long_ma else "SELL" if short_ma < long_ma else "HOLD"
+
+    def evaluate_ma_crossover_signal(self, candles: List[Dict]) -> int:
+        ma_crossover_signal = self.compute_moving_average_crossover(candles)
+        return 1 if ma_crossover_signal == "BUY" else -1 if ma_crossover_signal == "SELL" else 0
+
+    # Stochastic Oscillator Methods
+    def compute_stochastic_oscillator(self, candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
+        high = self.extract_prices(candles, 'high')
+        low = self.extract_prices(candles, 'low')
+        close = self.extract_prices(candles)
+        
+        k, d = talib.STOCH(high, low, close, fastk_period=k_period, slowk_period=d_period, slowd_period=d_period)
+        
+        return k[-1], d[-1]
+
+    def evaluate_stochastic_signal(self, candles: List[Dict]) -> int:
+        stochastic_k, stochastic_d = self.compute_stochastic_oscillator(candles)
+        if stochastic_k > 80 and stochastic_d > 80:
+            return -1  # Overbought condition
+        elif stochastic_k < 20 and stochastic_d < 20:
+            return 1  # Oversold condition
+        return 0
+
+    # Trend Analysis Methods
     def identify_trend(self, product_id: Optional[str], candles: List[Dict], window: int = 20) -> str:
         prices = self.extract_prices(candles)
         if len(prices) < window:
@@ -121,39 +218,156 @@ class TechnicalAnalysis:
         else:
             return "Sideways"
 
-    def compute_macd(self, product_id: str, candles: List[Dict]) -> Tuple[float, float, float]:
+    def evaluate_trend_signal(self, candles: List[Dict]) -> int:
+        price_trend = self.identify_trend(None, candles)
+        return 1 if price_trend == "Uptrend" else -1 if price_trend == "Downtrend" else 0
+
+    # Volume Analysis Methods
+    def compute_volume_profile(self, candles: List[Dict], num_bins: int = 10) -> List[Tuple[float, float]]:
         prices = self.extract_prices(candles)
-        return self.compute_macd_from_prices(prices)
-
-    def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
-        macd, signal, histogram = talib.MACD(np.array(prices), 
-                                             fastperiod=self.config.macd_fast, 
-                                             slowperiod=self.config.macd_slow, 
-                                             signalperiod=self.config.macd_signal)
-        return macd[-1], signal[-1], histogram[-1]
-
-    def exponential_moving_average(self, data: List[float], span: int) -> np.ndarray:
-        return pd.Series(data).ewm(span=span, adjust=False).mean().values
-
-    def compute_bollinger_bands(self, candles: List[Dict], window: Optional[int] = None, num_std: Optional[float] = None) -> Tuple[float, float, float]:
-        window = window or self.config.bollinger_window
-        num_std = num_std or self.config.bollinger_std
-        prices = self.extract_prices(candles)
+        volumes = self.extract_prices(candles, 'volume')
         
-        upper, middle, lower = talib.BBANDS(prices, timeperiod=window, nbdevup=num_std, nbdevdn=num_std)
+        min_price, max_price = np.min(prices), np.max(prices)
+        bins = np.linspace(min_price, max_price, num_bins + 1)
         
-        return upper[-1], middle[-1], lower[-1]
+        digitized = np.digitize(prices, bins)
+        volume_profile = [np.sum(volumes[digitized == i]) for i in range(1, len(bins))]
+        
+        bin_centers = (bins[:-1] + bins[1:]) / 2
+        
+        return list(zip(bin_centers, volume_profile))
 
-    def generate_bollinger_bands_signal(self, candles: List[Dict]) -> str:
-        upper_band, middle_band, lower_band = self.compute_bollinger_bands(candles)
-        current_price = self.extract_prices(candles)[-1]
+    def evaluate_volume_profile_signal(self, candles: List[Dict], current_price: float) -> int:
+        volume_profile = self.compute_volume_profile(candles)
+        volume_resistance = max(volume_profile, key=lambda x: x[1])[0]
+        if current_price > volume_resistance:
+            return 1
+        elif current_price < volume_resistance:
+            return -1
+        return 0
+
+    def analyze_volume(self, candles: List[Dict]) -> str:
+        recent_volumes = self.extract_prices(candles, 'volume')[-10:]
+        avg_volume = sum(recent_volumes) / len(recent_volumes)
+        current_volume = self.extract_prices(candles, 'volume')[-1]
         
-        if current_price > upper_band:
-            return "SELL"
-        elif current_price < lower_band:
-            return "BUY"
+        if current_volume > avg_volume * 1.5:
+            return "High"
+        elif current_volume < avg_volume * 0.5:
+            return "Low"
         else:
-            return "HOLD"
+            return "Normal"
+        
+    def compute_on_balance_volume(self, close_prices: List[float], volumes: List[float]) -> List[float]:
+        """
+        Calculate On-Balance Volume (OBV) indicator.
+
+        :param close_prices: List of closing prices.
+        :param volumes: List of volume data.
+        :return: List of OBV values.
+        """
+        obv = [0]
+        for i in range(1, len(close_prices)):
+            if close_prices[i] > close_prices[i-1]:
+                obv.append(obv[-1] + volumes[i])
+            elif close_prices[i] < close_prices[i-1]:
+                obv.append(obv[-1] - volumes[i])
+            else:
+                obv.append(obv[-1])
+        return obv
+
+    # Ichimoku Cloud Methods
+    def calculate_ichimoku_cloud(self, candles: List[Dict]) -> Dict[str, float]:
+        highs = self.extract_prices(candles, 'high')
+        lows = self.extract_prices(candles, 'low')
+        
+        tenkan_sen = (max(highs[-9:]) + min(lows[-9:])) / 2
+        kijun_sen = (max(highs[-26:]) + min(lows[-26:])) / 2
+        senkou_span_a = (tenkan_sen + kijun_sen) / 2
+        senkou_span_b = (max(highs[-52:]) + min(lows[-52:])) / 2
+        
+        return {
+            "tenkan_sen": tenkan_sen,
+            "kijun_sen": kijun_sen,
+            "senkou_span_a": senkou_span_a,
+            "senkou_span_b": senkou_span_b
+        }
+
+    def evaluate_ichimoku_signal(self, candles: List[Dict]) -> int:
+        current_price = self.extract_prices(candles)[-1]
+        ichimoku = self.calculate_ichimoku_cloud(candles)
+        
+        if current_price > ichimoku['senkou_span_a'] and current_price > ichimoku['senkou_span_b']:
+            return 1  # Bullish
+        elif current_price < ichimoku['senkou_span_a'] and current_price < ichimoku['senkou_span_b']:
+            return -1  # Bearish
+        return 0  # Neutral
+
+    # Fibonacci Methods
+    def calculate_fibonacci_levels(self, high: float, low: float) -> Dict[str, float]:
+        diff = high - low
+        levels = {
+            "23.6%": low + 0.236 * diff,
+            "38.2%": low + 0.382 * diff,
+            "50.0%": low + 0.5 * diff,
+            "61.8%": low + 0.618 * diff,
+            "78.6%": low + 0.786 * diff
+        }
+        return levels
+
+    def evaluate_fibonacci_signal(self, candles: List[Dict]) -> int:
+        prices = self.extract_prices(candles)
+        high, low = max(prices), min(prices)
+        current_price = prices[-1]
+        fib_levels = self.calculate_fibonacci_levels(high, low)
+        
+        for level, price in fib_levels.items():
+            if abs(current_price - price) / price < 0.01:  # Within 1% of a Fibonacci level
+                return 1 if current_price > price else -1
+        return 0
+
+    # Volatility Methods
+    def calculate_volatility(self, candles: List[Dict]) -> float:
+        prices = self.extract_prices(candles[-20:])
+        returns = np.diff(np.log(prices))
+        return np.std(returns) * np.sqrt(365)
+
+    def update_volatility_history(self, volatility: float):
+        self.volatility_history.append({'timestamp': time.time(), 'volatility': volatility})
+        # Keep only the last 100 volatility readings
+        self.volatility_history = self.volatility_history[-100:]
+
+    def get_dynamic_volatility_threshold(self) -> Tuple[float, float]:
+        volatilities = [v['volatility'] for v in self.volatility_history]
+        mean_volatility = np.mean(volatilities)
+        std_volatility = np.std(volatilities)
+        
+        # Set thresholds at 1 and 2 standard deviations above the mean
+        high_threshold = mean_volatility + std_volatility
+        very_high_threshold = mean_volatility + 2 * std_volatility
+        
+        return high_threshold, very_high_threshold
+
+    def compute_atr(self, candles: List[Dict], period: int = 14) -> float:
+        high = self.extract_prices(candles, 'high')
+        low = self.extract_prices(candles, 'low')
+        close = self.extract_prices(candles)
+        
+        atr = talib.ATR(high, low, close, timeperiod=period)
+        
+        return atr[-1]
+
+    # Signal Generation and Analysis Methods
+    def generate_signal(self, rsi: float, volatility: float) -> str:
+        # Adjust RSI levels based on volatility
+        if volatility > self.config.volatility_threshold:
+            adjusted_overbought = self.config.rsi_overbought + 10  # More room for upside in volatile markets
+            adjusted_oversold = self.config.rsi_oversold - 10  # More room for downside in volatile markets
+        else:
+            adjusted_overbought = self.config.rsi_overbought
+            adjusted_oversold = self.config.rsi_oversold
+
+        return "SELL" if rsi > adjusted_overbought else "BUY" if rsi < adjusted_oversold else "HOLD"
 
     def generate_combined_signal(self, rsi: float, macd: float, signal: float, histogram: float, 
                                  candles: List[Dict], market_conditions: Optional[str] = None) -> str:
@@ -163,11 +377,6 @@ class TechnicalAnalysis:
         signal_strength = self.calculate_signal_strength(rsi, macd, signal, histogram, market_conditions, candles, volatility_std)
         final_signal = self.determine_final_signal(signal_strength, market_conditions, current_price, candles)
         return final_signal
-
-    def calculate_volatility(self, candles: List[Dict]) -> float:
-        prices = self.extract_prices(candles[-20:])
-        returns = np.diff(np.log(prices))
-        return np.std(returns) * np.sqrt(365)
 
     def calculate_signal_strength(self, rsi: float, macd: float, signal: float, histogram: float, market_conditions: str,
                                   candles: List[Dict], volatility_std: float) -> int:
@@ -237,94 +446,6 @@ class TechnicalAnalysis:
         
         return signal_strength  # Return an integer
 
-
-    def calculate_ichimoku_cloud(self, candles: List[Dict]) -> Dict[str, float]:
-        highs = self.extract_prices(candles, 'high')
-        lows = self.extract_prices(candles, 'low')
-        
-        tenkan_sen = (max(highs[-9:]) + min(lows[-9:])) / 2
-        kijun_sen = (max(highs[-26:]) + min(lows[-26:])) / 2
-        senkou_span_a = (tenkan_sen + kijun_sen) / 2
-        senkou_span_b = (max(highs[-52:]) + min(lows[-52:])) / 2
-        
-        return {
-            "tenkan_sen": tenkan_sen,
-            "kijun_sen": kijun_sen,
-            "senkou_span_a": senkou_span_a,
-            "senkou_span_b": senkou_span_b
-        }
-
-    def evaluate_ichimoku_signal(self, candles: List[Dict]) -> int:
-        current_price = self.extract_prices(candles)[-1]
-        ichimoku = self.calculate_ichimoku_cloud(candles)
-        
-        if current_price > ichimoku['senkou_span_a'] and current_price > ichimoku['senkou_span_b']:
-            return 1  # Bullish
-        elif current_price < ichimoku['senkou_span_a'] and current_price < ichimoku['senkou_span_b']:
-            return -1  # Bearish
-        return 0  # Neutral
-
-
-    def evaluate_fibonacci_signal(self, candles: List[Dict]) -> int:
-        prices = self.extract_prices(candles)
-        high, low = max(prices), min(prices)
-        current_price = prices[-1]
-        fib_levels = self.calculate_fibonacci_levels(high, low)
-        
-        for level, price in fib_levels.items():
-            if abs(current_price - price) / price < 0.01:  # Within 1% of a Fibonacci level
-                return 1 if current_price > price else -1
-        return 0
-
-    def calculate_fibonacci_levels(self, high: float, low: float) -> Dict[str, float]:
-        diff = high - low
-        levels = {
-            "23.6%": low + 0.236 * diff,
-            "38.2%": low + 0.382 * diff,
-            "50.0%": low + 0.5 * diff,
-            "61.8%": low + 0.618 * diff,
-            "78.6%": low + 0.786 * diff
-        }
-        return levels
-
-
-    def evaluate_rsi_signal(self, rsi: float, volatility_std: float) -> int:
-        rsi_signal = self.generate_signal(rsi, volatility_std)
-        return 1 if rsi_signal == "BUY" else -1 if rsi_signal == "SELL" else 0
-
-    def evaluate_macd_signal(self, macd: float, signal: float, histogram: float) -> int:
-        macd_signal = self.generate_macd_signal(macd, signal, histogram)
-        return 1 if macd_signal == "BUY" else -1 if macd_signal == "SELL" else 0
-
-    def evaluate_bollinger_signal(self, candles: List[Dict]) -> int:
-        bollinger_signal = self.generate_bollinger_bands_signal(candles)
-        return 1 if bollinger_signal == "BUY" else -1 if bollinger_signal == "SELL" else 0
-
-    def evaluate_ma_crossover_signal(self, candles: List[Dict]) -> int:
-        ma_crossover_signal = self.compute_moving_average_crossover(candles)
-        return 1 if ma_crossover_signal == "BUY" else -1 if ma_crossover_signal == "SELL" else 0
-
-    def evaluate_stochastic_signal(self, candles: List[Dict]) -> int:
-        stochastic_k, stochastic_d = self.compute_stochastic_oscillator(candles)
-        if stochastic_k > 80 and stochastic_d > 80:
-            return -1  # Overbought condition
-        elif stochastic_k < 20 and stochastic_d < 20:
-            return 1  # Oversold condition
-        return 0
-
-    def evaluate_trend_signal(self, candles: List[Dict]) -> int:
-        price_trend = self.identify_trend(None, candles)
-        return 1 if price_trend == "Uptrend" else -1 if price_trend == "Downtrend" else 0
-
-    def evaluate_volume_profile_signal(self, candles: List[Dict], current_price: float) -> int:
-        volume_profile = self.compute_volume_profile(candles)
-        volume_resistance = max(volume_profile, key=lambda x: x[1])[0]
-        if current_price > volume_resistance:
-            return 1
-        elif current_price < volume_resistance:
-            return -1
-        return 0
-
     def adjust_signal_for_volatility(self, signal_strength: int, candles: List[Dict]) -> int:
         atr = self.compute_atr(candles)
         avg_price = np.mean(self.extract_prices(candles)[-14:])
@@ -383,129 +504,7 @@ class TechnicalAnalysis:
         else:
             return "HOLD"
 
-    def generate_macd_signal(self, macd: float, signal: float, histogram: float) -> str:
-        if macd > signal or histogram >= 0:
-            return "BUY"
-        elif macd < signal or histogram <= 0:
-            return "SELL"
-        else:
-            return "HOLD"
-
-    def compute_volume_profile(self, candles: List[Dict], num_bins: int = 10) -> List[Tuple[float, float]]:
-        prices = self.extract_prices(candles)
-        volumes = self.extract_prices(candles, 'volume')
-        
-        min_price, max_price = np.min(prices), np.max(prices)
-        bins = np.linspace(min_price, max_price, num_bins + 1)
-        
-        digitized = np.digitize(prices, bins)
-        volume_profile = [np.sum(volumes[digitized == i]) for i in range(1, len(bins))]
-        
-        bin_centers = (bins[:-1] + bins[1:]) / 2
-        
-        return list(zip(bin_centers, volume_profile))
-
-    def generate_signal(self, rsi: float, volatility: float) -> str:
-        # Adjust RSI levels based on volatility
-        if volatility > self.config.volatility_threshold:
-            adjusted_overbought = self.config.rsi_overbought + 10  # More room for upside in volatile markets
-            adjusted_oversold = self.config.rsi_oversold - 10  # More room for downside in volatile markets
-        else:
-            adjusted_overbought = self.config.rsi_overbought
-            adjusted_oversold = self.config.rsi_oversold
-
-        return "SELL" if rsi > adjusted_overbought else "BUY" if rsi < adjusted_oversold else "HOLD"
-
-    def calculate_position_size(self, account_balance: float, risk_per_trade: float, stop_loss_percent: float) -> float:
-        max_loss_amount = account_balance * risk_per_trade
-        position_size = max_loss_amount / stop_loss_percent
-        return position_size
-
-
-    def compute_stochastic_oscillator(self, candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
-        high = self.extract_prices(candles, 'high')
-        low = self.extract_prices(candles, 'low')
-        close = self.extract_prices(candles)
-        
-        k, d = talib.STOCH(high, low, close, fastk_period=k_period, slowk_period=d_period, slowd_period=d_period)
-        
-        return k[-1], d[-1]
-
-    def compute_moving_average_crossover(self, candles: List[Dict], short_period: int = 50, long_period: int = 200) -> str:
-        short_period = max(1, int(short_period * self.intervals_per_day / 24))
-        long_period = max(1, int(long_period * self.intervals_per_day / 24))
-        prices = self.extract_prices(candles)
-        short_ma = talib.SMA(prices, timeperiod=short_period)[-1]
-        long_ma = talib.SMA(prices, timeperiod=long_period)[-1]
-        
-        return "BUY" if short_ma > long_ma else "SELL" if short_ma < long_ma else "HOLD"
-
-    def compute_atr(self, candles: List[Dict], period: int = 14) -> float:
-        high = self.extract_prices(candles, 'high')
-        low = self.extract_prices(candles, 'low')
-        close = self.extract_prices(candles)
-        
-        atr = talib.ATR(high, low, close, timeperiod=period)
-        
-        return atr[-1]
-
-    def update_volatility_history(self, volatility: float):
-        self.volatility_history.append({'timestamp': time.time(), 'volatility': volatility})
-        # Keep only the last 100 volatility readings
-        self.volatility_history = self.volatility_history[-100:]
-
-    def get_dynamic_volatility_threshold(self) -> Tuple[float, float]:
-        volatilities = [v['volatility'] for v in self.volatility_history]
-        mean_volatility = np.mean(volatilities)
-        std_volatility = np.std(volatilities)
-        
-        # Set thresholds at 1 and 2 standard deviations above the mean
-        high_threshold = mean_volatility + std_volatility
-        very_high_threshold = mean_volatility + 2 * std_volatility
-        
-        return high_threshold, very_high_threshold
-
-    def calculate_sma(self, candles: List[Dict], period: int) -> float:
-        # Adjust period based on candle interval
-        adjusted_period = max(1, int(period * self.intervals_per_day / 24))
-        prices = self.extract_prices(candles)
-        sma = talib.SMA(prices, timeperiod=adjusted_period)
-        return sma[-1] if sma[-1] is not None else 0.0
-
-    def analyze_volume(self, candles: List[Dict]) -> str:
-        recent_volumes = self.extract_prices(candles, 'volume')[-10:]
-        avg_volume = sum(recent_volumes) / len(recent_volumes)
-        current_volume = self.extract_prices(candles, 'volume')[-1]
-        
-        if current_volume > avg_volume * 1.5:
-            return "High"
-        elif current_volume < avg_volume * 0.5:
-            return "Low"
-        else:
-            return "Normal"
-        
-    def extract_prices(self, candles: List[Dict], key: str = 'close') -> np.ndarray:
-        """
-        Extract prices from candle data.
-
-        :param candles: List of historical candle data.
-        :param key: Key to extract from each candle (default is 'close').
-        :return: NumPy array of prices.
-        """
-        return np.array([float(candle[key]) for candle in candles])
-
-
-    def detect_pullback(self, candles: List[Dict]) -> str:
-        recent_prices = self.extract_prices(candles)[-5:]
-        short_ma = self.calculate_sma(candles, 20)
-        long_ma = self.calculate_sma(candles, 50)
-        if recent_prices[-1] < np.min(recent_prices[:-1]) and short_ma > long_ma:
-            return "Buy"
-        elif recent_prices[-1] > np.max(recent_prices[:-1]) and short_ma < long_ma:
-            return "Sell"
-        else:
-            return "Hold"
-
+    # Market Analysis Methods
     def analyze_market_conditions(self, candles: List[Dict]) -> str:
         # Convert 200 days to the appropriate number of intervals
         long_term_period = 200 * self.intervals_per_day
@@ -604,25 +603,37 @@ class TechnicalAnalysis:
         else:  # High Volatility
             return 0.03  # 3% daily volatility
         
+    def detect_pullback(self, candles: List[Dict]) -> str:
+        recent_prices = self.extract_prices(candles)[-5:]
+        short_ma = self.calculate_sma(candles, 20)
+        long_ma = self.calculate_sma(candles, 50)
+        if recent_prices[-1] < np.min(recent_prices[:-1]) and short_ma > long_ma:
+            return "Buy"
+        elif recent_prices[-1] > np.max(recent_prices[:-1]) and short_ma < long_ma:
+            return "Sell"
+        else:
+            return "Hold"
+
+    # Position Sizing Methods
+    def calculate_position_size(self, account_balance: float, risk_per_trade: float, stop_loss_percent: float) -> float:
+        max_loss_amount = account_balance * risk_per_trade
+        position_size = max_loss_amount / stop_loss_percent
+        return position_size
+
     def calculate_atr_position_size(self, balance: float, price: float, atr: float) -> float:
         risk_amount = balance * self.config.risk_per_trade
         position_size = risk_amount / (self.config.atr_multiplier * atr)
         return min(position_size * price, balance)  # Ensure we don't exceed available balance
 
-    def compute_on_balance_volume(self, close_prices: List[float], volumes: List[float]) -> List[float]:
+    # Utility Methods
+    def extract_prices(self, candles: List[Dict], key: str = 'close') -> np.ndarray:
         """
-        Calculate On-Balance Volume (OBV) indicator.
+        Extract prices from candle data.
 
-        :param close_prices: List of closing prices.
-        :param volumes: List of volume data.
-        :return: List of OBV values.
+        :param candles: List of historical candle data.
+        :param key: Key to extract from each candle (default is 'close').
+        :return: NumPy array of prices.
         """
-        obv = [0]
-        for i in range(1, len(close_prices)):
-            if close_prices[i] > close_prices[i-1]:
-                obv.append(obv[-1] + volumes[i])
-            elif close_prices[i] < close_prices[i-1]:
-                obv.append(obv[-1] - volumes[i])
-            else:
-                obv.append(obv[-1])
-        return obv
+        return np.array([float(candle[key]) for candle in candles])
+
+# ... (any additional classes or functions)
