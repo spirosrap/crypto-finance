@@ -634,6 +634,6 @@ class TechnicalAnalysis:
         :param key: Key to extract from each candle (default is 'close').
         :return: NumPy array of prices.
         """
-        return np.array([float(candle[key]) for candle in candles])
+        return np.array([candle[key] for candle in candles], dtype=float)
 
 # ... (any additional classes or functions)
