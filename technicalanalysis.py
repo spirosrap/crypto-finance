@@ -186,22 +186,22 @@ class TechnicalAnalysis:
             'short_term_trend': 2,
             'long_term_trend': 1,
             'volume': 1,
-            'ichimoku': 0.75,
+            'ichimoku': 0.8,
             'fibonacci': 0
         }
 
         # Adjust weights for bear markets
         if market_conditions in [ "Bear Market", "Bearish"]:
             weights['rsi'] = 1
+            weights['macd'] = 1
+            weights['bollinger'] = 2
+            weights['ma_crossover'] = 1            
+            weights['stochastic'] = 1
             weights['trend'] = 1
-            weights['bollinger'] = 1
             weights['volume_profile'] = 1
             weights['short_term_trend'] = 1
             weights['long_term_trend'] = 1
-            weights['volume'] = 1
-            weights['macd'] = 1
-            weights['stochastic'] = 1
-            weights['ma_crossover'] = 1
+            weights['volume'] = 1            
             weights['ichimoku'] = 0
             weights['fibonacci'] = 0
 
