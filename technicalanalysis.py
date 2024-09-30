@@ -154,19 +154,34 @@ class TechnicalAnalysis:
     def exponential_moving_average(self, data: List[float], span: int) -> np.ndarray:
         return pd.Series(data).ewm(span=span, adjust=False).mean().values
 
-    def calculate_sma(self, candles: List[Dict], period: int) -> float:
-        # Adjust period based on candle interval
-        adjusted_period = max(1, int(period * self.intervals_per_day / 24))
+    def get_moving_average(self, candles: List[Dict], period: int, ma_type: str = 'sma') -> float:
+        """
+        Calculate moving average for given candles and period.
+
+        Args:
+            candles (List[Dict]): List of candle data.
+            period (int): Period for moving average calculation.
+            ma_type (str): Type of moving average ('sma' or 'ema').
+
+        Returns:
+            float: Calculated moving average value.
+        """
         prices = self.extract_prices(candles)
-        sma = talib.SMA(prices, timeperiod=adjusted_period)
-        return sma[-1] if sma[-1] is not None else 0.0
+        adjusted_period = max(1, int(period * self.intervals_per_day / 24))
+        
+        if ma_type == 'sma':
+            return talib.SMA(prices, timeperiod=adjusted_period)[-1]
+        elif ma_type == 'ema':
+            return talib.EMA(prices, timeperiod=adjusted_period)[-1]
+        else:
+            raise ValueError(f"Unsupported moving average type: {ma_type}")
+
+    def calculate_sma(self, candles: List[Dict], period: int) -> float:
+        return self.get_moving_average(candles, period, 'sma')
 
     def compute_moving_average_crossover(self, candles: List[Dict], short_period: int = 50, long_period: int = 200) -> str:
-        short_period = max(1, int(short_period * self.intervals_per_day / 24))
-        long_period = max(1, int(long_period * self.intervals_per_day / 24))
-        prices = self.extract_prices(candles)
-        short_ma = talib.SMA(prices, timeperiod=short_period)[-1]
-        long_ma = talib.SMA(prices, timeperiod=long_period)[-1]
+        short_ma = self.get_moving_average(candles, short_period, 'sma')
+        long_ma = self.get_moving_average(candles, long_period, 'sma')
         
         return "BUY" if short_ma > long_ma else "SELL" if short_ma < long_ma else "HOLD"
 
@@ -198,15 +213,14 @@ class TechnicalAnalysis:
         if len(prices) < window:
             return "Not enough data"
         
-        # Calculate Simple Moving Average
-        sma = np.convolve(prices, np.ones(window), 'valid') / window
+        # Calculate SMA for each point in the window
+        sma_values = [self.get_moving_average(candles[i-window:i], window, 'sma') for i in range(window, len(candles)+1)]
         
-        # Check if we have enough data points to calculate the gradient
-        if len(sma) < 2:
+        if len(sma_values) < 2:
             return "Not enough data"
         
         # Calculate the slope of the SMA
-        slope = np.gradient(sma)
+        slope = np.gradient(sma_values)
         
         # Determine the trend based on the recent slope
         recent_slope = slope[-5:].mean() if len(slope) >= 5 else slope.mean()
@@ -462,11 +476,11 @@ class TechnicalAnalysis:
 
     def adjust_signal_for_market_conditions(self, signal_strength: int, market_conditions: str, 
                                             current_price: float, candles: List[Dict]) -> int:
-        short_ma = self.calculate_sma(candles, 10)
-        long_ma = self.calculate_sma(candles, 50)
+        short_ma = self.get_moving_average(candles, 10, 'sma')
+        long_ma = self.get_moving_average(candles, 50, 'sma')
         ma_trend = "Uptrend" if short_ma > long_ma else "Downtrend"
 
-        ma_200 = self.calculate_sma(candles, 200)
+        ma_200 = self.get_moving_average(candles, 200, 'sma')
         volume_signal = self.analyze_volume(candles)
         pullback_signal = self.detect_pullback(candles)
 
@@ -510,7 +524,7 @@ class TechnicalAnalysis:
         long_term_period = 200 * self.intervals_per_day
 
         # Calculate the long-term moving average
-        long_term_ma = self.calculate_sma(candles, long_term_period)
+        long_term_ma = self.get_moving_average(candles, long_term_period, 'sma')
 
         # Analyze market conditions based on price action, volume, and volatility
         prices = self.extract_prices(candles)
@@ -530,7 +544,7 @@ class TechnicalAnalysis:
 
         # Calculate the shorter-term moving average (e.g., 50-day MA)
         short_term_period = 50 * self.intervals_per_day
-        short_term_ma = self.calculate_sma(candles, short_term_period)
+        short_term_ma = self.get_moving_average(candles, short_term_period, 'sma')
 
         # Calculate the average volume change during bull markets
         bull_market_volume_change = self.calculate_average_bull_market_volume_change(candles)
@@ -605,8 +619,8 @@ class TechnicalAnalysis:
         
     def detect_pullback(self, candles: List[Dict]) -> str:
         recent_prices = self.extract_prices(candles)[-5:]
-        short_ma = self.calculate_sma(candles, 20)
-        long_ma = self.calculate_sma(candles, 50)
+        short_ma = self.get_moving_average(candles, 20, 'sma')
+        long_ma = self.get_moving_average(candles, 50, 'sma')
         if recent_prices[-1] < np.min(recent_prices[:-1]) and short_ma > long_ma:
             return "Buy"
         elif recent_prices[-1] > np.max(recent_prices[:-1]) and short_ma < long_ma:
