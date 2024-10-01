@@ -151,6 +151,7 @@ def parse_arguments():
     ], help="Granularity for candle data (default: ONE_HOUR)")
     parser.add_argument("--continuous", action="store_true", help="Run continuous backtesting simulation")
     parser.add_argument("--update_interval", type=int, default=3600, help="Update interval for continuous backtesting (in seconds, default: 3600)")
+    parser.add_argument("--month", action="store_true", help="Use last month period")
     return parser.parse_args()
 
 def display_portfolio_info(trader, product_id):
@@ -208,6 +209,11 @@ def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_pe
     elif args.ytd:
         start_date = "2024-01-01 00:00:00"
         end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    elif args.month:
+        end_date = datetime.now()
+        start_date = (end_date - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date = start_date.strftime("%Y-%m-%d %H:%M:%S")
+        end_date = end_date.strftime("%Y-%m-%d %H:%M:%S")
     elif args.start_date:
         start_date = f"{args.start_date} 00:00:00"
         end_date = f"{args.end_date} 23:59:59" if args.end_date else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
