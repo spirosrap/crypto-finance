@@ -11,8 +11,8 @@ from dataclasses import dataclass
 
 @dataclass
 class TechnicalAnalysisConfig:
-    rsi_overbought: float = 70
-    rsi_oversold: float = 30
+    rsi_overbought: float = 65 # 70
+    rsi_oversold: float = 35 # 30
     volatility_threshold: float = 0.03
     rsi_period: int = 14
     macd_fast: int = 12
