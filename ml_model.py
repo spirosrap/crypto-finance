@@ -161,10 +161,13 @@ class MLSignal:
         ])
 
         # Define base models with regularization
+        class_counts = np.bincount(y)
+        scale_pos_weight = class_counts[0] / class_counts[1] if len(class_counts) > 1 else 1
+
         models = {
             'lr': LogisticRegression(random_state=42, class_weight='balanced'),
             'rf': RandomForestClassifier(random_state=42, class_weight='balanced'),
-            'xgb': XGBClassifier(random_state=42, scale_pos_weight=class_weights[1]/class_weights[0] if len(class_weights) > 1 else 1)
+            'xgb': XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight)
         }
 
         # Simplified hyperparameter search spaces

@@ -432,9 +432,9 @@ class TechnicalAnalysis:
             'short_term_trend': 2,
             'long_term_trend': 1,
             'volume': 1,
-            'ichimoku': 0.8,
+            'ichimoku': 0,
             'fibonacci': 0,
-            'ml_model': 2  # Increased weight for ML model
+            'ml_model': 3  # Increased weight for ML model
         }
 
         # Adjust weights for bear markets
