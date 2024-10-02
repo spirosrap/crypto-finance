@@ -434,14 +434,14 @@ class TechnicalAnalysis:
             'volume': 1,
             'ichimoku': 0.8,
             'fibonacci': 0,
-            'ml_model': 3  # Increased weight for ML model
+            'ml_model': 2  # Increased weight for ML model
         }
 
         # Adjust weights for bear markets
         if market_conditions in [ "Bear Market", "Bearish"]:
             weights['rsi'] = 1
             weights['macd'] = 1
-            weights['bollinger'] = 2
+            weights['bollinger'] = 1
             weights['ma_crossover'] = 1            
             weights['stochastic'] = 1
             weights['trend'] = 1
