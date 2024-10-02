@@ -8,9 +8,24 @@ import talib
 import logging
 from functools import lru_cache
 from dataclasses import dataclass
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, TimeSeriesSplit, RandomizedSearchCV
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from imblearn.over_sampling import SMOTE
+from xgboost import XGBClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import VotingClassifier
+from sklearn.feature_selection import SelectFromModel
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.utils.validation import check_is_fitted
+from sklearn.utils.class_weight import compute_class_weight
+from sklearn.linear_model import LogisticRegression
+from ml_model import MLSignal
 
 @dataclass
 class TechnicalAnalysisConfig:
@@ -49,7 +64,7 @@ class TechnicalAnalysis:
         self.logger = logging.getLogger(__name__)
         self.candle_interval = candle_interval
         self.intervals_per_day = self.calculate_intervals_per_day()
-        self.ml_model = None
+        self.ml_signal = MLSignal(self.logger)
         self.scaler = StandardScaler()
 
     def calculate_intervals_per_day(self) -> int:
@@ -416,7 +431,7 @@ class TechnicalAnalysis:
             'volume': 1,
             'ichimoku': 0.8,
             'fibonacci': 0,
-            'ml_model': 0.08  # Add weight for ML model signal
+            'ml_model': 0  # Increased weight for ML model
         }
 
         # Adjust weights for bear markets
@@ -446,9 +461,9 @@ class TechnicalAnalysis:
         signal_strength += weights['ichimoku'] * self.evaluate_ichimoku_signal(candles)
 
         # Add ML model signal
-        ml_signal = self.predict_ml_signal(candles)
-        if ml_signal != 0:  # Only add ML signal if it's not neutral
-            signal_strength += weights['ml_model'] * ml_signal
+        # ml_signal = self.ml_signal.predict_signal(candles)
+        # self.logger.debug(f"ML signal: {ml_signal}")  # Log the ML signal
+        # signal_strength += weights['ml_model'] * ml_signal
 
         signal_strength = self.adjust_signal_for_volatility(signal_strength, candles)
         signal_strength = self.adjust_signal_for_market_conditions(signal_strength, market_conditions, current_price, candles)
@@ -470,6 +485,7 @@ class TechnicalAnalysis:
         elif volume_signal == "Low":
             signal_strength -= weights['volume']
         
+        self.logger.debug(f"Final signal strength: {signal_strength}")  # Log the final signal strength
         return signal_strength  # Return an integer
 
     def adjust_signal_for_volatility(self, signal_strength: int, candles: List[Dict]) -> int:
@@ -661,88 +677,5 @@ class TechnicalAnalysis:
         :return: NumPy array of prices.
         """
         return np.array([candle[key] for candle in candles], dtype=float)
-
-    def prepare_ml_features(self, candles: List[Dict]) -> Tuple[pd.DataFrame, pd.Series]:
-        if len(candles) < 30:
-            self.logger.warning(f"Not enough candles for ML features. Got {len(candles)}, need at least 30.")
-            return pd.DataFrame(), pd.Series()
-
-        df = pd.DataFrame(candles)
-        
-        # Check if 'close' and 'volume' columns exist
-        if 'close' not in df.columns or 'volume' not in df.columns:
-            self.logger.error("Missing 'close' or 'volume' data in candles.")
-            return pd.DataFrame(), pd.Series()
-        
-        df['close'] = df['close'].astype(float)
-        df['volume'] = df['volume'].astype(float)
-        
-        # Calculate technical indicators
-        df['rsi'] = talib.RSI(df['close'], timeperiod=14)
-        df['macd'], _, _ = talib.MACD(df['close'])
-        df['sma_short'] = talib.SMA(df['close'], timeperiod=10)
-        df['sma_long'] = talib.SMA(df['close'], timeperiod=30)
-        
-        # Calculate returns
-        df['returns'] = df['close'].pct_change()
-        
-        # Create target variable (1 if price goes up, 0 if it goes down)
-        df['target'] = (df['returns'].shift(-1) > 0).astype(int)
-        
-        # Drop NaN values
-        df.dropna(inplace=True)
-        
-        if df.empty:
-            self.logger.warning("All rows removed due to NaN values after feature calculation.")
-            return pd.DataFrame(), pd.Series()
-        
-        features = ['rsi', 'macd', 'sma_short', 'sma_long', 'volume', 'returns']
-        X = df[features]
-        y = df['target']
-        
-        self.logger.debug(f"Prepared ML features. Shape: {X.shape}")
-        return X, y
-
-    def train_ml_model(self, candles: List[Dict]):
-        X, y = self.prepare_ml_features(candles)
-        X_scaled = self.scaler.fit_transform(X)
-        
-        X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
-        
-        self.ml_model = RandomForestClassifier(n_estimators=100, random_state=42)
-        self.ml_model.fit(X_train, y_train)
-        
-        # Optionally, you can print the model's accuracy here
-        # accuracy = self.ml_model.score(X_test, y_test)
-        # print(f"ML Model Accuracy: {accuracy}")
-
-    def predict_ml_signal(self, candles: List[Dict]) -> int:
-        if self.ml_model is None:
-            self.logger.info("Training ML model...")
-            self.train_ml_model(candles[:-1])  # Train on all but the last candle
-        
-        X, _ = self.prepare_ml_features(candles[-50:])  # Use the last 50 candles for prediction
-        
-        if X.empty:
-            self.logger.warning("Not enough data to make ML prediction. Returning neutral signal.")
-            return 0
-        
-        X_scaled = self.scaler.transform(X)
-        
-        if X_scaled.shape[0] == 0:
-            self.logger.warning("Scaled features array is empty. Returning neutral signal.")
-            return 0
-        
-        try:
-            prediction = self.ml_model.predict(X_scaled[-1].reshape(1, -1))
-            probability = self.ml_model.predict_proba(X_scaled[-1].reshape(1, -1))[0]
-                        
-            if prediction[0] == 1:
-                return int((probability[1] - 0.5) * 10)  # Scale from 0 to 5
-            else:
-                return -int((probability[0] - 0.5) * 10)  # Scale from -5 to 0
-        except Exception as e:
-            self.logger.error(f"Error in ML prediction: {str(e)}. Returning neutral signal.")
-            return 0
 
 # ... (any additional classes or functions)

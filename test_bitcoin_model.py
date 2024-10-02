@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from ml_model import BitcoinPredictionModel
+from ml_model_old import BitcoinPredictionModel
 from datetime import datetime, timedelta
 from historicaldata import HistoricalData
 from coinbaseservice import CoinbaseService
