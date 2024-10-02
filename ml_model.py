@@ -93,6 +93,13 @@ class MLSignal:
             df['log_return'] = np.log(df['close'] / df['close'].shift(1))
             df['volatility'] = df['log_return'].rolling(window=20).std() * np.sqrt(252)
 
+            # New features
+            df['ema_crossover'] = np.where(df['ema_fast'] > df['ema_slow'], 1, -1)
+            df['rsi_overbought'] = np.where(df['rsi'] > 70, 1, 0)
+            df['rsi_oversold'] = np.where(df['rsi'] < 30, 1, 0)
+            df['macd_signal'] = np.where(df['macd'] > 0, 1, -1)
+            df['bbw_high'] = np.where(df['bbw'] > df['bbw'].rolling(window=20).mean(), 1, 0)
+
             # Create target variable (1 if price goes up, 0 if it goes down)
             df['target'] = (df['returns'].shift(-1) > 0).astype(int)
             
@@ -108,7 +115,8 @@ class MLSignal:
             
             features = ['rsi', 'macd', 'sma_short', 'sma_long', 'volume', 'returns', 'atr', 'bbw', 'roc', 'mfi', 'adx', 
                         'rsi_lag1', 'macd_lag1', 'trend_strength', 'ema_fast', 'ema_slow', 'cci', 'obv',
-                        'stoch_k', 'stoch_d', 'willr', 'mom', 'log_return', 'volatility']
+                        'stoch_k', 'stoch_d', 'willr', 'mom', 'log_return', 'volatility',
+                        'ema_crossover', 'rsi_overbought', 'rsi_oversold', 'macd_signal', 'bbw_high']
             
             X = df[features].values
             y = df['target'].values
