@@ -35,6 +35,8 @@ pip install scikit-learn scikit-fuzzy
 pip install xgboost
 pip install git+https://github.com/TA-Lib/ta-lib-python.git
 pip install joblib
+pip install scikit-optimize
+pip install shap
 ```
 
 ## Installation

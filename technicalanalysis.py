@@ -434,7 +434,7 @@ class TechnicalAnalysis:
             'volume': 1,
             'ichimoku': 0.8,
             'fibonacci': 0,
-            'ml_model': 2  # Increased weight for ML model
+            'ml_model': 3  # Increased weight for ML model
         }
 
         # Adjust weights for bear markets
@@ -464,9 +464,10 @@ class TechnicalAnalysis:
         signal_strength += weights['ichimoku'] * self.evaluate_ichimoku_signal(candles)
 
         # Add ML model signal
-        ml_signal = self.ml_signal.predict_signal(candles)
-        self.logger.debug(f"ML signal: {ml_signal}")  # Log the ML signal
-        signal_strength += weights['ml_model'] * ml_signal
+        if weights['ml_model'] > 0:
+            ml_signal = self.ml_signal.predict_signal(candles)
+            self.logger.debug(f"ML signal: {ml_signal}")  # Log the ML signal
+            signal_strength += weights['ml_model'] * ml_signal
 
         signal_strength = self.adjust_signal_for_volatility(signal_strength, candles)
         signal_strength = self.adjust_signal_for_market_conditions(signal_strength, market_conditions, current_price, candles)
