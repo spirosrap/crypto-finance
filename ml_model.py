@@ -13,6 +13,8 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.utils.class_weight import compute_class_weight
 from xgboost import XGBClassifier
 import logging
+import joblib
+from datetime import datetime, timedelta
 
 class EnsembleClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, models):
@@ -32,9 +34,11 @@ class EnsembleClassifier(BaseEstimator, ClassifierMixin):
         return np.mean(probas, axis=0)
 
 class MLSignal:
-    def __init__(self, logger):
+    def __init__(self, logger, historical_data):
         self.logger = logger
         self.ml_model = None
+        self.historical_data = historical_data
+        self.model_file = 'ml_model.joblib'
 
     def prepare_features(self, candles: List[Dict]) -> Tuple[np.ndarray, np.ndarray]:
         if len(candles) < 50:
@@ -92,7 +96,12 @@ class MLSignal:
             self.logger.error(f"Error in prepare_features: {str(e)}")
             return np.array([]), np.array([])
 
-    def train_model(self, candles: List[Dict]):
+    def train_model(self):
+        # Get one year of historical data
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=365)
+        candles = self.historical_data.get_historical_data('BTC-USD', start_date, end_date, granularity="ONE_HOUR")
+        
         X, y = self.prepare_features(candles)
         
         if X.size == 0 or y.size == 0:
@@ -193,10 +202,21 @@ class MLSignal:
                 for name, importance in zip(feature_names, importances):
                     self.logger.info(f"Feature importance - {name}: {importance}")
 
+        # Save the trained model
+        joblib.dump(self.ml_model, self.model_file)
+        self.logger.info(f"ML model trained and saved to {self.model_file}")
+
+    def load_model(self):
+        try:
+            self.ml_model = joblib.load(self.model_file)
+            self.logger.info(f"ML model loaded from {self.model_file}")
+        except FileNotFoundError:
+            self.logger.warning(f"ML model file not found. Training a new model.")
+            self.train_model()
+
     def predict_signal(self, candles: List[Dict]) -> int:
         if self.ml_model is None:
-            self.logger.info("Training ML model...")
-            self.train_model(candles[:-1])  # Train on all but the last candle
+            self.load_model()
         
         X, _ = self.prepare_features(candles[-50:])  # Use the last 50 candles for prediction
         

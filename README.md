@@ -34,6 +34,7 @@ pip install hmmlearn
 pip install scikit-learn scikit-fuzzy
 pip install xgboost
 pip install git+https://github.com/TA-Lib/ta-lib-python.git
+pip install joblib
 ```
 
 ## Installation

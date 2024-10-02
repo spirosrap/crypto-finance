@@ -26,6 +26,7 @@ from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.linear_model import LogisticRegression
 from ml_model import MLSignal
+from historicaldata import HistoricalData
 
 @dataclass
 class TechnicalAnalysisConfig:
@@ -64,7 +65,9 @@ class TechnicalAnalysis:
         self.logger = logging.getLogger(__name__)
         self.candle_interval = candle_interval
         self.intervals_per_day = self.calculate_intervals_per_day()
-        self.ml_signal = MLSignal(self.logger)
+        historical_data = HistoricalData(coinbase_service.client)
+        self.ml_signal = MLSignal(self.logger, historical_data)
+        self.ml_signal.load_model()  # Load or train the model at initialization
         self.scaler = StandardScaler()
 
     def calculate_intervals_per_day(self) -> int:
@@ -431,7 +434,7 @@ class TechnicalAnalysis:
             'volume': 1,
             'ichimoku': 0.8,
             'fibonacci': 0,
-            'ml_model': 0  # Increased weight for ML model
+            'ml_model': 2  # Increased weight for ML model
         }
 
         # Adjust weights for bear markets
@@ -461,9 +464,9 @@ class TechnicalAnalysis:
         signal_strength += weights['ichimoku'] * self.evaluate_ichimoku_signal(candles)
 
         # Add ML model signal
-        # ml_signal = self.ml_signal.predict_signal(candles)
-        # self.logger.debug(f"ML signal: {ml_signal}")  # Log the ML signal
-        # signal_strength += weights['ml_model'] * ml_signal
+        ml_signal = self.ml_signal.predict_signal(candles)
+        self.logger.debug(f"ML signal: {ml_signal}")  # Log the ML signal
+        signal_strength += weights['ml_model'] * ml_signal
 
         signal_strength = self.adjust_signal_for_volatility(signal_strength, candles)
         signal_strength = self.adjust_signal_for_market_conditions(signal_strength, market_conditions, current_price, candles)

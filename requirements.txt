@@ -10,6 +10,7 @@ scikit-learn
 scikit-fuzzy
 xgboost
 ta-lib
+joblib==1.1.0
 
 # The following dependency is installed from GitHub:
 # git+https://github.com/TA-Lib/ta-lib-python.git
