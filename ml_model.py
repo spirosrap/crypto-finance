@@ -17,7 +17,6 @@ import logging
 import joblib
 from datetime import datetime, timedelta
 import os
-from sklearn.feature_selection import RFE
 
 class EnsembleClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, models):
@@ -165,38 +164,6 @@ class MLSignal:
             ('scaler', StandardScaler())
         ])
 
-        # Preprocess the data
-        X_train_preprocessed = preprocessor.fit_transform(X_train_resampled)
-        X_test_preprocessed = preprocessor.transform(X_test)
-
-        # Feature selection using RandomForest feature importances
-        rf_selector = RandomForestClassifier(n_estimators=100, random_state=42)
-        rf_selector.fit(X_train_preprocessed, y_train_resampled)
-        rf_feature_importance = rf_selector.feature_importances_
-
-        # Feature selection using XGBoost feature importances
-        xgb_selector = XGBClassifier(n_estimators=100, random_state=42)
-        xgb_selector.fit(X_train_preprocessed, y_train_resampled)
-        xgb_feature_importance = xgb_selector.feature_importances_
-
-        # Combine feature importances
-        combined_importance = (rf_feature_importance + xgb_feature_importance) / 2
-
-        # Select top 15 features
-        top_features = np.argsort(combined_importance)[-15:]
-
-        # Feature selection using RFE with Logistic Regression
-        rfe_selector = RFE(estimator=LogisticRegression(random_state=42), n_features_to_select=15, step=1)
-        rfe_selector = rfe_selector.fit(X_train_preprocessed, y_train_resampled)
-        rfe_features = np.where(rfe_selector.support_)[0]
-
-        # Combine selected features
-        selected_features = np.union1d(top_features, rfe_features)
-
-        # Update X_train and X_test with selected features
-        X_train_selected = X_train_preprocessed[:, selected_features]
-        X_test_selected = X_test_preprocessed[:, selected_features]
-
         # Define base models with regularization
         class_counts = np.bincount(y)
         scale_pos_weight = class_counts[0] / class_counts[1] if len(class_counts) > 1 else 1
@@ -210,59 +177,61 @@ class MLSignal:
         # Simplified hyperparameter search spaces
         param_distributions = {
             'lr': {
-                'C': [0.1, 1, 10],
-                'penalty': ['l2'],
-                'solver': ['liblinear', 'saga'],
-                'max_iter': [1000, 2000]
+                'classifier__C': [0.1, 1, 10],
+                'classifier__penalty': ['l2'],
+                'classifier__solver': ['liblinear', 'saga'],
+                'classifier__max_iter': [1000, 2000]  # Added max_iter to hyperparameter search
             },
             'rf': {
-                'n_estimators': [100, 200],
-                'max_depth': [10, 20, None],
-                'min_samples_split': [2, 5],
-                'min_samples_leaf': [1, 2]
+                'classifier__n_estimators': [100, 200],
+                'classifier__max_depth': [10, 20, None],
+                'classifier__min_samples_split': [2, 5],
+                'classifier__min_samples_leaf': [1, 2]
             },
             'xgb': {
-                'n_estimators': [100, 200],
-                'learning_rate': [0.01, 0.1],
-                'max_depth': [3, 5],
-                'min_child_weight': [1, 5],
-                'subsample': [0.8, 1.0],
-                'colsample_bytree': [0.8, 1.0]
+                'classifier__n_estimators': [100, 200],
+                'classifier__learning_rate': [0.01, 0.1],
+                'classifier__max_depth': [3, 5],
+                'classifier__min_child_weight': [1, 5],
+                'classifier__subsample': [0.8, 1.0],
+                'classifier__colsample_bytree': [0.8, 1.0]
             }
         }
 
         best_models = {}
         for name, model in models.items():
+            pipeline = Pipeline([
+                ('preprocessor', preprocessor),
+                ('classifier', model)
+            ])
+
             random_search = RandomizedSearchCV(
-                model, param_distributions[name], n_iter=10,
+                pipeline, param_distributions[name], n_iter=10,
                 cv=3, scoring='f1', random_state=42, n_jobs=-1
             )
-            random_search.fit(X_train_selected, y_train_resampled)
+            random_search.fit(X_train_resampled, y_train_resampled)
             best_models[name] = random_search.best_estimator_
 
         # Create ensemble with weighted voting
         self.ml_model = EnsembleClassifier([model for model in best_models.values()])
-        self.ml_model.fit(X_train_selected, y_train_resampled)
+        self.ml_model.fit(X_train_resampled, y_train_resampled)
 
         # Evaluate the model on the test set
-        y_pred = self.ml_model.predict(X_test_selected)
+        y_pred = self.ml_model.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
         f1 = f1_score(y_test, y_pred)
         precision = precision_score(y_test, y_pred)
         recall = recall_score(y_test, y_pred)
-        auc = roc_auc_score(y_test, self.ml_model.predict_proba(X_test_selected)[:, 1])
+        auc = roc_auc_score(y_test, self.ml_model.predict_proba(X_test)[:, 1])
         self.logger.info(f"ML Model test set - Accuracy: {accuracy:.4f}, F1 Score: {f1:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, AUC: {auc:.4f}")
 
-        # Log model weights and selected features
-        feature_names = self.get_feature_names()
-        selected_feature_names = [feature_names[i] for i in selected_features]
+        # Log model weights
         for model, weight in zip(self.ml_model.models, self.ml_model.weights):
             self.logger.info(f"Model {type(model).__name__} weight: {weight:.4f}")
-        self.logger.info(f"Selected features: {selected_feature_names}")
 
-        # Save the trained model and selected features
-        joblib.dump((self.ml_model, selected_features, preprocessor), self.model_file)
-        self.logger.info(f"ML model, selected features, and preprocessor saved to {self.model_file}")
+        # Save the trained model
+        joblib.dump(self.ml_model, self.model_file)
+        self.logger.info(f"ML model trained and saved to {self.model_file}")
 
     def load_model(self):
         try:
@@ -290,14 +259,9 @@ class MLSignal:
         try:
             self.logger.debug(f"X shape: {X.shape}")
             
-            # Load the preprocessor and selected features
-            _, selected_features, preprocessor = joblib.load(self.model_file)
+            X_processed = self.ml_model.models[0].named_steps['preprocessor'].transform(X)
             
-            # Preprocess and select features
-            X_processed = preprocessor.transform(X)
-            X_selected = X_processed[:, selected_features]
-            
-            probability = self.ml_model.predict_proba(X_selected)
+            probability = self.ml_model.predict_proba(X_processed)
             
             # Use the last prediction (most recent)
             last_probability = probability[-1]
@@ -320,10 +284,3 @@ class MLSignal:
         y_pred = self.ml_model.predict(X)
         recent_accuracy = accuracy_score(y, y_pred)
         return min(max(recent_accuracy, 0.5), 2.0)  # Scale between 0.5 and 2
-
-    def get_feature_names(self):
-        # Return the list of feature names used in prepare_features
-        return ['rsi', 'macd', 'sma_short', 'sma_long', 'volume', 'returns', 'atr', 'bbw', 'roc', 'mfi', 'adx', 
-                'rsi_lag1', 'macd_lag1', 'trend_strength', 'ema_fast', 'ema_slow', 'cci', 'obv',
-                'stoch_k', 'stoch_d', 'willr', 'mom', 'log_return', 'volatility',
-                'ema_crossover', 'rsi_overbought', 'rsi_oversold', 'macd_signal', 'bbw_high']
