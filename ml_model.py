@@ -103,11 +103,15 @@ class MLSignal:
             # Create target variable (1 if price goes up, 0 if it goes down)
             df['target'] = (df['returns'].shift(-1) > 0).astype(int)
             
-            # Drop the last row as it won't have a target
-            df = df.iloc[:-1]
+            # Handle missing values
+            # First, forward fill
+            df = df.ffill()
             
-            # Drop rows with NaN values
-            df.dropna(inplace=True)
+            # Then, backward fill any remaining NaNs at the beginning
+            df = df.bfill()
+            
+            # If there are still NaNs, drop those rows
+            df = df.dropna()
             
             if df.empty:
                 self.logger.warning("All rows removed after feature calculation and NaN removal.")
@@ -165,7 +169,7 @@ class MLSignal:
         scale_pos_weight = class_counts[0] / class_counts[1] if len(class_counts) > 1 else 1
 
         models = {
-            'lr': LogisticRegression(random_state=42, class_weight='balanced'),
+            'lr': LogisticRegression(random_state=42, class_weight='balanced', max_iter=1000),
             'rf': RandomForestClassifier(random_state=42, class_weight='balanced'),
             'xgb': XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight)
         }
@@ -175,7 +179,8 @@ class MLSignal:
             'lr': {
                 'classifier__C': [0.1, 1, 10],
                 'classifier__penalty': ['l2'],
-                'classifier__solver': ['liblinear', 'saga']
+                'classifier__solver': ['liblinear', 'saga'],
+                'classifier__max_iter': [1000, 2000]  # Added max_iter to hyperparameter search
             },
             'rf': {
                 'classifier__n_estimators': [100, 200],
