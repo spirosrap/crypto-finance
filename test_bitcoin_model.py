@@ -13,8 +13,6 @@ from sklearn.model_selection import train_test_split
 import schedule
 import time
 
-DAYS_TO_TEST_MODEL = 200  # Global variable to define the number of days to test the model
-LOOK_AHEAD_HOURS = 24 # Global variable to define the number of hours to look ahead for prediction
 
 
 def calculate_normalized_metrics(y_true, y_pred, scaler):
