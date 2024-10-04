@@ -437,8 +437,8 @@ class TechnicalAnalysis:
             'volume': 1,
             'ichimoku': 0,
             'fibonacci': 0,
-            'ml_model': 3,  # Increased weight for ML model
-            'bitcoin_prediction': 0  # Assign a weight to the BitcoinPredictionModel signal
+            'ml_model': 2,  # Increased weight for ML model
+            'bitcoin_prediction': 3  # Assign a weight to the BitcoinPredictionModel signal
         }
 
         # Adjust weights for bear markets

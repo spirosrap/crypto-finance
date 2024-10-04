@@ -16,6 +16,7 @@ import joblib
 import os
 import logging
 
+# COINGECKO PROVIDES ONLY UP TO ONE YEAR OF DATA FOR THE FREE TIER
 DAYS_TO_TEST_MODEL = 50  # Global variable to define the number of days to test the model
 
 class BitcoinPredictionModel:
@@ -37,7 +38,12 @@ class BitcoinPredictionModel:
 
     def prepare_data(self, candles, external_data=None):
         df = pd.DataFrame(candles)
-        df['date'] = pd.to_datetime(pd.to_numeric(df['start']), unit='s').dt.date  # Convert to date
+
+        if df.empty:
+            self.logger.error("Candles data is empty. Cannot proceed with data preparation.")
+            return None, None, None
+
+        df['date'] = pd.to_datetime(pd.to_numeric(df['start']), unit='s').dt.date
         df['close'] = df['close'].astype(float)
         df['volume'] = df['volume'].astype(float)
         
@@ -108,6 +114,10 @@ class BitcoinPredictionModel:
 
         df = df.dropna().reset_index(drop=True)
 
+        if df.empty:
+            self.logger.error("Dataframe is empty after preparation. Check for NaN values or insufficient data.")
+            return None, None, None
+
         X = df[['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
                 'market_condition', 'lagged_close', 'lagged_volume', 
                 'lagged_rsi', 'lagged_macd', 'lagged_signal', 
@@ -136,6 +146,14 @@ class BitcoinPredictionModel:
         # Prepare the data
         df, X, y = self.prepare_data(candles, external_data)
         
+        if X is None or y is None:
+            self.logger.error("Data preparation failed. Unable to train the model.")
+            return
+
+        if len(X) < 100:  # Adjust this threshold as needed
+            self.logger.error(f"Insufficient data for training. Only {len(X)} samples available.")
+            return
+
         X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
         X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.2, shuffle=False)
 

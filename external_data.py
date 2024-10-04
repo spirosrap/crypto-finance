@@ -7,7 +7,7 @@ import yfinance as yf
 class ExternalDataFetcher:
     def __init__(self):
         self.blockchain_info_url = "https://api.blockchain.info/charts/{chart}?timespan=all&sampled=false&metadata=false&cors=true&format=json"
-        self.coingecko_url = "https://api.coingecko.com/api/v3"
+        self.coingecko_url = "https://api.coingecko.com/api/v3" # Max 1 year data
 
     def get_data(self, start_date, end_date):
         # Ensure start_date and end_date are date objects
