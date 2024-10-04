@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from ml_model_old import BitcoinPredictionModel
+from bitcoinpredictionmodel import BitcoinPredictionModel
 from datetime import datetime, timedelta
 from historicaldata import HistoricalData
 from coinbaseservice import CoinbaseService
@@ -232,15 +232,7 @@ def main():
     # print(f"ARIMA forecast for the next hour: {arima_forecast}")
 
 if __name__ == "__main__":
-    # Schedule the main function to run every 1 minute
-    schedule.every(1).minute.do(main)
-    
-    # Keep the script running
-    while True:
-        try:
-            schedule.run_pending()
-        except Exception as e:
-            print(f"Network error: {e}. Retrying in 1 minute...")
-            time.sleep(60)  # Wait for 1 minute before retrying
-        else:
-            time.sleep(3)
+    try:
+        main()
+    except Exception as e:
+        print(f"An error occurred: {e}")

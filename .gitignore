@@ -15,3 +15,7 @@ ml_model.joblib-latest
 ml_model.joblib.good4
 ml_model.joblib.latest
 ml_model.joblib-latest2
+catboost_info/catboost_training.json
+catboost_info/learn_error.tsv
+catboost_info/time_left.tsv
+catboost_info/learn/events.out.tfevents
