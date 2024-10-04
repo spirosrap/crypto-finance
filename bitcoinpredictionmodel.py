@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import joblib
 import os
 import logging
+from sklearn.feature_selection import RFECV
 
 # COINGECKO PROVIDES ONLY UP TO ONE YEAR OF DATA FOR THE FREE TIER
 DAYS_TO_TEST_MODEL = 50  # Global variable to define the number of days to test the model
@@ -35,6 +36,7 @@ class BitcoinPredictionModel:
         self.coinbase_service = coinbase_service
         self.model_file = 'bitcoin_prediction_model.joblib'
         self.logger = logging.getLogger(__name__)
+        self.selected_features = None
 
     def prepare_data(self, candles, external_data=None):
         df = pd.DataFrame(candles)
@@ -118,10 +120,19 @@ class BitcoinPredictionModel:
             self.logger.error("Dataframe is empty after preparation. Check for NaN values or insufficient data.")
             return None, None, None
 
-        X = df[['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
-                'market_condition', 'lagged_close', 'lagged_volume', 
-                'lagged_rsi', 'lagged_macd', 'lagged_signal', 
-                'lagged_pct_change', 'lagged_volatility']].copy()
+        # Define all potential features
+        all_features = ['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
+                        'market_condition', 'lagged_close', 'lagged_volume', 
+                        'lagged_rsi', 'lagged_macd', 'lagged_signal', 
+                        'lagged_pct_change', 'lagged_volatility']
+
+        if external_data is not None:
+            all_features.extend(['btc_dominance', 'hash_rate_ma', 'hash_rate_pct_change',
+                                 'total_market_cap_pct_change', 'sp500_pct_change',
+                                 'lagged_hash_rate', 'lagged_btc_dominance',
+                                 'lagged_total_crypto_market_cap', 'lagged_sp500'])
+
+        X = df[all_features].copy()
 
         y = df['close'].shift(-1)
 
@@ -130,6 +141,17 @@ class BitcoinPredictionModel:
         y = y.iloc[:-1]
         
         return df, X, y
+
+    def select_features(self, X, y):
+        estimator = GradientBoostingRegressor(**self.params)
+        selector = RFECV(estimator=estimator, step=1, cv=TimeSeriesSplit(n_splits=5), 
+                         scoring='neg_mean_squared_error', n_jobs=-1)
+        selector = selector.fit(X, y)
+        
+        self.selected_features = X.columns[selector.support_].tolist()
+        print("Selected features:", self.selected_features)
+        
+        return X[self.selected_features]
 
     def train(self):
         historical_data = HistoricalData(self.coinbase_service.client)
@@ -149,6 +171,9 @@ class BitcoinPredictionModel:
         if X is None or y is None:
             self.logger.error("Data preparation failed. Unable to train the model.")
             return
+
+        # Perform feature selection
+        X = self.select_features(X, y)
 
         if len(X) < 100:  # Adjust this threshold as needed
             self.logger.error(f"Insufficient data for training. Only {len(X)} samples available.")
@@ -219,7 +244,8 @@ class BitcoinPredictionModel:
         joblib.dump({
             'model': self.model,
             'scaler_X': self.scaler_X,
-            'scaler_y': self.scaler_y
+            'scaler_y': self.scaler_y,
+            'selected_features': self.selected_features
         }, self.model_file)
         self.logger.info(f"Bitcoin prediction model trained and saved to {self.model_file}")
 
@@ -239,6 +265,7 @@ class BitcoinPredictionModel:
             self.model = model_data['model']
             self.scaler_X = model_data['scaler_X']
             self.scaler_y = model_data['scaler_y']
+            self.selected_features = model_data['selected_features']
             model_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(self.model_file))
             if model_age > timedelta(days=7):  # Retrain weekly
                 self.logger.info("Bitcoin prediction model is over a week old. Retraining...")
@@ -253,16 +280,11 @@ class BitcoinPredictionModel:
         if self.model is None:
             self.load_model()
 
-        required_features = ['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
-                             'market_condition', 'lagged_close', 'lagged_volume', 
-                             'lagged_rsi', 'lagged_macd', 'lagged_signal', 
-                             'lagged_pct_change', 'lagged_volatility']
-        
-        for feature in required_features:
-            if feature not in features.columns:
-                features[feature] = 0
-        
-        features = features[required_features]
+        if self.selected_features is None:
+            self.logger.error("No features have been selected. The model may not have been properly trained.")
+            return None
+
+        features = features[self.selected_features]
         
         features_scaled = self.scaler_X.transform(features)
         predictions_scaled = self.model.predict(features_scaled)
