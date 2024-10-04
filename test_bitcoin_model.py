@@ -16,71 +16,6 @@ import time
 DAYS_TO_TEST_MODEL = 200  # Global variable to define the number of days to test the model
 LOOK_AHEAD_HOURS = 24 # Global variable to define the number of hours to look ahead for prediction
 
-def prepare_historical_data(candles, external_data):
-    df = pd.DataFrame(candles)
-    df['date'] = pd.to_datetime(pd.to_numeric(df['start']), unit='s').dt.date  # Convert to date
-    df['close'] = df['close'].astype(float)
-    df['volume'] = df['volume'].astype(float)
-    
-    # Calculate RSI (14 * 1hr = 14hr)
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['rsi'] = 100 - (100 / (1 + rs))
-    
-    # Calculate MACD (12 * 1hr = 12hr, 26 * 1hr = 26hr, 9 * 1hr = 9hr)
-    exp1 = df['close'].ewm(span=12, adjust=False).mean()
-    exp2 = df['close'].ewm(span=26, adjust=False).mean()
-    df['macd'] = exp1 - exp2
-    df['signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-    
-    # Add percentage change
-    df['pct_change'] = df['close'].pct_change()
-    
-    # Add volatility (20 * 1hr = 20hr rolling standard deviation of returns)
-    df['volatility'] = df['pct_change'].rolling(window=20).std()
-    
-    # Add direction (1 for up, 0 for down or no change)
-    df['direction'] = (df['close'].shift(-24) > df['close']).astype(int)  # Shift by 24 periods (24 hours)
-
-    # Add market condition (this is a placeholder, you may want to calculate it based on your analysis)
-    df['market_condition'] = 0  # Default value, you can modify this later based on your analysis
-
-    # Add lagged features
-    df['lagged_close'] = df['close'].shift(1)
-    df['lagged_volume'] = df['volume'].shift(1)
-    df['lagged_rsi'] = df['rsi'].shift(1)
-    df['lagged_macd'] = df['macd'].shift(1)
-    df['lagged_signal'] = df['signal'].shift(1)
-    df['lagged_pct_change'] = df['pct_change'].shift(1)
-    df['lagged_volatility'] = df['volatility'].shift(1)
-
-    # Convert external_data 'date' column to date type if it's not already
-    external_data['date'] = pd.to_datetime(external_data['date']).dt.date
-
-    # Add external data
-    df = pd.merge(df, external_data, on='date', how='left')
-
-    # Add new features
-    if 'btc_market_cap' in df.columns and 'total_crypto_market_cap' in df.columns:
-        df['btc_dominance'] = df['btc_market_cap'] / df['total_crypto_market_cap']
-    else:
-        print("Warning: Unable to calculate btc_dominance due to missing columns")
-        df['btc_dominance'] = np.nan
-
-    if 'hash_rate' in df.columns:
-        df['hash_rate_ma'] = df['hash_rate'].rolling(window=24).mean()  # 24-hour moving average
-    else:
-        print("Warning: Unable to calculate hash_rate_ma due to missing hash_rate column")
-        df['hash_rate_ma'] = np.nan
-
-    # Add percentage change for external data
-    df['hash_rate_pct_change'] = df['hash_rate'].pct_change()
-    df['total_market_cap_pct_change'] = df['total_crypto_market_cap'].pct_change()
-    df['sp500_pct_change'] = df['sp500'].pct_change()
-
-    return df.dropna().reset_index(drop=True)
 
 def calculate_normalized_metrics(y_true, y_pred, scaler):
     y_true_array = y_true.values.reshape(-1, 1)
@@ -96,30 +31,11 @@ def main():
     print("Starting main function")
     # Initialize necessary classes
     coinbase_service = CoinbaseService(API_KEY, API_SECRET)  # Create CoinbaseService instance
-    historical_data = HistoricalData(coinbase_service.client)
-
-    # Fetch historical data (e.g., 1 month of data with 5-minute granularity)
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=DAYS_TO_TEST_MODEL)  # Get 2 months of data
-    candles = historical_data.get_historical_data("BTC-USDC", start_date, end_date, granularity="ONE_HOUR")  # Fetch data with 5-minute granularity
-
-    # Fetch external data
-    external_data_fetcher = ExternalDataFetcher()
-    external_data = external_data_fetcher.get_data(start_date, end_date)
-
-    # Prepare the data
-    df = prepare_historical_data(candles, external_data)
-    print("Historical data fetched and prepared:")
-    print("\nShape of data:", df.shape)
-
-    # Split the data into training, validation, and testing sets
-    train_df, temp_df = train_test_split(df, test_size=0.3, shuffle=False)
-    val_df, test_df = train_test_split(temp_df, test_size=0.5, shuffle=False)
 
     # Create and train the model
     model = BitcoinPredictionModel(coinbase_service)
     try:
-        model.train(train_df)
+        model.train()
     except Exception as e:
         print(f"An error occurred during model training: {e}")
         return

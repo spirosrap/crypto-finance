@@ -27,6 +27,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from sklearn.linear_model import LogisticRegression
 from ml_model import MLSignal
 from historicaldata import HistoricalData
+from bitcoinpredictionmodel import BitcoinPredictionModel
 
 @dataclass
 class TechnicalAnalysisConfig:
@@ -69,6 +70,8 @@ class TechnicalAnalysis:
         self.ml_signal = MLSignal(self.logger, historical_data)
         self.ml_signal.load_model()  # Load or train the model at initialization
         self.scaler = StandardScaler()
+        self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service)
+        self.bitcoin_prediction_model.load_model()  # Load or train the model at initialization
 
     def calculate_intervals_per_day(self) -> int:
         interval_map = {
@@ -434,7 +437,8 @@ class TechnicalAnalysis:
             'volume': 1,
             'ichimoku': 0,
             'fibonacci': 0,
-            'ml_model': 3  # Increased weight for ML model
+            'ml_model': 3,  # Increased weight for ML model
+            'bitcoin_prediction': 0  # Assign a weight to the BitcoinPredictionModel signal
         }
 
         # Adjust weights for bear markets
@@ -452,6 +456,7 @@ class TechnicalAnalysis:
             weights['ichimoku'] = 0
             weights['fibonacci'] = 0
             weights['ml_model'] = 0
+            weights['bitcoin_prediction'] = 0
 
         signal_strength += weights['rsi'] * self.evaluate_rsi_signal(rsi, volatility_std)
         signal_strength += weights['macd'] * self.evaluate_macd_signal(macd, signal, histogram)
@@ -468,6 +473,12 @@ class TechnicalAnalysis:
             ml_signal = self.ml_signal.predict_signal(candles)
             self.logger.debug(f"ML signal: {ml_signal}")  # Log the ML signal
             signal_strength += weights['ml_model'] * ml_signal
+
+        # Add BitcoinPredictionModel signal
+        if weights['bitcoin_prediction'] > 0:
+            # Ensure the model is loaded
+            bitcoin_prediction_signal = self.get_bitcoin_prediction_signal(candles)
+            signal_strength += weights['bitcoin_prediction'] * bitcoin_prediction_signal
 
         signal_strength = self.adjust_signal_for_volatility(signal_strength, candles)
         signal_strength = self.adjust_signal_for_market_conditions(signal_strength, market_conditions, current_price, candles)
@@ -681,5 +692,27 @@ class TechnicalAnalysis:
         :return: NumPy array of prices.
         """
         return np.array([candle[key] for candle in candles], dtype=float)
+
+    def get_bitcoin_prediction_signal(self, candles: List[Dict]) -> int:
+        try:
+            # Prepare the data for prediction
+            df, X, _ = self.bitcoin_prediction_model.prepare_data(candles)
+            
+            # Make prediction
+            prediction = self.bitcoin_prediction_model.predict(X.iloc[-1:])
+            
+            # Convert prediction to signal
+            current_price = float(candles[-1]['close'])
+            predicted_price = prediction[0]
+            
+            if predicted_price > current_price * 1.01:  # 1% increase
+                return 1  # Buy signal
+            elif predicted_price < current_price * 0.99:  # 1% decrease
+                return -1  # Sell signal
+            else:
+                return 0  # Hold signal
+        except Exception as e:
+            self.logger.error(f"Error in BitcoinPredictionModel prediction: {str(e)}. Returning neutral signal.")
+            return 0
 
 # ... (any additional classes or functions)
