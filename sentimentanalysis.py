@@ -1,5 +1,5 @@
 import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
+from nltk.sentiment import SentimentIntensityAnalyzer
 #nltk.download('vader_lexicon')
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -10,7 +10,12 @@ from config import NEWS_API_KEY
 
 class SentimentAnalysis:
     def __init__(self):
-        self.sia = SentimentIntensityAnalyzer()
+        try:
+            self.sia = SentimentIntensityAnalyzer()
+        except LookupError:
+            print("Downloading required NLTK data...")
+            nltk.download('vader_lexicon')
+            self.sia = SentimentIntensityAnalyzer()
 
     def analyze_sentiment(self, keyword):
         try:
