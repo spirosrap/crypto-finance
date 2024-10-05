@@ -26,7 +26,13 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 ## Prerequisites
 
 ```
+conda create -n myenv python=3.11
+conda activate myenv
+```
+
+```
 pip install coinbase-advanced-py
+pip install statsmodels
 pip install yfinance
 pip install newsapi-python
 pip install schedule
