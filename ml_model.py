@@ -5,7 +5,7 @@ import talib
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV, train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
@@ -151,8 +151,9 @@ class MLSignal:
         class_weights = compute_class_weight('balanced', classes=np.unique(y), y=y)
         class_weight_dict = dict(zip(np.unique(y), class_weights))
 
-        # Split the data into training and testing sets
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+        # Split the data into training, validation, and testing sets
+        X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+        X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.2, shuffle=False)
 
         # Handle class imbalance
         smote = SMOTE(random_state=42)
@@ -180,7 +181,7 @@ class MLSignal:
                 'classifier__C': [0.1, 1, 10],
                 'classifier__penalty': ['l2'],
                 'classifier__solver': ['liblinear', 'saga'],
-                'classifier__max_iter': [1000, 2000]  # Added max_iter to hyperparameter search
+                'classifier__max_iter': [1000, 2000]
             },
             'rf': {
                 'classifier__n_estimators': [100, 200],
@@ -207,7 +208,7 @@ class MLSignal:
 
             random_search = RandomizedSearchCV(
                 pipeline, param_distributions[name], n_iter=10,
-                cv=3, scoring='f1', random_state=42, n_jobs=-1
+                cv=3, scoring='neg_mean_squared_error', random_state=42, n_jobs=-1
             )
             random_search.fit(X_train_resampled, y_train_resampled)
             best_models[name] = random_search.best_estimator_
@@ -216,14 +217,22 @@ class MLSignal:
         self.ml_model = EnsembleClassifier([model for model in best_models.values()])
         self.ml_model.fit(X_train_resampled, y_train_resampled)
 
-        # Evaluate the model on the test set
-        y_pred = self.ml_model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred)
-        recall = recall_score(y_test, y_pred)
-        auc = roc_auc_score(y_test, self.ml_model.predict_proba(X_test)[:, 1])
-        self.logger.info(f"ML Model test set - Accuracy: {accuracy:.4f}, F1 Score: {f1:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, AUC: {auc:.4f}")
+        # Evaluate the model on training, validation, and test sets
+        sets = [
+            ("Training", X_train_resampled, y_train_resampled),
+            ("Validation", X_val, y_val),
+            ("Test", X_test, y_test)
+        ]
+
+        for set_name, X_set, y_set in sets:
+            y_pred = self.ml_model.predict(X_set)
+            y_pred_proba = self.ml_model.predict_proba(X_set)[:, 1]  # Probability of positive class
+
+            mse = mean_squared_error(y_set, y_pred_proba)
+            mae = mean_absolute_error(y_set, y_pred_proba)
+            r2 = r2_score(y_set, y_pred_proba)
+
+            self.logger.info(f"{set_name} set - MSE: {mse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
 
         # Log model weights
         for model, weight in zip(self.ml_model.models, self.ml_model.weights):
@@ -273,7 +282,8 @@ class MLSignal:
             self.logger.debug(f"ML signal: {signal}")
             return signal
         except Exception as e:
-            self.logger.error(f"Error in ML prediction: {str(e)}. Returning neutral signal.")
+            self.logger.exception(f"Error in ML prediction: {str(e)}. Returning neutral signal.")
+            raise  # Re-raise the exception for debugging
             return 0
 
     def evaluate_performance(self, candles: List[Dict]) -> float:
