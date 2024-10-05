@@ -1,11 +1,11 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler
 from coinbaseservice import CoinbaseService
 import statsmodels.api as sm
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor, VotingRegressor, RandomForestRegressor, ExtraTreesRegressor
 from external_data import ExternalDataFetcher
 from historicaldata import HistoricalData
 from config import API_KEY, API_SECRET
@@ -15,10 +15,11 @@ from datetime import datetime, timedelta
 import joblib
 import os
 import logging
-from sklearn.feature_selection import RFECV
+from sklearn.feature_selection import RFECV, RFE
+from sklearn.linear_model import Lasso
 
 # COINGECKO PROVIDES ONLY UP TO ONE YEAR OF DATA FOR THE FREE TIER
-DAYS_TO_TEST_MODEL = 50  # Global variable to define the number of days to test the model
+DAYS_TO_TEST_MODEL = 100  # Increase from 50 to 100
 
 class BitcoinPredictionModel:
     def __init__(self, coinbase_service):
@@ -37,6 +38,7 @@ class BitcoinPredictionModel:
         self.model_file = 'bitcoin_prediction_model.joblib'
         self.logger = logging.getLogger(__name__)
         self.selected_features = None
+        self.ensemble = None
 
     def prepare_data(self, candles, external_data=None):
         df = pd.DataFrame(candles)
@@ -192,34 +194,69 @@ class BitcoinPredictionModel:
         y_val_scaled = self.scaler_y.transform(y_val.values.reshape(-1, 1)).ravel()
         y_test_scaled = self.scaler_y.transform(y_test.values.reshape(-1, 1)).ravel()
 
-        param_grid = {
-            'n_estimators': [100, 200],
-            'max_depth': [3, 5, 7],
-            'learning_rate': [0.01, 0.1],
-            'subsample': [0.8, 0.9],  # Changed 1.0 to 0.9
-            'min_samples_split': [2, 5],
-            'min_samples_leaf': [1, 2]
+        # Replace GridSearchCV with RandomizedSearchCV
+        param_distributions = {
+            'max_depth': [2, 3, 4],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'subsample': [0.7, 0.8, 0.9],
+            'min_samples_split': [5, 10, 20],
+            'min_samples_leaf': [2, 4, 8]
         }
 
         tscv = TimeSeriesSplit(n_splits=5)
-        grid_search = GridSearchCV(GradientBoostingRegressor(), 
-                                   param_grid, 
-                                   cv=tscv, 
-                                   scoring='neg_mean_squared_error',
-                                   n_jobs=-1, 
-                                   verbose=2)
+        random_search = RandomizedSearchCV(GradientBoostingRegressor(loss='huber', n_estimators=100), 
+                                           param_distributions, 
+                                           n_iter=10,
+                                           cv=tscv, 
+                                           scoring='neg_mean_squared_error',
+                                           n_jobs=-1, 
+                                           verbose=2)
         
         try:
-            grid_search.fit(X_train_scaled, y_train_scaled)
-            print("Best parameters:", grid_search.best_params_)
-            self.model = grid_search.best_estimator_
+            random_search.fit(X_train_scaled, y_train_scaled)
+            print("Best parameters:", random_search.best_params_)
+            best_params = random_search.best_params_
         except Exception as e:
-            print(f"An error occurred during grid search: {e}")
+            print(f"An error occurred during random search: {e}")
             print("Falling back to default parameters.")
-            self.model = GradientBoostingRegressor(**self.params)
-            self.model.fit(X_train_scaled, y_train_scaled)
+            best_params = self.params
 
-        val_predictions = self.model.predict(X_val_scaled)
+        # Implement early stopping without warm start
+        max_estimators = 1000
+        best_val_score = float('inf')
+        best_iteration = 0
+        patience = 10
+        model = None
+
+        for n_estimators in range(1, max_estimators + 1):
+            current_model = GradientBoostingRegressor(n_estimators=n_estimators, **best_params)
+            current_model.fit(X_train_scaled, y_train_scaled)
+            val_pred = current_model.predict(X_val_scaled)
+            val_score = mean_squared_error(y_val_scaled, val_pred)
+            
+            if val_score < best_val_score:
+                best_val_score = val_score
+                best_iteration = n_estimators
+                model = current_model
+            elif n_estimators - best_iteration > patience:
+                print(f"Early stopping at iteration {n_estimators}")
+                break
+
+        self.model = model
+        print(f"Best number of estimators: {best_iteration}")
+
+        # Create and train the ensemble
+        gb = GradientBoostingRegressor(n_estimators=best_iteration, **best_params)
+        rf = RandomForestRegressor(n_estimators=100)
+        et = ExtraTreesRegressor(n_estimators=100)
+
+        self.ensemble = VotingRegressor([('gb', gb), ('rf', rf), ('et', et)])
+        self.ensemble.fit(X_train_scaled, y_train_scaled)
+
+        # Use the ensemble for predictions
+        val_predictions = self.ensemble.predict(X_val_scaled)
+        test_predictions = self.ensemble.predict(X_test_scaled)
+
         val_mse = mean_squared_error(y_val_scaled, val_predictions)
         val_mae = mean_absolute_error(y_val_scaled, val_predictions)
         val_r2 = r2_score(y_val_scaled, val_predictions)
@@ -227,7 +264,6 @@ class BitcoinPredictionModel:
         print(f"Validation set MAE: {val_mae:.4f}")
         print(f"Validation set R2: {val_r2:.4f}")
 
-        test_predictions = self.model.predict(X_test_scaled)
         test_mse = mean_squared_error(y_test_scaled, test_predictions)
         test_mae = mean_absolute_error(y_test_scaled, test_predictions)
         test_r2 = r2_score(y_test_scaled, test_predictions)
@@ -240,9 +276,9 @@ class BitcoinPredictionModel:
         for importance, name in sorted(zip(feature_importance, feature_names), reverse=True):
             print(f"{name}: {importance:.4f}")
 
-        # Save the trained model
+        # Save the trained ensemble
         joblib.dump({
-            'model': self.model,
+            'ensemble': self.ensemble,
             'scaler_X': self.scaler_X,
             'scaler_y': self.scaler_y,
             'selected_features': self.selected_features
@@ -262,7 +298,7 @@ class BitcoinPredictionModel:
     def load_model(self):
         try:
             model_data = joblib.load(self.model_file)
-            self.model = model_data['model']
+            self.ensemble = model_data['ensemble']
             self.scaler_X = model_data['scaler_X']
             self.scaler_y = model_data['scaler_y']
             self.selected_features = model_data['selected_features']
@@ -277,7 +313,7 @@ class BitcoinPredictionModel:
             self.train()
 
     def predict(self, features):
-        if self.model is None:
+        if self.ensemble is None:
             self.load_model()
 
         if self.selected_features is None:
@@ -287,5 +323,5 @@ class BitcoinPredictionModel:
         features = features[self.selected_features]
         
         features_scaled = self.scaler_X.transform(features)
-        predictions_scaled = self.model.predict(features_scaled)
+        predictions_scaled = self.ensemble.predict(features_scaled)
         return self.scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()
