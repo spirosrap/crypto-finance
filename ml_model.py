@@ -174,8 +174,7 @@ class MLSignal:
         models = {
             'lr': LogisticRegression(random_state=42, class_weight='balanced', max_iter=3000),
             'rf': RandomForestClassifier(random_state=42, class_weight='balanced'),
-            'xgb': XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight),
-            'gb': GradientBoostingClassifier(random_state=42)
+            'xgb': XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight)
         }
 
         # Simplified hyperparameter search spaces
@@ -199,15 +198,7 @@ class MLSignal:
                 'classifier__min_child_weight': [1, 5],
                 'classifier__subsample': [0.8, 1.0],
                 'classifier__colsample_bytree': [0.8, 1.0]
-            },
-            'gb': {
-                'classifier__n_estimators': [100, 200],
-                'classifier__learning_rate': [0.01, 0.1],
-                'classifier__max_depth': [3, 5],
-                'classifier__min_samples_split': [2, 5],
-                'classifier__min_samples_leaf': [1, 2],
-                'classifier__subsample': [0.8, 1.0]
-            }
+            }        
         }
 
         best_models = {}
