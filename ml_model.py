@@ -4,12 +4,12 @@ from typing import List, Dict, Tuple
 import talib
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV, train_test_split
+from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV, train_test_split, cross_val_predict
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.utils.class_weight import compute_class_weight
 from xgboost import XGBClassifier
 from imblearn.over_sampling import SMOTE
@@ -20,34 +20,61 @@ import os
 from sklearn.inspection import permutation_importance
 import matplotlib.pyplot as plt
 
-class EnsembleClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, models):
-        self.models = models
-        self.weights = None
+class StackingEnsemble(BaseEstimator, ClassifierMixin):
+    def __init__(self, base_models, meta_model):
+        self.base_models = base_models
+        self.meta_model = meta_model
+        self.classes_ = None
 
     def fit(self, X, y):
-        for model in self.models:
-            model.fit(X, y)
-        
-        # Calculate weights based on individual model performance
-        self.weights = []
-        for model in self.models:
-            y_pred = model.predict(X)
-            score = f1_score(y, y_pred)
-            self.weights.append(score)
-        
-        # Normalize weights
-        self.weights = np.array(self.weights) / sum(self.weights)
+        # Store unique class labels
+        self.classes_ = np.unique(y)
+
+        # Train base models
+        self.fitted_base_models_ = []
+        for model in self.base_models:
+            fitted_model = clone(model)
+            fitted_model.fit(X, y)
+            self.fitted_base_models_.append(fitted_model)
+
+        # Generate meta-features
+        meta_features = np.column_stack([
+            cross_val_predict(model, X, y, cv=5, method='predict_proba')[:, 1]
+            for model in self.base_models
+        ])
+
+        # Train meta-model
+        self.fitted_meta_model_ = clone(self.meta_model)
+        self.fitted_meta_model_.fit(meta_features, y)
         return self
 
-    def predict(self, X):
-        predictions = np.array([model.predict(X) for model in self.models])
-        weighted_predictions = np.average(predictions, axis=0, weights=self.weights)
-        return (weighted_predictions > 0.5).astype(int)
-
     def predict_proba(self, X):
-        probas = np.array([model.predict_proba(X) for model in self.models])
-        return np.average(probas, axis=0, weights=self.weights)
+        meta_features = np.column_stack([
+            model.predict_proba(X)[:, 1] for model in self.fitted_base_models_
+        ])
+        return self.fitted_meta_model_.predict_proba(meta_features)
+
+    def predict(self, X):
+        return self.predict_proba(X)[:, 1] > 0.5
+
+    def get_params(self, deep=True):
+        return {
+            "base_models": self.base_models,
+            "meta_model": self.meta_model
+        }
+
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+
+    @property
+    def classes_(self):
+        return self._classes
+
+    @classes_.setter
+    def classes_(self, value):
+        self._classes = value
 
 class MLSignal:
     def __init__(self, logger, historical_data):
@@ -166,66 +193,51 @@ class MLSignal:
             ('imputer', SimpleImputer(strategy='mean')),
             ('scaler', StandardScaler())
         ])
-
-        # Define base models with regularization
         class_counts = np.bincount(y)
         scale_pos_weight = class_counts[0] / class_counts[1] if len(class_counts) > 1 else 1
 
-        models = {
-            'lr': LogisticRegression(random_state=42, class_weight='balanced', max_iter=3000),
-            'rf': RandomForestClassifier(random_state=42, class_weight='balanced'),
-            'xgb': XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight)
-        }
+        # Define base models
+        base_models = [
+            ('lr', LogisticRegression(random_state=42, class_weight='balanced', max_iter=3000)),
+            ('rf', RandomForestClassifier(random_state=42, class_weight='balanced')),
+            ('xgb', XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight))
+        ]
 
-        # Simplified hyperparameter search spaces
+        # Define meta-model
+        meta_model = LogisticRegression(random_state=42)
+
+        # Create stacking ensemble
+        stacking_ensemble = StackingEnsemble(base_models=[model for _, model in base_models], meta_model=meta_model)
+
+        # Create a pipeline with preprocessing and stacking ensemble
+        self.ml_model = Pipeline([
+            ('preprocessor', preprocessor),
+            ('stacking_ensemble', stacking_ensemble)
+        ])
+
+        # Simplified hyperparameter search space
         param_distributions = {
-            'lr': {
-                'classifier__C': [0.1, 1, 10],
-                'classifier__penalty': ['l2'],
-                'classifier__solver': ['liblinear', 'saga'],
-                'classifier__max_iter': [1000, 2000]
-            },
-            'rf': {
-                'classifier__n_estimators': [100, 200],
-                'classifier__max_depth': [10, 20, None],
-                'classifier__min_samples_split': [2, 5],
-                'classifier__min_samples_leaf': [1, 2]
-            },
-            'xgb': {
-                'classifier__n_estimators': [100, 200],
-                'classifier__learning_rate': [0.01, 0.1],
-                'classifier__max_depth': [3, 5],
-                'classifier__min_child_weight': [1, 5],
-                'classifier__subsample': [0.8, 1.0],
-                'classifier__colsample_bytree': [0.8, 1.0]
-            }        
+            'stacking_ensemble__base_models__0__C': [0.1, 1, 10],
+            'stacking_ensemble__base_models__1__n_estimators': [100, 200],
+            'stacking_ensemble__base_models__1__max_depth': [10, 20, None],
+            'stacking_ensemble__base_models__2__n_estimators': [100, 200],
+            'stacking_ensemble__base_models__2__learning_rate': [0.01, 0.1],
+            'stacking_ensemble__meta_model__C': [0.1, 1, 10]
         }
 
-        best_models = {}
-        for name, model in models.items():
-            pipeline = Pipeline([
-                ('preprocessor', preprocessor),
-                ('classifier', model)
-            ])
+        # Perform randomized search
+        random_search = RandomizedSearchCV(
+            self.ml_model, param_distributions, n_iter=10,
+            cv=TimeSeriesSplit(n_splits=3), scoring='neg_log_loss',
+            random_state=42, n_jobs=-1
+        )
+        random_search.fit(X_train_resampled, y_train_resampled)
 
-            random_search = RandomizedSearchCV(
-                pipeline, param_distributions[name], n_iter=10,  # Reduced from 30 to 10
-                cv=TimeSeriesSplit(n_splits=3),  # Reduced from 5 to 3
-                scoring='neg_log_loss',
-                random_state=42, n_jobs=-1
-            )
-            random_search.fit(X_train_resampled, y_train_resampled)
-            best_models[name] = random_search.best_estimator_
-            
-            self.logger.info(f"Best parameters for {name}: {random_search.best_params_}")
-            self.logger.info(f"Best score for {name}: {-random_search.best_score_:.4f}")
+        # Set the best model
+        self.ml_model = random_search.best_estimator_
 
-        # Create ensemble with weighted voting
-        self.ml_model = EnsembleClassifier([model for model in best_models.values()])
-        self.ml_model.fit(X_train_resampled, y_train_resampled)
-
-        # Evaluate feature importance
-        self.evaluate_feature_importance(X_train_resampled, y_train_resampled, X_val, y_val)
+        self.logger.info(f"Best parameters: {random_search.best_params_}")
+        self.logger.info(f"Best score: {-random_search.best_score_:.4f}")
 
         # Evaluate the model on training, validation, and test sets
         sets = [
@@ -236,17 +248,13 @@ class MLSignal:
 
         for set_name, X_set, y_set in sets:
             y_pred = self.ml_model.predict(X_set)
-            y_pred_proba = self.ml_model.predict_proba(X_set)[:, 1]  # Probability of positive class
+            y_pred_proba = self.ml_model.predict_proba(X_set)[:, 1]
 
             mse = mean_squared_error(y_set, y_pred_proba)
             mae = mean_absolute_error(y_set, y_pred_proba)
             r2 = r2_score(y_set, y_pred_proba)
 
             self.logger.info(f"{set_name} set - MSE: {mse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
-
-        # Log model weights
-        for model, weight in zip(self.ml_model.models, self.ml_model.weights):
-            self.logger.info(f"Model {type(model).__name__} weight: {weight:.4f}")
 
         # Save the trained model
         joblib.dump(self.ml_model, self.model_file)
@@ -305,7 +313,7 @@ class MLSignal:
         try:
             self.logger.debug(f"X shape: {X.shape}")
             
-            X_processed = self.ml_model.models[0].named_steps['preprocessor'].transform(X)
+            X_processed = self.ml_model.named_steps['preprocessor'].transform(X)
             
             probability = self.ml_model.predict_proba(X_processed)
             
