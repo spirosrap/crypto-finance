@@ -4,9 +4,7 @@ candle_data/
 .DS_Store
 *.png
 bitcoin_direction_prediction.png
-ml_model.joblib
 ml_model.joblib-good4
-ml_model.joblib
 ml_model.joblib
 ml_model.joblib.good5
 ml_model.joblib.good5.1
@@ -20,6 +18,5 @@ catboost_info/learn_error.tsv
 catboost_info/time_left.tsv
 catboost_info/learn/events.out.tfevents
 bitcoin_prediction_model.joblib
-ml_model_BTC-USDC_ONE_HOUR.joblib
 ml_model_BTC-USDC_ONE_HOUR.joblib
 ml_model_BTC-USDC_ONE_HOUR.joblib.temp
