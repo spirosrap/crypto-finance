@@ -20,3 +20,6 @@ catboost_info/learn_error.tsv
 catboost_info/time_left.tsv
 catboost_info/learn/events.out.tfevents
 bitcoin_prediction_model.joblib
+ml_model_BTC-USDC_ONE_HOUR.joblib
+ml_model_BTC-USDC_ONE_HOUR.joblib
+ml_model_BTC-USDC_ONE_HOUR.joblib.temp

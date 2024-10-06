@@ -3,7 +3,6 @@ numpy==1.24.3
 matplotlib==3.7.1
 yfinance==0.2.18
 statsmodels
-ibmlearn
 coinbase-advanced-py
 newsapi-python
 schedule
@@ -11,10 +10,21 @@ hmmlearn
 scikit-learn
 scikit-fuzzy
 xgboost
-ta-lib
 joblib==1.1.0
 scikit-optimize
 shap
 catboost
 # The following dependency is installed from GitHub:
-# git+https://github.com/TA-Lib/ta-lib-python.git
+# INSTALL TA-lib from https://sourceforge.net/projects/ta-lib/files/ta-lib/0.4.0/ta-lib-0.4.0-src.tar.gz/download
+
+#LINUX
+#$ tar -xzf ta-lib-0.4.0-src.tar.gz
+#$ cd ta-lib/
+#$ ./configure --prefix=/usr
+#$ make
+#$ sudo make install
+# MAC
+#brew install ta-lib
+
+git+https://github.com/TA-Lib/ta-lib-python.git
+

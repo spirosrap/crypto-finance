@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 import os
 from sklearn.inspection import permutation_importance
 import matplotlib.pyplot as plt
+from sklearn.feature_selection import SelectFromModel
+from sklearn.inspection import permutation_importance
 
 class StackingEnsemble(BaseEstimator, ClassifierMixin):
     def __init__(self, base_models, meta_model):
@@ -195,6 +197,10 @@ class MLSignal:
             ('imputer', SimpleImputer(strategy='mean')),
             ('scaler', StandardScaler())
         ])
+
+        # Feature selection using permutation importance
+        feature_selector = self.select_features(X_train_resampled, y_train_resampled, preprocessor)
+
         class_counts = np.bincount(y)
         scale_pos_weight = class_counts[0] / class_counts[1] if len(class_counts) > 1 else 1
 
@@ -211,9 +217,10 @@ class MLSignal:
         # Create stacking ensemble
         stacking_ensemble = StackingEnsemble(base_models=[model for _, model in base_models], meta_model=meta_model)
 
-        # Create a pipeline with preprocessing and stacking ensemble
+        # Create a pipeline with preprocessing, feature selection, and stacking ensemble
         self.ml_model = Pipeline([
             ('preprocessor', preprocessor),
+            ('feature_selector', feature_selector),
             ('stacking_ensemble', stacking_ensemble)
         ])
 
@@ -261,6 +268,42 @@ class MLSignal:
         # Save the trained model
         joblib.dump(self.ml_model, self.model_file)
         self.logger.info(f"ML model trained and saved to {self.model_file}")
+
+    def select_features(self, X, y, preprocessor):
+        # Preprocess the data
+        X_preprocessed = preprocessor.fit_transform(X)
+
+        # Train a simple model for feature importance
+        rf = RandomForestClassifier(n_estimators=100, random_state=42)
+        rf.fit(X_preprocessed, y)
+
+        # Calculate feature importance
+        importances = permutation_importance(rf, X_preprocessed, y, n_repeats=10, random_state=42)
+        feature_importance = pd.DataFrame({'feature': self.get_feature_names(), 'importance': importances.importances_mean})
+        feature_importance = feature_importance.sort_values('importance', ascending=False).reset_index(drop=True)
+
+        # Log feature importance
+        self.logger.info("Feature Importance:")
+        for idx, row in feature_importance.iterrows():
+            self.logger.info(f"{row['feature']}: {row['importance']:.4f}")
+
+        # Select features with importance above the mean
+        importance_threshold = feature_importance['importance'].mean()
+        selected_features = feature_importance[feature_importance['importance'] > importance_threshold]['feature'].tolist()
+
+        self.logger.info(f"Selected {len(selected_features)} features out of {len(self.get_feature_names())}")
+        self.logger.info(f"Selected features: {', '.join(selected_features)}")
+
+        # Create a selector based on the selected features
+        selector = SelectFromModel(estimator=rf, prefit=False, threshold=importance_threshold)
+        selector.fit(X_preprocessed, y)  # Fit the selector here
+        return selector
+
+    def get_feature_names(self):
+        return ['rsi', 'macd', 'sma_short', 'sma_long', 'volume', 'returns', 'atr', 'bbw', 'roc', 'mfi', 'adx', 
+                'rsi_lag1', 'macd_lag1', 'trend_strength', 'ema_fast', 'ema_slow', 'cci', 'obv',
+                'stoch_k', 'stoch_d', 'willr', 'mom', 'log_return', 'volatility',
+                'ema_crossover', 'rsi_overbought', 'rsi_oversold', 'macd_signal', 'bbw_high']
 
     def evaluate_feature_importance(self, X_train, y_train, X_val, y_val):
         feature_names = ['rsi', 'macd', 'sma_short', 'sma_long', 'volume', 'returns', 'atr', 'bbw', 'roc', 'mfi', 'adx', 
