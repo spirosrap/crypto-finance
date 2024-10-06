@@ -19,7 +19,6 @@ def main():
     # Use this logger when creating the MLSignal instance
     ml_signal = MLSignal(logger, historical_data)
 
-    ml_signal.load_model()  # Load or train the model at initialization
 
     # Create and train the model
     try:

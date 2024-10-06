@@ -17,6 +17,8 @@ import logging
 import joblib
 from datetime import datetime, timedelta
 import os
+from sklearn.inspection import permutation_importance
+import matplotlib.pyplot as plt
 
 class EnsembleClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, models):
@@ -170,9 +172,10 @@ class MLSignal:
         scale_pos_weight = class_counts[0] / class_counts[1] if len(class_counts) > 1 else 1
 
         models = {
-            'lr': LogisticRegression(random_state=42, class_weight='balanced', max_iter=1000),
+            'lr': LogisticRegression(random_state=42, class_weight='balanced', max_iter=3000),
             'rf': RandomForestClassifier(random_state=42, class_weight='balanced'),
-            'xgb': XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight)
+            'xgb': XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight),
+            'gb': GradientBoostingClassifier(random_state=42)
         }
 
         # Simplified hyperparameter search spaces
@@ -196,6 +199,14 @@ class MLSignal:
                 'classifier__min_child_weight': [1, 5],
                 'classifier__subsample': [0.8, 1.0],
                 'classifier__colsample_bytree': [0.8, 1.0]
+            },
+            'gb': {
+                'classifier__n_estimators': [100, 200],
+                'classifier__learning_rate': [0.01, 0.1],
+                'classifier__max_depth': [3, 5],
+                'classifier__min_samples_split': [2, 5],
+                'classifier__min_samples_leaf': [1, 2],
+                'classifier__subsample': [0.8, 1.0]
             }
         }
 
@@ -207,15 +218,23 @@ class MLSignal:
             ])
 
             random_search = RandomizedSearchCV(
-                pipeline, param_distributions[name], n_iter=10,
-                cv=3, scoring='neg_mean_squared_error', random_state=42, n_jobs=-1
+                pipeline, param_distributions[name], n_iter=10,  # Reduced from 30 to 10
+                cv=TimeSeriesSplit(n_splits=3),  # Reduced from 5 to 3
+                scoring='neg_log_loss',
+                random_state=42, n_jobs=-1
             )
             random_search.fit(X_train_resampled, y_train_resampled)
             best_models[name] = random_search.best_estimator_
+            
+            self.logger.info(f"Best parameters for {name}: {random_search.best_params_}")
+            self.logger.info(f"Best score for {name}: {-random_search.best_score_:.4f}")
 
         # Create ensemble with weighted voting
         self.ml_model = EnsembleClassifier([model for model in best_models.values()])
         self.ml_model.fit(X_train_resampled, y_train_resampled)
+
+        # Evaluate feature importance
+        self.evaluate_feature_importance(X_train_resampled, y_train_resampled, X_val, y_val)
 
         # Evaluate the model on training, validation, and test sets
         sets = [
@@ -241,6 +260,33 @@ class MLSignal:
         # Save the trained model
         joblib.dump(self.ml_model, self.model_file)
         self.logger.info(f"ML model trained and saved to {self.model_file}")
+
+    def evaluate_feature_importance(self, X_train, y_train, X_val, y_val):
+        feature_names = ['rsi', 'macd', 'sma_short', 'sma_long', 'volume', 'returns', 'atr', 'bbw', 'roc', 'mfi', 'adx', 
+                         'rsi_lag1', 'macd_lag1', 'trend_strength', 'ema_fast', 'ema_slow', 'cci', 'obv',
+                         'stoch_k', 'stoch_d', 'willr', 'mom', 'log_return', 'volatility',
+                         'ema_crossover', 'rsi_overbought', 'rsi_oversold', 'macd_signal', 'bbw_high']
+
+        # Permutation importance
+        perm_importance = permutation_importance(self.ml_model, X_val, y_val, n_repeats=10, random_state=42)
+
+        # Sort features by importance
+        feature_importance = pd.DataFrame({'feature': feature_names, 'importance': perm_importance.importances_mean})
+        feature_importance = feature_importance.sort_values('importance', ascending=False).reset_index(drop=True)
+
+        # Log feature importance
+        self.logger.info("Feature Importance:")
+        for idx, row in feature_importance.iterrows():
+            self.logger.info(f"{row['feature']}: {row['importance']:.4f}")
+
+        # Identify low importance features
+        low_importance_threshold = 0.001  # Adjust this threshold as needed
+        low_importance_features = feature_importance[feature_importance['importance'] < low_importance_threshold]['feature'].tolist()
+        
+        if low_importance_features:
+            self.logger.info(f"Consider removing these low importance features: {', '.join(low_importance_features)}")
+        else:
+            self.logger.info("No low importance features identified.")
 
     def load_model(self):
         try:
