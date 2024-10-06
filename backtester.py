@@ -167,7 +167,7 @@ class Backtester:
                         self.logger.debug(f"Market conditions for today: {market_conditions}")
                         self.logger.debug(f"Trend for today: {trend}")
                         self.logger.debug(f"Volume signal for today: {volume_signal}")
-                        self.logger.debug(f"Current Bitcoin value: {close_price:.2f} USD")
+                        self.logger.debug(f"Current {product_id} value: {close_price:.2f} USD")
 
                     # Only generate signals if we have enough historical data and haven't exceeded max trades for the day
                     if i >= min_candles and trades_today < self.max_trades_per_day:

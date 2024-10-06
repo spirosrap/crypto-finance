@@ -77,11 +77,13 @@ class StackingEnsemble(BaseEstimator, ClassifierMixin):
         self._classes = value
 
 class MLSignal:
-    def __init__(self, logger, historical_data):
+    def __init__(self, logger, historical_data, product_id='BTC-USDC', granularity='ONE_HOUR'):
         self.logger = logger
         self.ml_model = None
         self.historical_data = historical_data
-        self.model_file = 'ml_model.joblib'
+        self.model_file = f'ml_model_{product_id}_{granularity}.joblib'
+        self.product_id = product_id
+        self.granularity = granularity
 
     def prepare_features(self, candles: List[Dict]) -> Tuple[np.ndarray, np.ndarray]:
         if len(candles) < 50:
@@ -163,7 +165,7 @@ class MLSignal:
         # Get 4 years of historical data
         end_date = datetime.now()
         start_date = end_date - timedelta(days=365*4)
-        candles = self.historical_data.get_historical_data('BTC-USD', start_date, end_date, granularity="ONE_HOUR")
+        candles = self.historical_data.get_historical_data(self.product_id, start_date, end_date, granularity=self.granularity)
         
         X, y = self.prepare_features(candles)
         
