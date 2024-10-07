@@ -1,16 +1,14 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit, RandomizedSearchCV
+from sklearn.model_selection import train_test_split, TimeSeriesSplit, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler
-from coinbaseservice import CoinbaseService
 import statsmodels.api as sm
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.ensemble import GradientBoostingRegressor, VotingRegressor, RandomForestRegressor, ExtraTreesRegressor
 from external_data import ExternalDataFetcher
 from historicaldata import HistoricalData
 from config import API_KEY, API_SECRET
-import schedule
-import time
+
 from datetime import datetime, timedelta
 import joblib
 import os

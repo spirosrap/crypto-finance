@@ -1,30 +1,13 @@
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Dict, Optional, Union
+from typing import List, Tuple, Dict, Optional
 from coinbaseservice import CoinbaseService
 import time
-import yfinance as yf
 import talib
 import logging
 from functools import lru_cache
 from dataclasses import dataclass
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split, TimeSeriesSplit, RandomizedSearchCV
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
-from imblearn.over_sampling import SMOTE
-from xgboost import XGBClassifier
-from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import VotingClassifier
-from sklearn.feature_selection import SelectFromModel
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.utils.validation import check_is_fitted
-from sklearn.utils.class_weight import compute_class_weight
-from sklearn.linear_model import LogisticRegression
 from ml_model import MLSignal
 from historicaldata import HistoricalData
 from bitcoinpredictionmodel import BitcoinPredictionModel
