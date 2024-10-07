@@ -51,7 +51,7 @@ class TechnicalAnalysis:
     and generating trading signals based on those indicators.
     """
 
-    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None, candle_interval: str = 'ONE_HOUR'):
+    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None, candle_interval: str = 'ONE_HOUR', product_id: str = 'BTC-USDC'):
         """
         Initialize the TechnicalAnalysis class.
 
@@ -65,12 +65,13 @@ class TechnicalAnalysis:
         self.volatility_history = []
         self.logger = logging.getLogger(__name__)
         self.candle_interval = candle_interval
+        self.product_id = product_id
         self.intervals_per_day = self.calculate_intervals_per_day()
         historical_data = HistoricalData(coinbase_service.client)
-        self.ml_signal = MLSignal(self.logger, historical_data, product_id='BTC-USDC', granularity='ONE_HOUR')
+        self.ml_signal = MLSignal(self.logger, historical_data, product_id=self.product_id, granularity=self.candle_interval)
         self.ml_signal.load_model()  # Load or train the model at initialization
         self.scaler = StandardScaler()
-        self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service)
+        self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service, product_id=self.product_id, granularity=self.candle_interval)
         self.bitcoin_prediction_model.load_model()  # Load or train the model at initialization
 
     def calculate_intervals_per_day(self) -> int:
@@ -437,7 +438,7 @@ class TechnicalAnalysis:
             'volume': 1,
             'ichimoku': 0,
             'fibonacci': 0,
-            'ml_model': 1,  # Increased weight for ML model
+            'ml_model': 2,  # Increased weight for ML model
             'bitcoin_prediction': 3  # Assign a weight to the BitcoinPredictionModel signal
         }
 

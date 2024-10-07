@@ -47,14 +47,14 @@ class TradeRecord:
     fee: float
 
 class CryptoTrader:
-    def __init__(self, api_key: str, api_secret: str):
+    def __init__(self, api_key: str, api_secret: str, product_id: str = 'BTC-USDC', granularity: str = 'ONE_HOUR'):
         self.client = RESTClient(api_key=api_key, api_secret=api_secret)
         self.coinbase_service = CoinbaseService(api_key, api_secret)
-        self.technical_analysis = TechnicalAnalysis(self.coinbase_service)
+        self.technical_analysis = TechnicalAnalysis(self.coinbase_service, candle_interval=granularity, product_id=product_id)
         self.sentiment_analysis = SentimentAnalysis()
         self.historical_data = HistoricalData(self.client)
         self.backtester = Backtester(self)
-        logger.info("CryptoTrader initialized with API key.")
+        logger.info(f"CryptoTrader initialized with API key for {product_id} with {granularity} granularity.")
 
     def get_portfolio_info(self) -> Tuple[float, float]:
         logger.debug("Fetching portfolio info.")
@@ -235,7 +235,7 @@ def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_pe
 
 def main():
     args = parse_arguments()
-    trader = CryptoTrader(API_KEY, API_SECRET)
+    trader = CryptoTrader(API_KEY, API_SECRET, product_id=args.product_id, granularity=args.granularity)
 
     end_date = datetime.now()
     start_date = end_date - timedelta(days=7)

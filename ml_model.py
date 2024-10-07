@@ -86,9 +86,9 @@ class MLSignal:
         self.logger = logger
         self.ml_model = None
         self.historical_data = historical_data
-        self.model_file = f'ml_model_{product_id.lower().replace("-", "_")}_{granularity.lower()}.joblib'
         self.product_id = product_id
         self.granularity = granularity
+        self.model_file = f'ml_model_{product_id.lower().replace("-", "_")}_{granularity.lower()}.joblib'
 
     def prepare_features(self, candles: List[Dict]) -> Tuple[np.ndarray, np.ndarray]:
         if len(candles) < 50:
@@ -341,12 +341,12 @@ class MLSignal:
             self.ml_model = joblib.load(self.model_file)
             model_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(self.model_file))
             if model_age > timedelta(days=7):  # Retrain weekly
-                self.logger.info("Model is over a week old. Retraining...")
+                self.logger.info(f"Model for {self.product_id} with granularity {self.granularity} is over a week old. Retraining...")
                 self.train_model()
             else:
-                self.logger.info(f"ML model loaded from {self.model_file}")
+                self.logger.info(f"ML model for {self.product_id} with granularity {self.granularity} loaded from {self.model_file}")
         except FileNotFoundError:
-            self.logger.warning(f"ML model file not found. Training a new model.")
+            self.logger.warning(f"ML model file for {self.product_id} with granularity {self.granularity} not found. Training a new model.")
             self.train_model()
 
     def predict_signal(self, candles: List[Dict]) -> int:
