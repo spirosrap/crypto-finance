@@ -60,6 +60,50 @@ class TechnicalAnalysis:
         # Set product-specific parameters
         self.set_product_specific_parameters()
 
+
+    def set_product_weights(self):
+        # Define base weights for each signal
+        base_weights = {
+            'rsi': 2,
+            'macd': 2,
+            'bollinger': 1,
+            'ma_crossover': 1,
+            'stochastic': 1,
+            'trend': 2,
+            'volume_profile': 1,
+            'short_term_trend': 2,
+            'long_term_trend': 1,
+            'volume': 1,
+            'ichimoku': 0,
+            'fibonacci': 0,
+            'ml_model': 2,
+            'bitcoin_prediction': 3
+        }
+
+        # Adjust weights based on product_id
+        if self.product_id == 'BTC-USDC':
+            # Bitcoin might be more influenced by long-term trends and prediction models
+            base_weights['long_term_trend'] = 2
+        elif self.product_id == 'ETH-USDC':
+            # Ethereum might be more volatile, so we increase weight on short-term indicators
+            base_weights['rsi'] = 3
+            base_weights['macd'] = 3
+            base_weights['short_term_trend'] = 3
+            base_weights['volume'] = 2
+        elif self.product_id == 'LTC-USDC':
+            # Litecoin might follow Bitcoin's trends more closely
+            base_weights['bitcoin_prediction'] = 3
+            base_weights['trend'] = 3
+        elif self.product_id == 'XRP-USDC':
+            # XRP might be more news-driven, so we reduce reliance on technical indicators
+            base_weights['rsi'] = 1
+            base_weights['macd'] = 1
+            base_weights['ml_model'] = 3
+            base_weights['volume'] = 2
+        # Add more product-specific adjustments as needed
+
+        return base_weights
+
     def set_product_specific_parameters(self):
         if self.product_id == 'ETH-USDC':
             # Adjust parameters for ETH-USDC
@@ -428,24 +472,7 @@ class TechnicalAnalysis:
         current_price = float(candles[-1]['close'])
         signal_strength = 0
 
-        # Define weights for each signal
-        weights = {
-            'rsi': 2,
-            'macd': 2,
-            'bollinger': 1,
-            'ma_crossover': 1,
-            'stochastic': 1,
-            'trend': 2,
-            'volume_profile': 1,
-            'short_term_trend': 2,
-            'long_term_trend': 1,
-            'volume': 1,
-            'ichimoku': 0,
-            'fibonacci': 0,
-            'ml_model': 2,  # Increased weight for ML model
-            'bitcoin_prediction': 3  # Assign a weight to the BitcoinPredictionModel signal
-        }
-
+        weights = self.set_product_weights()
         # Adjust weights for bear markets
         if market_conditions in [ "Bear Market", "Bearish"]:
             weights['rsi'] = 1
