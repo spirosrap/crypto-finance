@@ -22,7 +22,7 @@ from sklearn.linear_model import Lasso
 DAYS_TO_TEST_MODEL = 100  # Increase from 50 to 100
 
 class BitcoinPredictionModel:
-    def __init__(self, coinbase_service):
+    def __init__(self, coinbase_service, product_id="BTC-USDC", granularity="ONE_HOUR"):
         self.model = None
         self.scaler_X = StandardScaler()  # Scaler for features
         self.scaler_y = StandardScaler()  # Scaler for target variable
@@ -35,7 +35,9 @@ class BitcoinPredictionModel:
             'min_samples_leaf': 1
         }
         self.coinbase_service = coinbase_service
-        self.model_file = 'bitcoin_prediction_model.joblib'
+        self.product_id = product_id
+        self.granularity = granularity
+        self.model_file = f'{product_id.lower().replace("-", "_")}_{granularity.lower()}_prediction_model.joblib'
         self.logger = logging.getLogger(__name__)
         self.selected_features = None
         self.ensemble = None
@@ -161,7 +163,7 @@ class BitcoinPredictionModel:
         # Fetch historical data
         end_date = datetime.now()
         start_date = end_date - timedelta(days=DAYS_TO_TEST_MODEL)
-        candles = historical_data.get_historical_data("BTC-USDC", start_date, end_date, granularity="ONE_HOUR")
+        candles = historical_data.get_historical_data(self.product_id, start_date, end_date, granularity=self.granularity)
 
         # Fetch external data
         external_data_fetcher = ExternalDataFetcher()
@@ -283,7 +285,7 @@ class BitcoinPredictionModel:
             'scaler_y': self.scaler_y,
             'selected_features': self.selected_features
         }, self.model_file)
-        self.logger.info(f"Bitcoin prediction model trained and saved to {self.model_file}")
+        self.logger.info(f"{self.product_id} prediction model trained and saved to {self.model_file}")
 
     def fit_arima(self, df):
         model = sm.tsa.ARIMA(df['close'], order=(5, 1, 0))
@@ -304,12 +306,12 @@ class BitcoinPredictionModel:
             self.selected_features = model_data['selected_features']
             model_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(self.model_file))
             if model_age > timedelta(days=7):  # Retrain weekly
-                self.logger.info("Bitcoin prediction model is over a week old. Retraining...")
+                self.logger.info(f"{self.product_id} prediction model is over a week old. Retraining...")
                 self.train()
             else:
-                self.logger.info(f"Bitcoin prediction model loaded from {self.model_file}")
+                self.logger.info(f"{self.product_id} prediction model loaded from {self.model_file}")
         except FileNotFoundError:
-            self.logger.warning(f"Bitcoin prediction model file not found. Training a new model.")
+            self.logger.warning(f"{self.product_id} prediction model file not found. Training a new model.")
             self.train()
 
     def predict(self, features):

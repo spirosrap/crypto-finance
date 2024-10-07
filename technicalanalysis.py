@@ -67,7 +67,7 @@ class TechnicalAnalysis:
         self.candle_interval = candle_interval
         self.intervals_per_day = self.calculate_intervals_per_day()
         historical_data = HistoricalData(coinbase_service.client)
-        self.ml_signal = MLSignal(self.logger, historical_data)
+        self.ml_signal = MLSignal(self.logger, historical_data, product_id='BTC-USDC', granularity='ONE_HOUR')
         self.ml_signal.load_model()  # Load or train the model at initialization
         self.scaler = StandardScaler()
         self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service)

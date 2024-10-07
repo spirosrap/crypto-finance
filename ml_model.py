@@ -22,6 +22,9 @@ import matplotlib.pyplot as plt
 from sklearn.feature_selection import SelectFromModel
 from sklearn.inspection import permutation_importance
 
+# Add this near the top of the file, after the imports
+TRAINING_DAYS = 365 * 4  # 4 years of data
+
 class StackingEnsemble(BaseEstimator, ClassifierMixin):
     def __init__(self, base_models, meta_model):
         self.base_models = base_models
@@ -83,7 +86,7 @@ class MLSignal:
         self.logger = logger
         self.ml_model = None
         self.historical_data = historical_data
-        self.model_file = f'ml_model_{product_id}_{granularity}.joblib'
+        self.model_file = f'ml_model_{product_id.lower().replace("-", "_")}_{granularity.lower()}.joblib'
         self.product_id = product_id
         self.granularity = granularity
 
@@ -164,9 +167,10 @@ class MLSignal:
             return np.array([]), np.array([])
 
     def train_model(self):
-        # Get 4 years of historical data
+        # Get historical data for the specified number of days
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=365*4)
+        start_date = end_date - timedelta(days=TRAINING_DAYS)
+        print(f"Training model for {self.product_id} with granularity {self.granularity} for {TRAINING_DAYS} days")
         candles = self.historical_data.get_historical_data(self.product_id, start_date, end_date, granularity=self.granularity)
         
         X, y = self.prepare_features(candles)

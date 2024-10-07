@@ -20,3 +20,15 @@ catboost_info/learn/events.out.tfevents
 bitcoin_prediction_model.joblib
 ml_model_BTC-USDC_ONE_HOUR.joblib
 ml_model_BTC-USDC_ONE_HOUR.joblib.temp
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/func_code.py
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/1a4c110e7f7a1d0cd5eac8e069cb279d/metadata.json
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/1a4c110e7f7a1d0cd5eac8e069cb279d/output.pkl
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/63d76595651633d565f1188a08bb8548/metadata.json
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/63d76595651633d565f1188a08bb8548/output.pkl
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/b0bb901b8dc802ebed86ffcd44a5a45f/metadata.json
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/b0bb901b8dc802ebed86ffcd44a5a45f/output.pkl
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/b804e8364bd9b8da9ac25531316573d3/metadata.json
+cachedir/joblib/sklearn/pipeline/_fit_transform_one/b804e8364bd9b8da9ac25531316573d3/output.pkl
+ml_model_BTC-USDC_SIX_HOUR.joblib
+btc_usdc_one_hour_prediction_model.joblib
+ml_model_btc_usdc_one_hour.joblib

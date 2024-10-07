@@ -17,8 +17,7 @@ def main():
     logger = logging.getLogger(__name__)
 
     # Use this logger when creating the MLSignal instance
-    ml_signal = MLSignal(logger, historical_data)
-
+    ml_signal = MLSignal(logger, historical_data, product_id='BTC-USDC', granularity='ONE_HOUR')
 
     # Create and train the model
     try:
