@@ -36,3 +36,5 @@ btc_usdc_one_hour_prediction_model-100.joblib
 btc_usdc_one_hour_prediction_model-50.joblib
 btc_usdc_one_hour_prediction_model-150.joblib
 btc_usdc_one_hour_prediction_model-200.joblib
+ml_model_eth_usdc_one_hour.joblib
+eth_usdc_one_hour_prediction_model.joblib

@@ -69,10 +69,31 @@ class TechnicalAnalysis:
         self.intervals_per_day = self.calculate_intervals_per_day()
         historical_data = HistoricalData(coinbase_service.client)
         self.ml_signal = MLSignal(self.logger, historical_data, product_id=self.product_id, granularity=self.candle_interval)
-        self.ml_signal.load_model()  # Load or train the model at initialization
+        self.ml_signal.load_model()
         self.scaler = StandardScaler()
         self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service, product_id=self.product_id, granularity=self.candle_interval)
-        self.bitcoin_prediction_model.load_model()  # Load or train the model at initialization
+        self.bitcoin_prediction_model.load_model()
+        
+        # Set product-specific parameters
+        self.set_product_specific_parameters()
+
+    def set_product_specific_parameters(self):
+        if self.product_id == 'ETH-USDC':
+            # Adjust parameters for ETH-USDC
+            self.config.rsi_overbought = 70
+            self.config.rsi_oversold = 30
+            self.config.volatility_threshold = 0.04
+            self.config.rsi_period = 12
+            self.config.macd_fast = 10
+            self.config.macd_slow = 24
+            self.config.macd_signal = 8
+            self.config.bollinger_window = 18
+            self.config.bollinger_std = 2.2
+            self.config.risk_per_trade = 0.015
+            self.config.atr_multiplier = 2.2
+        # Add more product-specific configurations as needed
+        # elif self.product_id == 'SOME-OTHER-PRODUCT':
+        #     ...
 
     def calculate_intervals_per_day(self) -> int:
         interval_map = {
