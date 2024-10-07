@@ -32,3 +32,7 @@ cachedir/joblib/sklearn/pipeline/_fit_transform_one/b804e8364bd9b8da9ac255313165
 ml_model_BTC-USDC_SIX_HOUR.joblib
 btc_usdc_one_hour_prediction_model.joblib
 ml_model_btc_usdc_one_hour.joblib
+btc_usdc_one_hour_prediction_model-100.joblib
+btc_usdc_one_hour_prediction_model-50.joblib
+btc_usdc_one_hour_prediction_model-150.joblib
+btc_usdc_one_hour_prediction_model-200.joblib
