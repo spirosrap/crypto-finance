@@ -48,3 +48,4 @@ ml_model_sol_usdc_one_hour.joblib
 ml_model_xrp_usdc_one_hour.joblib
 sol_usdc_one_hour_prediction_model.joblib
 xrp_usdc_one_hour_prediction_model.joblib
+models/ml_model.joblib-best

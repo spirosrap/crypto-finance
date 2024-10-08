@@ -35,7 +35,7 @@ class BitcoinPredictionModel:
         self.coinbase_service = coinbase_service
         self.product_id = product_id
         self.granularity = granularity
-        self.model_file = f'{product_id.lower().replace("-", "_")}_{granularity.lower()}_prediction_model.joblib'
+        self.model_file = os.path.join('models', f'{product_id.lower().replace("-", "_")}_{granularity.lower()}_prediction_model.joblib')
         self.logger = logging.getLogger(__name__)
         self.selected_features = None
         self.ensemble = None
@@ -277,6 +277,7 @@ class BitcoinPredictionModel:
             print(f"{name}: {importance:.4f}")
 
         # Save the trained ensemble
+        os.makedirs(os.path.dirname(self.model_file), exist_ok=True)  # Create the 'models' directory if it doesn't exist
         joblib.dump({
             'ensemble': self.ensemble,
             'scaler_X': self.scaler_X,

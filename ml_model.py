@@ -88,7 +88,7 @@ class MLSignal:
         self.historical_data = historical_data
         self.product_id = product_id
         self.granularity = granularity
-        self.model_file = f'ml_model_{product_id.lower().replace("-", "_")}_{granularity.lower()}.joblib'
+        self.model_file = os.path.join('models', f'ml_model_{product_id.lower().replace("-", "_")}_{granularity.lower()}.joblib')
 
     def prepare_features(self, candles: List[Dict]) -> Tuple[np.ndarray, np.ndarray]:
         if len(candles) < 50:
@@ -270,6 +270,7 @@ class MLSignal:
             self.logger.info(f"{set_name} set - MSE: {mse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
 
         # Save the trained model
+        os.makedirs(os.path.dirname(self.model_file), exist_ok=True)  # Create the 'models' directory if it doesn't exist
         joblib.dump(self.ml_model, self.model_file)
         self.logger.info(f"ML model trained and saved to {self.model_file}")
 
