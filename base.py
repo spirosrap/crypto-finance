@@ -166,6 +166,10 @@ def display_portfolio_info(trader, product_id):
         logger.info(f"{currency}: Bid: {price['bid']:.2f}, Ask: {price['ask']:.2f}")
 
 def display_technical_indicators(trader, product_id, candles):
+    if len(candles) < 20:  # Adjust this number based on your minimum required data points
+        print(f"Not enough data for analysis. Only {len(candles)} candles available.")
+        return
+
     rsi = trader.compute_rsi(product_id, candles, period=RSI_PERIOD)
     prices = [float(candle['close']) for candle in candles[-20:]]
     returns = np.diff(np.log(prices))

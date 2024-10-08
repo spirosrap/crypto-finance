@@ -230,27 +230,22 @@ class TechnicalAnalysis:
         return pd.Series(data).ewm(span=span, adjust=False).mean().values
 
     def get_moving_average(self, candles: List[Dict], period: int, ma_type: str = 'sma') -> float:
-        """
-        Calculate moving average for given candles and period.
-
-        Args:
-            candles (List[Dict]): List of candle data.
-            period (int): Period for moving average calculation.
-            ma_type (str): Type of moving average ('sma' or 'ema').
-
-        Returns:
-            float: Calculated moving average value.
-        """
         prices = self.extract_prices(candles)
-        #adjusted_period = max(1, int(period * self.intervals_per_day / 24))
-        adjusted_period = max(1, int(period))
+        adjusted_period = min(max(1, int(period * self.intervals_per_day / 24)), len(prices))
 
-        if ma_type == 'sma':
-            return talib.SMA(prices, timeperiod=adjusted_period)[-1]
-        elif ma_type == 'ema':
-            return talib.EMA(prices, timeperiod=adjusted_period)[-1]
-        else:
-            raise ValueError(f"Unsupported moving average type: {ma_type}")
+        self.logger.debug(f"Calculating {ma_type.upper()} with period {adjusted_period}")
+        self.logger.debug(f"Number of prices: {len(prices)}")
+
+        try:
+            if ma_type == 'sma':
+                return talib.SMA(prices, timeperiod=adjusted_period)[-1]
+            elif ma_type == 'ema':
+                return talib.EMA(prices, timeperiod=adjusted_period)[-1]
+            else:
+                raise ValueError(f"Unsupported moving average type: {ma_type}")
+        except Exception as e:
+            self.logger.error(f"Error calculating {ma_type.upper()}: {str(e)}")
+            return np.mean(prices)  # Fallback to simple mean if TA-Lib calculation fails
 
     def calculate_sma(self, candles: List[Dict], period: int) -> float:
         return self.get_moving_average(candles, period, 'sma')
@@ -463,8 +458,14 @@ class TechnicalAnalysis:
         current_price = float(candles[-1]['close'])
         market_conditions = market_conditions or self.analyze_market_conditions(candles)
         volatility_std = self.calculate_volatility(candles)
-        signal_strength = self.calculate_signal_strength(rsi, macd, signal, histogram, market_conditions, candles, volatility_std)
-        final_signal = self.determine_final_signal(signal_strength, market_conditions, current_price, candles)
+        
+        try:
+            signal_strength = self.calculate_signal_strength(rsi, macd, signal, histogram, market_conditions, candles, volatility_std)
+            final_signal = self.determine_final_signal(signal_strength, market_conditions, current_price, candles)
+        except Exception as e:
+            self.logger.error(f"Error generating combined signal: {str(e)}")
+            final_signal = "HOLD"  # Default to HOLD if there's an error
+        
         return final_signal
 
     def calculate_signal_strength(self, rsi: float, macd: float, signal: float, histogram: float, market_conditions: str,
@@ -600,6 +601,10 @@ class TechnicalAnalysis:
 
         # Calculate the long-term moving average
         long_term_ma = self.get_moving_average(candles, long_term_period, 'sma')
+
+        if np.isnan(long_term_ma):
+            self.logger.warning("Unable to calculate long-term MA. Returning 'Neutral' market condition.")
+            return "Neutral"
 
         # Analyze market conditions based on price action, volume, and volatility
         prices = self.extract_prices(candles)
