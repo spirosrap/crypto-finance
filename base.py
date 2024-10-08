@@ -155,6 +155,8 @@ def parse_arguments():
     parser.add_argument("--week", action="store_true", help="Use last week period")
     parser.add_argument("--start_hour", type=int, choices=range(24), help="Start hour of the day (0-23)")
     parser.add_argument("--end_hour", type=int, choices=range(24), help="End hour of the day (0-23)")
+    parser.add_argument("--oldbear", action="store_true", help="Use old bear market period (2018-01-01 to 2020-06-01)")
+    parser.add_argument("--oldbull", action="store_true", help="Use old bull market period (2018-01-01 to 2019-12-01)")
     return parser.parse_args()
 
 def display_portfolio_info(trader, product_id):
@@ -221,6 +223,12 @@ def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_pe
         start_date = end_date - timedelta(days=30)
     elif args.week:
         start_date = end_date - timedelta(days=7)
+    elif args.oldbear:
+        start_date = datetime(2018, 1, 1)
+        end_date = datetime(2020, 6, 1, 23, 59, 59)
+    elif args.oldbull:
+        start_date = datetime(2016, 12, 1)
+        end_date = datetime(2017, 12, 1, 23, 59, 59)
     elif args.start_date:
         start_date = datetime.strptime(args.start_date, "%Y-%m-%d")
         if args.end_date:
