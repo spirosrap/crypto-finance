@@ -40,3 +40,5 @@ ml_model_eth_usdc_one_hour.joblib
 eth_usdc_one_hour_prediction_model.joblib
 ml_model_btc_usdc_thirty_minute.joblib
 btc_usdc_thirty_minute_prediction_model.joblib
+ml_model_btc_usdc_five_minute.joblib
+btc_usdc_five_minute_prediction_model.joblib

@@ -152,6 +152,9 @@ def parse_arguments():
     parser.add_argument("--continuous", action="store_true", help="Run continuous backtesting simulation")
     parser.add_argument("--update_interval", type=int, default=3600, help="Update interval for continuous backtesting (in seconds, default: 3600)")
     parser.add_argument("--month", action="store_true", help="Use last month period")
+    parser.add_argument("--week", action="store_true", help="Use last week period")
+    parser.add_argument("--start_hour", type=int, choices=range(24), help="Start hour of the day (0-23)")
+    parser.add_argument("--end_hour", type=int, choices=range(24), help="End hour of the day (0-23)")
     return parser.parse_args()
 
 def display_portfolio_info(trader, product_id):
@@ -200,28 +203,44 @@ def calculate_btc_eur_value(trader):
     logger.info(f"0.00187597 BTC is worth approximately {eur_value_after_fees:.2f} EUR (including {float(fee_percentage)*100}% fees), Fees: {fees:.2f} EUR")
 
 def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent, granularity):
+    end_date = datetime.now()
+    
     if args.bearmarket:
-        start_date = "2021-11-01 00:00:00"
-        end_date = "2022-11-01 23:59:59"
+        start_date = datetime(2021, 11, 1)
+        end_date = datetime(2022, 11, 1, 23, 59, 59)
     elif args.bullmarket:
-        start_date = "2020-10-01 00:00:00"
-        end_date = "2021-04-01 23:59:59"
+        start_date = datetime(2020, 10, 1)
+        end_date = datetime(2021, 4, 1, 23, 59, 59)
     elif args.ytd:
-        start_date = "2024-01-01 00:00:00"
-        end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        start_date = datetime(2024, 1, 1)
     elif args.month:
-        end_date = datetime.now()
-        start_date = (end_date - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date = start_date.strftime("%Y-%m-%d %H:%M:%S")
-        end_date = end_date.strftime("%Y-%m-%d %H:%M:%S")
+        start_date = end_date - timedelta(days=30)
+    elif args.week:
+        start_date = end_date - timedelta(days=7)
     elif args.start_date:
-        start_date = f"{args.start_date} 00:00:00"
-        end_date = f"{args.end_date} 23:59:59" if args.end_date else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        start_date = datetime.strptime(args.start_date, "%Y-%m-%d")
+        if args.end_date:
+            end_date = datetime.strptime(args.end_date, "%Y-%m-%d")
     else:
-        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d 00:00:00")
-        end_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        start_date = end_date - timedelta(days=365)
 
-    final_value, trades = trader.run_backtest(args.product_id, start_date, end_date, initial_balance, risk_per_trade, trailing_stop_percent, granularity)
+    # Apply start and end hours if specified
+    if args.start_hour is not None:
+        start_date = start_date.replace(hour=args.start_hour, minute=0, second=0, microsecond=0)
+    else:
+        start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if args.end_hour is not None:
+        end_date = end_date.replace(hour=args.end_hour, minute=59, second=59, microsecond=999999)
+    else:
+        end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    start_date_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
+    end_date_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+
+    logger.info(f"Running backtest from {start_date_str} to {end_date_str}")
+
+    final_value, trades = trader.run_backtest(args.product_id, start_date_str, end_date_str, initial_balance, risk_per_trade, trailing_stop_percent, granularity)
     
     logger.info(f"Initial: ${initial_balance}, Final value: ${final_value:.2f}")
     logger.info(f"Number of trades: {len(trades)}")

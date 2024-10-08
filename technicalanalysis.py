@@ -242,8 +242,9 @@ class TechnicalAnalysis:
             float: Calculated moving average value.
         """
         prices = self.extract_prices(candles)
-        adjusted_period = max(1, int(period * self.intervals_per_day / 24))
-        
+        #adjusted_period = max(1, int(period * self.intervals_per_day / 24))
+        adjusted_period = max(1, int(period))
+
         if ma_type == 'sma':
             return talib.SMA(prices, timeperiod=adjusted_period)[-1]
         elif ma_type == 'ema':
@@ -296,7 +297,6 @@ class TechnicalAnalysis:
         
         # Calculate the slope of the SMA
         slope = np.gradient(sma_values)
-        
         # Determine the trend based on the recent slope
         recent_slope = slope[-5:].mean() if len(slope) >= 5 else slope.mean()
         
