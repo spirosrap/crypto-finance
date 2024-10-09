@@ -45,6 +45,19 @@ pip install scikit-optimize
 pip install shap
 ```
 
+INSTALL TA-lib from [here](https://sourceforge.net/projects/ta-lib/files/ta-lib/0.4.0/ta-lib-0.4.0-src.tar.gz/download)
+
+```
+#LINUX
+$ tar -xzf ta-lib-0.4.0-src.tar.gz
+$ cd ta-lib/
+$ ./configure --prefix=/usr
+$ make
+$ sudo make install
+# MAC
+brew install ta-lib
+```
+
 ## Installation
 
 1. Clone the repository:
