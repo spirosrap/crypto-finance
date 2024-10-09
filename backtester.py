@@ -86,6 +86,19 @@ class Backtester:
 
     def backtest(self, product_id: str, start_date: str, end_date: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float, granularity: str = "ONE_HOUR") -> Tuple[float, List[TradeRecord]]:
         try:
+            if granularity == "ONE_MINUTE":
+                self.cooldown_period: int = 24 * 60 * 60 * 1 * 0.05  # 1 day in seconds
+                self.max_trades_per_day: int = 10
+            elif granularity == "FIVE_MINUTE":
+                self.cooldown_period: int = 24 * 60 * 60 * 1 * 0.1  # 1 day in seconds
+                self.max_trades_per_day: int = 5
+            elif granularity == "FIFTEEN_MINUTE":
+                self.cooldown_period: int = 24 * 60 * 60 * 1 * 0.1  # 1 day in seconds
+                self.max_trades_per_day: int = 3
+            elif granularity == "THIRTY_MINUTE":
+                self.cooldown_period: int = 24 * 60 * 60 * 1 * 0.2  # 1 day in seconds
+                self.max_trades_per_day: int = 2
+
             # Convert start_date and end_date to datetime objects if they're strings
             if isinstance(start_date, str):
                 start_date = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')

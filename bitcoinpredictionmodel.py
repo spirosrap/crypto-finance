@@ -16,8 +16,17 @@ import logging
 from sklearn.feature_selection import RFECV, RFE
 from sklearn.linear_model import Lasso
 
-# COINGECKO PROVIDES ONLY UP TO ONE YEAR OF DATA FOR THE FREE TIER
-DAYS_TO_TEST_MODEL = 100  # Increase from 50 to 100
+# Replace the existing DAYS_TO_TEST_MODEL dictionary with this updated version
+DAYS_TO_TEST_MODEL = {
+    "ONE_MINUTE": 7,    # 1 week of minute data
+    "FIVE_MINUTE": 30,  # 1 month of 5-minute data
+    "TEN_MINUTE": 45,   # 1.5 months of 10-minute data
+    "FIFTEEN_MINUTE": 60,  # 2 months of 15-minute data
+    "THIRTY_MINUTE": 90,   # 3 months of 30-minute data
+    "ONE_HOUR": 180,       # 6 months of hourly data
+    "SIX_HOUR": 365,       # 1 year of 6-hour data
+    "ONE_DAY": 730         # 2 years of daily data
+}
 
 class BitcoinPredictionModel:
     def __init__(self, coinbase_service, product_id="BTC-USDC", granularity="ONE_HOUR"):
@@ -35,6 +44,7 @@ class BitcoinPredictionModel:
         self.coinbase_service = coinbase_service
         self.product_id = product_id
         self.granularity = granularity
+        self.days_to_test = DAYS_TO_TEST_MODEL.get(granularity, 180)  # Default to 180 days if granularity not found
         self.model_file = os.path.join('models', f'{product_id.lower().replace("-", "_")}_{granularity.lower()}_prediction_model.joblib')
         self.logger = logging.getLogger(__name__)
         self.selected_features = None
@@ -160,7 +170,7 @@ class BitcoinPredictionModel:
 
         # Fetch historical data
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=DAYS_TO_TEST_MODEL)
+        start_date = end_date - timedelta(days=self.days_to_test)
         candles = historical_data.get_historical_data(self.product_id, start_date, end_date, granularity=self.granularity)
 
         # Fetch external data

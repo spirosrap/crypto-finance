@@ -26,7 +26,9 @@ from sklearn.inspection import permutation_importance
 GRANULARITY_SETTINGS = {
     'ONE_MINUTE': {'training_days': 30, 'feature_window': 100},
     'FIVE_MINUTE': {'training_days': 60, 'feature_window': 200},
-    'FIFTEEN_MINUTE': {'training_days': 90, 'feature_window': 300}, 
+    'TEN_MINUTE': {'training_days': 75, 'feature_window': 250},
+    'FIFTEEN_MINUTE': {'training_days': 90, 'feature_window': 300},
+    'THIRTY_MINUTE': {'training_days': 180, 'feature_window': 400},
     'ONE_HOUR': {'training_days': 365*4, 'feature_window': 500}, #feature window was 50.
     'SIX_HOUR': {'training_days': 730, 'feature_window': 1000},
     'ONE_DAY': {'training_days': 1460, 'feature_window': 2000},
