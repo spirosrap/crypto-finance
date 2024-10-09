@@ -22,8 +22,15 @@ import matplotlib.pyplot as plt
 from sklearn.feature_selection import SelectFromModel
 from sklearn.inspection import permutation_importance
 
-# Add this near the top of the file, after the imports
-TRAINING_DAYS = 365 * 4  # 4 years of data
+# Add these constants near the top of the file
+GRANULARITY_SETTINGS = {
+    'ONE_MINUTE': {'training_days': 30, 'feature_window': 100},
+    'FIVE_MINUTE': {'training_days': 60, 'feature_window': 200},
+    'FIFTEEN_MINUTE': {'training_days': 90, 'feature_window': 300}, 
+    'ONE_HOUR': {'training_days': 365*4, 'feature_window': 500}, #feature window was 50.
+    'SIX_HOUR': {'training_days': 730, 'feature_window': 1000},
+    'ONE_DAY': {'training_days': 1460, 'feature_window': 2000},
+}
 
 class StackingEnsemble(BaseEstimator, ClassifierMixin):
     def __init__(self, base_models, meta_model):
@@ -88,11 +95,12 @@ class MLSignal:
         self.historical_data = historical_data
         self.product_id = product_id
         self.granularity = granularity
+        self.settings = GRANULARITY_SETTINGS.get(granularity, GRANULARITY_SETTINGS['ONE_HOUR'])
         self.model_file = os.path.join('models', f'ml_model_{product_id.lower().replace("-", "_")}_{granularity.lower()}.joblib')
 
     def prepare_features(self, candles: List[Dict]) -> Tuple[np.ndarray, np.ndarray]:
-        if len(candles) < 50:
-            self.logger.warning(f"Not enough candles for ML features. Got {len(candles)}, need at least 50.")
+        if len(candles) < self.settings['feature_window']:
+            self.logger.warning(f"Not enough candles for ML features. Got {len(candles)}, need at least {self.settings['feature_window']}.")
             return np.array([]), np.array([])
 
         df = pd.DataFrame(candles)
@@ -169,8 +177,8 @@ class MLSignal:
     def train_model(self):
         # Get historical data for the specified number of days
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=TRAINING_DAYS)
-        print(f"Training model for {self.product_id} with granularity {self.granularity} for {TRAINING_DAYS} days")
+        start_date = end_date - timedelta(days=self.settings['training_days'])
+        print(f"Training model for {self.product_id} with granularity {self.granularity} for {self.settings['training_days']} days")
         candles = self.historical_data.get_historical_data(self.product_id, start_date, end_date, granularity=self.granularity)
         
         X, y = self.prepare_features(candles)
@@ -354,7 +362,7 @@ class MLSignal:
         if self.ml_model is None:
             self.load_model()
         
-        X, _ = self.prepare_features(candles[-50:])  # Use the last 50 candles for prediction
+        X, _ = self.prepare_features(candles[-self.settings['feature_window']:])  # Use the last feature_window candles for prediction. was 50
         
         if X.size == 0:
             self.logger.warning("Not enough data to make ML prediction. Returning neutral signal.")
@@ -382,7 +390,7 @@ class MLSignal:
             return 0
 
     def evaluate_performance(self, candles: List[Dict]) -> float:
-        X, y = self.prepare_features(candles[-100:])  # Use last 100 candles for evaluation
+        X, y = self.prepare_features(candles[-self.settings['feature_window']:])  # Use last feature_window candles for evaluation was 100
         if X.size == 0 or y.size == 0 or self.ml_model is None:
             return 1.0  # Default weight if we can't evaluate
 

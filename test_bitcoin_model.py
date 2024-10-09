@@ -31,7 +31,7 @@ def main():
     coinbase_service = CoinbaseService(API_KEY, API_SECRET)  # Create CoinbaseService instance
 
     # Create and train the model
-    model = BitcoinPredictionModel(coinbase_service)
+    model = BitcoinPredictionModel(coinbase_service, granularity="ONE_HOUR", product_id="BTC-USDC")
     try:
         model.train()
     except Exception as e:

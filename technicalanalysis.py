@@ -80,6 +80,11 @@ class TechnicalAnalysis:
             'bitcoin_prediction': 3
         }
 
+        if self.candle_interval == 'FIFTEEN_MINUTE':
+            base_weights['ml_model'] = 0
+            base_weights['bitcoin_prediction'] = 0
+            base_weights['ichimoku'] = 1
+
         # Adjust weights based on product_id
         if self.product_id == 'BTC-USDC':
             # Bitcoin might be more influenced by long-term trends and prediction models
