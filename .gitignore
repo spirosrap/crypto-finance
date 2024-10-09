@@ -49,3 +49,6 @@ ml_model_xrp_usdc_one_hour.joblib
 sol_usdc_one_hour_prediction_model.joblib
 xrp_usdc_one_hour_prediction_model.joblib
 models/ml_model.joblib-best
+models/bch_usdc_one_hour_prediction_model.joblib
+models/ml_model_bch_usdc_one_hour.joblib
+models
