@@ -137,8 +137,8 @@ class CryptoTrader:
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Crypto Trading Bot")
-    parser.add_argument("--start_date", help="Start date for backtesting (YYYY-MM-DD)")
-    parser.add_argument("--end_date", help="End date for backtesting (YYYY-MM-DD)")
+    parser.add_argument("--start_date", help="Start date and time for backtesting (YYYY-MM-DD [HH:MM])")
+    parser.add_argument("--end_date", help="End date and time for backtesting (YYYY-MM-DD [HH:MM])")
     parser.add_argument("--bearmarket", action="store_true", help="Use bear market period (2021-11-01 to 2022-11-01)")
     parser.add_argument("--bullmarket", action="store_true", help="Use bull market period (2020-10-01 to 2021-04-01)")
     parser.add_argument("--ytd", action="store_true", help="Use year-to-date period (2024-01-01 to current date)")
@@ -154,10 +154,24 @@ def parse_arguments():
     parser.add_argument("--month", action="store_true", help="Use last month period")
     parser.add_argument("--week", action="store_true", help="Use last week period")
     parser.add_argument("--start_hour", type=int, choices=range(24), help="Start hour of the day (0-23)")
+    parser.add_argument("--start_minute", type=int, choices=range(60), help="Start minute of the hour (0-59)")
     parser.add_argument("--end_hour", type=int, choices=range(24), help="End hour of the day (0-23)")
+    parser.add_argument("--end_minute", type=int, choices=range(60), help="End minute of the hour (0-59)")
     parser.add_argument("--oldbear", action="store_true", help="Use old bear market period (2018-01-01 to 2020-06-01)")
     parser.add_argument("--oldbull", action="store_true", help="Use old bull market period (2018-01-01 to 2019-12-01)")
     return parser.parse_args()
+
+def parse_datetime(date_string):
+    formats = [
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d"
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(date_string, fmt)
+        except ValueError:
+            pass
+    raise ValueError(f"Invalid date format: {date_string}. Use YYYY-MM-DD [HH:MM]")
 
 def display_portfolio_info(trader, product_id):
     fiat_usd, btc = trader.get_portfolio_info()
@@ -230,21 +244,16 @@ def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_pe
         start_date = datetime(2016, 12, 1)
         end_date = datetime(2017, 12, 1, 23, 59, 59)
     elif args.start_date:
-        start_date = datetime.strptime(args.start_date, "%Y-%m-%d")
+        start_date = parse_datetime(args.start_date)
         if args.end_date:
-            end_date = datetime.strptime(args.end_date, "%Y-%m-%d")
+            end_date = parse_datetime(args.end_date)
     else:
         start_date = end_date - timedelta(days=365)
 
-    # Apply start and end hours if specified
-    if args.start_hour is not None:
-        start_date = start_date.replace(hour=args.start_hour, minute=0, second=0, microsecond=0)
-    else:
+    # If only date was provided, set default time
+    if start_date.hour == 0 and start_date.minute == 0:
         start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    if args.end_hour is not None:
-        end_date = end_date.replace(hour=args.end_hour, minute=59, second=59, microsecond=999999)
-    else:
+    if end_date.hour == 0 and end_date.minute == 0:
         end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
 
     start_date_str = start_date.strftime("%Y-%m-%d %H:%M:%S")
