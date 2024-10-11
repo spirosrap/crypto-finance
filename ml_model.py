@@ -102,7 +102,7 @@ class MLSignal:
 
     def prepare_features(self, candles: List[Dict]) -> Tuple[np.ndarray, np.ndarray]:
         if len(candles) < self.settings['feature_window']:
-            self.logger.warning(f"Not enough candles for ML features. Got {len(candles)}, need at least {self.settings['feature_window']}.")
+            self.logger.debug(f"Not enough candles for ML features. Got {len(candles)}, need at least {self.settings['feature_window']}.")
             return np.array([]), np.array([])
 
         df = pd.DataFrame(candles)
@@ -367,7 +367,7 @@ class MLSignal:
         X, _ = self.prepare_features(candles[-self.settings['feature_window']:])  # Use the last feature_window candles for prediction. was 50
         
         if X.size == 0:
-            self.logger.warning("Not enough data to make ML prediction. Returning neutral signal.")
+            self.logger.debug("Not enough data to make ML prediction. Returning neutral signal.")
             return 0
         
         try:
