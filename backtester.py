@@ -88,8 +88,9 @@ class Backtester:
         try:
             seconds_in_day = 24 * 60 * 60
             if granularity == "ONE_MINUTE":
-                self.cooldown_period: int = seconds_in_day * 0.05  # 1 day in seconds
-                self.max_trades_per_day: int = 10
+                self.cooldown_period: int = seconds_in_day * 0.1  # 14.4 minutes
+                self.max_trades_per_day: int = 20
+                self.min_price_change: float = 0.03  # 3% minimum price change
             elif granularity == "FIVE_MINUTE":
                 self.cooldown_period: int = seconds_in_day * 0.1  # 1 day in seconds
                 self.max_trades_per_day: int = 5
@@ -99,6 +100,10 @@ class Backtester:
             elif granularity == "THIRTY_MINUTE":
                 self.cooldown_period: int = seconds_in_day * 0.2  # 1 day in seconds
                 self.max_trades_per_day: int = 2
+            else:  # Default for ONE_HOUR and any other granularity
+                self.cooldown_period: int = 24 * 60 * 60 * 1  # 1 day in seconds
+                self.max_trades_per_day: int = 1
+                self.min_price_change: float = 0.08  # 8% minimum price change
 
             # Convert start_date and end_date to datetime objects if they're strings
             if isinstance(start_date, str):
