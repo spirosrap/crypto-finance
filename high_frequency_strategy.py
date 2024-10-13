@@ -9,17 +9,19 @@ from coinbaseservice import CoinbaseService
 from config import API_KEY, API_SECRET, NEWS_API_KEY
 import numpy as np
 from scipy import stats
+from ml_model import MLSignal
 
 class HighFrequencyStrategy:
-    def __init__(self, api_key: str, api_secret: str, product_id: str):
+    def __init__(self, api_key: str, api_secret: str, product_id: str, granularity: str = "ONE_MINUTE"):
         self.client = RESTClient(api_key=api_key, api_secret=api_secret)
         self.product_id = product_id
         self.coinbase_service = CoinbaseService(api_key, api_secret)
         self.historical_data = HistoricalData(self.client)
-        self.technical_analysis = TechnicalAnalysis(self.coinbase_service)  # Pass coinbase_service here
+        self.granularity = granularity
+        self.technical_analysis = TechnicalAnalysis(self.coinbase_service, candle_interval=granularity, product_id=self.product_id)  # Pass coinbase_service here
         self.sentiment_analysis = SentimentAnalysis()
         self.logger = logging.getLogger(__name__)
-
+        self.ml_signal = MLSignal(self.logger, self.historical_data, product_id=self.product_id, granularity=granularity)
     def extract_prices(self, candles: List[Dict], key: str = 'close') -> np.ndarray:
         """
         Extract prices from candle data.
@@ -59,15 +61,18 @@ class HighFrequencyStrategy:
         # Add new signals
         price_momentum = self.get_price_momentum(close_prices)
         volume_trend = self.get_volume_trend(volumes)
+        # Get ML signal
+        ml_signal = self.get_ml_signal(candles)
 
-        # Combine signals with weights
+        # Adjust weights to include ML signal
         weights = {
-            'rsi': 0.2,
-            'macd': 0.2,
-            'bollinger': 0.2,
+            'rsi': 0.15,
+            'macd': 0.15,
+            'bollinger': 0.15,
             'obv': 0.1,
-            'price_momentum': 0.2,
-            'volume_trend': 0.1
+            'price_momentum': 0.15,
+            'volume_trend': 0.1,
+            'ml_signal': 0.5  # Add weight for ML signal
         }
 
         combined_signal = (
@@ -76,7 +81,8 @@ class HighFrequencyStrategy:
             bollinger_signal * weights['bollinger'] +
             obv_signal * weights['obv'] +
             price_momentum * weights['price_momentum'] +
-            volume_trend * weights['volume_trend']
+            volume_trend * weights['volume_trend'] +
+            ml_signal * weights['ml_signal']  # Include ML signal in combined signal
         )
 
         return {
@@ -86,6 +92,7 @@ class HighFrequencyStrategy:
             "obv": obv_signal,
             "price_momentum": price_momentum,
             "volume_trend": volume_trend,
+            "ml_signal": ml_signal,  # Add ML signal to the returned dictionary
             "combined": combined_signal
         }
 
@@ -129,6 +136,38 @@ class HighFrequencyStrategy:
         long_ma = np.mean(volumes[-30:])
         return np.tanh((short_ma - long_ma) / long_ma)  # Normalize using hyperbolic tangent
 
+    def get_ml_signal(self, candles: List[Dict]) -> float:
+        """
+        Get the ML model's prediction signal.
+        
+        :param candles: List of historical candle data.
+        :return: ML model's prediction signal (-1 to 1).
+        """
+        # Extract features from candles (you may need to adjust this based on your ML model's input requirements)
+        features = self.extract_features(candles)
+        
+        # Get prediction from ML model
+        prediction = self.ml_signal.predict_signal(candles)
+        
+        # Normalize prediction to be between -1 and 1
+        return np.tanh(prediction)
+
+    def extract_features(self, candles: List[Dict]) -> np.ndarray:
+        """
+        Extract features from candles for ML model input.
+        Adjust this method based on your ML model's requirements.
+        """
+        # This is a placeholder implementation. Adjust according to your ML model's needs.
+        close_prices = self.extract_prices(candles, key='close')
+        returns = np.diff(close_prices) / close_prices[:-1]
+        features = np.array([
+            np.mean(returns),
+            np.std(returns),
+            np.percentile(returns, 25),
+            np.percentile(returns, 75)
+        ])
+        return features.reshape(1, -1)  # Reshape for single sample prediction
+
     def run_strategy(self, lookback_hours: int = 24):
         end_date = datetime.now()
         start_date = end_date - timedelta(hours=lookback_hours)
@@ -137,7 +176,7 @@ class HighFrequencyStrategy:
             self.product_id,
             start_date,
             end_date,
-            granularity="FIVE_MINUTE"
+            granularity= self.granularity
         )
 
         if not candles:
@@ -150,8 +189,8 @@ class HighFrequencyStrategy:
         sentiment_score = self.sentiment_analysis.get_sentiment(self.product_id)
 
         # Combine technical signals with sentiment
-        final_signal = (signals['combined'] + sentiment_score) / 2
-
+        #final_signal = (signals['combined'] + sentiment_score) / 2
+        final_signal = signals['combined']
         self.logger.info(f"Technical Signals: {signals}")
         self.logger.info(f"Sentiment Score: {sentiment_score}")
         self.logger.info(f"Final Signal: {final_signal}")
@@ -179,7 +218,7 @@ class HighFrequencyStrategy:
                 self.product_id,
                 lookback_start,
                 current_date,
-                granularity="FIVE_MINUTE"
+                granularity= self.granularity
             )
 
             if not candles:
@@ -193,7 +232,8 @@ class HighFrequencyStrategy:
             current_price = float(candles[-1]['close'])
 
             self.logger.info(f"Date: {current_date}, Price: {current_price}, Signal: {final_signal}")
-            self.logger.info(f"Current balance: ${balance:.2f}, BTC balance: {btc_balance:.8f}")
+            total_usd = balance + (btc_balance * current_price)
+            self.logger.info(f"Current balance: ${balance:.2f}, BTC balance: {btc_balance:.8f}, Total in USD: ${total_usd:.2f}")
 
             if final_signal > 0.4 and balance > 0:  # Buy signal
                 btc_to_buy = (balance * 0.1) / current_price  # Buy with 10% of available balance
@@ -236,9 +276,9 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     # Initialize the strategy with your API key and secret
-    strategy = HighFrequencyStrategy(API_KEY, API_SECRET, "BTC-USDC")
+    strategy = HighFrequencyStrategy(API_KEY, API_SECRET, product_id="BTC-USDC", granularity="ONE_MINUTE")
     
     # Run backtest
-    start_date = datetime(2024, 8, 1)  # Changed to a past date
-    end_date = datetime(2024, 9, 28)
+    start_date = datetime(2024, 9, 13)  # Changed to a past date
+    end_date = datetime(2024, 10, 13)
     final_balance, roi, trades = strategy.backtest(start_date, end_date)
