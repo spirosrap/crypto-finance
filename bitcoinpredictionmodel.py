@@ -54,14 +54,20 @@ class BitcoinPredictionModel:
 
     def prepare_data(self, candles, external_data=None):
         df = pd.DataFrame(candles)
-
+        
+        # Convert numeric columns to float, handling non-numeric values
+        numeric_columns = ['open', 'high', 'low', 'close', 'volume', 'start']
+        for col in numeric_columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        # Convert 'start' column to datetime
+        df['start'] = pd.to_datetime(df['start'].astype(int), unit='s')
+        
         if df.empty:
             self.logger.error("Candles data is empty. Cannot proceed with data preparation.")
             return None, None, None
 
-        df['date'] = pd.to_datetime(pd.to_numeric(df['start']), unit='s').dt.date
-        df['close'] = df['close'].astype(float)
-        df['volume'] = df['volume'].astype(float)
+        df['date'] = df['start'].dt.date
         
         # Calculate RSI (14 * 1hr = 14hr)
         delta = df['close'].diff()
@@ -380,8 +386,20 @@ class BitcoinPredictionModel:
             self.logger.error("No features have been selected. The model may not have been properly trained.")
             return None
 
-        features = features[self.selected_features]
+        # Create a new DataFrame with only the selected features, filling missing ones with 0
+        # Use float64 dtype to avoid issues with integer/float incompatibility
+        features_selected = pd.DataFrame(0.0, index=features.index, columns=self.selected_features, dtype=np.float64)
         
-        features_scaled = self.scaler_X.transform(features)
-        predictions_scaled = self.ensemble.predict(features_scaled)
-        return self.scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()
+        # Update the features, ensuring all values are converted to float
+        for col in self.selected_features:
+            if col in features.columns:
+                features_selected[col] = features[col].astype(np.float64)
+
+        features_scaled = self.scaler_X.transform(features_selected)
+        
+        try:
+            predictions_scaled = self.ensemble.predict(features_scaled)
+            return self.scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()
+        except Exception as e:
+            self.logger.error(f"Error in prediction: {str(e)}")
+            return None
