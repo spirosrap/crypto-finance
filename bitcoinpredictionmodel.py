@@ -15,6 +15,8 @@ import os
 import logging
 from sklearn.feature_selection import RFECV, RFE
 from sklearn.linear_model import Lasso
+from tqdm import tqdm
+import time
 
 # Replace the existing DAYS_TO_TEST_MODEL dictionary with this updated version
 DAYS_TO_TEST_MODEL = {
@@ -154,46 +156,90 @@ class BitcoinPredictionModel:
         
         return df, X, y
 
-    def select_features(self, X, y):
+    def select_features(self, X, y, max_time=600):  # max_time in seconds (10 minutes)
+        print("Starting feature selection...")
         estimator = GradientBoostingRegressor(**self.params)
-        selector = RFECV(estimator=estimator, step=1, cv=TimeSeriesSplit(n_splits=5), 
-                         scoring='neg_mean_squared_error', n_jobs=-1)
-        selector = selector.fit(X, y)
+        n_features = X.shape[1]
         
+        class RFECV_with_progress(RFECV):
+            def _fit(self, X, y, step, estimator, n_jobs):
+                self.n_features_ = X.shape[1]
+                self.support_ = np.ones(self.n_features_, dtype=bool)
+                self.ranking_ = np.ones(self.n_features_, dtype=int)
+                
+                start_time = time.time()
+                with tqdm(total=self.n_features_, desc="Feature Selection Progress") as pbar:
+                    while np.sum(self.support_) > 1:
+                        if time.time() - start_time > max_time:
+                            print(f"Feature selection timed out after {max_time} seconds.")
+                            break
+                        
+                        features_before = np.sum(self.support_)
+                        super()._fit(X, y, step, estimator, n_jobs)
+                        features_after = np.sum(self.support_)
+                        features_removed = features_before - features_after
+                        pbar.update(features_removed)
+                        
+                        print(f"Features remaining: {features_after}")
+        
+        selector = RFECV_with_progress(estimator=estimator, step=1, cv=TimeSeriesSplit(n_splits=5), 
+                                       scoring='neg_mean_squared_error', n_jobs=-1, verbose=2)
+        
+        try:
+            selector = selector.fit(X, y)
+        except Exception as e:
+            print(f"An error occurred during feature selection: {e}")
+            print("Falling back to using all features.")
+            self.selected_features = X.columns.tolist()
+            return X
+
         self.selected_features = X.columns[selector.support_].tolist()
+        print(f"Feature selection complete. Selected {len(self.selected_features)} out of {n_features} features.")
         print("Selected features:", self.selected_features)
         
         return X[self.selected_features]
 
     def train(self):
+        print("Starting training process...")
         historical_data = HistoricalData(self.coinbase_service.client)
-
+        
         # Fetch historical data
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self.days_to_test)
+        print(f"Fetching historical data from {start_date} to {end_date}")
         candles = historical_data.get_historical_data(self.product_id, start_date, end_date, granularity=self.granularity)
-
+        print(f"Fetched {len(candles)} candles")
+        
         # Fetch external data
+        print("Fetching external data...")
         external_data_fetcher = ExternalDataFetcher()
         external_data = external_data_fetcher.get_data(start_date, end_date)
-
+        print(f"Fetched external data with shape: {external_data.shape if external_data is not None else 'None'}")
+        
         # Prepare the data
+        print("Preparing data...")
         df, X, y = self.prepare_data(candles, external_data)
         
         if X is None or y is None:
             self.logger.error("Data preparation failed. Unable to train the model.")
             return
 
+        print(f"Prepared data shape: X: {X.shape}, y: {y.shape}")
+
         # Perform feature selection
+        print("Performing feature selection...")
         X = self.select_features(X, y)
+        print(f"Selected features: {X.columns.tolist()}")
 
         if len(X) < 100:  # Adjust this threshold as needed
             self.logger.error(f"Insufficient data for training. Only {len(X)} samples available.")
             return
 
+        print("Splitting data...")
         X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
         X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.2, shuffle=False)
 
+        print("Scaling data...")
         # Fit and transform the training data
         X_train_scaled = self.scaler_X.fit_transform(X_train)
         y_train_scaled = self.scaler_y.fit_transform(y_train.values.reshape(-1, 1)).ravel()
@@ -204,7 +250,7 @@ class BitcoinPredictionModel:
         y_val_scaled = self.scaler_y.transform(y_val.values.reshape(-1, 1)).ravel()
         y_test_scaled = self.scaler_y.transform(y_test.values.reshape(-1, 1)).ravel()
 
-        # Replace GridSearchCV with RandomizedSearchCV
+        print("Starting RandomizedSearchCV...")
         param_distributions = {
             'max_depth': [2, 3, 4],
             'learning_rate': [0.01, 0.05, 0.1],
@@ -231,7 +277,7 @@ class BitcoinPredictionModel:
             print("Falling back to default parameters.")
             best_params = self.params
 
-        # Implement early stopping without warm start
+        print("Training final model with early stopping...")
         max_estimators = 1000
         best_val_score = float('inf')
         best_iteration = 0
@@ -251,6 +297,9 @@ class BitcoinPredictionModel:
             elif n_estimators - best_iteration > patience:
                 print(f"Early stopping at iteration {n_estimators}")
                 break
+
+            if n_estimators % 10 == 0:  # Print every 10 iterations
+                print(f"Iteration {n_estimators}: MSE = {val_score:.4f}")
 
         self.model = model
         print(f"Best number of estimators: {best_iteration}")
