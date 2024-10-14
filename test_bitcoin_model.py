@@ -12,8 +12,7 @@ from external_data import ExternalDataFetcher
 from sklearn.model_selection import train_test_split
 import schedule
 import time
-
-
+import argparse
 
 def calculate_normalized_metrics(y_true, y_pred, scaler):
     y_true_array = y_true.values.reshape(-1, 1)
@@ -25,13 +24,13 @@ def calculate_normalized_metrics(y_true, y_pred, scaler):
     r2 = r2_score(y_true_normalized, y_pred_normalized)
     return mse, mae, r2
 
-def main():
-    print("Starting main function")
+def main(granularity="ONE_MINUTE", product_id="BTC-USDC"):
+    print(f"Starting main function with granularity: {granularity}, product_id: {product_id}")
     # Initialize necessary classes
     coinbase_service = CoinbaseService(API_KEY, API_SECRET)  # Create CoinbaseService instance
 
-    # Create and train the model
-    model = BitcoinPredictionModel(coinbase_service, granularity="ONE_MINUTE", product_id="BTC-USDC")
+    # Create and train the model with custom granularity and product_id
+    model = BitcoinPredictionModel(coinbase_service, granularity=granularity, product_id=product_id)
     try:
         model.train()
     except Exception as e:
@@ -146,7 +145,15 @@ def main():
     # print(f"ARIMA forecast for the next hour: {arima_forecast}")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train Bitcoin prediction model with custom parameters")
+    parser.add_argument("--granularity", type=str, default="ONE_MINUTE", 
+                        help="Granularity for the data (e.g., ONE_MINUTE, FIVE_MINUTE, ONE_HOUR)")
+    parser.add_argument("--product_id", type=str, default="BTC-USDC", 
+                        help="Product ID for the cryptocurrency pair (e.g., BTC-USDC, ETH-USDC)")
+    
+    args = parser.parse_args()
+
     try:
-        main()
+        main(granularity=args.granularity, product_id=args.product_id)
     except Exception as e:
         print(f"An error occurred: {e}")
