@@ -2,7 +2,7 @@
 
 ## Overview
 
-This Bitcoin Trading Bot implements a sophisticated trading strategy using traditional technical analysis signals and machine learning models (XGBoost) for price prediction. It offers both backtesting capabilities and live trading simulations.
+This Bitcoin Trading Bot implements a sophisticated trading strategy using traditional technical analysis signals, machine learning models (XGBoost), and advanced market analysis techniques for price prediction. It offers both backtesting capabilities and live trading simulations.
 
 ## Key Components
 
@@ -11,51 +11,61 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 3. **CoinbaseService**: Handles interactions with the Coinbase API.
 4. **HistoricalData**: Manages retrieval and storage of historical price data.
 5. **API**: Provides an interface for external interactions with the trading bot.
+6. **MLSignal**: Implements machine learning models for price prediction and signal generation.
+7. **BitcoinPredictionModel**: A specialized model for Bitcoin price prediction.
+8. **HighFrequencyStrategy**: Implements high-frequency trading strategies.
 
 ## Features
 
 - Backtesting over specified date ranges
 - Live (paper) trading simulations
 - Multiple technical indicators (RSI, MACD, Bollinger Bands, etc.)
-- Market condition analysis (Bull/Bear market detection)
-- Dynamic trade sizing based on market conditions
-- Risk management with trailing stop-loss
+- Advanced market condition analysis (Bull/Bear market detection)
+- Dynamic trade sizing based on market conditions and volatility
+- Risk management with trailing stop-loss and ATR-based position sizing
 - State persistence for continuous operation
 - Visual trade and balance history plots
+- Machine learning integration for enhanced prediction accuracy
+- High-frequency trading capabilities
+- Sentiment analysis integration
 
 ## Prerequisites
 
-```
+### Python Environment Setup
+
+```bash
 conda create -n myenv python=3.11
 conda activate myenv
 ```
 
-```
-pip install coinbase-advanced-py
-pip install statsmodels
-pip install yfinance
-pip install newsapi-python
-pip install schedule
-pip install hmmlearn
-pip install scikit-learn scikit-fuzzy
-pip install xgboost
-pip install git+https://github.com/TA-Lib/ta-lib-python.git
-pip install joblib
-pip install scikit-optimize
-pip install shap
+### Required Libraries
+
+```bash
+pip install coinbase-advanced-py statsmodels yfinance newsapi-python schedule hmmlearn scikit-learn scikit-fuzzy xgboost joblib scikit-optimize shap pandas numpy matplotlib tqdm requests talib
 ```
 
-INSTALL TA-lib from [here](https://sourceforge.net/projects/ta-lib/files/ta-lib/0.4.0/ta-lib-0.4.0-src.tar.gz/download)
+### TA-Lib Installation
 
+TA-Lib is required for technical analysis calculations. Install it based on your operating system:
+
+#### Linux
+```bash
+wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+tar -xzf ta-lib-0.4.0-src.tar.gz
+cd ta-lib/
+./configure --prefix=/usr
+make
+sudo make install
 ```
-#LINUX
-$ tar -xzf ta-lib-0.4.0-src.tar.gz
-$ cd ta-lib/
-$ ./configure --prefix=/usr
-$ make
-$ sudo make install
-# MAC
+
+#### macOS
+```bash
 brew install ta-lib
+```
+
+After installing TA-Lib, install the Python wrapper:
+```bash
+pip install TA-Lib
 ```
 
 ## Installation
@@ -82,15 +92,9 @@ brew install ta-lib
 
    Note: Keep your `config.py` file secure and never share it publicly or commit it to version control.
 
-4. You're now ready to use the Bitcoin Trading Bot!
-
 ## Usage
 
 The main program for the Bitcoin Trading Bot is `base.py`. Here are some common usage scenarios:
-
-### Basic Backtesting
-
-Run a 1-year backtest with default settings:
 
 ### Backtesting Options
 
@@ -116,8 +120,6 @@ Run a 1-year backtest with default settings:
 
 ### Live Trading Simulation
 
-The live trading simulation mode doesn't execute real-time trades. Instead, it simulates trades as if they had started a few weeks ago, providing a more extensive historical context. This allows you to observe when the bot would perform its next buy or sell action based on current market conditions.
-
 To run the program in live trading simulation mode:
 
 ```bash
@@ -136,14 +138,41 @@ python base.py
   python base.py --product_id ETH-USD
   ```
 
-You can combine these options as needed. For example, to run a live simulation with ETH-USD:
+- Change granularity:
+  ```bash
+  python base.py --granularity ONE_MINUTE
+  ```
 
 For a full list of options, run:
 ```bash
 python base.py --help
 ```
 
-This will display all available command-line arguments and their descriptions.
+## Advanced Usage
+
+### High-Frequency Trading
+
+To use the high-frequency trading strategy:
+
+```bash
+python high_frequency_strategy.py
+```
+
+### Running All Commands
+
+To run a series of backtests with different parameters:
+
+```bash
+python run_all_commands.py
+```
+
+### Continuous Backtesting
+
+For continuous backtesting:
+
+```bash
+python run_base.py
+```
 
 ## Technical Analysis
 
@@ -151,57 +180,33 @@ The `TechnicalAnalysis` class in `technicalanalysis.py` is a core component of o
 
 ### Key Features
 
-- Calculates multiple technical indicators:
-  - Relative Strength Index (RSI)
-  - Moving Average Convergence Divergence (MACD)
-  - Bollinger Bands
-  - Stochastic Oscillator
-  - Average True Range (ATR)
-  - Simple Moving Averages (SMA)
-- Implements trend identification
-- Provides volume analysis
-- Generates combined trading signals based on multiple indicators
-- Analyzes market conditions (Bull/Bear market, Bullish/Bearish trends)
-- Implements dynamic support/resistance levels
-- Detects pullbacks for potential entry points
-- Adjusts strategies based on market volatility
+- Multiple technical indicators (RSI, MACD, Bollinger Bands, Stochastic Oscillator, etc.)
+- Trend identification and analysis
+- Volume analysis and On-Balance Volume (OBV)
+- Market condition analysis (Bull/Bear market detection)
+- Dynamic support/resistance levels
+- Volatility analysis and ATR calculations
+- Fibonacci retracements
+- Ichimoku Cloud analysis
 
-### Main Methods
+## Machine Learning Integration
 
-- `generate_combined_signal`: Produces a trading signal by combining multiple technical indicators and market conditions.
-- `analyze_market_conditions`: Determines the overall market state (Bull Market, Bear Market, Bullish, Bearish, or Neutral).
-- `compute_rsi`, `compute_macd`, `compute_bollinger_bands`: Calculate individual technical indicators.
-- `identify_trend`: Determines the current market trend.
-- `analyze_volume`: Assesses the current trading volume relative to recent averages.
-- `detect_pullback`: Identifies potential pullback situations for trading opportunities.
+The `MLSignal` class in `ml_model.py` integrates machine learning models to enhance prediction accuracy. It uses ensemble methods combining Random Forest, Gradient Boosting, and Logistic Regression models.
 
-### Usage
+## Contributing
 
-The `TechnicalAnalysis` class is typically used within the `Backtester` and main trading logic to generate signals and analyze market conditions. It's initialized with a `CoinbaseService` object:
-```
-python
-from technicalanalysis import TechnicalAnalysis
-from coinbaseservice import CoinbaseService
-coinbase_service = CoinbaseService(api_key, api_secret)
-ta = TechnicalAnalysis(coinbase_service)
-```
+Contributions to improve the Bitcoin Trading Bot are welcome. Please follow these steps:
 
+1. Fork the repository
+2. Create a new branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-### Generate a combined trading signal
+## License
 
-```
-signal = ta.generate_combined_signal(rsi, macd, signal, histogram, candles, market_conditions)
-```
+Distributed under the MIT License. See `LICENSE` for more information.
 
-###  Analyze market conditions
-```
-market_state = ta.analyze_market_conditions(candles)
-```
+## Disclaimer
 
-### Calculate technical indicators
-```
-rsi = ta.compute_rsi(candles)
-macd = ta.compute_macd(candles)
-signal = ta.compute_signal(candles)
-histogram = ta.compute_histogram(candles)
-```
+This Bitcoin Trading Bot is for educational and research purposes only. It is not intended to be used for actual trading. Always consult with a qualified financial advisor before making any investment decisions. The authors and contributors are not responsible for any financial losses incurred from using this software.
