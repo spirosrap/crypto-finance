@@ -92,10 +92,11 @@ class Backtester:
                 # self.max_trades_per_day: int = 20
                 # self.min_price_change: float = 0.04 # 7% minimum price change
 
-                self.cooldown_period: int = 15 * 60  # 15 minutes
-                self.max_trades_per_day: int = 24
-                self.min_price_change: float = 0.06  # 0.8% minimum price change
- 
+                self.cooldown_period: int = 5 * 60  # 5 minutes
+                self.max_trades_per_day: int = 48  # Allow more frequent trades
+                self.min_price_change: float = 0.06  # 2% minimum price change
+                self.strong_buy_percentage: float = 0.15  # 15% of balance for strong buy
+                self.buy_percentage: float = 0.05  # 5% of balance for regular buy 
 
             elif granularity == "FIVE_MINUTE":
                 self.cooldown_period: int = seconds_in_day * 0.1  # 1 day in seconds
