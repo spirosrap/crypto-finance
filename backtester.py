@@ -94,14 +94,21 @@ class Backtester:
 
                 self.cooldown_period: int = 5 * 60  # 5 minutes
                 self.max_trades_per_day: int = 48  # Allow more frequent trades
-                self.min_price_change: float = 0.06  # 2% minimum price change
+                self.min_price_change: float = 0.07  # 2% minimum price change
                 self.strong_buy_percentage: float = 0.15  # 15% of balance for strong buy
                 self.buy_percentage: float = 0.05  # 5% of balance for regular buy 
 
             elif granularity == "FIVE_MINUTE":
-                self.cooldown_period: int = seconds_in_day * 0.1  # 1 day in seconds
-                self.max_trades_per_day: int = 5
-                self.min_price_change: float = 0.08  # 0.5% minimum price change                
+                # self.cooldown_period: int = seconds_in_day * 0.1  # 1 day in seconds
+                # self.max_trades_per_day: int = 5
+                # self.min_price_change: float = 0.08  # 0.5% minimum price change                
+
+                self.cooldown_period: int = 15 * 60  # 15 minutes
+                self.max_trades_per_day: int = 24  # Allow frequent trades, but less than ONE_MINUTE
+                self.min_price_change: float = 0.06  # 6% minimum price change
+                self.strong_buy_percentage: float = 0.2  # 20% of balance for strong buy
+                self.buy_percentage: float = 0.07  # 7% of balance for regular buy
+
             elif granularity == "FIFTEEN_MINUTE":
                 self.cooldown_period: int = 15 * 60  # 15 minutes
                 self.max_trades_per_day: int = 24
@@ -114,7 +121,9 @@ class Backtester:
                 self.cooldown_period: int = 24 * 60 * 60 * 1  # 1 day in seconds
                 self.max_trades_per_day: int = 1
                 self.min_price_change: float = 0.08  # 8% minimum price change
-
+                self.strong_buy_percentage: float = 0.8  # 80% of balance for strong buy
+                self.buy_percentage: float = 0.4  # 40% of balance for regular buy
+            
             # Convert start_date and end_date to datetime objects if they're strings
             if isinstance(start_date, str):
                 start_date = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')

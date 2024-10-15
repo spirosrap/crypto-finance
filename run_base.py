@@ -2,8 +2,10 @@ import subprocess
 import time
 
 def run_command():
-    command = ["python base.py --month --product_id BTC-USDC --granularity ONE_MINUTE"]
+    # command = ["python base.py --month --product_id BTC-USDC --granularity ONE_MINUTE"]
     # command = ["python base.py --start_date 2024-08-23 --product_id BTC-USDC --granularity ONE_MINUTE"]
+    command = ["python base.py --start_date 2024-09-10 --product_id BTC-USDC --granularity ONE_MINUTE"]
+
     return subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
 
 def main():
