@@ -288,7 +288,7 @@ def main():
 
     initial_balance = 10000  # USD
     risk_per_trade = 0.02  # 2% risk per trade
-    trailing_stop_percent = 0.08  # 8% trailing stop
+    trailing_stop_percent = 0.076 # 7.6% trailing stop # WAS 0.08
 
     if args.live:
         logger.info("Starting live trading simulation.")
