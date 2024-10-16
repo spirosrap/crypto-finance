@@ -1,10 +1,12 @@
 import subprocess
 import argparse
+from datetime import datetime, timedelta
 
 # Add argument parsing
-parser = argparse.ArgumentParser(description="Run backtesting commands with custom product ID and granularity.")
-parser.add_argument("--product_id", default="BTC-USDC", help="Product ID to use for backtesting (default: BTC-USD)")
+parser = argparse.ArgumentParser(description="Run backtesting commands with custom product ID, granularity, and monthly options.")
+parser.add_argument("--product_id", default="BTC-USDC", help="Product ID to use for backtesting (default: BTC-USDC)")
 parser.add_argument("--granularity", default="ONE_HOUR", help="Granularity in seconds (default: ONE_HOUR)")
+parser.add_argument("--months", type=int, default=0, help="Number of months to backtest individually (default: 0)")
 args = parser.parse_args()
 
 # List of commands to run
@@ -17,6 +19,15 @@ commands = [
     f"python base.py --product_id {args.product_id} --granularity {args.granularity}",
     f"python base.py --bullmarket --product_id {args.product_id} --granularity {args.granularity}",
 ]
+
+# Add monthly commands if --months argument is provided
+if args.months > 0:
+    current_date = datetime.now()
+    commands = []
+    for i in range(args.months):
+        target_date = current_date - timedelta(days=30 * i)
+        month_year = target_date.strftime("%m-%y")  # Changed to MM-YY format
+        commands.append(f"python base.py --month-year {month_year} --product_id {args.product_id} --granularity {args.granularity}")
 
 # Run each command and capture the output in real-time
 for command in commands:
