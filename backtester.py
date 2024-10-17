@@ -333,7 +333,7 @@ class Backtester:
 
             # Log the final take profit price if there was a buy
             if take_profit is not None:
-                self.logger.info(f"Final take profit price: {take_profit:.2f} USD")
+                self.logger.info(f"Final take profit price: {take_profit:.2f} USD | Combined Signal: {combined_signal}" )
             else:
                 self.logger.info("No take profit price set (no buy trades executed)")
 
@@ -347,13 +347,22 @@ class Backtester:
             else:
                 self.logger.info("No buy trades executed, so no trailing stop was set.")
 
-            # Calculate and print Sharpe ratio
+            # Calculate and print Sharpe ratio and Sortino ratio
             daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
             if daily_returns.std() != 0:
                 sharpe_ratio = np.sqrt(365) * daily_returns.mean() / daily_returns.std()  # Adjusted for daily returns in a 24/7/365 market
+                
+                # Calculate Sortino ratio
+                negative_returns = daily_returns[daily_returns < 0]
+                if len(negative_returns) > 0:
+                    downside_deviation = np.sqrt(np.mean(negative_returns**2))
+                    sortino_ratio = np.sqrt(365) * daily_returns.mean() / downside_deviation
+                else:
+                    sortino_ratio = float('inf')  # If there are no negative returns, set Sortino ratio to infinity
             else:
-                sharpe_ratio = 0  # Set to 0 if standard deviation is 0 to avoid division by zero
-            self.logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f}")
+                sharpe_ratio = 0
+                sortino_ratio = 0  # Set to 0 if standard deviation is 0 to avoid division by zero
+
 
             # # Calculate and print total return
             # total_return = (final_value - initial_balance) / initial_balance * 100
@@ -363,7 +372,9 @@ class Backtester:
             cumulative_max = np.maximum.accumulate(portfolio_values)
             drawdown = (cumulative_max - portfolio_values) / cumulative_max
             max_drawdown = drawdown.max() * 100
-            self.logger.info(f"Maximum Drawdown: {max_drawdown:.2f}%")
+            
+            self.logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f} | Sortino Ratio: {sortino_ratio:.4f} | Max Drawdown: {max_drawdown:.2f}%")
+
 
             return final_value, trades
         except Exception as e:
