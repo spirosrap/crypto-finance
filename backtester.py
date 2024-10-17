@@ -72,10 +72,14 @@ class Backtester:
         plt.close()
 
     def calculate_dynamic_stop_loss(self, candles: List[Dict], entry_price: float) -> float:
+        if entry_price is None:
+            return None
         atr = self.trader.technical_analysis.compute_atr(candles, self.atr_period)
         return entry_price - (atr * self.atr_multiplier)
 
     def calculate_dynamic_take_profit(self, candles: List[Dict], entry_price: float) -> float:
+        if entry_price is None:
+            return None
         atr = self.trader.technical_analysis.compute_atr(candles, self.atr_period)
         return entry_price + (atr * self.atr_multiplier * 1.5)  # 1.5x the stop-loss distance
 
@@ -182,6 +186,7 @@ class Backtester:
             # Initialize tqdm progress bar for the entire loop
             with tqdm(total=len(candles), desc="Processing candles") as pbar:
                 highest_price_since_buy = 0  # Track the highest price since the last buy
+                take_profit = None  # Initialize the variable to store the take profit price
                 for i, candle in enumerate(candles):
                     close_price = float(candle['close'])
                     current_time = int(candle['start'])
@@ -326,6 +331,22 @@ class Backtester:
                             f"Amount: {trade.amount:.8f}, Fee: {trade.fee:.2f}, "
                             f"USD Value: {(usd_value - trade.fee):.2f}")
 
+            # Log the final take profit price if there was a buy
+            if take_profit is not None:
+                self.logger.info(f"Final take profit price: {take_profit:.2f} USD")
+            else:
+                self.logger.info("No take profit price set (no buy trades executed)")
+
+            # Print the current trailing stop value in Bitcoin terms
+            last_btc_price = float(candles[-1]['close'])
+            if highest_price_since_buy > 0:
+                trailing_stop_btc_value = highest_price_since_buy * (1 - trailing_stop_percent)
+                self.logger.info(f"Current trailing stop: {trailing_stop_btc_value:.2f} USD in Bitcoin value")
+                self.logger.info(f"(Based on peak price of {highest_price_since_buy:.2f} USD since last buy)")
+                self.logger.info(f"(Triggers when Bitcoin price drops by {trailing_stop_percent * 100:.2f}% from its peak after buying)")
+            else:
+                self.logger.info("No buy trades executed, so no trailing stop was set.")
+
             # Calculate and print Sharpe ratio
             daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
             if daily_returns.std() != 0:
@@ -343,16 +364,6 @@ class Backtester:
             drawdown = (cumulative_max - portfolio_values) / cumulative_max
             max_drawdown = drawdown.max() * 100
             self.logger.info(f"Maximum Drawdown: {max_drawdown:.2f}%")
-
-            # Print the current trailing stop value in Bitcoin terms
-            last_btc_price = float(candles[-1]['close'])
-            if highest_price_since_buy > 0:
-                trailing_stop_btc_value = highest_price_since_buy * (1 - trailing_stop_percent)
-                self.logger.info(f"Current trailing stop: {trailing_stop_btc_value:.2f} USD in Bitcoin value")
-                self.logger.info(f"(Based on peak price of {highest_price_since_buy:.2f} USD since last buy)")
-                self.logger.info(f"(Triggers when Bitcoin price drops by {trailing_stop_percent * 100:.2f}% from its peak after buying)")
-            else:
-                self.logger.info("No buy trades executed, so no trailing stop was set.")
 
             return final_value, trades
         except Exception as e:
