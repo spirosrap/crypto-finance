@@ -143,7 +143,6 @@ def parse_arguments():
     parser.add_argument("--bullmarket", action="store_true", help="Use bull market period (2020-10-01 to 2021-04-01)")
     parser.add_argument("--ytd", action="store_true", help="Use year-to-date period (2024-01-01 to current date)")
     parser.add_argument("--skip_backtest", action="store_true", help="Skip backtesting")
-    parser.add_argument("--live", action="store_true", help="Run live trading simulation")
     parser.add_argument("--product_id", default="BTC-USDC", help="Product ID for trading (default: BTC-USDC)")
     parser.add_argument("--granularity", default="ONE_HOUR", choices=[
         "ONE_MINUTE", "FIVE_MINUTE", "TEN_MINUTE", "FIFTEEN_MINUTE", 
@@ -303,10 +302,7 @@ def main():
     risk_per_trade = 0.02  # 2% risk per trade
     trailing_stop_percent = 0.076 # 7.6% trailing stop # WAS 0.08
 
-    if args.live:
-        logger.info("Starting live trading simulation.")
-        trader.backtester.run_live(args.product_id, initial_balance, risk_per_trade, trailing_stop_percent, granularity=args.granularity)
-    elif args.continuous:
+    if  args.continuous:
         logger.info("Starting continuous backtesting simulation.")
         trader.backtester.run_continuous_backtest(args.product_id, initial_balance, risk_per_trade, trailing_stop_percent, update_interval=args.update_interval)
     elif not args.skip_backtest:
