@@ -171,10 +171,14 @@ class Backtester:
             trades: List[TradeRecord] = []
             balance_history: List[float] = []
             btc_balance_history: List[float] = []
-            portfolio_values: List[float] = []  # Store daily portfolio values
+            portfolio_values: List[float] = []  # Store daily portfolio values for trading strategy
+            buy_and_hold_values: List[float] = []  # Store daily portfolio values for buy and hold strategy
             last_trade_time: Optional[int] = None
             last_trade_price: Optional[float] = None
-            last_portfolio_date: Optional[datetime.date] = None  # New variable to track the last recorded portfolio date
+            last_portfolio_date: Optional[datetime.date] = None
+
+            # Calculate initial buy and hold position
+            initial_btc_balance = initial_balance / float(candles[0]['close'])
 
             # Define a minimum number of candles required for analysis
             min_candles = 50  # Adjust this value based on your longest indicator period
@@ -316,9 +320,10 @@ class Backtester:
                     balance_history.append(balance)
                     btc_balance_history.append(btc_balance * close_price)
                     
-                    # Only add to portfolio_values if it's a new day
+                    # Only add to portfolio_values and buy_and_hold_values if it's a new day
                     if last_portfolio_date is None or current_date > last_portfolio_date:
                         portfolio_values.append(balance + btc_balance * close_price)
+                        buy_and_hold_values.append(initial_btc_balance * close_price)
                         last_portfolio_date = current_date
 
                     # Update the progress bar
@@ -354,16 +359,21 @@ class Backtester:
 
             # Calculate and print Sharpe ratio and Sortino ratio
             daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
+            buy_and_hold_returns = np.diff(buy_and_hold_values) / buy_and_hold_values[:-1]
             if daily_returns.std() != 0:
                 sharpe_ratio = np.sqrt(365) * daily_returns.mean() / daily_returns.std()  # Adjusted for daily returns in a 24/7/365 market
-                
+                sharpe_ratio_buy_and_hold = np.sqrt(365) * buy_and_hold_returns.mean() / buy_and_hold_returns.std()
                 # Calculate Sortino ratio
                 negative_returns = daily_returns[daily_returns < 0]
+                negative_returns_buy_and_hold = buy_and_hold_returns[buy_and_hold_returns < 0]
                 if len(negative_returns) > 0:
                     downside_deviation = np.sqrt(np.mean(negative_returns**2))
                     sortino_ratio = np.sqrt(365) * daily_returns.mean() / downside_deviation
+                    downside_deviation_buy_and_hold = np.sqrt(np.mean(negative_returns_buy_and_hold**2))
+                    sortino_ratio_buy_and_hold = np.sqrt(365) * buy_and_hold_returns.mean() / downside_deviation_buy_and_hold
                 else:
                     sortino_ratio = float('inf')  # If there are no negative returns, set Sortino ratio to infinity
+                    sortino_ratio_buy_and_hold = float('inf')  # If there are no negative returns, set Sortino ratio to infinity
             else:
                 sharpe_ratio = 0
                 sortino_ratio = 0  # Set to 0 if standard deviation is 0 to avoid division by zero
@@ -378,7 +388,7 @@ class Backtester:
             drawdown = (cumulative_max - portfolio_values) / cumulative_max
             max_drawdown = drawdown.max() * 100
             
-            self.logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f} | Sortino Ratio: {sortino_ratio:.4f} | Max Drawdown: {max_drawdown:.2f}%")
+            self.logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f} | Sortino Ratio: {sortino_ratio:.4f} | Max Drawdown: {max_drawdown:.2f}% | Sharpe Ratio Buy and Hold: {sharpe_ratio_buy_and_hold:.4f} | Sortino Ratio Buy and Hold: {sortino_ratio_buy_and_hold:.4f}")
 
 
             return final_value, trades
