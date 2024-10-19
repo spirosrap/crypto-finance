@@ -171,10 +171,11 @@ class Backtester:
             trades: List[TradeRecord] = []
             balance_history: List[float] = []
             btc_balance_history: List[float] = []
-            portfolio_values: List[float] = []  # New list to store daily portfolio values
+            portfolio_values: List[float] = []  # Store daily portfolio values
             last_trade_time: Optional[int] = None
             last_trade_price: Optional[float] = None
-            
+            last_portfolio_date: Optional[datetime.date] = None  # New variable to track the last recorded portfolio date
+
             # Define a minimum number of candles required for analysis
             min_candles = 50  # Adjust this value based on your longest indicator period
 
@@ -314,7 +315,11 @@ class Backtester:
                     # Update balance histories and portfolio value
                     balance_history.append(balance)
                     btc_balance_history.append(btc_balance * close_price)
-                    portfolio_values.append(balance + btc_balance * close_price)
+                    
+                    # Only add to portfolio_values if it's a new day
+                    if last_portfolio_date is None or current_date > last_portfolio_date:
+                        portfolio_values.append(balance + btc_balance * close_price)
+                        last_portfolio_date = current_date
 
                     # Update the progress bar
                     pbar.update(1)
