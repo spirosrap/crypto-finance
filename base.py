@@ -159,6 +159,7 @@ def parse_arguments():
     parser.add_argument("--oldbear", action="store_true", help="Use old bear market period (2018-01-01 to 2020-06-01)")
     parser.add_argument("--oldbull", action="store_true", help="Use old bull market period (2018-01-01 to 2019-12-01)")
     parser.add_argument("--month-year", help="Specify a month and year for backtesting (format: MM-YY)")
+    parser.add_argument("--year", type=int, help="Specify a year for backtesting (e.g., 2024)")
     return parser.parse_args()
 
 def parse_datetime(date_string):
@@ -225,7 +226,10 @@ def calculate_btc_eur_value(trader):
 def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_percent, granularity):
     end_date = datetime.now()
     
-    if args.month_year:
+    if args.year:
+        start_date = datetime(args.year, 1, 1)
+        end_date = datetime(args.year + 1, 1, 1) - timedelta(seconds=1)
+    elif args.month_year:
         try:
             month, year = map(int, args.month_year.split('-'))
             year = 2000 + year if year < 100 else year  # Assume 20xx for two-digit years
