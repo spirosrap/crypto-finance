@@ -202,7 +202,7 @@ def display_technical_indicators(trader, product_id, candles):
     logger.info(f"Current market conditions: {current_market_conditions}")
 
     trend = trader.identify_trend(product_id, candles, window=TREND_WINDOW) 
-    logger.info(f"Current 1h (12 days) trend for {product_id}: {trend}")
+    logger.debug(f"Current 1h (12 days) trend for {product_id}: {trend}")
 
 def display_sentiment_analysis(trader, product_id):
     bitcoin_sentiment = trader.analyze_sentiment("Bitcoin")
