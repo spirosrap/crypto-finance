@@ -74,8 +74,8 @@ class TechnicalAnalysis:
             'short_term_trend': 2,
             'long_term_trend': 1,
             'volume': 1,
-            'ichimoku': 0,
-            'fibonacci': 0,
+            'ichimoku': 1, #WAS 0
+            'fibonacci': 1,#WAS 0
             'ml_model': 2,
             'bitcoin_prediction': 3
         }
