@@ -344,6 +344,7 @@ class Backtester:
             # Log the final take profit price if there was a buy
             if take_profit is not None:
                 self.logger.info(f"Final take profit price: {take_profit:.2f} USD | Combined Signal: {combined_signal}" )
+                print(f"Min price change: {abs(close_price - last_trade_price) / last_trade_price} | Min price change threshold: {self.min_price_change}")
             else:
                 self.logger.info("No take profit price set (no buy trades executed)")
 
