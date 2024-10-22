@@ -404,10 +404,6 @@ class Backtester:
                 
                 balance = initial_balance
                 btc_balance = 0
-                last_trade_time = None
-                last_trade_price = None
-                last_buy_price = None
-                highest_price_since_buy = 0
                 trades = []
 
                 end_date = datetime.now(timezone.utc)
@@ -435,16 +431,10 @@ class Backtester:
                         if latest_trade.action in ["BUY", "STRONG BUY"]:
                             btc_balance += latest_trade.amount
                             balance -= (latest_trade.amount * latest_trade.price + latest_trade.fee)
-                            last_buy_price = latest_trade.price
-                            highest_price_since_buy = latest_trade.price
                         elif latest_trade.action in ["SELL", "STRONG SELL", "STOP LOSS", "TRAILING STOP"]:
                             balance += (latest_trade.amount * latest_trade.price - latest_trade.fee)
                             btc_balance -= latest_trade.amount
-                            last_buy_price = None
-                            highest_price_since_buy = 0
 
-                        last_trade_time = latest_trade.date
-                        last_trade_price = latest_trade.price
 
                 # Log current state
                 current_price = float(candles[-1]['close'])
