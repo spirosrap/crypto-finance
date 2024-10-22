@@ -23,14 +23,48 @@ class Backtester:
     def __init__(self, trader: Any):
         self.trader = trader
         self.logger = logging.getLogger(__name__)
-        self.cooldown_period: int = 24 * 60 * 60 * 1  # 1 day in seconds
-        self.max_trades_per_day: int = 1
-        self.min_price_change: float = 0.08  # 8% minimum price change
-        self.drawdown_threshold: float = 0.1  # 10% drawdown threshold
-        self.strong_buy_percentage: float = 0.8  # 80% of balance for strong buy
-        self.buy_percentage: float = 0.4  # 40% of balance for regular buy
+        self.granularity_settings = {
+            "ONE_MINUTE": {
+                "cooldown_period": 5 * 60,  # 5 minutes
+                "max_trades_per_day": 48,
+                "min_price_change": 0.07,
+                "strong_buy_percentage": 0.15,
+                "buy_percentage": 0.05
+            },
+            "FIVE_MINUTE": {
+                "cooldown_period": 15 * 60,  # 15 minutes
+                "max_trades_per_day": 24,
+                "min_price_change": 0.06,
+                "strong_buy_percentage": 0.2,
+                "buy_percentage": 0.07
+            },
+            "FIFTEEN_MINUTE": {
+                "cooldown_period": 15 * 60,
+                "max_trades_per_day": 24,
+                "min_price_change": 0.08,
+                "strong_buy_percentage": 0.3,
+                "buy_percentage": 0.15
+            },
+            "THIRTY_MINUTE": {
+                "cooldown_period": 24 * 60 * 60 * 0.2,
+                "max_trades_per_day": 2,
+                "min_price_change": 0.08,
+                "strong_buy_percentage": 0.45,
+                "buy_percentage": 0.15
+            },
+            "ONE_HOUR": {  # Default settings
+                "cooldown_period": 24 * 60 * 60,
+                "max_trades_per_day": 1,
+                "min_price_change": 0.08,
+                "strong_buy_percentage": 0.8,
+                "buy_percentage": 0.4
+            }
+        }
+        # Default settings
+        self.set_granularity_settings("ONE_HOUR")
         self.atr_period = 14
         self.atr_multiplier = 2
+        self.drawdown_threshold = 0.1
 
     def create_trade_record(self, date: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date, action, price, amount, fee)
@@ -389,7 +423,14 @@ class Backtester:
             drawdown = (cumulative_max - portfolio_values) / cumulative_max
             max_drawdown = drawdown.max() * 100
             
-            self.logger.info(f"Sharpe Ratio: {sharpe_ratio:.4f} | Sortino Ratio: {sortino_ratio:.4f} | Max Drawdown: {max_drawdown:.2f}% | Sharpe Ratio Buy and Hold: {sharpe_ratio_buy_and_hold:.4f} | Sortino Ratio Buy and Hold: {sortino_ratio_buy_and_hold:.4f}")
+            metrics = self.calculate_performance_metrics(portfolio_values, buy_and_hold_values)
+            self.logger.info(
+                f"Sharpe Ratio: {metrics['sharpe_ratio']:.4f} | "
+                f"Sortino Ratio: {metrics['sortino_ratio']:.4f} | "
+                f"Max Drawdown: {metrics['max_drawdown']:.2f}% | "
+                f"Sharpe Ratio Buy and Hold: {metrics['sharpe_ratio_buy_and_hold']:.4f} | "
+                f"Sortino Ratio Buy and Hold: {metrics['sortino_ratio_buy_and_hold']:.4f}"
+            )
 
 
             return final_value, trades
@@ -452,3 +493,45 @@ class Backtester:
                 self.logger.error(f"An error occurred during continuous backtesting: {e}", exc_info=True)
                 # Wait and continue running
                 time.sleep(60)
+
+    def set_granularity_settings(self, granularity: str) -> None:
+        """Apply settings for the specified granularity."""
+        settings = self.granularity_settings.get(granularity, self.granularity_settings["ONE_HOUR"])
+        for key, value in settings.items():
+            setattr(self, key, value)
+
+    def calculate_performance_metrics(self, portfolio_values: List[float], buy_and_hold_values: List[float]) -> Dict[str, float]:
+        """Calculate various performance metrics."""
+        daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
+        buy_and_hold_returns = np.diff(buy_and_hold_values) / buy_and_hold_values[:-1]
+        
+        # Calculate metrics
+        metrics = {}
+        if daily_returns.std() != 0:
+            metrics["sharpe_ratio"] = np.sqrt(365) * daily_returns.mean() / daily_returns.std()
+            metrics["sharpe_ratio_buy_and_hold"] = np.sqrt(365) * buy_and_hold_returns.mean() / buy_and_hold_returns.std()
+            
+            negative_returns = daily_returns[daily_returns < 0]
+            negative_returns_buy_and_hold = buy_and_hold_returns[buy_and_hold_returns < 0]
+            
+            if len(negative_returns) > 0:
+                downside_deviation = np.sqrt(np.mean(negative_returns**2))
+                metrics["sortino_ratio"] = np.sqrt(365) * daily_returns.mean() / downside_deviation
+                
+                downside_deviation_buy_and_hold = np.sqrt(np.mean(negative_returns_buy_and_hold**2))
+                metrics["sortino_ratio_buy_and_hold"] = np.sqrt(365) * buy_and_hold_returns.mean() / downside_deviation_buy_and_hold
+            else:
+                metrics["sortino_ratio"] = float('inf')
+                metrics["sortino_ratio_buy_and_hold"] = float('inf')
+        else:
+            metrics["sharpe_ratio"] = 0
+            metrics["sortino_ratio"] = 0
+            metrics["sharpe_ratio_buy_and_hold"] = 0
+            metrics["sortino_ratio_buy_and_hold"] = 0
+
+        # Calculate maximum drawdown
+        cumulative_max = np.maximum.accumulate(portfolio_values)
+        drawdown = (cumulative_max - portfolio_values) / cumulative_max
+        metrics["max_drawdown"] = drawdown.max() * 100
+        
+        return metrics
