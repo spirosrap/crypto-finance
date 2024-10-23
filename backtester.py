@@ -6,13 +6,11 @@ from tqdm import tqdm
 import numpy as np
 import time
 import requests
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from dataclasses import dataclass
 from typing import List, Tuple, Dict, Any, Optional
 
 from trading.models import TradeRecord, PerformanceMetrics
 from trading.granularity_settings import GRANULARITY_SETTINGS
+from trading.visualization import plot_trades  # Add this import
 
 class Backtester:
     def __init__(self, trader: Any):
@@ -29,41 +27,7 @@ class Backtester:
     def create_trade_record(self, date: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date, action, price, amount, fee)
 
-    def plot_trades(self, candles: List[Dict[str, Any]], trades: List[TradeRecord], balance_history: List[float], btc_balance_history: List[float]) -> None:
-        # Convert timestamps to datetime
-        dates = [datetime.fromtimestamp(float(candle['start']), tz=timezone.utc) for candle in candles]
-        prices = [float(candle['close']) for candle in candles]
-
-        # Create the plot
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
-
-        # Plot price
-        ax1.plot(dates, prices, label='Price')
-
-        # Plot trades
-        for trade in trades:
-            date = datetime.fromtimestamp(int(trade.date), tz=timezone.utc)
-            if trade.action in ['BUY', 'STRONG BUY']:
-                ax1.plot(date, trade.price, '^', color='g', markersize=10)
-            elif trade.action in ['SELL', 'STRONG SELL', 'STOP LOSS', 'TRAILING STOP']:
-                ax1.plot(date, trade.price, 'v', color='r', markersize=10)
-
-        # Plot balances
-        ax2.plot(dates, balance_history, label='USD Balance')
-        ax2.plot(dates, btc_balance_history, label='BTC Balance (in USD)')
-
-        # Format the plot
-        ax1.set_title('Price and Trades')
-        ax1.legend()
-        ax2.set_title('Account Balance')
-        ax2.legend()
-
-        plt.xlabel('Date')
-        fig.autofmt_xdate()  # Rotate and align the tick labels
-
-        plt.tight_layout()
-        plt.savefig('trades_and_balance.png')
-        plt.close()
+    # Remove the plot_trades method since it's now in visualization.py
 
     def calculate_dynamic_stop_loss(self, candles: List[Dict], entry_price: float) -> float:
         if entry_price is None:
@@ -418,5 +382,6 @@ class Backtester:
         settings = self.granularity_settings.get(granularity, self.granularity_settings["ONE_HOUR"])
         for key, value in settings.items():
             setattr(self, key, value)
+
 
 
