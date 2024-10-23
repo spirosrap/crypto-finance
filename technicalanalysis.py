@@ -1,21 +1,72 @@
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Union, Callable
 from coinbaseservice import CoinbaseService
 import time
 import talib
 import logging
 from functools import lru_cache
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from sklearn.preprocessing import StandardScaler
 from ml_model import MLSignal
 from historicaldata import HistoricalData
 from bitcoinpredictionmodel import BitcoinPredictionModel
+import numpy.typing as npt
+from enum import Enum
+from time import perf_counter
+from contextlib import contextmanager
+
+# Move these error classes to the top, before any class that uses them
+class TechnicalAnalysisError(Exception):
+    """Base exception class for TechnicalAnalysis errors."""
+    pass
+
+class InsufficientDataError(TechnicalAnalysisError):
+    """Raised when there is not enough data for calculation."""
+    pass
+
+def validate_candles(func: Callable):
+    """Decorator to validate candle data."""
+    def wrapper(self, candles: List[Dict], *args, **kwargs):
+        if not candles:
+            raise InsufficientDataError("No candle data provided")
+        if len(candles) < 2:
+            raise InsufficientDataError("Insufficient candle data for analysis")
+        try:
+            # Validate candle structure
+            required_keys = {'open', 'high', 'low', 'close', 'volume'}
+            if not all(all(key in candle for key in required_keys) for candle in candles):
+                raise ValueError("Invalid candle data structure")
+            return func(self, candles, *args, **kwargs)
+        except Exception as e:
+            self.logger.error(f"Error in {func.__name__}: {str(e)}")
+            raise TechnicalAnalysisError(f"Error processing candle data: {str(e)}")
+    return wrapper
+
+# Then keep your existing enums and dataclasses
+class MarketCondition(Enum):
+    BULL_MARKET = "Bull Market"
+    BEAR_MARKET = "Bear Market"
+    BULLISH = "Bullish"
+    BEARISH = "Bearish"
+    NEUTRAL = "Neutral"
+
+class MarketRegime(Enum):
+    LOW_VOLATILITY = "Low Volatility"
+    MEDIUM_VOLATILITY = "Medium Volatility"
+    HIGH_VOLATILITY = "High Volatility"
+
+class SignalType(Enum):
+    STRONG_BUY = "STRONG BUY"
+    BUY = "BUY"
+    HOLD = "HOLD"
+    SELL = "SELL"
+    STRONG_SELL = "STRONG SELL"
 
 @dataclass
 class TechnicalAnalysisConfig:
-    rsi_overbought: float = 65 # 70
-    rsi_oversold: float = 35 # 30
+    rsi_overbought: float = 65
+    rsi_oversold: float = 35
     volatility_threshold: float = 0.03
     rsi_period: int = 14
     macd_fast: int = 12
@@ -25,6 +76,30 @@ class TechnicalAnalysisConfig:
     bollinger_std: float = 2
     risk_per_trade: float = 0.01
     atr_multiplier: float = 2
+    signal_weights: Dict[str, float] = field(default_factory=lambda: {
+        'rsi': 2.0,
+        'macd': 2.0,
+        'bollinger': 1.0,
+        'ma_crossover': 1.0,
+        'stochastic': 1.0,
+        'trend': 2.0,
+        'volume_profile': 1.0,
+        'short_term_trend': 2.0,
+        'long_term_trend': 1.0,
+        'volume': 1.0,
+        'ichimoku': 1.0,
+        'fibonacci': 1.0,
+        'ml_model': 2.0,
+        'bitcoin_prediction': 3.0
+    })
+
+@dataclass
+class SignalResult:
+    signal_type: SignalType
+    confidence: float
+    indicators: Dict[str, float]
+    market_condition: MarketCondition
+    timestamp: float = field(default_factory=time.time)
 
 class TechnicalAnalysis:
     """
@@ -757,4 +832,150 @@ class TechnicalAnalysis:
             self.logger.error(f"Error in BitcoinPredictionModel prediction: {str(e)}. Returning neutral signal.")
             return 0
 
+    def get_combined_signal(self, candles: List[Dict]) -> SignalResult:
+        """
+        Generate a comprehensive trading signal with confidence level.
+        """
+        try:
+            # Calculate all indicators
+            indicators = self._calculate_all_indicators(candles)
+            
+            # Get market conditions
+            market_condition = self.analyze_market_conditions(candles)
+            
+            # Calculate weighted signal
+            signal_strength = self._calculate_weighted_signal(indicators, market_condition)
+            
+            # Calculate confidence level (0-1)
+            confidence = min(abs(signal_strength) / 10, 1.0)
+            
+            # Determine signal type
+            signal_type = self._determine_signal_type(signal_strength)
+            
+            return SignalResult(
+                signal_type=signal_type,
+                confidence=confidence,
+                indicators=indicators,
+                market_condition=MarketCondition(market_condition)
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error generating combined signal: {str(e)}")
+            return SignalResult(
+                signal_type=SignalType.HOLD,
+                confidence=0.0,
+                indicators={},
+                market_condition=MarketCondition.NEUTRAL
+            )
+
+    @validate_candles
+    def _calculate_all_indicators(self, candles: List[Dict]) -> Dict[str, float]:
+        """Calculate all technical indicators."""
+        return {
+            'rsi': self.compute_rsi(self.product_id, candles),
+            'macd': self.compute_macd(self.product_id, candles)[0],
+            'bollinger': self.evaluate_bollinger_signal(candles),
+            # ... add other indicators
+        }
+
+    @contextmanager
+    def performance_monitor(self, operation_name: str):
+        """Context manager to monitor performance of operations."""
+        start_time = perf_counter()
+        try:
+            yield
+        finally:
+            execution_time = perf_counter() - start_time
+            self.logger.debug(f"{operation_name} took {execution_time:.4f} seconds")
+
+    def analyze_market(self, candles: List[Dict]) -> Dict[str, Union[SignalResult, Dict]]:
+        """
+        Perform complete market analysis with performance monitoring.
+        """
+        with self.performance_monitor("Market Analysis"):
+            signal_result = self.get_combined_signal(candles)
+            
+        with self.performance_monitor("Risk Analysis"):
+            risk_metrics = self._calculate_risk_metrics(candles)
+            
+        return {
+            'signal': signal_result,
+            'risk_metrics': risk_metrics,
+            'timestamp': time.time()
+        }
+
+    def _calculate_risk_metrics(self, candles: List[Dict]) -> Dict[str, float]:
+        """
+        Calculate risk metrics for the current market conditions.
+        
+        Args:
+            candles: List of historical candle data
+        
+        Returns:
+            Dictionary containing various risk metrics
+        """
+        try:
+            current_price = float(candles[-1]['close'])
+            atr = self.compute_atr(candles)
+            volatility = self.calculate_volatility(candles)
+            
+            # Calculate risk metrics
+            risk_metrics = {
+                'atr': atr,
+                'volatility': volatility,
+                'risk_level': self._calculate_risk_level(volatility),
+                'stop_loss': current_price - (atr * self.config.atr_multiplier),
+                'take_profit': current_price + (atr * self.config.atr_multiplier * 1.5),
+                'max_position_size': self.calculate_atr_position_size(
+                    balance=10000,  # This should be passed in or stored as a property
+                    price=current_price,
+                    atr=atr
+                )
+            }
+            
+            return risk_metrics
+        except Exception as e:
+            self.logger.error(f"Error calculating risk metrics: {str(e)}")
+            return {
+                'atr': 0.0,
+                'volatility': 0.0,
+                'risk_level': 'high',
+                'stop_loss': 0.0,
+                'take_profit': 0.0,
+                'max_position_size': 0.0
+            }
+
+    def _calculate_risk_level(self, volatility: float) -> str:
+        """
+        Determine risk level based on volatility.
+        """
+        if volatility > self.config.volatility_threshold * 2:
+            return 'high'
+        elif volatility > self.config.volatility_threshold:
+            return 'medium'
+        else:
+            return 'low'
+
 # ... (any additional classes or functions)
+
+def cache_result(ttl_seconds: int = 300):
+    """Cache decorator with time-to-live."""
+    def decorator(func: Callable):
+        cache = {}
+        
+        def wrapper(*args, **kwargs):
+            key = str(args) + str(kwargs)
+            now = time.time()
+            
+            if key in cache:
+                result, timestamp = cache[key]
+                if now - timestamp < ttl_seconds:
+                    return result
+                
+            result = func(*args, **kwargs)
+            cache[key] = (result, now)
+            return result
+            
+        return wrapper
+    return decorator
+
