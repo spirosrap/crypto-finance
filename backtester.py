@@ -163,7 +163,6 @@ class Backtester:
                                     trade_size_multiplier = 0.5  # Decrease trade size in bear market conditions
                                 else:
                                     trade_size_multiplier = 1.0  # No change in neutral conditions
-
                                         
                                 # Execute trade based on signal
                                 if combined_signal in ["BUY", "STRONG BUY"] and balance > 0:

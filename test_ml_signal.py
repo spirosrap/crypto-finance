@@ -31,7 +31,7 @@ if __name__ == "__main__":
     # Set up argument parser
     parser = argparse.ArgumentParser(description="Train ML model for Bitcoin prediction")
     parser.add_argument("--product_id", type=str, default="BTC-USDC", help="Product ID (e.g., BTC-USDC)")
-    parser.add_argument("--granularity", type=str, default="ONE_MINUTE", help="Granularity (e.g., ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE)")
+    parser.add_argument("--granularity", type=str, default="ONE_HOUR", help="Granularity (e.g., ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE)")
 
     # Parse arguments
     args = parser.parse_args()

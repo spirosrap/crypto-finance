@@ -31,7 +31,7 @@ def main(granularity="ONE_MINUTE", product_id="BTC-USDC"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Bitcoin prediction model with custom parameters")
-    parser.add_argument("--granularity", type=str, default="ONE_MINUTE", 
+    parser.add_argument("--granularity", type=str, default="ONE_HOUR", 
                         help="Granularity for the data (e.g., ONE_MINUTE, FIVE_MINUTE, ONE_HOUR)")
     parser.add_argument("--product_id", type=str, default="BTC-USDC", 
                         help="Product ID for the cryptocurrency pair (e.g., BTC-USDC, ETH-USDC)")
