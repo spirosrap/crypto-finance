@@ -3,9 +3,7 @@ import os
 import json
 import logging
 from tqdm import tqdm
-import numpy as np
 import time
-import requests
 from typing import List, Tuple, Dict, Any, Optional
 
 from trading.models import TradeRecord, PerformanceMetrics
@@ -26,8 +24,6 @@ class Backtester:
 
     def create_trade_record(self, date: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date, action, price, amount, fee)
-
-    # Remove the plot_trades method since it's now in visualization.py
 
     def calculate_dynamic_stop_loss(self, candles: List[Dict], entry_price: float) -> float:
         if entry_price is None:
@@ -67,9 +63,6 @@ class Backtester:
             filename = f"{product_id}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}_{granularity}.json"
             filepath = os.path.join(candle_dir, filename)
             
-            # Check if we need the most recent data
-            need_recent_data = end_date.date() == datetime.now().date()
-
             # Fetch historical data
             self.logger.info(f"Fetching all historical data from {start_date} to {end_date} with granularity {granularity}...")
             candles = self.trader.get_historical_data(product_id, start_date, end_date, granularity)
@@ -265,37 +258,6 @@ class Backtester:
                 self.logger.info(f"(Triggers when Bitcoin price drops by {trailing_stop_percent * 100:.2f}% from its peak after buying)")
             else:
                 self.logger.info("No buy trades executed, so no trailing stop was set.")
-
-            # Calculate and print Sharpe ratio and Sortino ratio
-            daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
-            buy_and_hold_returns = np.diff(buy_and_hold_values) / buy_and_hold_values[:-1]
-            if daily_returns.std() != 0:
-                sharpe_ratio = np.sqrt(365) * daily_returns.mean() / daily_returns.std()  # Adjusted for daily returns in a 24/7/365 market
-                sharpe_ratio_buy_and_hold = np.sqrt(365) * buy_and_hold_returns.mean() / buy_and_hold_returns.std()
-                # Calculate Sortino ratio
-                negative_returns = daily_returns[daily_returns < 0]
-                negative_returns_buy_and_hold = buy_and_hold_returns[buy_and_hold_returns < 0]
-                if len(negative_returns) > 0:
-                    downside_deviation = np.sqrt(np.mean(negative_returns**2))
-                    sortino_ratio = np.sqrt(365) * daily_returns.mean() / downside_deviation
-                    downside_deviation_buy_and_hold = np.sqrt(np.mean(negative_returns_buy_and_hold**2))
-                    sortino_ratio_buy_and_hold = np.sqrt(365) * buy_and_hold_returns.mean() / downside_deviation_buy_and_hold
-                else:
-                    sortino_ratio = float('inf')  # If there are no negative returns, set Sortino ratio to infinity
-                    sortino_ratio_buy_and_hold = float('inf')  # If there are no negative returns, set Sortino ratio to infinity
-            else:
-                sharpe_ratio = 0
-                sortino_ratio = 0  # Set to 0 if standard deviation is 0 to avoid division by zero
-
-
-            # # Calculate and print total return
-            # total_return = (final_value - initial_balance) / initial_balance * 100
-            # self.logger.info(f"Total Return: {total_return:.2f}%")
-
-            # Calculate and print maximum drawdown
-            cumulative_max = np.maximum.accumulate(portfolio_values)
-            drawdown = (cumulative_max - portfolio_values) / cumulative_max
-            max_drawdown = drawdown.max() * 100
             
             metrics = PerformanceMetrics.calculate_metrics(portfolio_values, buy_and_hold_values)
             self.logger.info(
@@ -305,7 +267,6 @@ class Backtester:
                 f"Sharpe Ratio Buy and Hold: {metrics['sharpe_ratio_buy_and_hold']:.4f} | "
                 f"Sortino Ratio Buy and Hold: {metrics['sortino_ratio_buy_and_hold']:.4f}"
             )
-
 
             return final_value, trades
         except Exception as e:
