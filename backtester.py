@@ -34,13 +34,43 @@ class Backtester:
     def calculate_dynamic_take_profit(self, candles: List[Dict], entry_price: float) -> float:
         if entry_price is None:
             return None
+        
+        # Calculate ATR for volatility-based take profit
         atr = self.trader.technical_analysis.compute_atr(candles, self.atr_period)
-        return entry_price + (atr * self.atr_multiplier * 1.5)  # 1.5x the stop-loss distance
+        
+        # Calculate trend strength using ADX
+        adx = self.trader.technical_analysis.compute_adx(candles, period=14)
+        
+        # Adjust take profit multiplier based on trend strength
+        if adx > 25:  # Strong trend
+            tp_multiplier = 2.0
+        elif adx > 20:  # Moderate trend
+            tp_multiplier = 1.75
+        else:  # Weak trend
+            tp_multiplier = 1.5
+            
+        return entry_price + (atr * self.atr_multiplier * tp_multiplier)
 
     def calculate_position_size(self, balance: float, entry_price: float, stop_loss: float, risk_per_trade: float) -> float:
+        """Calculate position size with enhanced risk management"""
+        # Base risk calculation
         risk_amount = balance * risk_per_trade
+        
+        # Calculate volatility
+        volatility = abs(entry_price - stop_loss) / entry_price
+        
+        # Adjust position size based on volatility
+        if volatility > 0.05:  # High volatility
+            risk_amount *= 0.7  # Reduce position size
+        elif volatility < 0.02:  # Low volatility
+            risk_amount *= 1.2  # Increase position size
+            
+        # Ensure minimum position size
+        min_position = balance * 0.01  # 1% of balance minimum
         risk_per_coin = entry_price - stop_loss
-        return risk_amount / risk_per_coin
+        position_size = max(risk_amount / risk_per_coin, min_position / entry_price)
+        
+        return position_size
 
     def backtest(self, product_id: str, start_date: str, end_date: str, initial_balance: float, risk_per_trade: float, trailing_stop_percent: float, granularity: str = "ONE_HOUR") -> Tuple[float, List[TradeRecord]]:
         try:

@@ -956,6 +956,123 @@ class TechnicalAnalysis:
         else:
             return 'low'
 
+    # Add these methods to the TechnicalAnalysis class, keeping all existing code
+
+    def compute_adx(self, candles: List[Dict], period: int = 14) -> float:
+        """
+        Calculate the Average Directional Index (ADX)
+        
+        Args:
+            candles: List of candle data
+            period: Period for ADX calculation (default 14)
+        
+        Returns:
+            float: ADX value between 0 and 100
+        """
+        try:
+            # Extract price data
+            high = self.extract_prices(candles, 'high')
+            low = self.extract_prices(candles, 'low')
+            close = self.extract_prices(candles)
+
+            # Use TA-Lib's ADX function
+            adx = talib.ADX(high, low, close, timeperiod=period)
+            
+            # Return the latest ADX value
+            latest_adx = adx[-1]
+            
+            # Handle NaN values
+            if np.isnan(latest_adx):
+                self.logger.warning("ADX calculation returned NaN. Returning 0.")
+                return 0.0
+                
+            return float(latest_adx)
+            
+        except Exception as e:
+            self.logger.error(f"Error computing ADX: {str(e)}")
+            return 0.0
+
+    def evaluate_adx_signal(self, candles: List[Dict], period: int = 14) -> int:
+        """
+        Evaluate ADX signal strength and trend direction
+        
+        Args:
+            candles: List of candle data
+            period: Period for ADX calculation
+        
+        Returns:
+            int: Signal strength (-1 to 1)
+        """
+        try:
+            adx = self.compute_adx(candles, period)
+            
+            # Calculate DI+ and DI- using TA-Lib
+            high = self.extract_prices(candles, 'high')
+            low = self.extract_prices(candles, 'low')
+            close = self.extract_prices(candles)
+            
+            plus_di = talib.PLUS_DI(high, low, close, timeperiod=period)[-1]
+            minus_di = talib.MINUS_DI(high, low, close, timeperiod=period)[-1]
+            
+            # Strong trend if ADX > 25
+            if adx > 25:
+                if plus_di > minus_di:
+                    return 1  # Strong uptrend
+                elif minus_di > plus_di:
+                    return -1  # Strong downtrend
+                    
+            # Weak trend if ADX < 20
+            elif adx < 20:
+                return 0  # No clear trend
+                
+            # Moderate trend
+            else:
+                if plus_di > minus_di:
+                    return 0.5  # Moderate uptrend
+                elif minus_di > plus_di:
+                    return -0.5  # Moderate downtrend
+                    
+            return 0
+            
+        except Exception as e:
+            self.logger.error(f"Error evaluating ADX signal: {str(e)}")
+            return 0
+
+    def get_trend_strength(self, candles: List[Dict]) -> Tuple[float, str]:
+        """
+        Get trend strength and direction using ADX and DI indicators
+        
+        Args:
+            candles: List of candle data
+        
+        Returns:
+            Tuple[float, str]: (ADX value, trend direction)
+        """
+        try:
+            adx = self.compute_adx(candles)
+            
+            # Calculate DI+ and DI-
+            high = self.extract_prices(candles, 'high')
+            low = self.extract_prices(candles, 'low')
+            close = self.extract_prices(candles)
+            
+            plus_di = talib.PLUS_DI(high, low, close, timeperiod=14)[-1]
+            minus_di = talib.MINUS_DI(high, low, close, timeperiod=14)[-1]
+            
+            # Determine trend direction
+            if plus_di > minus_di:
+                direction = "Uptrend"
+            elif minus_di > plus_di:
+                direction = "Downtrend"
+            else:
+                direction = "Sideways"
+                
+            return adx, direction
+            
+        except Exception as e:
+            self.logger.error(f"Error getting trend strength: {str(e)}")
+            return 0.0, "Unknown"
+
 # ... (any additional classes or functions)
 
 def cache_result(ttl_seconds: int = 300):
