@@ -210,3 +210,57 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ## Disclaimer
 
 This Bitcoin Trading Bot is for educational and research purposes only. It is not intended to be used for actual trading. Always consult with a qualified financial advisor before making any investment decisions. The authors and contributors are not responsible for any financial losses incurred from using this software.
+
+## 🚀 Quick Start
+
+1. **Set up environment:**
+   ```bash
+   conda create -n btc-trader python=3.11
+   conda activate btc-trader
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configure API keys:**
+   Create `config.py` with your API credentials:
+   ```python
+   API_KEY = "your_coinbase_api_key"
+   API_SECRET = "your_coinbase_api_secret"
+   NEWS_API_KEY = "your_news_api_key"  # Optional for sentiment analysis
+   ```
+
+4. **Run basic simulation:**
+   ```bash
+   python base.py --ytd  # Backtest using year-to-date data
+   ```
+
+## 📊 Trading Strategies
+
+The bot combines multiple analysis methods for trading decisions:
+
+1. **Technical Analysis**
+   - RSI (Relative Strength Index)
+   - MACD (Moving Average Convergence Divergence)
+   - Bollinger Bands
+   - Volume analysis
+   - Support/Resistance levels
+   - ATR (Average True Range)
+
+2. **Machine Learning**
+   - XGBoost price prediction
+   - Random Forest classification
+   - Ensemble methods
+   - Feature engineering from technical indicators
+
+3. **Market Analysis**
+   - Bull/Bear market detection
+   - Volatility tracking
+   - Trend analysis
+   - News sentiment integration
+
+## 💻 Usage Examples
+
+### Basic Backtesting
