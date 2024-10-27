@@ -178,6 +178,13 @@ class Backtester:
                                     trade_size_multiplier = 0.5  # Decrease trade size in bear market conditions
                                 else:
                                     trade_size_multiplier = 1.0  # No change in neutral conditions
+                                
+                                # Check for drawdown
+                                drawdown_metrics = PerformanceMetrics.calculate_drawdown_metrics(portfolio_values)                    
+                                # Additional risk management based on drawdown
+                                if drawdown_metrics["current_drawdown"] > self.drawdown_threshold * 100:
+                                    # Reduce position sizes or take defensive actions
+                                    trade_size_multiplier *= 1  # Placeholder, maybe change later.
                                         
                                 # Execute trade based on signal
                                 if combined_signal in ["BUY", "STRONG BUY"] and balance > 0:
@@ -298,6 +305,17 @@ class Backtester:
                 f"Sortino Ratio Buy and Hold: {metrics['sortino_ratio_buy_and_hold']:.4f}"
             )
 
+            # After updating portfolio_values...
+            if len(portfolio_values) > 0:
+                drawdown_metrics = PerformanceMetrics.calculate_drawdown_metrics(portfolio_values)
+                
+                # Log drawdown metrics if they exceed certain thresholds
+                if drawdown_metrics["current_drawdown"] > 5:  # Alert on 5% drawdown
+                    self.logger.warning(
+                        f"Current drawdown: {drawdown_metrics['current_drawdown']:.2f}% | "
+                        f"Duration: {drawdown_metrics['drawdown_duration']} periods | "
+                        f"Max drawdown: {drawdown_metrics['max_drawdown']:.2f}%"
+                    )
             return final_value, trades
         except Exception as e:
             self.logger.error(f"An error occurred during backtesting: {e}", exc_info=True)

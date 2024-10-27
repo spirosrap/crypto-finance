@@ -47,3 +47,53 @@ class PerformanceMetrics:
         metrics["max_drawdown"] = drawdown.max() * 100
         
         return metrics
+
+    @staticmethod
+    def calculate_drawdown_metrics(portfolio_values: List[float]) -> Dict[str, float]:
+        """
+        Calculate real-time drawdown metrics from a list of portfolio values.
+        
+        Args:
+            portfolio_values: List of historical portfolio values
+        
+        Returns:
+            Dictionary containing:
+            - current_drawdown: Current drawdown from peak (%)
+            - max_drawdown: Maximum drawdown seen (%)
+            - drawdown_duration: Current drawdown duration (days)
+        """
+        if not portfolio_values:
+            return {
+                "current_drawdown": 0.0,
+                "max_drawdown": 0.0,
+                "drawdown_duration": 0
+            }
+        
+        peak = portfolio_values[0]
+        max_drawdown = 0.0
+        current_drawdown = 0.0
+        drawdown_start = 0
+        current_duration = 0
+        
+        for i, value in enumerate(portfolio_values):
+            # Update peak if new high reached
+            if value > peak:
+                peak = value
+                drawdown_start = i
+            
+            # Calculate drawdown
+            drawdown = (peak - value) / peak * 100
+            
+            # Update maximum drawdown
+            max_drawdown = max(max_drawdown, drawdown)
+            
+            # Update current drawdown and duration
+            if i == len(portfolio_values) - 1:
+                current_drawdown = drawdown
+                current_duration = i - drawdown_start
+        
+        return {
+            "current_drawdown": current_drawdown,
+            "max_drawdown": max_drawdown,
+            "drawdown_duration": current_duration
+        }
