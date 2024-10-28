@@ -65,32 +65,42 @@ class SignalType(Enum):
 
 @dataclass
 class TechnicalAnalysisConfig:
-    rsi_overbought: float = 65
-    rsi_oversold: float = 35
-    volatility_threshold: float = 0.03
+    # RSI parameters
+    rsi_overbought: float = 70  # Changed from 65
+    rsi_oversold: float = 30    # Changed from 35
     rsi_period: int = 14
+    
+    # MACD parameters
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
+    
+    # Bollinger Bands parameters
     bollinger_window: int = 20
-    bollinger_std: float = 2
-    risk_per_trade: float = 0.01
-    atr_multiplier: float = 2
+    bollinger_std: float = 2.0
+    
+    # Volatility and risk parameters
+    volatility_threshold: float = 0.02  # Changed from 0.03
+    risk_per_trade: float = 0.02   # Changed from 0.01
+    atr_multiplier: float = 2.5     # Changed from 2.0
+    
+    # Signal weights with refined values
     signal_weights: Dict[str, float] = field(default_factory=lambda: {
-        'rsi': 2.0,
-        'macd': 2.0,
-        'bollinger': 1.0,
-        'ma_crossover': 1.0,
+        'rsi': 2.5,           # Increased from 2.0
+        'macd': 2.5,          # Increased from 2.0
+        'bollinger': 1.5,     # Increased from 1.0
+        'ma_crossover': 1.5,  # Increased from 1.0
         'stochastic': 1.0,
-        'trend': 2.0,
-        'volume_profile': 1.0,
-        'short_term_trend': 2.0,
-        'long_term_trend': 1.0,
-        'volume': 1.0,
-        'ichimoku': 1.0,
+        'trend': 2.5,         # Increased from 2.0
+        'volume_profile': 1.5,  # Increased from 1.0
+        'short_term_trend': 2.5,  # Increased from 2.0
+        'long_term_trend': 1.5,   # Increased from 1.0
+        'volume': 1.5,           # Increased from 1.0
+        'ichimoku': 1.5,         # Increased from 1.0
         'fibonacci': 1.0,
-        'ml_model': 2.0,
-        'bitcoin_prediction': 3.0
+        'ml_model': 2.5,         # Increased from 2.0
+        'bitcoin_prediction': 3.5,  # Increased from 3.0
+        'adx': 2.0  # New parameter
     })
 
 @dataclass
@@ -137,70 +147,114 @@ class TechnicalAnalysis:
 
 
     def set_product_weights(self):
-        # Define base weights for each signal
+        """Set product-specific signal weights."""
         base_weights = {
-            'rsi': 2,
-            'macd': 2,
-            'bollinger': 1,
-            'ma_crossover': 1,
-            'stochastic': 1,
-            'trend': 2,
-            'volume_profile': 1,
-            'short_term_trend': 2,
-            'long_term_trend': 1,
-            'volume': 1,
-            'ichimoku': 1, #WAS 0
-            'fibonacci': 1,#WAS 0
-            'ml_model': 2,
-            'bitcoin_prediction': 3
+            'rsi': 2.5,
+            'macd': 2.5,
+            'bollinger': 1.5,
+            'ma_crossover': 1.5,
+            'stochastic': 1.0,
+            'trend': 2.5,
+            'volume_profile': 1.5,
+            'short_term_trend': 2.5,
+            'long_term_trend': 1.5,
+            'volume': 1.5,
+            'ichimoku': 1.5,
+            'fibonacci': 1.0,
+            'ml_model': 2.5,
+            'bitcoin_prediction': 3.5,
+            'adx': 2.0
         }
 
         if self.candle_interval == 'FIFTEEN_MINUTE':
             base_weights['ml_model'] = 0
             base_weights['bitcoin_prediction'] = 0
-            base_weights['ichimoku'] = 1
+            base_weights['short_term_trend'] = 3.0
+            base_weights['volume'] = 2.0
+            base_weights['rsi'] = 3.0
+            base_weights['macd'] = 3.0
 
-        # Adjust weights based on product_id
+        # Product-specific adjustments
         if self.product_id == 'BTC-USDC':
-            # Bitcoin might be more influenced by long-term trends and prediction models
-            base_weights['long_term_trend'] = 2
+            base_weights['long_term_trend'] = 2.5
+            base_weights['bitcoin_prediction'] = 4.0
+            base_weights['trend'] = 3.0
+            
         elif self.product_id == 'ETH-USDC':
-            # Ethereum might be more volatile, so we increase weight on short-term indicators
-            base_weights['rsi'] = 3
-            base_weights['macd'] = 3
-            base_weights['short_term_trend'] = 3
-            base_weights['volume'] = 2
-        elif self.product_id == 'LTC-USDC':
-            # Litecoin might follow Bitcoin's trends more closely
-            base_weights['bitcoin_prediction'] = 3
-            base_weights['trend'] = 3
+            base_weights['rsi'] = 3.0
+            base_weights['macd'] = 3.0
+            base_weights['short_term_trend'] = 3.0
+            base_weights['volume'] = 2.0
+            base_weights['bitcoin_prediction'] = 3.0
+            
+        elif self.product_id == 'SOL-USDC':
+            base_weights['volume'] = 2.5
+            base_weights['short_term_trend'] = 3.0
+            base_weights['volatility'] = 2.0
+            base_weights['bitcoin_prediction'] = 3.0
+            
         elif self.product_id == 'XRP-USDC':
-            # XRP might be more news-driven, so we reduce reliance on technical indicators
-            base_weights['rsi'] = 1
-            base_weights['macd'] = 1
-            base_weights['ml_model'] = 3
-            base_weights['volume'] = 2
-        # Add more product-specific adjustments as needed
+            base_weights['volume'] = 2.5
+            base_weights['news_sentiment'] = 2.0
+            base_weights['rsi'] = 2.0
+            base_weights['macd'] = 2.0
+            base_weights['bitcoin_prediction'] = 2.5
 
         return base_weights
 
     def set_product_specific_parameters(self):
-        if self.product_id == 'ETH-USDC':
-            # Adjust parameters for ETH-USDC
+        """Set product-specific parameters based on historical behavior and volatility."""
+        if self.product_id == 'BTC-USDC':
             self.config.rsi_overbought = 70
             self.config.rsi_oversold = 30
-            self.config.volatility_threshold = 0.04
+            self.config.volatility_threshold = 0.025
+            self.config.rsi_period = 14
+            self.config.macd_fast = 12
+            self.config.macd_slow = 26
+            self.config.macd_signal = 9
+            self.config.bollinger_window = 20
+            self.config.bollinger_std = 2.0
+            self.config.risk_per_trade = 0.02
+            self.config.atr_multiplier = 2.5
+            
+        elif self.product_id == 'ETH-USDC':
+            self.config.rsi_overbought = 75
+            self.config.rsi_oversold = 25
+            self.config.volatility_threshold = 0.03
             self.config.rsi_period = 12
             self.config.macd_fast = 10
             self.config.macd_slow = 24
             self.config.macd_signal = 8
             self.config.bollinger_window = 18
             self.config.bollinger_std = 2.2
-            self.config.risk_per_trade = 0.015
+            self.config.risk_per_trade = 0.025
             self.config.atr_multiplier = 2.2
-        # Add more product-specific configurations as needed
-        # elif self.product_id == 'SOME-OTHER-PRODUCT':
-        #     ...
+            
+        elif self.product_id == 'SOL-USDC':
+            self.config.rsi_overbought = 75
+            self.config.rsi_oversold = 25
+            self.config.volatility_threshold = 0.035
+            self.config.rsi_period = 10
+            self.config.macd_fast = 8
+            self.config.macd_slow = 21
+            self.config.macd_signal = 7
+            self.config.bollinger_window = 15
+            self.config.bollinger_std = 2.5
+            self.config.risk_per_trade = 0.015
+            self.config.atr_multiplier = 3.0
+            
+        elif self.product_id == 'XRP-USDC':
+            self.config.rsi_overbought = 80
+            self.config.rsi_oversold = 20
+            self.config.volatility_threshold = 0.04
+            self.config.rsi_period = 10
+            self.config.macd_fast = 8
+            self.config.macd_slow = 21
+            self.config.macd_signal = 7
+            self.config.bollinger_window = 15
+            self.config.bollinger_std = 2.8
+            self.config.risk_per_trade = 0.015
+            self.config.atr_multiplier = 3.0
 
     def calculate_intervals_per_day(self) -> int:
         interval_map = {
