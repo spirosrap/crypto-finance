@@ -123,6 +123,10 @@ class CoinbaseService:
         :param is_buy: True if it's a buy order, False if it's a sell order
         :return: A tuple of (trade_amount, fee)
         """
+        # Return zeros if balance is too low
+        if balance < 5:
+            return 0.0, 0.0
+        
         transaction_summary = self.client.get_transaction_summary()
         fee_tier = transaction_summary.get('fee_tier', {})
         fee_rate = float(fee_tier.get('taker_fee_rate', self.DEFAULT_FEE_RATE))

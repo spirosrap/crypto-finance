@@ -20,7 +20,7 @@ class Backtester:
         self.set_granularity_settings("ONE_HOUR")
         self.atr_period = 14
         self.atr_multiplier = 2
-        self.drawdown_threshold = 0.1
+        self.drawdown_threshold = 0.08
 
     def create_trade_record(self, date: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date, action, price, amount, fee)
