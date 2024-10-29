@@ -217,23 +217,27 @@ class Backtester:
 
                                 elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
                                     # Implement a trailing stop
-                                    if last_buy_price and (close_price < last_buy_price * (1 - self.drawdown_threshold) or combined_signal == "STRONG SELL"):
+                                    should_sell = False
+                                    sell_reason = ""
+
+                                    # Check all sell conditions
+                                    if close_price < last_trade_price * (1 - self.drawdown_threshold) or combined_signal == "STRONG SELL":
+                                        should_sell = True                                        
+                                        sell_reason = "STOP LOSS" 
+                                    elif close_price <= stop_loss:
+                                        should_sell = True
+                                        sell_reason = "STOP LOSS"
+                                    elif close_price >= take_profit:
+                                        should_sell = True
+                                        sell_reason = "TAKE PROFIT"
+                                        
+                                    # Execute sell if any condition is met
+                                    if should_sell:
                                         amount_to_sell = btc_balance
                                         balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
                                         balance += balance_to_add
                                         btc_balance = 0
-                                        trades.append(self.create_trade_record(current_time, "STOP LOSS" if close_price < last_buy_price else combined_signal, close_price, amount_to_sell, fee))
-                                        last_trade_time = current_time
-                                        last_trade_price = close_price
-                                        highest_price_since_buy = 0  # Reset after selling
-                                        trades_today += 1
-                                    if close_price <= stop_loss or close_price >= take_profit:
-                                        # Execute the sell
-                                        amount_to_sell = btc_balance
-                                        balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
-                                        balance += balance_to_add
-                                        btc_balance = 0
-                                        trades.append(self.create_trade_record(current_time, "TAKE PROFIT" if close_price >= take_profit else "STOP LOSS", close_price, amount_to_sell, fee))
+                                        trades.append(self.create_trade_record(current_time, sell_reason, close_price, amount_to_sell, fee))
                                         last_trade_time = current_time
                                         last_trade_price = close_price
                                         highest_price_since_buy = 0  # Reset after selling
