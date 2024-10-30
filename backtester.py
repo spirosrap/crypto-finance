@@ -16,11 +16,23 @@ class Backtester:
         self.logger = logging.getLogger(__name__)
         self.granularity_settings = GRANULARITY_SETTINGS
         
+        # Initialize drawdown thresholds first
+        self.drawdown_thresholds = {
+            "ONE_MINUTE": 0.05,   # 5% for very short timeframes
+            "FIVE_MINUTE": 0.07,  # 7% for short timeframes
+            "FIFTEEN_MINUTE": 0.09, # 9% for medium-short timeframes
+            "ONE_HOUR": 0.15,     # 15% for hourly
+            "SIX_HOUR": 0.20,     # 20% for medium timeframes
+            "ONE_DAY": 0.25       # 25% for daily timeframes
+        }
+        self.drawdown_threshold = self.drawdown_thresholds["ONE_HOUR"]  # default
+        
         # Default settings
-        self.set_granularity_settings("ONE_HOUR")
         self.atr_period = 14
         self.atr_multiplier = 2
-        self.drawdown_threshold = 0.12
+        
+        # Apply granularity settings last, as it will update drawdown_threshold
+        self.set_granularity_settings("ONE_HOUR")
 
     def create_trade_record(self, date: int, action: str, price: float, amount: float, fee: float) -> TradeRecord:
         return TradeRecord(date, action, price, amount, fee)
@@ -386,6 +398,9 @@ class Backtester:
         settings = self.granularity_settings.get(granularity, self.granularity_settings["ONE_HOUR"])
         for key, value in settings.items():
             setattr(self, key, value)
+        
+        # Update drawdown threshold based on granularity
+        self.drawdown_threshold = self.drawdown_thresholds.get(granularity, self.drawdown_thresholds["ONE_HOUR"])
 
 
 
