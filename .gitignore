@@ -52,3 +52,6 @@ models/ml_model.joblib-best
 models/bch_usdc_one_hour_prediction_model.joblib
 models/ml_model_bch_usdc_one_hour.joblib
 models
+backtest_results/trades_ETH-USDC_2023-01-01_2023-12-31.csv
+backtest_results/backtest_metrics.csv
+backtest_results/trades_ETH-USDC_2024-01-01_2024-12-31.csv
