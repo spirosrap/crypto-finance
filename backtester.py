@@ -306,9 +306,11 @@ class Backtester:
             last_btc_price = float(candles[-1]['close'])
             if highest_price_since_buy > 0:
                 trailing_stop_btc_value = highest_price_since_buy * (1 - trailing_stop_percent)
-                self.logger.info(f"Current trailing stop: {trailing_stop_btc_value:.2f} USD in Bitcoin value")
-                self.logger.info(f"(Based on peak price of {highest_price_since_buy:.2f} USD since last buy)")
-                self.logger.info(f"(Triggers when Bitcoin price drops by {trailing_stop_percent * 100:.2f}% from its peak after buying)")
+                self.logger.info(
+                    f"Current trailing stop: {trailing_stop_btc_value:.2f} USD | "
+                    f"Peak price since buy: {highest_price_since_buy:.2f} USD | "
+                    f"Stop triggers at: {trailing_stop_percent * 100:.2f}% drop from peak"
+                )
             else:
                 self.logger.info("No buy trades executed, so no trailing stop was set.")
             
