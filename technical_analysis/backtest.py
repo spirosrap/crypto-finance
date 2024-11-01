@@ -34,7 +34,7 @@ class Backtester:
         self,
         strategy_class: Type[BaseTechnicalAnalysis],
         initial_capital: float = 10000.0,
-        position_size: float = 0.1,  # 10% of capital per trade
+        position_size: float = 0.1,  # 10% of initial capital
         stop_loss_pct: float = 0.02,  # 2% stop loss
         take_profit_pct: float = 0.04,  # 4% take profit
         maker_fee: float = 0.001,  # 0.1% maker fee
@@ -42,7 +42,7 @@ class Backtester:
     ):
         self.strategy = strategy_class()
         self.initial_capital = initial_capital
-        self.position_size = position_size
+        self.base_position_size = initial_capital * position_size  # Store fixed position size
         self.stop_loss_pct = stop_loss_pct
         self.take_profit_pct = take_profit_pct
         self.maker_fee = maker_fee
@@ -110,7 +110,7 @@ class Backtester:
     def _open_long_position(self, candle: Dict):
         """Open a long position."""
         entry_price = float(candle['open'])
-        position_size = self.capital * self.position_size
+        position_size = self.base_position_size  # Use fixed position size
         stop_loss = entry_price * (1 - self.stop_loss_pct)
         take_profit = entry_price * (1 + self.take_profit_pct)
         
@@ -132,7 +132,7 @@ class Backtester:
     def _open_short_position(self, candle: Dict):
         """Open a short position."""
         entry_price = float(candle['open'])
-        position_size = self.capital * self.position_size
+        position_size = self.base_position_size  # Use fixed position size
         stop_loss = entry_price * (1 + self.stop_loss_pct)
         take_profit = entry_price * (1 - self.take_profit_pct)
         
@@ -409,7 +409,7 @@ class Backtester:
                                      else current_price * (1 + self.stop_loss_pct),
                 'potential_take_profit': current_price * (1 + self.take_profit_pct) if signal.signal_type in [SignalType.STRONG_BUY, SignalType.BUY]
                                       else current_price * (1 - self.take_profit_pct),
-                'potential_position_size': self.capital * self.position_size,
+                'potential_position_size': self.base_position_size,
                 'risk_reward_ratio': self.take_profit_pct / self.stop_loss_pct
             }
             
