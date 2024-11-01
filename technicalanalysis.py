@@ -83,25 +83,6 @@ class TechnicalAnalysisConfig:
     volatility_threshold: float = 0.02  # Changed from 0.03
     risk_per_trade: float = 0.02   # Changed from 0.01
     atr_multiplier: float = 2.5     # Changed from 2.0
-    
-    # Signal weights with refined values
-    signal_weights: Dict[str, float] = field(default_factory=lambda: {
-        'rsi': 2.5,           # Increased from 2.0
-        'macd': 2.5,          # Increased from 2.0
-        'bollinger': 1.5,     # Increased from 1.0
-        'ma_crossover': 1.5,  # Increased from 1.0
-        'stochastic': 1.0,
-        'trend': 2.5,         # Increased from 2.0
-        'volume_profile': 1.5,  # Increased from 1.0
-        'short_term_trend': 2.5,  # Increased from 2.0
-        'long_term_trend': 1.5,   # Increased from 1.0
-        'volume': 1.5,           # Increased from 1.0
-        'ichimoku': 1.5,         # Increased from 1.0
-        'fibonacci': 1.0,
-        'ml_model': 2.5,         # Increased from 2.0
-        'bitcoin_prediction': 3.5,  # Increased from 3.0
-        'adx': 2.0  # New parameter
-    })
 
 @dataclass
 class SignalResult:
