@@ -147,18 +147,12 @@ class TechnicalAnalysis:
             'adx': 2.0
         }
 
-        if self.candle_interval == 'FIFTEEN_MINUTE':
-            base_weights['ml_model'] = 0
-            base_weights['bitcoin_prediction'] = 0
-            base_weights['short_term_trend'] = 3.0
-            base_weights['volume'] = 2.0
-            base_weights['rsi'] = 3.0
-            base_weights['macd'] = 3.0
-
         # Product-specific adjustments
         if self.product_id == 'BTC-USDC':
+            base_weights['ml_model'] = 2.5
+            base_weights['bitcoin_prediction'] = 3.5
+
             base_weights['long_term_trend'] = 2.5
-            base_weights['bitcoin_prediction'] = 4.0
             base_weights['trend'] = 3.0
             
         elif self.product_id == 'ETH-USDC':

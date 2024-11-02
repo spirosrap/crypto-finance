@@ -158,7 +158,6 @@ class Backtester:
                         trades_today = 0
                         last_trade_date = current_date
 
-
                     if i == len(candles) - 1:
                         trend = self.trader.identify_trend(product_id, candles[:i+1])
                         volume_signal = self.trader.technical_analysis.analyze_volume(candles[:i+1])
