@@ -279,8 +279,7 @@ def run_backtest(trader, args, initial_balance, risk_per_trade, trailing_stop_pe
 
     final_value, trades = trader.run_backtest(args.product_id, start_date_str, end_date_str, initial_balance, risk_per_trade, trailing_stop_percent, granularity)
     
-    logger.info(f"Initial: ${initial_balance}, Final value: ${final_value:.2f}")
-    logger.info(f"Number of trades: {len(trades)}")
+    logger.info(f"Number of trades: {len(trades)} | Initial: ${initial_balance} | Final value: ${final_value:.2f}")
     logger.debug("Trades executed during backtesting:")
     logger.info(f"Total return: {(final_value - initial_balance) / initial_balance * 100:.2f}%")
 
