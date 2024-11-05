@@ -297,9 +297,9 @@ def main():
     candles = trader.get_historical_data(args.product_id, start_date, end_date, args.granularity)
 
     display_portfolio_info(trader, args.product_id)
-    display_technical_indicators(trader, args.product_id, candles)
-    calculate_btc_eur_value(trader)
-    display_sentiment_analysis(trader, args.product_id)
+    # display_technical_indicators(trader, args.product_id, candles)
+    # calculate_btc_eur_value(trader)
+    # display_sentiment_analysis(trader, args.product_id)
 
     initial_balance = 10000  # USD
     risk_per_trade = 0.02  # 2% risk per trade
