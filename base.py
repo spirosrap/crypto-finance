@@ -303,7 +303,7 @@ def main():
 
     initial_balance = 10000  # USD
     risk_per_trade = 0.02  # 2% risk per trade
-    trailing_stop_percent = 0.085 # 8.5% trailing stop # WAS 0.08
+    trailing_stop_percent = 0.084 # 8.4% trailing stop # WAS 0.08
 
     if  args.continuous:
         logger.info("Starting continuous backtesting simulation.")
