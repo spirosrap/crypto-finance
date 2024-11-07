@@ -157,15 +157,7 @@ class Backtester:
                     if last_trade_date != current_date:
                         trades_today = 0
                         last_trade_date = current_date
-
-                    if i == len(candles) - 1:
-                        trend = self.trader.identify_trend(product_id, candles[:i+1])
-                        volume_signal = self.trader.technical_analysis.analyze_volume(candles[:i+1])
-                        market_conditions = self.trader.technical_analysis.analyze_market_conditions(candles[:i+1])
-                        rsi = self.trader.compute_rsi_for_backtest(candles[:i+1])
-                        macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
-                        combined_signal = self.trader.generate_combined_signal(rsi, macd, signal, histogram, candles[:i+1], market_conditions=market_conditions)
-
+                
                     # Only generate signals if we have enough historical data and haven't exceeded max trades for the day
                     if i >= min_candles and trades_today < self.max_trades_per_day:
                         # Check if enough time has passed since the last trade
