@@ -44,6 +44,13 @@ class Backtester:
         return entry_price - (atr * self.atr_multiplier)
 
     def calculate_dynamic_take_profit(self, candles: List[Dict], entry_price: float) -> float:
+        """Calculate dynamic take profit level based on multiple factors:
+        1. Market volatility (ATR)
+        2. Trend strength (ADX)
+        3. Recent price highs
+        4. Volume profile
+        5. Market momentum (RSI)
+        """
         if entry_price is None:
             return None
         
@@ -53,15 +60,54 @@ class Backtester:
         # Calculate trend strength using ADX
         adx = self.trader.technical_analysis.compute_adx(candles, period=14)
         
-        # Adjust take profit multiplier based on trend strength
-        if adx > 25:  # Strong trend
-            tp_multiplier = 2.0
-        elif adx > 20:  # Moderate trend
-            tp_multiplier = 1.75
-        else:  # Weak trend
-            tp_multiplier = 1.5
+        # Get RSI for momentum analysis
+        rsi = self.trader.compute_rsi_for_backtest(candles)
+        
+        # Analyze volume profile
+        recent_volume = sum(float(candle['volume']) for candle in candles[-5:]) / 5
+        volume_sma = sum(float(candle['volume']) for candle in candles[-20:]) / 20
+        volume_ratio = recent_volume / volume_sma if volume_sma > 0 else 1
+        
+        # Base multiplier adjustments
+        tp_multiplier = 2.0  # Base multiplier
+        
+        # Adjust based on trend strength (ADX)
+        if adx > 40:  # Very strong trend
+            tp_multiplier *= 1.5
+        elif adx > 25:  # Strong trend
+            tp_multiplier *= 1.25
+        elif adx < 15:  # Weak trend
+            tp_multiplier *= 0.8
             
-        return entry_price + (atr * self.atr_multiplier * tp_multiplier)
+        # Adjust based on momentum (RSI)
+        if rsi > 70:  # Overbought
+            tp_multiplier *= 0.8
+        elif rsi < 30:  # Oversold
+            tp_multiplier *= 1.2
+            
+        # Adjust based on volume
+        if volume_ratio > 1.5:  # High volume
+            tp_multiplier *= 1.2
+        elif volume_ratio < 0.5:  # Low volume
+            tp_multiplier *= 0.8
+        
+        # Find recent high as resistance level (using last 20 candles)
+        recent_highs = [float(candle['high']) for candle in candles[-20:]]
+        nearest_resistance = None
+        if recent_highs:
+            highs_above_entry = [high for high in recent_highs if high > entry_price]
+            if highs_above_entry:
+                nearest_resistance = min(highs_above_entry)
+                
+        # Calculate final take profit level
+        base_tp = entry_price + (atr * self.atr_multiplier * tp_multiplier)
+        
+        # If there's a recent high nearby, use it as resistance
+        if nearest_resistance is not None:
+            if nearest_resistance < base_tp:
+                return nearest_resistance * 0.995  # Slight buffer below resistance
+        
+        return base_tp
 
     def calculate_position_size(self, balance: float, entry_price: float, stop_loss: float, risk_per_trade: float) -> float:
         """Calculate position size with enhanced risk management"""
