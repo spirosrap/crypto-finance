@@ -43,16 +43,12 @@ class Backtester:
         atr = self.trader.technical_analysis.compute_atr(candles, self.atr_period)
         return entry_price - (atr * self.atr_multiplier)
 
-    def calculate_dynamic_take_profit(self, candles: List[Dict], entry_price: float) -> float:
-        """Calculate dynamic take profit level based on multiple factors:
-        1. Market volatility (ATR)
-        2. Trend strength (ADX)
-        3. Recent price highs
-        4. Volume profile
-        5. Market momentum (RSI)
+    def calculate_dynamic_take_profit(self, candles: List[Dict], entry_price: float) -> Tuple[float, float, float]:
+        """Calculate multiple dynamic take profit levels based on market conditions.
+        Returns a tuple of (tp1, tp2, tp3) representing different take profit targets.
         """
         if entry_price is None:
-            return None
+            return None, None, None
         
         # Calculate ATR for volatility-based take profit
         atr = self.trader.technical_analysis.compute_atr(candles, self.atr_period)
@@ -68,46 +64,65 @@ class Backtester:
         volume_sma = sum(float(candle['volume']) for candle in candles[-20:]) / 20
         volume_ratio = recent_volume / volume_sma if volume_sma > 0 else 1
         
-        # Base multiplier adjustments
-        tp_multiplier = 2.0  # Base multiplier
+        # Base multipliers for different take profit levels
+        tp1_multiplier = 1.003  # First target: 0.3% profit
+        tp2_multiplier = 1.007  # Second target: 0.7% profit
+        tp3_multiplier = 1.015  # Third target: 1.5% profit
         
-        # Adjust based on trend strength (ADX)
+        # Adjust multipliers based on market conditions
         if adx > 40:  # Very strong trend
-            tp_multiplier *= 1.5
+            tp1_multiplier += 0.002
+            tp2_multiplier += 0.003
+            tp3_multiplier += 0.005
         elif adx > 25:  # Strong trend
-            tp_multiplier *= 1.25
-        elif adx < 15:  # Weak trend
-            tp_multiplier *= 0.8
-            
-        # Adjust based on momentum (RSI)
-        if rsi > 70:  # Overbought
-            tp_multiplier *= 0.8
-        elif rsi < 30:  # Oversold
-            tp_multiplier *= 1.2
-            
-        # Adjust based on volume
-        if volume_ratio > 1.5:  # High volume
-            tp_multiplier *= 1.2
-        elif volume_ratio < 0.5:  # Low volume
-            tp_multiplier *= 0.8
+            tp1_multiplier += 0.001
+            tp2_multiplier += 0.002
+            tp3_multiplier += 0.003
         
-        # Find recent high as resistance level (using last 20 candles)
-        recent_highs = [float(candle['high']) for candle in candles[-20:]]
-        nearest_resistance = None
+        # Adjust based on RSI
+        if rsi > 65:  # Overbought - take profits quicker
+            tp1_multiplier *= 0.95
+            tp2_multiplier *= 0.97
+            tp3_multiplier *= 0.98
+        elif rsi < 35:  # Oversold - allow for more upside
+            tp1_multiplier *= 1.02
+            tp2_multiplier *= 1.03
+            tp3_multiplier *= 1.05
+        
+        # Volume-based adjustments
+        if volume_ratio > 1.3:
+            tp1_multiplier *= 1.01
+            tp2_multiplier *= 1.02
+            tp3_multiplier *= 1.03
+        
+        # Calculate take profit levels
+        tp1 = entry_price * tp1_multiplier
+        tp2 = entry_price * tp2_multiplier
+        tp3 = entry_price * tp3_multiplier
+        
+        # Look for nearby resistance levels
+        recent_highs = [float(candle['high']) for candle in candles[-5:]]  # Shortened to 5 candles
         if recent_highs:
             highs_above_entry = [high for high in recent_highs if high > entry_price]
             if highs_above_entry:
                 nearest_resistance = min(highs_above_entry)
-                
-        # Calculate final take profit level
-        base_tp = entry_price + (atr * self.atr_multiplier * tp_multiplier)
+                # Adjust take profit levels if resistance is nearby
+                if nearest_resistance < tp3:
+                    resistance_level = nearest_resistance * 0.999
+                    tp3 = min(tp3, resistance_level)
+                    tp2 = min(tp2, resistance_level * 0.997)
+                    tp1 = min(tp1, resistance_level * 0.995)
         
-        # If there's a recent high nearby, use it as resistance
-        if nearest_resistance is not None:
-            if nearest_resistance < base_tp:
-                return nearest_resistance * 0.995  # Slight buffer below resistance
+        # Ensure minimum profit levels
+        min_tp1 = entry_price * 1.002  # Minimum 0.2% profit
+        min_tp2 = entry_price * 1.004  # Minimum 0.4% profit
+        min_tp3 = entry_price * 1.008  # Minimum 0.8% profit
         
-        return base_tp
+        return (
+            max(min_tp1, tp1),
+            max(min_tp2, tp2),
+            max(min_tp3, tp3)
+        )
 
     def calculate_position_size(self, balance: float, entry_price: float, stop_loss: float, risk_per_trade: float) -> float:
         """Calculate position size with enhanced risk management"""
@@ -260,7 +275,7 @@ class Backtester:
                                             highest_price_since_buy = close_price  # Reset highest price after buying
                                             trades_today += 1
                                             stop_loss = self.calculate_dynamic_stop_loss(candles[:i+1], close_price)
-                                            take_profit = self.calculate_dynamic_take_profit(candles[:i+1], close_price)
+                                            take_profit1, take_profit2, take_profit3 = self.calculate_dynamic_take_profit(candles[:i+1], close_price)
                                             position_size = self.calculate_position_size(balance, close_price, stop_loss, risk_per_trade)
                                             btc_to_buy = min(position_size, balance / close_price)  # Ensure we don't exceed available balance
 
@@ -268,28 +283,39 @@ class Backtester:
                                     # Implement a trailing stop
                                     should_sell = False
                                     sell_reason = ""
+                                    sell_amount = 0
 
                                     # Check all sell conditions
                                     if close_price < last_trade_price * (1 - self.drawdown_threshold) or combined_signal == "STRONG SELL":
-                                        should_sell = True                                        
-                                        sell_reason = "STOP LOSS" 
+                                        should_sell = True
+                                        sell_amount = btc_balance
+                                        sell_reason = "STOP LOSS"
                                     elif close_price <= stop_loss:
                                         should_sell = True
+                                        sell_amount = btc_balance
                                         sell_reason = "STOP LOSS"
-                                    elif close_price >= take_profit:
+                                    # Check take profit levels
+                                    elif close_price >= take_profit3:
                                         should_sell = True
-                                        sell_reason = "TAKE PROFIT"
-                                        
+                                        sell_amount = btc_balance  # Sell 100% of position
+                                        sell_reason = "TAKE_PROFIT_3"
+                                    elif close_price >= take_profit2:
+                                        should_sell = True
+                                        sell_amount = btc_balance * 0.5  # Sell 50% of position
+                                        sell_reason = "TAKE_PROFIT_2"
+                                    elif close_price >= take_profit1:
+                                        should_sell = True
+                                        sell_amount = btc_balance * 0.3  # Sell 30% of position
+                                        sell_reason = "TAKE_PROFIT_1"
+
                                     # Execute sell if any condition is met
-                                    if should_sell:
-                                        amount_to_sell = btc_balance
-                                        balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(amount_to_sell * close_price, close_price, is_buy=False)
+                                    if should_sell and sell_amount > 0:
+                                        balance_to_add, fee = self.trader.calculate_trade_amount_and_fee(sell_amount * close_price, close_price, is_buy=False)
                                         balance += balance_to_add
-                                        btc_balance = 0
-                                        trades.append(self.create_trade_record(current_time, sell_reason, close_price, amount_to_sell, fee))
+                                        btc_balance -= sell_amount
+                                        trades.append(self.create_trade_record(current_time, sell_reason, close_price, sell_amount, fee))
                                         last_trade_time = current_time
                                         last_trade_price = close_price
-                                        highest_price_since_buy = 0  # Reset after selling
                                         trades_today += 1
 
                     # Update highest price for trailing stop
