@@ -201,6 +201,11 @@ class Backtester:
             last_trade_date: Optional[datetime.date] = None
             last_buy_price: Optional[float] = None
 
+            # Add tracking for average buy price
+            total_btc_bought = 0
+            total_cost = 0
+            average_buy_price = None
+
             # Initialize tqdm progress bar for the entire loop
             with tqdm(total=len(candles), desc="Processing candles") as pbar:
                 highest_price_since_buy = 0  # Track the highest price since the last buy
@@ -223,8 +228,13 @@ class Backtester:
                     if i >= min_candles and trades_today < self.max_trades_per_day:
                         # Check if enough time has passed since the last trade
                         if last_trade_time is None or (current_time - last_trade_time) >= self.cooldown_period:
-                            # Check if the price has changed enough since the last trade
                             if last_trade_price is None or abs(close_price - last_trade_price) / last_trade_price >= self.min_price_change:
+                            # Check if price has changed enough from average buy price
+                                price_change_ok = (
+                                    average_buy_price is None or 
+                                    abs(close_price - average_buy_price) / average_buy_price >= self.min_price_change
+                                )
+                                                            
                                 # Calculate indicators and generate signal
                                 rsi = self.trader.compute_rsi_for_backtest(candles[:i+1])
                                 macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
@@ -279,8 +289,12 @@ class Backtester:
                                             position_size = self.calculate_position_size(balance, close_price, stop_loss, risk_per_trade)
                                             btc_to_buy = min(position_size, balance / close_price)  # Ensure we don't exceed available balance
                                                                                         
-                                            # # Log take profit levels after buy
-                                            # self.logger.info(f"Take Profit Levels - TP1: {take_profit1:.2f} USD | TP2: {take_profit2:.2f} USD | TP3: {take_profit3:.2f} USD")
+                                            # When buying, update the average buy price
+                                            if btc_to_buy > 0:
+                                                # Update average buy price
+                                                total_btc_bought += btc_to_buy
+                                                total_cost += (btc_to_buy * close_price)
+                                                average_buy_price = total_cost / total_btc_bought
 
                                 elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
                                     # Implement a trailing stop
@@ -297,19 +311,20 @@ class Backtester:
                                         should_sell = True
                                         sell_amount = btc_balance
                                         sell_reason = "STOP LOSS"
-                                    # Check take profit levels
-                                    elif close_price >= take_profit3:
-                                        should_sell = True
-                                        sell_amount = btc_balance  # Sell 100% of position
-                                        sell_reason = "TAKE_PROFIT_3"
-                                    elif close_price >= take_profit2:
-                                        should_sell = True
-                                        sell_amount = btc_balance * 0.5  # Sell 50% of position
-                                        sell_reason = "TAKE_PROFIT_2"
-                                    elif close_price >= take_profit1:
-                                        should_sell = True
-                                        sell_amount = btc_balance * 0.3  # Sell 30% of position
-                                        sell_reason = "TAKE_PROFIT_1"
+                                    # Use average buy price for take profit levels
+                                    elif average_buy_price is not None:  # Only check take profits if we have an average buy price
+                                        if close_price >= average_buy_price * 1.015:  # TP3: 1.5% above average entry
+                                            should_sell = True
+                                            sell_amount = btc_balance  # Sell 100% of position
+                                            sell_reason = "TAKE_PROFIT_3"
+                                        elif close_price >= average_buy_price * 1.007:  # TP2: 0.7% above average entry
+                                            should_sell = True
+                                            sell_amount = btc_balance * 0.5  # Sell 50% of position
+                                            sell_reason = "TAKE_PROFIT_2"
+                                        elif close_price >= average_buy_price * 1.003:  # TP1: 0.3% above average entry
+                                            should_sell = True
+                                            sell_amount = btc_balance * 0.3  # Sell 30% of position
+                                            sell_reason = "TAKE_PROFIT_1"
 
                                     # Execute sell if any condition is met
                                     if should_sell and sell_amount > 0:
@@ -320,6 +335,16 @@ class Backtester:
                                         last_trade_time = current_time
                                         last_trade_price = close_price
                                         trades_today += 1
+
+                                        # Update the totals after selling
+                                        remaining_btc = total_btc_bought - sell_amount
+                                        if remaining_btc > 0:
+                                            total_btc_bought = remaining_btc
+                                            total_cost = total_cost * (remaining_btc / (remaining_btc + sell_amount))
+                                        else:
+                                            total_btc_bought = 0
+                                            total_cost = 0
+                                            average_buy_price = None
 
                     # Update highest price for trailing stop
                     if btc_balance > 0:
