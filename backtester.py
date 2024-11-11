@@ -170,10 +170,10 @@ class Backtester:
             self.logger.info(f"Fetching all historical data from {start_date} to {end_date} with granularity {granularity}...")
             candles = self.trader.get_historical_data(product_id, start_date, end_date, granularity)
             
-            # Save the fetched data to a file
-            with open(filepath, 'w') as f:
-                json.dump(candles, f)
-            self.logger.info(f"Saved {len(candles)} candles to {filepath}")
+            # # Save the fetched data to a file
+            # with open(filepath, 'w') as f:
+            #     json.dump(candles, f)
+            # self.logger.info(f"Saved {len(candles)} candles to {filepath}")
 
             if not candles:
                 self.logger.warning("No historical data available for backtesting.")
