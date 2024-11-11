@@ -278,6 +278,9 @@ class Backtester:
                                             take_profit1, take_profit2, take_profit3 = self.calculate_dynamic_take_profit(candles[:i+1], close_price)
                                             position_size = self.calculate_position_size(balance, close_price, stop_loss, risk_per_trade)
                                             btc_to_buy = min(position_size, balance / close_price)  # Ensure we don't exceed available balance
+                                                                                        
+                                            # # Log take profit levels after buy
+                                            # self.logger.info(f"Take Profit Levels - TP1: {take_profit1:.2f} USD | TP2: {take_profit2:.2f} USD | TP3: {take_profit3:.2f} USD")
 
                                 elif combined_signal in ["SELL", "STRONG SELL"] and btc_balance > 0:
                                     # Implement a trailing stop
@@ -358,12 +361,12 @@ class Backtester:
                             f"Amount: {trade.amount:.8f}, Fee: {trade.fee:.2f}, "
                             f"USD Value: {(usd_value - trade.fee):.2f}")
 
-            # Log the final take profit price if there was a buy
-            if take_profit is not None:
-                self.logger.info(f"Final take profit price: {take_profit:.2f} USD | Combined Signal: {combined_signal}" )
+            # Update the take profit logging at the end
+            if take_profit1 is not None and take_profit2 is not None and take_profit3 is not None:
+                self.logger.info(f"Final take profit levels - TP1: {take_profit1:.2f} USD | TP2: {take_profit2:.2f} USD | TP3: {take_profit3:.2f} USD | Combined Signal: {combined_signal}")
                 print(f"Min price change: {abs(close_price - last_trade_price) / last_trade_price} | Min price change threshold: {self.min_price_change}")
             else:
-                self.logger.info("No take profit price set (no buy trades executed)")
+                self.logger.info("No take profit levels set (no buy trades executed)")
 
             # Print the current trailing stop value in Bitcoin terms
             last_btc_price = float(candles[-1]['close'])
@@ -397,6 +400,8 @@ class Backtester:
                         f"Duration: {drawdown_metrics['drawdown_duration']} periods | "
                         f"Max drawdown: {drawdown_metrics['max_drawdown']:.2f}%"
                     )
+
+
             return final_value, trades
         except Exception as e:
             self.logger.error(f"An error occurred during backtesting: {e}", exc_info=True)
