@@ -161,20 +161,11 @@ class Backtester:
             # Create a directory for candle files if it doesn't exist
             candle_dir = "candle_data"
             os.makedirs(candle_dir, exist_ok=True)
-
-            # Create a filename based on the product_id, date range, and granularity
-            filename = f"{product_id}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}_{granularity}.json"
-            filepath = os.path.join(candle_dir, filename)
             
             # Fetch historical data
             self.logger.info(f"Fetching all historical data from {start_date} to {end_date} with granularity {granularity}...")
             candles = self.trader.get_historical_data(product_id, start_date, end_date, granularity)
             
-            # # Save the fetched data to a file
-            # with open(filepath, 'w') as f:
-            #     json.dump(candles, f)
-            # self.logger.info(f"Saved {len(candles)} candles to {filepath}")
-
             if not candles:
                 self.logger.warning("No historical data available for backtesting.")
                 return initial_balance, []
@@ -234,7 +225,7 @@ class Backtester:
                                     average_buy_price is None or 
                                     abs(close_price - average_buy_price) / average_buy_price >= self.min_price_change
                                 )
-                                                            
+
                                 # Calculate indicators and generate signal
                                 rsi = self.trader.compute_rsi_for_backtest(candles[:i+1])
                                 macd, signal, histogram = self.trader.compute_macd_for_backtest(candles[:i+1])
