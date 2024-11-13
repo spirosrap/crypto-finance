@@ -196,6 +196,7 @@ class Backtester:
             total_btc_bought = 0
             total_cost = 0
             average_buy_price = None
+            take_profit1, take_profit2, take_profit3 = None, None, None
 
             # Initialize tqdm progress bar for the entire loop
             with tqdm(total=len(candles), desc="Processing candles") as pbar:
