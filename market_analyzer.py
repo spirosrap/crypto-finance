@@ -108,6 +108,9 @@ class MarketAnalyzer:
                 'product_id': self.product_id,
                 'current_price': current_price,
                 'signal': analysis['signal'].signal_type.value,
+                'position': 'LONG' if analysis['signal'].signal_type in [SignalType.STRONG_BUY, SignalType.BUY] 
+                           else 'SHORT' if analysis['signal'].signal_type in [SignalType.STRONG_SELL, SignalType.SELL]
+                           else 'NEUTRAL',
                 'confidence': analysis['signal'].confidence,
                 'market_condition': analysis['signal'].market_condition.value,
                 'risk_metrics': analysis['risk_metrics'],
@@ -134,6 +137,7 @@ class MarketAnalyzer:
                 'timestamp': datetime.now(UTC).isoformat(),
                 'product_id': self.product_id,
                 'signal': 'HOLD',
+                'position': 'NEUTRAL',
                 'confidence': 0.0,
                 'current_price': 0.0,
                 'recommendation': 'Unable to generate signal due to error'
@@ -155,15 +159,64 @@ class MarketAnalyzer:
         return formatted_candles
 
     def _generate_recommendation(self, signal_type: SignalType) -> str:
-        """Generate a human-readable recommendation based on the signal type."""
+        """Generate a detailed trading recommendation including position type and risk management."""
         recommendations = {
-            SignalType.STRONG_BUY: "Strong buy signal detected. Consider opening a long position with proper risk management.",
-            SignalType.BUY: "Bullish conditions detected. Look for entry points for a long position.",
-            SignalType.HOLD: "Market conditions are neutral. Hold current positions or wait for clearer signals.",
-            SignalType.SELL: "Bearish conditions detected. Consider closing long positions or looking for short entries.",
-            SignalType.STRONG_SELL: "Strong sell signal detected. Consider opening a short position with proper risk management."
+            SignalType.STRONG_BUY: {
+                'position': 'LONG',
+                'message': "Strong buy signal detected. Consider opening a LONG position:\n"
+                          "• Entry: Current market price\n"
+                          "• Position Type: LONG\n"
+                          "• Leverage: 1-2x maximum\n"
+                          "• Stop Loss: Place below recent support or -2.5 ATR\n"
+                          "• Take Profit: Set multiple targets at 1.5:1 and 2:1 risk-reward ratios\n"
+                          "• Risk Management: Size position to risk only 1-2% of portfolio"
+            },
+            SignalType.BUY: {
+                'position': 'LONG',
+                'message': "Bullish conditions detected. Consider a conservative LONG position:\n"
+                          "• Entry: Look for pullbacks to support levels\n"
+                          "• Position Type: LONG\n"
+                          "• Leverage: 1x only\n"
+                          "• Stop Loss: Place below entry support level\n"
+                          "• Take Profit: Set target at 1.5:1 risk-reward ratio\n"
+                          "• Risk Management: Size position to risk only 1% of portfolio"
+            },
+            SignalType.HOLD: {
+                'position': 'NEUTRAL',
+                'message': "Market conditions are neutral:\n"
+                          "• Action: Hold existing positions or stay in cash\n"
+                          "• Watch for: Consolidation breakout or breakdown\n"
+                          "• Strategy: Wait for clearer directional signals\n"
+                          "• Risk Management: Maintain tight stops on any existing positions"
+            },
+            SignalType.SELL: {
+                'position': 'SHORT',
+                'message': "Bearish conditions detected. Consider a conservative SHORT position:\n"
+                          "• Entry: Look for rallies to resistance levels\n"
+                          "• Position Type: SHORT\n"
+                          "• Leverage: 1x only\n"
+                          "• Stop Loss: Place above entry resistance level\n"
+                          "• Take Profit: Set target at 1.5:1 risk-reward ratio\n"
+                          "• Risk Management: Size position to risk only 1% of portfolio"
+            },
+            SignalType.STRONG_SELL: {
+                'position': 'SHORT',
+                'message': "Strong sell signal detected. Consider opening a SHORT position:\n"
+                          "• Entry: Current market price\n"
+                          "• Position Type: SHORT\n"
+                          "• Leverage: 1-2x maximum\n"
+                          "• Stop Loss: Place above recent resistance or +2.5 ATR\n"
+                          "• Take Profit: Set multiple targets at 1.5:1 and 2:1 risk-reward ratios\n"
+                          "• Risk Management: Size position to risk only 1-2% of portfolio"
+            }
         }
-        return recommendations.get(signal_type, "No clear recommendation available")
+        
+        rec = recommendations.get(signal_type, {
+            'position': 'NEUTRAL',
+            'message': "No clear trading opportunity. Wait for better setup."
+        })
+        
+        return f"Position: {rec['position']}\n\n{rec['message']}"
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -241,6 +294,7 @@ def main():
         print(f"Product: {analysis['product_id']}")
         print(f"Current Price: ${analysis['current_price']:,.2f}")
         print(f"\nSignal: {analysis['signal']}")
+        print(f"Position: {analysis['position']}")
         print(f"Confidence: {analysis['confidence']*100:.1f}%")
         print(f"Market Condition: {analysis['market_condition']}")
         
@@ -257,7 +311,8 @@ def main():
                 else:
                     print(f"  {name}: {value}")
         
-        print(f"\nRecommendation:\n{analysis['recommendation']}")
+        print(f"\nRecommendation:")
+        print(analysis['recommendation'])
 
     except Exception as e:
         print(f"\nError running market analysis: {str(e)}")
