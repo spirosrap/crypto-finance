@@ -900,12 +900,25 @@ class TechnicalAnalysis:
     @validate_candles
     def _calculate_all_indicators(self, candles: List[Dict]) -> Dict[str, float]:
         """Calculate all technical indicators."""
-        return {
-            'rsi': self.compute_rsi(self.product_id, candles),
-            'macd': self.compute_macd(self.product_id, candles)[0],
-            'bollinger': self.evaluate_bollinger_signal(candles),
-            # ... add other indicators
-        }
+        try:
+            rsi = self.compute_rsi(self.product_id, candles)
+            macd, signal, histogram = self.compute_macd(self.product_id, candles)
+            bollinger_signal = self.evaluate_bollinger_signal(candles)
+            adx_signal = self.evaluate_adx_signal(candles)
+            ma_signal = self.evaluate_ma_crossover_signal(candles)
+            
+            return {
+                'rsi': rsi,
+                'macd': macd,
+                'macd_signal': signal,
+                'macd_histogram': histogram,
+                'bollinger': bollinger_signal,
+                'adx': adx_signal,
+                'ma_crossover': ma_signal
+            }
+        except Exception as e:
+            self.logger.error(f"Error calculating indicators: {str(e)}")
+            return {}
 
     @contextmanager
     def performance_monitor(self, operation_name: str):
@@ -1101,6 +1114,85 @@ class TechnicalAnalysis:
         except Exception as e:
             self.logger.error(f"Error getting trend strength: {str(e)}")
             return 0.0, "Unknown"
+
+    def _calculate_weighted_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
+        """
+        Calculate weighted signal based on technical indicators and market conditions.
+        
+        Args:
+            indicators: Dictionary of technical indicators
+            market_condition: Current market condition
+            
+        Returns:
+            float: Weighted signal strength (-10 to 10)
+        """
+        try:
+            # Get base weights for the product
+            weights = self.set_product_weights()
+            signal_strength = 0.0
+
+            # RSI Signal
+            if 'rsi' in indicators:
+                rsi = indicators['rsi']
+                if rsi > self.config.rsi_overbought:
+                    signal_strength -= weights['rsi']
+                elif rsi < self.config.rsi_oversold:
+                    signal_strength += weights['rsi']
+
+            # MACD Signal
+            if 'macd' in indicators:
+                macd = indicators['macd']
+                if macd > 0:
+                    signal_strength += weights['macd']
+                else:
+                    signal_strength -= weights['macd']
+
+            # Bollinger Bands Signal
+            if 'bollinger' in indicators:
+                signal_strength += weights['bollinger'] * indicators['bollinger']
+
+            # Market Condition Adjustment
+            condition_multipliers = {
+                'Bull Market': 1.2,
+                'Bear Market': 0.8,
+                'Bullish': 1.1,
+                'Bearish': 0.9,
+                'Neutral': 1.0
+            }
+            
+            # Apply market condition multiplier
+            multiplier = condition_multipliers.get(market_condition, 1.0)
+            signal_strength *= multiplier
+
+            # Normalize signal strength to be between -10 and 10
+            signal_strength = max(min(signal_strength, 10), -10)
+
+            return signal_strength
+
+        except Exception as e:
+            self.logger.error(f"Error calculating weighted signal: {str(e)}")
+            return 0.0
+
+    def _determine_signal_type(self, signal_strength: float) -> SignalType:
+        """
+        Determine signal type based on signal strength.
+        
+        Args:
+            signal_strength: Float value between -10 and 10
+            
+        Returns:
+            SignalType: The determined signal type
+        """
+        if signal_strength >= 7:
+            return SignalType.STRONG_BUY
+        elif signal_strength >= 3:
+            return SignalType.BUY
+        elif signal_strength <= -7:
+            return SignalType.STRONG_SELL
+        elif signal_strength <= -3:
+            return SignalType.SELL
+        else:
+            return SignalType.HOLD
 
 # ... (any additional classes or functions)
 
