@@ -301,21 +301,19 @@ def list_options():
     print()
 
 def main():
-    # Parse command line arguments
-    args = parse_arguments()
-    
-    # If user requested to list options, show them and exit
-    if args.list_products or args.list_granularities:
-        list_options()
-        return
-    
-    # Configure logging
+    # Configure logging with more detail
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.INFO,  # Change to DEBUG level
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
     # Create analyzer instance with command line arguments
+    args = parse_arguments()
+    
+    if args.list_products or args.list_granularities:
+        list_options()
+        return
+
     analyzer = MarketAnalyzer(
         product_id=args.product_id,
         candle_interval=args.granularity
