@@ -55,3 +55,4 @@ models
 backtest_results/trades_ETH-USDC_2023-01-01_2023-12-31.csv
 backtest_results/backtest_metrics.csv
 backtest_results/trades_ETH-USDC_2024-01-01_2024-12-31.csv
+backtest_results/trades_DOGE-USDC_2024-01-01_2024-12-31.csv

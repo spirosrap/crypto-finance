@@ -8,18 +8,14 @@ import talib
 import logging
 
 class SignalType(Enum):
-    STRONG_BUY = "STRONG BUY"
-    BUY = "BUY"
-    HOLD = "HOLD"
-    SELL = "SELL"
-    STRONG_SELL = "STRONG SELL"
+    LONG = "LONG"
+    SHORT = "SHORT"
 
 class MarketRegime(Enum):
-    TRENDING_UP = "TRENDING UP"
-    TRENDING_DOWN = "TRENDING DOWN"
-    RANGING = "RANGING"
-    HIGH_VOLATILITY = "HIGH VOLATILITY"
-    LOW_VOLATILITY = "LOW VOLATILITY"
+    BULLISH = "BULLISH"
+    BEARISH = "BEARISH"
+    NEUTRAL = "NEUTRAL"
+    VOLATILE = "VOLATILE"
 
 @dataclass
 class TechnicalIndicatorConfig:
@@ -128,12 +124,12 @@ class BaseTechnicalAnalysis(ABC):
         long_ma = talib.SMA(prices, timeperiod=50)[-1]
         
         if volatility > self.config.volatility_threshold * 1.5:
-            return MarketRegime.HIGH_VOLATILITY
+            return MarketRegime.VOLATILE
         elif volatility < self.config.volatility_threshold * 0.5:
-            return MarketRegime.LOW_VOLATILITY
+            return MarketRegime.NEUTRAL
         elif short_ma > long_ma * 1.02:
-            return MarketRegime.TRENDING_UP
+            return MarketRegime.BULLISH
         elif short_ma < long_ma * 0.98:
-            return MarketRegime.TRENDING_DOWN
+            return MarketRegime.BEARISH
         else:
-            return MarketRegime.RANGING 
+            return MarketRegime.NEUTRAL 
