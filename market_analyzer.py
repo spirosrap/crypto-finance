@@ -7,6 +7,7 @@ from config import API_KEY, API_SECRET, NEWS_API_KEY
 from historicaldata import HistoricalData
 from coinbase.rest import RESTClient
 import argparse
+import time
 
 # Add valid choices for granularity and products
 VALID_GRANULARITIES = [
@@ -106,6 +107,11 @@ class MarketAnalyzer:
             upper_band, middle_band, lower_band = self.technical_analysis.compute_bollinger_bands(formatted_candles)
             current_price = float(formatted_candles[-1]['close'])
             
+            # Add signal stability information
+            signal_stability = "High" if len(self.technical_analysis.signal_history) >= self.technical_analysis.trend_confirmation_period and \
+                                  all(s['strength'] > 0 for s in self.technical_analysis.signal_history) or \
+                                  all(s['strength'] < 0 for s in self.technical_analysis.signal_history) else "Low"
+            
             # Create detailed analysis result
             result = {
                 'timestamp': datetime.now(UTC).isoformat(),
@@ -129,7 +135,10 @@ class MarketAnalyzer:
                     'adx': round(adx_value, 2),
                     'trend_direction': trend_direction
                 },
-                'recommendation': self._generate_recommendation(analysis['signal'].signal_type)
+                'recommendation': self._generate_recommendation(analysis['signal'].signal_type),
+                'signal_stability': signal_stability,
+                'signals_analyzed': len(self.technical_analysis.signal_history),
+                'time_since_last_change': time.time() - (self.technical_analysis.last_signal_time or time.time())
             }
 
             return result
