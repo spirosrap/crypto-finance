@@ -165,62 +165,95 @@ class MarketAnalyzer:
     def _generate_recommendation(self, signal_type: SignalType) -> str:
         """Generate a detailed trading recommendation including consolidation patterns."""
         try:
-            # Check if we have candles data
             if not self._current_candles:
                 return "No market data available for recommendation"
             
-            # Get consolidation information
+            # Get current price and indicators
+            current_price = float(self._current_candles[-1]['close'])
+            atr = self.technical_analysis.compute_atr(self._current_candles)
             consolidation_info = self.technical_analysis.detect_consolidation(self._current_candles)
             
-            # Base recommendations
+            # Calculate key levels
+            stop_loss_atr = atr * self.ta_config.atr_multiplier
+            take_profit_1r = stop_loss_atr * 1.5  # 1.5:1 reward-risk
+            take_profit_2r = stop_loss_atr * 2.0  # 2:1 reward-risk
+            take_profit_3r = stop_loss_atr * 3.0  # 3:1 reward-risk
+            
+            # Calculate support and resistance levels
+            resistance_level = consolidation_info['upper_channel']
+            support_level = consolidation_info['lower_channel']
+            
             recommendations = {
                 SignalType.STRONG_BUY: {
                     'position': 'LONG',
-                    'message': "Strong buy signal detected. Consider opening a LONG position:\n"
-                              "• Entry: Current market price\n"
-                              "• Position Type: LONG\n"
-                              "• Leverage: 1-2x maximum\n"
-                              "• Stop Loss: Place below recent support or -2.5 ATR\n"
-                              "• Take Profit: Set multiple targets at 1.5:1 and 2:1 risk-reward ratios\n"
-                              "• Risk Management: Size position to risk only 1-2% of portfolio"
-                },
-                SignalType.BUY: {
-                    'position': 'LONG',
-                    'message': "Bullish conditions detected. Consider a conservative LONG position:\n"
-                              "• Entry: Look for pullbacks to support levels\n"
-                              "• Position Type: LONG\n"
-                              "• Leverage: 1x only\n"
-                              "• Stop Loss: Place below entry support level\n"
-                              "• Take Profit: Set target at 1.5:1 risk-reward ratio\n"
-                              "• Risk Management: Size position to risk only 1% of portfolio"
-                },
-                SignalType.HOLD: {
-                    'position': 'NEUTRAL',
-                    'message': "Market conditions are neutral:\n"
-                              "• Action: Hold existing positions or stay in cash\n"
-                              "• Watch for: Consolidation breakout or breakdown\n"
-                              "• Strategy: Wait for clearer directional signals\n"
-                              "• Risk Management: Maintain tight stops on any existing positions"
-                },
-                SignalType.SELL: {
-                    'position': 'SHORT',
-                    'message': "Bearish conditions detected. Consider a conservative SHORT position:\n"
-                              "• Entry: Look for rallies to resistance levels\n"
-                              "• Position Type: SHORT\n"
-                              "• Leverage: 1x only\n"
-                              "• Stop Loss: Place above entry resistance level\n"
-                              "• Take Profit: Set target at 1.5:1 risk-reward ratio\n"
-                              "• Risk Management: Size position to risk only 1% of portfolio"
+                    'message': f"Strong buy signal detected. Consider opening a LONG position:\n"
+                              f"• Entry Price: ${current_price:.4f}\n"
+                              f"• Position Type: LONG\n"
+                              f"• Leverage: 1-2x maximum\n\n"
+                              f"Support Level: ${support_level:.4f}\n"
+                              f"Resistance Level: ${resistance_level:.4f}\n\n"
+                              f"Stop Losses:\n"
+                              f"• Conservative: ${(current_price - stop_loss_atr):.4f} (-{(stop_loss_atr/current_price)*100:.1f}%)\n"
+                              f"• Aggressive: ${(current_price - (stop_loss_atr*0.7)):.4f} (-{(stop_loss_atr*0.7/current_price)*100:.1f}%)\n\n"
+                              f"Take Profit Targets:\n"
+                              f"• Target 1 (1.5R): ${(current_price + take_profit_1r):.4f} (+{(take_profit_1r/current_price)*100:.1f}%)\n"
+                              f"• Target 2 (2R): ${(current_price + take_profit_2r):.4f} (+{(take_profit_2r/current_price)*100:.1f}%)\n"
+                              f"• Target 3 (3R): ${(current_price + take_profit_3r):.4f} (+{(take_profit_3r/current_price)*100:.1f}%)"
                 },
                 SignalType.STRONG_SELL: {
                     'position': 'SHORT',
-                    'message': "Strong sell signal detected. Consider opening a SHORT position:\n"
-                              "• Entry: Current market price\n"
-                              "• Position Type: SHORT\n"
-                              "• Leverage: 1-2x maximum\n"
-                              "• Stop Loss: Place above recent resistance or +2.5 ATR\n"
-                              "• Take Profit: Set multiple targets at 1.5:1 and 2:1 risk-reward ratios\n"
-                              "• Risk Management: Size position to risk only 1-2% of portfolio"
+                    'message': f"Strong sell signal detected. Consider opening a SHORT position:\n"
+                              f"• Entry Price: ${current_price:.4f}\n"
+                              f"• Position Type: SHORT\n"
+                              f"• Leverage: 1-2x maximum\n\n"
+                              f"Support Level: ${support_level:.4f}\n"
+                              f"Resistance Level: ${resistance_level:.4f}\n\n"
+                              f"Stop Losses:\n"
+                              f"• Conservative: ${(current_price + stop_loss_atr):.4f} (+{(stop_loss_atr/current_price)*100:.1f}%)\n"
+                              f"• Aggressive: ${(current_price + (stop_loss_atr*0.7)):.4f} (+{(stop_loss_atr*0.7/current_price)*100:.1f}%)\n\n"
+                              f"Take Profit Targets:\n"
+                              f"• Target 1 (1.5R): ${(current_price - take_profit_1r):.4f} (-{(take_profit_1r/current_price)*100:.1f}%)\n"
+                              f"• Target 2 (2R): ${(current_price - take_profit_2r):.4f} (-{(take_profit_2r/current_price)*100:.1f}%)\n"
+                              f"• Target 3 (3R): ${(current_price - take_profit_3r):.4f} (-{(take_profit_3r/current_price)*100:.1f}%)"
+                },
+                SignalType.BUY: {
+                    'position': 'LONG',
+                    'message': f"Bullish conditions detected. Consider a conservative LONG position:\n"
+                              f"• Entry Price: ${current_price:.4f}\n"
+                              f"• Position Type: LONG\n"
+                              f"• Leverage: 1x only\n\n"
+                              f"Support Level: ${support_level:.4f}\n"
+                              f"Resistance Level: ${resistance_level:.4f}\n\n"
+                              f"Stop Loss: Place below support at ${(support_level - (atr * 0.5)):.4f}\n"
+                              f"Take Profit Targets:\n"
+                              f"• Target 1 (1.5R): ${(current_price + take_profit_1r):.4f}\n"
+                              f"• Target 2 (2R): ${(current_price + take_profit_2r):.4f}"
+                },
+                SignalType.SELL: {
+                    'position': 'SHORT',
+                    'message': f"Bearish conditions detected. Consider a conservative SHORT position:\n"
+                              f"• Entry Price: ${current_price:.4f}\n"
+                              f"• Position Type: SHORT\n"
+                              f"• Leverage: 1x only\n\n"
+                              f"Support Level: ${support_level:.4f}\n"
+                              f"Resistance Level: ${resistance_level:.4f}\n\n"
+                              f"Stop Loss: Place above resistance at ${(resistance_level + (atr * 0.5)):.4f}\n"
+                              f"Take Profit Targets:\n"
+                              f"• Target 1 (1.5R): ${(current_price - take_profit_1r):.4f}\n"
+                              f"• Target 2 (2R): ${(current_price - take_profit_2r):.4f}"
+                },
+                SignalType.HOLD: {
+                    'position': 'NEUTRAL',
+                    'message': f"Market conditions are neutral:\n"
+                              f"• Current Price: ${current_price:.4f}\n"
+                              f"• ATR: ${atr:.4f}\n\n"
+                              f"Key Levels:\n"
+                              f"• Support: ${support_level:.4f}\n"
+                              f"• Resistance: ${resistance_level:.4f}\n\n"
+                              f"Recommendation:\n"
+                              f"• Hold existing positions\n"
+                              f"• Wait for price to break ${resistance_level:.4f} resistance or\n"
+                              f"  ${support_level:.4f} support with volume confirmation"
                 }
             }
             
@@ -229,25 +262,29 @@ class MarketAnalyzer:
                 'message': "No clear trading opportunity. Wait for better setup."
             })
             
-            # Add consolidation information
+            # Add consolidation information if relevant
             consolidation_message = ""
             if consolidation_info['is_consolidating']:
                 if consolidation_info['pattern'] == "Breakout":
-                    consolidation_message = "\nConsolidation Breakout Detected:\n" \
-                                         f"• Upper Channel: ${consolidation_info['upper_channel']:,.2f}\n" \
-                                         f"• Volume Confirmation: {'Yes' if consolidation_info['volume_confirmed'] else 'No'}\n" \
-                                         "• Strategy: Consider aggressive entries with tight stops"
+                    target = consolidation_info['upper_channel'] + (consolidation_info['upper_channel'] - consolidation_info['lower_channel'])
+                    consolidation_message = f"\nBreakout Pattern Detected:\n" \
+                                          f"• Breakout Level: ${consolidation_info['upper_channel']:.4f}\n" \
+                                          f"• Volume Confirmation: {'Yes' if consolidation_info['volume_confirmed'] else 'No'}\n" \
+                                          f"• Suggested Stop: ${consolidation_info['channel_middle']:.4f}\n" \
+                                          f"• Target: ${target:.4f}"
                 elif consolidation_info['pattern'] == "Breakdown":
-                    consolidation_message = "\nConsolidation Breakdown Detected:\n" \
-                                         f"• Lower Channel: ${consolidation_info['lower_channel']:,.2f}\n" \
-                                         f"• Volume Confirmation: {'Yes' if consolidation_info['volume_confirmed'] else 'No'}\n" \
-                                         "• Strategy: Consider short positions with stops above the breakdown level"
+                    target = consolidation_info['lower_channel'] - (consolidation_info['upper_channel'] - consolidation_info['lower_channel'])
+                    consolidation_message = f"\nBreakdown Pattern Detected:\n" \
+                                          f"• Breakdown Level: ${consolidation_info['lower_channel']:.4f}\n" \
+                                          f"• Volume Confirmation: {'Yes' if consolidation_info['volume_confirmed'] else 'No'}\n" \
+                                          f"• Suggested Stop: ${consolidation_info['channel_middle']:.4f}\n" \
+                                          f"• Target: ${target:.4f}"
                 else:
-                    consolidation_message = "\nConsolidation Phase Detected:\n" \
-                                         f"• Upper Channel: ${consolidation_info['upper_channel']:,.2f}\n" \
-                                         f"• Lower Channel: ${consolidation_info['lower_channel']:,.2f}\n" \
-                                         f"• Strength: {consolidation_info['strength']*100:.1f}%\n" \
-                                         "• Strategy: Wait for breakout/breakdown confirmation"
+                    consolidation_message = f"\nConsolidation Phase Detected:\n" \
+                                          f"• Upper Channel: ${consolidation_info['upper_channel']:.4f}\n" \
+                                          f"• Lower Channel: ${consolidation_info['lower_channel']:.4f}\n" \
+                                          f"• Channel Middle: ${consolidation_info['channel_middle']:.4f}\n" \
+                                          f"• Strength: {consolidation_info['strength']*100:.1f}%"
             
             return f"Position: {rec['position']}\n\n{rec['message']}{consolidation_message}"
             
