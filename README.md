@@ -264,3 +264,176 @@ The bot combines multiple analysis methods for trading decisions:
 ## 💻 Usage Examples
 
 ### Basic Backtesting
+
+```
+
+## Market Analyzer
+
+The Market Analyzer is a powerful command-line tool that provides real-time technical analysis and trading signals for various cryptocurrency pairs. It analyzes market conditions using multiple technical indicators and generates detailed trading recommendations.
+
+### Market Analyzer Features
+
+- Real-time market analysis with multiple technical indicators
+- Support for multiple cryptocurrency pairs
+- Configurable time intervals (granularity)
+- Risk metrics calculation
+- Market condition assessment
+- Confidence-based signals
+- Detailed recommendations
+- Performance monitoring
+
+### Market Analyzer Usage
+
+1. **Basic Usage:**
+   ```bash
+   python market_analyzer.py
+   ```
+
+2. **Analyze Specific Product:**
+   ```bash
+   python market_analyzer.py --product_id BTC-USDC
+   ```
+
+3. **Change Time Interval:**
+   ```bash
+   python market_analyzer.py --granularity FIFTEEN_MINUTE
+   ```
+
+4. **List Available Options:**
+   ```bash
+   python market_analyzer.py --list-products
+   python market_analyzer.py --list-granularities
+   ```
+
+### Supported Products
+
+- BTC-USDC
+- ETH-USDC
+- SOL-USDC
+- DOGE-USDC
+- XRP-USDC
+- ADA-USDC
+- MATIC-USDC
+- LINK-USDC
+- DOT-USDC
+- UNI-USDC
+
+### Available Granularities
+
+- ONE_MINUTE
+- FIVE_MINUTE
+- FIFTEEN_MINUTE
+- THIRTY_MINUTE
+- ONE_HOUR
+- TWO_HOUR
+- SIX_HOUR
+- ONE_DAY
+
+### Analysis Components
+
+1. **Technical Indicators:**
+   - Relative Strength Index (RSI)
+   - Moving Average Convergence Divergence (MACD)
+   - Bollinger Bands
+   - Average Directional Index (ADX)
+   - Moving Average Crossovers
+   - Volume Analysis
+   - Trend Strength Analysis
+
+2. **Risk Metrics:**
+   - Average True Range (ATR)
+   - Volatility Assessment
+   - Risk Level Classification
+   - Suggested Stop Loss Levels
+   - Recommended Take Profit Levels
+   - Maximum Position Size Calculation
+
+3. **Market Conditions:**
+   - Bull Market
+   - Bear Market
+   - Bullish
+   - Bearish
+   - Neutral
+
+4. **Signal Types:**
+   - STRONG BUY
+   - BUY
+   - HOLD
+   - SELL
+   - STRONG SELL
+
+### Sample Output
+
+```
+=== Market Analysis Report ===
+Timestamp: 2024-11-15T20:47:29.866625
+Product: BTC-USDC
+Current Price: $44,123.45
+
+Signal: BUY
+Confidence: 75.5%
+Market Condition: Bullish
+
+Key Indicators:
+  rsi: 58.32
+  macd: 125.45
+  macd_signal: 100.23
+  macd_histogram: 25.22
+  bollinger_upper: 45000.00
+  bollinger_middle: 44000.00
+  bollinger_lower: 43000.00
+  adx: 28.45
+  trend_direction: Uptrend
+
+Risk Metrics:
+  atr: 450.2345
+  volatility: 0.0234
+  risk_level: medium
+  stop_loss: 43500.00
+  take_profit: 45000.00
+  max_position_size: 0.5000
+
+Recommendation:
+Bullish conditions detected. Look for entry points for a long position.
+```
+
+### Signal Generation Process
+
+The Market Analyzer uses a sophisticated weighted approach to generate signals:
+
+1. **Data Collection:**
+   - Fetches historical data for the specified timeframe
+   - Validates and formats candle data
+
+2. **Technical Analysis:**
+   - Calculates multiple technical indicators
+   - Evaluates trend strength and direction
+   - Assesses market conditions
+
+3. **Signal Weighting:**
+   - Applies product-specific weights to each indicator
+   - Adjusts for market conditions
+   - Considers volume and volatility
+
+4. **Risk Assessment:**
+   - Calculates risk metrics
+   - Determines position sizing
+   - Suggests entry/exit points
+
+5. **Final Recommendation:**
+   - Generates confidence-based signals
+   - Provides detailed trading recommendations
+   - Includes risk management suggestions
+
+### Integration with Trading Bot
+
+The Market Analyzer can be integrated with the trading bot for automated trading:
+
+```python
+from market_analyzer import MarketAnalyzer
+
+analyzer = MarketAnalyzer(product_id='BTC-USDC', candle_interval='ONE_HOUR')
+analysis = analyzer.get_market_signal()
+signal = analysis['signal']
+confidence = analysis['confidence']
+```
