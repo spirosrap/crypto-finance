@@ -287,15 +287,30 @@ class TechnicalAnalysis:
 
     # MACD Methods
     def compute_macd(self, product_id: str, candles: List[Dict]) -> Tuple[float, float, float]:
-        prices = self.extract_prices(candles)
-        return self.compute_macd_from_prices(prices)
-
-    def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
-        macd, signal, histogram = talib.MACD(np.array(prices), 
-                                             fastperiod=self.config.macd_fast, 
-                                             slowperiod=self.config.macd_slow, 
-                                             signalperiod=self.config.macd_signal)
-        return macd[-1], signal[-1], histogram[-1]
+        """Compute MACD values."""
+        try:
+            prices = self.extract_prices(candles)
+            if len(prices) < self.config.macd_slow:
+                raise InsufficientDataError(f"Need at least {self.config.macd_slow} candles for MACD calculation")
+            
+            macd, signal, histogram = talib.MACD(
+                prices,
+                fastperiod=self.config.macd_fast,
+                slowperiod=self.config.macd_slow,
+                signalperiod=self.config.macd_signal
+            )
+            
+            # Get the last valid values (non-NaN)
+            macd_value = float(macd[-1]) if not np.isnan(macd[-1]) else 0.0
+            signal_value = float(signal[-1]) if not np.isnan(signal[-1]) else 0.0
+            histogram_value = float(histogram[-1]) if not np.isnan(histogram[-1]) else 0.0
+            
+            self.logger.debug(f"MACD values - MACD: {macd_value}, Signal: {signal_value}, Histogram: {histogram_value}")
+            return macd_value, signal_value, histogram_value
+            
+        except Exception as e:
+            self.logger.error(f"Error computing MACD: {str(e)}")
+            return 0.0, 0.0, 0.0
 
     def generate_macd_signal(self, macd: float, signal: float, histogram: float) -> str:
         if macd > signal or histogram >= 0:
@@ -1118,38 +1133,63 @@ class TechnicalAnalysis:
     def _calculate_weighted_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
         """
         Calculate weighted signal based on technical indicators and market conditions.
-        
-        Args:
-            indicators: Dictionary of technical indicators
-            market_condition: Current market condition
-            
-        Returns:
-            float: Weighted signal strength (-10 to 10)
         """
         try:
             # Get base weights for the product
             weights = self.set_product_weights()
             signal_strength = 0.0
 
-            # RSI Signal
+            # RSI Signal (0-100 scale)
             if 'rsi' in indicators:
                 rsi = indicators['rsi']
+                # Convert RSI to a -1 to 1 scale
                 if rsi > self.config.rsi_overbought:
-                    signal_strength -= weights['rsi']
+                    rsi_signal = -1 * (rsi - self.config.rsi_overbought) / (100 - self.config.rsi_overbought)
                 elif rsi < self.config.rsi_oversold:
-                    signal_strength += weights['rsi']
+                    rsi_signal = (self.config.rsi_oversold - rsi) / self.config.rsi_oversold
+                else:
+                    rsi_signal = 0
+                signal_strength += weights['rsi'] * rsi_signal
 
             # MACD Signal
-            if 'macd' in indicators:
+            if all(k in indicators for k in ['macd', 'macd_signal', 'macd_histogram']):
                 macd = indicators['macd']
-                if macd > 0:
-                    signal_strength += weights['macd']
-                else:
-                    signal_strength -= weights['macd']
+                macd_signal = indicators['macd_signal']
+                histogram = indicators['macd_histogram']
+                
+                # Normalize MACD signals
+                max_macd = max(abs(macd), abs(macd_signal)) if macd and macd_signal else 1
+                if max_macd != 0:
+                    macd_normalized = macd / max_macd
+                    histogram_normalized = histogram / max_macd if histogram else 0
+                    
+                    # MACD crossing signal line is more significant
+                    if macd > macd_signal:
+                        signal_strength += weights['macd'] * (0.5 + 0.5 * macd_normalized)
+                    else:
+                        signal_strength -= weights['macd'] * (0.5 + 0.5 * abs(macd_normalized))
+                    
+                    # Add histogram contribution
+                    signal_strength += weights['macd'] * 0.5 * histogram_normalized
 
-            # Bollinger Bands Signal
+            # Bollinger Bands Signal (-1 to 1 scale)
             if 'bollinger' in indicators:
                 signal_strength += weights['bollinger'] * indicators['bollinger']
+
+            # ADX Signal (0-100 scale, normalized to -1 to 1)
+            if 'adx' in indicators:
+                adx = indicators['adx']
+                if adx > 25:  # Strong trend
+                    # Use trend direction to determine signal
+                    if 'trend_direction' in indicators:
+                        if indicators['trend_direction'] == "Uptrend":
+                            signal_strength += weights['adx'] * (adx / 100)
+                        elif indicators['trend_direction'] == "Downtrend":
+                            signal_strength -= weights['adx'] * (adx / 100)
+
+            # MA Crossover Signal (-1 to 1 scale)
+            if 'ma_crossover' in indicators:
+                signal_strength += weights['ma_crossover'] * indicators['ma_crossover']
 
             # Market Condition Adjustment
             condition_multipliers = {
@@ -1164,9 +1204,15 @@ class TechnicalAnalysis:
             multiplier = condition_multipliers.get(market_condition, 1.0)
             signal_strength *= multiplier
 
-            # Normalize signal strength to be between -10 and 10
-            signal_strength = max(min(signal_strength, 10), -10)
+            # Check for consolidation patterns
+            if hasattr(self, '_current_candles') and self._current_candles:
+                consolidation_info = self.detect_consolidation(self._current_candles)
+                signal_strength = self._adjust_signal_for_consolidation(signal_strength, consolidation_info)
 
+            # Normalize final signal strength to be between -10 and 10
+            signal_strength = max(min(signal_strength * 5, 10), -10)
+
+            self.logger.debug(f"Final signal strength: {signal_strength}")
             return signal_strength
 
         except Exception as e:
@@ -1193,6 +1239,101 @@ class TechnicalAnalysis:
             return SignalType.SELL
         else:
             return SignalType.HOLD
+
+    def detect_consolidation(self, candles: List[Dict], window: int = 20, threshold: float = 0.02) -> Dict[str, Union[bool, str]]:
+        """
+        Detect if the market is in consolidation and identify potential breakouts/breakdowns.
+        
+        Args:
+            candles: List of candle data
+            window: Number of periods to check for consolidation
+            threshold: Maximum price variation threshold for consolidation (2% default)
+        
+        Returns:
+            Dict containing consolidation status and pattern
+        """
+        try:
+            # Get recent prices
+            prices = self.extract_prices(candles[-window:])
+            highs = self.extract_prices(candles[-window:], 'high')
+            lows = self.extract_prices(candles[-window:], 'low')
+            volumes = self.extract_prices(candles[-window:], 'volume')
+            
+            # Calculate price ranges
+            price_range = (max(highs) - min(lows)) / min(lows)
+            current_price = prices[-1]
+            avg_price = sum(prices) / len(prices)
+            
+            # Calculate average volume and recent volume
+            avg_volume = sum(volumes[:-3]) / (len(volumes) - 3)
+            recent_volume = sum(volumes[-3:]) / 3
+            volume_increase = recent_volume > avg_volume * 1.5
+            
+            # Define price channels
+            upper_channel = max(highs[:-1])  # Excluding most recent candle
+            lower_channel = min(lows[:-1])   # Excluding most recent candle
+            channel_middle = (upper_channel + lower_channel) / 2
+            
+            # Check if in consolidation
+            is_consolidating = price_range <= threshold
+            
+            # Detect breakout/breakdown patterns
+            if is_consolidating:
+                if current_price > upper_channel and volume_increase:
+                    pattern = "Breakout"
+                elif current_price < lower_channel and volume_increase:
+                    pattern = "Breakdown"
+                else:
+                    pattern = "Consolidating"
+                    
+                # Calculate consolidation strength
+                strength = 1.0 - (price_range / threshold)
+                
+                return {
+                    'is_consolidating': True,
+                    'pattern': pattern,
+                    'strength': strength,
+                    'upper_channel': upper_channel,
+                    'lower_channel': lower_channel,
+                    'channel_middle': channel_middle,
+                    'volume_confirmed': volume_increase,
+                    'price_range': price_range
+                }
+            
+            return {
+                'is_consolidating': False,
+                'pattern': "None",
+                'strength': 0.0,
+                'upper_channel': upper_channel,
+                'lower_channel': lower_channel,
+                'channel_middle': channel_middle,
+                'volume_confirmed': volume_increase,
+                'price_range': price_range
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting consolidation: {str(e)}")
+            return {
+                'is_consolidating': False,
+                'pattern': "Error",
+                'strength': 0.0,
+                'upper_channel': 0.0,
+                'lower_channel': 0.0,
+                'channel_middle': 0.0,
+                'volume_confirmed': False,
+                'price_range': 0.0
+            }
+
+    def _adjust_signal_for_consolidation(self, signal_strength: float, consolidation_info: Dict) -> float:
+        """Adjust signal strength based on consolidation pattern."""
+        if consolidation_info['is_consolidating']:
+            if consolidation_info['pattern'] == "Breakout":
+                return min(signal_strength * 1.5, 10.0)  # Amplify bullish signals
+            elif consolidation_info['pattern'] == "Breakdown":
+                return max(signal_strength * 1.5, -10.0)  # Amplify bearish signals
+            else:
+                return signal_strength * 0.5  # Reduce signal strength during consolidation
+        return signal_strength
 
 # ... (any additional classes or functions)
 

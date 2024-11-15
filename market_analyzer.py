@@ -62,6 +62,7 @@ class MarketAnalyzer:
             product_id=product_id
         )
         
+        self._current_candles = []
         self.logger = logging.getLogger(__name__)
 
     def get_market_signal(self) -> Dict:
@@ -89,6 +90,9 @@ class MarketAnalyzer:
 
             # Format candles to match expected structure
             formatted_candles = self._format_candles(candles)
+            
+            # Store the formatted candles
+            self._current_candles = formatted_candles
 
             # Get comprehensive market analysis
             analysis = self.technical_analysis.analyze_market(formatted_candles)
@@ -159,64 +163,97 @@ class MarketAnalyzer:
         return formatted_candles
 
     def _generate_recommendation(self, signal_type: SignalType) -> str:
-        """Generate a detailed trading recommendation including position type and risk management."""
-        recommendations = {
-            SignalType.STRONG_BUY: {
-                'position': 'LONG',
-                'message': "Strong buy signal detected. Consider opening a LONG position:\n"
-                          "• Entry: Current market price\n"
-                          "• Position Type: LONG\n"
-                          "• Leverage: 1-2x maximum\n"
-                          "• Stop Loss: Place below recent support or -2.5 ATR\n"
-                          "• Take Profit: Set multiple targets at 1.5:1 and 2:1 risk-reward ratios\n"
-                          "• Risk Management: Size position to risk only 1-2% of portfolio"
-            },
-            SignalType.BUY: {
-                'position': 'LONG',
-                'message': "Bullish conditions detected. Consider a conservative LONG position:\n"
-                          "• Entry: Look for pullbacks to support levels\n"
-                          "• Position Type: LONG\n"
-                          "• Leverage: 1x only\n"
-                          "• Stop Loss: Place below entry support level\n"
-                          "• Take Profit: Set target at 1.5:1 risk-reward ratio\n"
-                          "• Risk Management: Size position to risk only 1% of portfolio"
-            },
-            SignalType.HOLD: {
-                'position': 'NEUTRAL',
-                'message': "Market conditions are neutral:\n"
-                          "• Action: Hold existing positions or stay in cash\n"
-                          "• Watch for: Consolidation breakout or breakdown\n"
-                          "• Strategy: Wait for clearer directional signals\n"
-                          "• Risk Management: Maintain tight stops on any existing positions"
-            },
-            SignalType.SELL: {
-                'position': 'SHORT',
-                'message': "Bearish conditions detected. Consider a conservative SHORT position:\n"
-                          "• Entry: Look for rallies to resistance levels\n"
-                          "• Position Type: SHORT\n"
-                          "• Leverage: 1x only\n"
-                          "• Stop Loss: Place above entry resistance level\n"
-                          "• Take Profit: Set target at 1.5:1 risk-reward ratio\n"
-                          "• Risk Management: Size position to risk only 1% of portfolio"
-            },
-            SignalType.STRONG_SELL: {
-                'position': 'SHORT',
-                'message': "Strong sell signal detected. Consider opening a SHORT position:\n"
-                          "• Entry: Current market price\n"
-                          "• Position Type: SHORT\n"
-                          "• Leverage: 1-2x maximum\n"
-                          "• Stop Loss: Place above recent resistance or +2.5 ATR\n"
-                          "• Take Profit: Set multiple targets at 1.5:1 and 2:1 risk-reward ratios\n"
-                          "• Risk Management: Size position to risk only 1-2% of portfolio"
+        """Generate a detailed trading recommendation including consolidation patterns."""
+        try:
+            # Check if we have candles data
+            if not self._current_candles:
+                return "No market data available for recommendation"
+            
+            # Get consolidation information
+            consolidation_info = self.technical_analysis.detect_consolidation(self._current_candles)
+            
+            # Base recommendations
+            recommendations = {
+                SignalType.STRONG_BUY: {
+                    'position': 'LONG',
+                    'message': "Strong buy signal detected. Consider opening a LONG position:\n"
+                              "• Entry: Current market price\n"
+                              "• Position Type: LONG\n"
+                              "• Leverage: 1-2x maximum\n"
+                              "• Stop Loss: Place below recent support or -2.5 ATR\n"
+                              "• Take Profit: Set multiple targets at 1.5:1 and 2:1 risk-reward ratios\n"
+                              "• Risk Management: Size position to risk only 1-2% of portfolio"
+                },
+                SignalType.BUY: {
+                    'position': 'LONG',
+                    'message': "Bullish conditions detected. Consider a conservative LONG position:\n"
+                              "• Entry: Look for pullbacks to support levels\n"
+                              "• Position Type: LONG\n"
+                              "• Leverage: 1x only\n"
+                              "• Stop Loss: Place below entry support level\n"
+                              "• Take Profit: Set target at 1.5:1 risk-reward ratio\n"
+                              "• Risk Management: Size position to risk only 1% of portfolio"
+                },
+                SignalType.HOLD: {
+                    'position': 'NEUTRAL',
+                    'message': "Market conditions are neutral:\n"
+                              "• Action: Hold existing positions or stay in cash\n"
+                              "• Watch for: Consolidation breakout or breakdown\n"
+                              "• Strategy: Wait for clearer directional signals\n"
+                              "• Risk Management: Maintain tight stops on any existing positions"
+                },
+                SignalType.SELL: {
+                    'position': 'SHORT',
+                    'message': "Bearish conditions detected. Consider a conservative SHORT position:\n"
+                              "• Entry: Look for rallies to resistance levels\n"
+                              "• Position Type: SHORT\n"
+                              "• Leverage: 1x only\n"
+                              "• Stop Loss: Place above entry resistance level\n"
+                              "• Take Profit: Set target at 1.5:1 risk-reward ratio\n"
+                              "• Risk Management: Size position to risk only 1% of portfolio"
+                },
+                SignalType.STRONG_SELL: {
+                    'position': 'SHORT',
+                    'message': "Strong sell signal detected. Consider opening a SHORT position:\n"
+                              "• Entry: Current market price\n"
+                              "• Position Type: SHORT\n"
+                              "• Leverage: 1-2x maximum\n"
+                              "• Stop Loss: Place above recent resistance or +2.5 ATR\n"
+                              "• Take Profit: Set multiple targets at 1.5:1 and 2:1 risk-reward ratios\n"
+                              "• Risk Management: Size position to risk only 1-2% of portfolio"
+                }
             }
-        }
-        
-        rec = recommendations.get(signal_type, {
-            'position': 'NEUTRAL',
-            'message': "No clear trading opportunity. Wait for better setup."
-        })
-        
-        return f"Position: {rec['position']}\n\n{rec['message']}"
+            
+            rec = recommendations.get(signal_type, {
+                'position': 'NEUTRAL',
+                'message': "No clear trading opportunity. Wait for better setup."
+            })
+            
+            # Add consolidation information
+            consolidation_message = ""
+            if consolidation_info['is_consolidating']:
+                if consolidation_info['pattern'] == "Breakout":
+                    consolidation_message = "\nConsolidation Breakout Detected:\n" \
+                                         f"• Upper Channel: ${consolidation_info['upper_channel']:,.2f}\n" \
+                                         f"• Volume Confirmation: {'Yes' if consolidation_info['volume_confirmed'] else 'No'}\n" \
+                                         "• Strategy: Consider aggressive entries with tight stops"
+                elif consolidation_info['pattern'] == "Breakdown":
+                    consolidation_message = "\nConsolidation Breakdown Detected:\n" \
+                                         f"• Lower Channel: ${consolidation_info['lower_channel']:,.2f}\n" \
+                                         f"• Volume Confirmation: {'Yes' if consolidation_info['volume_confirmed'] else 'No'}\n" \
+                                         "• Strategy: Consider short positions with stops above the breakdown level"
+                else:
+                    consolidation_message = "\nConsolidation Phase Detected:\n" \
+                                         f"• Upper Channel: ${consolidation_info['upper_channel']:,.2f}\n" \
+                                         f"• Lower Channel: ${consolidation_info['lower_channel']:,.2f}\n" \
+                                         f"• Strength: {consolidation_info['strength']*100:.1f}%\n" \
+                                         "• Strategy: Wait for breakout/breakdown confirmation"
+            
+            return f"Position: {rec['position']}\n\n{rec['message']}{consolidation_message}"
+            
+        except Exception as e:
+            self.logger.error(f"Error generating recommendation: {str(e)}")
+            return "Error generating recommendation"
 
 def parse_arguments():
     """Parse command line arguments."""
