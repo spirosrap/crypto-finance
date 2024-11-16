@@ -1363,6 +1363,73 @@ class TechnicalAnalysis:
                 return signal_strength * 0.5  # Reduce signal strength during consolidation
         return signal_strength
 
+    def analyze_volume_confirmation(self, candles: List[Dict], lookback: int = 20) -> Dict[str, Union[bool, float, str]]:
+        """
+        Analyze volume patterns for trade confirmation.
+        
+        Args:
+            candles: List of candle data
+            lookback: Number of periods to analyze
+        
+        Returns:
+            Dict containing volume analysis results
+        """
+        try:
+            # Get recent data
+            recent_candles = candles[-lookback:]
+            volumes = self.extract_prices(recent_candles, 'volume')
+            prices = self.extract_prices(recent_candles, 'close')
+            
+            # Calculate average volume
+            avg_volume = np.mean(volumes[:-1])  # Excluding current volume
+            current_volume = volumes[-1]
+            
+            # Calculate volume change
+            volume_change = ((current_volume - avg_volume) / avg_volume) * 100
+            
+            # Calculate price change
+            price_change = ((prices[-1] - prices[-2]) / prices[-2]) * 100
+            
+            # Determine if volume is confirming price movement
+            is_confirming = (price_change > 0 and volume_change > 20) or \
+                           (price_change < 0 and volume_change > 20)
+            
+            # Calculate volume trend
+            volume_sma = np.mean(volumes[-5:])  # 5-period volume SMA
+            volume_trend = "Increasing" if volume_sma > avg_volume else "Decreasing"
+            
+            # Determine volume signal strength
+            if volume_change > 100:  # Volume spike (2x average)
+                strength = "Very Strong"
+            elif volume_change > 50:
+                strength = "Strong"
+            elif volume_change > 20:
+                strength = "Moderate"
+            else:
+                strength = "Weak"
+                
+            return {
+                'is_confirming': is_confirming,
+                'volume_change': volume_change,
+                'volume_trend': volume_trend,
+                'strength': strength,
+                'current_volume': current_volume,
+                'average_volume': avg_volume,
+                'price_change': price_change
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing volume confirmation: {str(e)}")
+            return {
+                'is_confirming': False,
+                'volume_change': 0.0,
+                'volume_trend': "Unknown",
+                'strength': "Unknown",
+                'current_volume': 0.0,
+                'average_volume': 0.0,
+                'price_change': 0.0
+            }
+
 # ... (any additional classes or functions)
 
 def cache_result(ttl_seconds: int = 300):

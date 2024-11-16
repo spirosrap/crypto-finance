@@ -112,6 +112,9 @@ class MarketAnalyzer:
                                   all(s['strength'] > 0 for s in self.technical_analysis.signal_history) or \
                                   all(s['strength'] < 0 for s in self.technical_analysis.signal_history) else "Low"
             
+            # Get volume confirmation analysis
+            volume_info = self.technical_analysis.analyze_volume_confirmation(formatted_candles)
+            
             # Create detailed analysis result
             result = {
                 'timestamp': datetime.now(UTC).isoformat(),
@@ -138,7 +141,14 @@ class MarketAnalyzer:
                 'recommendation': self._generate_recommendation(analysis['signal'].signal_type),
                 'signal_stability': signal_stability,
                 'signals_analyzed': len(self.technical_analysis.signal_history),
-                'time_since_last_change': time.time() - (self.technical_analysis.last_signal_time or time.time())
+                'time_since_last_change': time.time() - (self.technical_analysis.last_signal_time or time.time()),
+                'volume_analysis': {
+                    'change': round(volume_info['volume_change'], 1),
+                    'trend': volume_info['volume_trend'],
+                    'strength': volume_info['strength'],
+                    'is_confirming': volume_info['is_confirming'],
+                    'price_change': round(volume_info['price_change'], 1)
+                }
             }
 
             return result
@@ -181,6 +191,7 @@ class MarketAnalyzer:
             current_price = float(self._current_candles[-1]['close'])
             atr = self.technical_analysis.compute_atr(self._current_candles)
             consolidation_info = self.technical_analysis.detect_consolidation(self._current_candles)
+            volume_info = self.technical_analysis.analyze_volume_confirmation(self._current_candles)
             
             # Calculate key levels
             stop_loss_atr = atr * self.ta_config.atr_multiplier
@@ -266,9 +277,21 @@ class MarketAnalyzer:
                 }
             }
             
+            # Add volume analysis message
+            volume_message = f"\nVolume Analysis:\n" \
+                            f"• Volume Change: {volume_info['volume_change']:.1f}%\n" \
+                            f"• Volume Trend: {volume_info['volume_trend']}\n" \
+                            f"• Signal Strength: {volume_info['strength']}\n" \
+                            f"• Price Change: {volume_info['price_change']:.1f}%\n" \
+                            f"• Volume Confirmation: {'Yes' if volume_info['is_confirming'] else 'No'}"
+            
+            # Add volume message to each recommendation
+            for key in recommendations:
+                recommendations[key]['message'] = recommendations[key]['message'] + volume_message
+            
             rec = recommendations.get(signal_type, {
                 'position': 'NEUTRAL',
-                'message': "No clear trading opportunity. Wait for better setup."
+                'message': "No clear trading opportunity. Wait for better setup." + volume_message
             })
             
             # Add consolidation information if relevant
