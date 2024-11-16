@@ -1351,6 +1351,14 @@ class TechnicalAnalysis:
                 'volume_confirmed': False,
                 'price_range': 0.0
             }
+        
+    def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:
+        macd, signal, histogram = talib.MACD(np.array(prices), 
+                                             fastperiod=self.config.macd_fast, 
+                                             slowperiod=self.config.macd_slow, 
+                                             signalperiod=self.config.macd_signal)
+        return macd[-1], signal[-1], histogram[-1]
+
 
     def _adjust_signal_for_consolidation(self, signal_strength: float, consolidation_info: Dict) -> float:
         """Adjust signal strength based on consolidation pattern."""
