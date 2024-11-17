@@ -182,7 +182,7 @@ class MarketAnalyzer:
         return formatted_candles
 
     def _generate_recommendation(self, signal_type: SignalType) -> str:
-        """Generate a detailed trading recommendation including consolidation patterns."""
+        """Generate a detailed trading recommendation including consolidation patterns and bias."""
         try:
             if not self._current_candles:
                 return "No market data available for recommendation"
@@ -192,6 +192,15 @@ class MarketAnalyzer:
             atr = self.technical_analysis.compute_atr(self._current_candles)
             consolidation_info = self.technical_analysis.detect_consolidation(self._current_candles)
             volume_info = self.technical_analysis.analyze_volume_confirmation(self._current_candles)
+            
+            # Calculate market bias
+            rsi = self.technical_analysis.compute_rsi(self.product_id, self._current_candles)
+            macd, signal, histogram = self.technical_analysis.compute_macd(self.product_id, self._current_candles)
+            adx_value, trend_direction = self.technical_analysis.get_trend_strength(self._current_candles)
+            
+            # Calculate price change
+            prices = self.technical_analysis.extract_prices(self._current_candles)
+            price_change = ((prices[-1] - prices[-2]) / prices[-2]) * 100 if len(prices) > 1 else 0.0
             
             # Calculate key levels
             stop_loss_atr = atr * self.ta_config.atr_multiplier
@@ -203,6 +212,47 @@ class MarketAnalyzer:
             resistance_level = consolidation_info['upper_channel']
             support_level = consolidation_info['lower_channel']
             
+            # Determine bias based on multiple indicators
+            bias_factors = []
+            
+            # RSI bias
+            if rsi > 50:
+                bias_factors.append(("Bullish", (rsi - 50) / 50))
+            else:
+                bias_factors.append(("Bearish", (50 - rsi) / 50))
+            
+            # MACD bias
+            if macd > signal:
+                bias_factors.append(("Bullish", abs(histogram / macd) if macd != 0 else 0.1))
+            else:
+                bias_factors.append(("Bearish", abs(histogram / macd) if macd != 0 else 0.1))
+            
+            # Trend direction bias
+            if trend_direction == "Uptrend":
+                bias_factors.append(("Bullish", adx_value / 100))
+            elif trend_direction == "Downtrend":
+                bias_factors.append(("Bearish", adx_value / 100))
+            
+            # Volume trend bias
+            if volume_info['volume_trend'] == "Increasing":
+                if price_change > 0:
+                    bias_factors.append(("Bullish", 0.3))
+                else:
+                    bias_factors.append(("Bearish", 0.3))
+                
+            # Calculate overall bias
+            bullish_strength = sum(strength for direction, strength in bias_factors if direction == "Bullish")
+            bearish_strength = sum(strength for direction, strength in bias_factors if direction == "Bearish")
+            
+            # Determine dominant bias
+            if bullish_strength > bearish_strength:
+                bias = f"Neutral with Bullish Bias (Strength: {(bullish_strength - bearish_strength):.1f})"
+            elif bearish_strength > bullish_strength:
+                bias = f"Neutral with Bearish Bias (Strength: {(bearish_strength - bullish_strength):.1f})"
+            else:
+                bias = "Neutral with No Clear Bias"
+            
+            # Define recommendations dictionary
             recommendations = {
                 SignalType.STRONG_BUY: {
                     'position': 'LONG',
@@ -267,13 +317,20 @@ class MarketAnalyzer:
                     'message': f"Market conditions are neutral:\n"
                               f"• Current Price: ${current_price:.4f}\n"
                               f"• ATR: ${atr:.4f}\n\n"
+                              f"Market Bias:\n"
+                              f"• Current Bias: {bias}\n"
+                              f"• RSI Position: {'Bullish' if rsi > 50 else 'Bearish'} ({rsi:.1f})\n"
+                              f"• MACD Status: {'Bullish' if macd > signal else 'Bearish'}\n"
+                              f"• Trend Direction: {trend_direction}\n"
+                              f"• Volume Trend: {volume_info['volume_trend']}\n\n"
                               f"Key Levels:\n"
                               f"• Support: ${support_level:.4f}\n"
                               f"• Resistance: ${resistance_level:.4f}\n\n"
                               f"Recommendation:\n"
                               f"• Hold existing positions\n"
                               f"• Wait for price to break ${resistance_level:.4f} resistance or\n"
-                              f"  ${support_level:.4f} support with volume confirmation"
+                              f"  ${support_level:.4f} support with volume confirmation\n"
+                              f"• Prepare for potential {'bullish' if bullish_strength > bearish_strength else 'bearish'} move"
                 }
             }
             
