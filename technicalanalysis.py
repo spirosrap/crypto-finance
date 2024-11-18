@@ -1270,73 +1270,97 @@ class TechnicalAnalysis:
 
     def detect_consolidation(self, candles: List[Dict], window: int = 20, threshold: float = 0.02) -> Dict[str, Union[bool, str]]:
         """
-        Detect if the market is in consolidation and identify potential breakouts/breakdowns.
-        
-        Args:
-            candles: List of candle data
-            window: Number of periods to check for consolidation
-            threshold: Maximum price variation threshold for consolidation (2% default)
-        
-        Returns:
-            Dict containing consolidation status and pattern
+        Detect consolidation and analyze volume at support/resistance levels.
         """
         try:
-            # Get recent prices
+            # Get recent prices and volumes
             prices = self.extract_prices(candles[-window:])
             highs = self.extract_prices(candles[-window:], 'high')
             lows = self.extract_prices(candles[-window:], 'low')
             volumes = self.extract_prices(candles[-window:], 'volume')
+            timestamps = [candle['time'] for candle in candles[-window:]]
             
             # Calculate price ranges
-            price_range = (max(highs) - min(lows)) / min(lows)
             current_price = prices[-1]
-            avg_price = sum(prices) / len(prices)
             
-            # Calculate average volume and recent volume
+            # Calculate average volume and volume trend
             avg_volume = sum(volumes[:-3]) / (len(volumes) - 3)
             recent_volume = sum(volumes[-3:]) / 3
             volume_increase = recent_volume > avg_volume * 1.5
             
-            # Define price channels
-            upper_channel = max(highs[:-1])  # Excluding most recent candle
-            lower_channel = min(lows[:-1])   # Excluding most recent candle
-            channel_middle = (upper_channel + lower_channel) / 2
+            # Find recent swing high and low points
+            swing_high = max(highs[-10:])  # Last 10 candles for recent levels
+            swing_low = min(lows[-10:])
             
-            # Check if in consolidation
+            # Calculate price range and determine if consolidating
+            price_range = (swing_high - swing_low) / swing_low
             is_consolidating = price_range <= threshold
             
-            # Detect breakout/breakdown patterns
+            # Initialize pattern and strength
+            pattern = "None"
+            strength = 0.0
+            
+            # Determine pattern if consolidating
             if is_consolidating:
-                if current_price > upper_channel and volume_increase:
+                if current_price > swing_high and volume_increase:
                     pattern = "Breakout"
-                elif current_price < lower_channel and volume_increase:
+                elif current_price < swing_low and volume_increase:
                     pattern = "Breakdown"
                 else:
                     pattern = "Consolidating"
-                    
-                # Calculate consolidation strength
                 strength = 1.0 - (price_range / threshold)
-                
-                return {
-                    'is_consolidating': True,
-                    'pattern': pattern,
-                    'strength': strength,
-                    'upper_channel': upper_channel,
-                    'lower_channel': lower_channel,
-                    'channel_middle': channel_middle,
-                    'volume_confirmed': volume_increase,
-                    'price_range': price_range
-                }
+            
+            # Track rejection events with timestamps
+            rejection_event = None
+            
+            # Check for resistance rejection (in last 5 candles)
+            for i in range(-5, 0):
+                if highs[i] >= swing_high * 0.998:  # Within 0.2% of recent high
+                    if current_price < highs[i]:  # Price pulled back from high
+                        rejection_volume = volumes[i]
+                        rejection_volume_ratio = rejection_volume / avg_volume
+                        rejection_event = {
+                            'type': 'resistance',
+                            'price_level': swing_high,
+                            'timestamp': timestamps[i],
+                            'volume': rejection_volume,
+                            'volume_ratio': rejection_volume_ratio,
+                            'price': current_price,
+                            'distance_from_level': ((swing_high - current_price) / current_price) * 100,
+                            'candles_ago': abs(i)
+                        }
+                        break
+
+            # Check for support bounce (in last 5 candles)
+            if not rejection_event:
+                for i in range(-5, 0):
+                    if lows[i] <= swing_low * 1.002:  # Within 0.2% of recent low
+                        if current_price > lows[i]:  # Price bounced from low
+                            rejection_volume = volumes[i]
+                            rejection_volume_ratio = rejection_volume / avg_volume
+                            rejection_event = {
+                                'type': 'support',
+                                'price_level': swing_low,
+                                'timestamp': timestamps[i],
+                                'volume': rejection_volume,
+                                'volume_ratio': rejection_volume_ratio,
+                                'price': current_price,
+                                'distance_from_level': ((current_price - swing_low) / current_price) * 100,
+                                'candles_ago': abs(i)
+                            }
+                            break
             
             return {
-                'is_consolidating': False,
-                'pattern': "None",
-                'strength': 0.0,
-                'upper_channel': upper_channel,
-                'lower_channel': lower_channel,
-                'channel_middle': channel_middle,
+                'is_consolidating': is_consolidating,
+                'pattern': pattern,
+                'strength': strength,
+                'upper_channel': swing_high,
+                'lower_channel': swing_low,
+                'channel_middle': (swing_high + swing_low) / 2,
                 'volume_confirmed': volume_increase,
-                'price_range': price_range
+                'price_range': price_range,
+                'rejection_event': rejection_event,
+                'avg_volume': avg_volume
             }
             
         except Exception as e:
@@ -1349,7 +1373,9 @@ class TechnicalAnalysis:
                 'lower_channel': 0.0,
                 'channel_middle': 0.0,
                 'volume_confirmed': False,
-                'price_range': 0.0
+                'price_range': 0.0,
+                'rejection_event': None,
+                'avg_volume': 0.0
             }
         
     def compute_macd_from_prices(self, prices: List[float]) -> Tuple[float, float, float]:

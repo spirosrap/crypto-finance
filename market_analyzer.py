@@ -375,6 +375,31 @@ class MarketAnalyzer:
                                           f"• Channel Middle: ${consolidation_info['channel_middle']:.4f}\n" \
                                           f"• Strength: {consolidation_info['strength']*100:.1f}%"
             
+            # Add rejection analysis if detected
+            if consolidation_info.get('rejection_event'):
+                rejection = consolidation_info['rejection_event']
+                # Convert Unix timestamp to datetime
+                rejection_time = datetime.fromtimestamp(float(rejection['timestamp'])).strftime('%Y-%m-%d %H:%M:%S')
+                
+                if rejection['type'] == 'resistance':
+                    consolidation_message += f"\nMost Recent Resistance Rejection:\n" \
+                                           f"• Time: {rejection_time}\n" \
+                                           f"• Rejection Level: ${rejection['price_level']:.4f}\n" \
+                                           f"• Current Price: ${rejection['price']:.4f}\n" \
+                                           f"• Distance from Level: {rejection['distance_from_level']:.1f}%\n" \
+                                           f"• Rejection Volume: {rejection['volume']:.2f}\n" \
+                                           f"• Volume vs Average: {rejection['volume_ratio']:.1f}x\n" \
+                                           f"• Strength: {'Strong' if rejection['volume_ratio'] > 1.5 else 'Moderate'}"
+                else:  # support rejection
+                    consolidation_message += f"\nMost Recent Support Bounce:\n" \
+                                           f"• Time: {rejection_time}\n" \
+                                           f"• Support Level: ${rejection['price_level']:.4f}\n" \
+                                           f"• Current Price: ${rejection['price']:.4f}\n" \
+                                           f"• Distance from Level: {rejection['distance_from_level']:.1f}%\n" \
+                                           f"• Bounce Volume: {rejection['volume']:.2f}\n" \
+                                           f"• Volume vs Average: {rejection['volume_ratio']:.1f}x\n" \
+                                           f"• Strength: {'Strong' if rejection['volume_ratio'] > 1.5 else 'Moderate'}"
+            
             return f"Position: {rec['position']}\n\n{rec['message']}{consolidation_message}"
             
         except Exception as e:
