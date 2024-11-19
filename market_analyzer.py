@@ -378,8 +378,11 @@ class MarketAnalyzer:
             # Add rejection analysis if detected
             if consolidation_info.get('rejection_event'):
                 rejection = consolidation_info['rejection_event']
-                # Convert Unix timestamp to datetime
                 rejection_time = datetime.fromtimestamp(float(rejection['timestamp'])).strftime('%Y-%m-%d %H:%M:%S')
+                
+                confirmation_strength = "Strong" if rejection['confirming_candles'] >= 2 and rejection['volume_confirmation'] else \
+                                      "Moderate" if rejection['confirming_candles'] >= 1 or rejection['volume_confirmation'] else \
+                                      "Weak"
                 
                 if rejection['type'] == 'resistance':
                     consolidation_message += f"\nMost Recent Resistance Rejection:\n" \
@@ -389,7 +392,9 @@ class MarketAnalyzer:
                                            f"• Distance from Level: {rejection['distance_from_level']:.1f}%\n" \
                                            f"• Rejection Volume: {rejection['volume']:.2f}\n" \
                                            f"• Volume vs Average: {rejection['volume_ratio']:.1f}x\n" \
-                                           f"• Strength: {'Strong' if rejection['volume_ratio'] > 1.5 else 'Moderate'}"
+                                           f"• Confirming Candles: {rejection['confirming_candles']}\n" \
+                                           f"• Volume Confirmation: {'Yes' if rejection['volume_confirmation'] else 'No'}\n" \
+                                           f"• Confirmation Strength: {confirmation_strength}"
                 else:  # support rejection
                     consolidation_message += f"\nMost Recent Support Bounce:\n" \
                                            f"• Time: {rejection_time}\n" \
@@ -398,7 +403,9 @@ class MarketAnalyzer:
                                            f"• Distance from Level: {rejection['distance_from_level']:.1f}%\n" \
                                            f"• Bounce Volume: {rejection['volume']:.2f}\n" \
                                            f"• Volume vs Average: {rejection['volume_ratio']:.1f}x\n" \
-                                           f"• Strength: {'Strong' if rejection['volume_ratio'] > 1.5 else 'Moderate'}"
+                                           f"• Confirming Candles: {rejection['confirming_candles']}\n" \
+                                           f"• Volume Confirmation: {'Yes' if rejection['volume_confirmation'] else 'No'}\n" \
+                                           f"• Confirmation Strength: {confirmation_strength}"
             
             return f"Position: {rec['position']}\n\n{rec['message']}{consolidation_message}"
             

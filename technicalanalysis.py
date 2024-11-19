@@ -1277,6 +1277,7 @@ class TechnicalAnalysis:
             prices = self.extract_prices(candles[-window:])
             highs = self.extract_prices(candles[-window:], 'high')
             lows = self.extract_prices(candles[-window:], 'low')
+            closes = self.extract_prices(candles[-window:], 'close')
             volumes = self.extract_prices(candles[-window:], 'volume')
             timestamps = [candle['time'] for candle in candles[-window:]]
             
@@ -1317,8 +1318,22 @@ class TechnicalAnalysis:
             for i in range(-5, 0):
                 if highs[i] >= swing_high * 0.998:  # Within 0.2% of recent high
                     if current_price < highs[i]:  # Price pulled back from high
+                        # Check for confirmation
+                        candles_since_rejection = abs(i)
+                        confirming_candles = 0
+                        volume_confirmation = False
+                        avg_volume_before = np.mean(volumes[i-3:i])  # Average volume before rejection
+                        
+                        # Check subsequent candles for confirmation using closes
+                        for j in range(i+1, 0):
+                            if highs[j] < highs[i] and closes[j] < closes[i]:  # Now closes is defined
+                                confirming_candles += 1
+                            if volumes[j] > avg_volume_before * 1.2:  # 20% above average
+                                volume_confirmation = True
+                        
                         rejection_volume = volumes[i]
                         rejection_volume_ratio = rejection_volume / avg_volume
+                        
                         rejection_event = {
                             'type': 'resistance',
                             'price_level': swing_high,
@@ -1327,7 +1342,10 @@ class TechnicalAnalysis:
                             'volume_ratio': rejection_volume_ratio,
                             'price': current_price,
                             'distance_from_level': ((swing_high - current_price) / current_price) * 100,
-                            'candles_ago': abs(i)
+                            'candles_ago': candles_since_rejection,
+                            'confirming_candles': confirming_candles,
+                            'volume_confirmation': volume_confirmation,
+                            'avg_volume_before': avg_volume_before
                         }
                         break
 
@@ -1336,8 +1354,22 @@ class TechnicalAnalysis:
                 for i in range(-5, 0):
                     if lows[i] <= swing_low * 1.002:  # Within 0.2% of recent low
                         if current_price > lows[i]:  # Price bounced from low
+                            # Check for confirmation
+                            candles_since_bounce = abs(i)
+                            confirming_candles = 0
+                            volume_confirmation = False
+                            avg_volume_before = np.mean(volumes[i-3:i])  # Average volume before bounce
+                            
+                            # Check subsequent candles for confirmation using closes
+                            for j in range(i+1, 0):
+                                if lows[j] > lows[i] and closes[j] > closes[i]:  # Now closes is defined
+                                    confirming_candles += 1
+                                if volumes[j] > avg_volume_before * 1.2:  # 20% above average
+                                    volume_confirmation = True
+                            
                             rejection_volume = volumes[i]
                             rejection_volume_ratio = rejection_volume / avg_volume
+                            
                             rejection_event = {
                                 'type': 'support',
                                 'price_level': swing_low,
@@ -1346,7 +1378,10 @@ class TechnicalAnalysis:
                                 'volume_ratio': rejection_volume_ratio,
                                 'price': current_price,
                                 'distance_from_level': ((current_price - swing_low) / current_price) * 100,
-                                'candles_ago': abs(i)
+                                'candles_ago': candles_since_bounce,
+                                'confirming_candles': confirming_candles,
+                                'volume_confirmation': volume_confirmation,
+                                'avg_volume_before': avg_volume_before
                             }
                             break
             
