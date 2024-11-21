@@ -256,7 +256,7 @@ def main():
         print(f"Timestamp: {scalping_setups['timestamp']}")
         print(f"Product: {args.product_id}")
         print(f"Timeframe: {args.granularity}")
-        print(f"Current Price: ${scalping_setups['current_price']:,.2f}")
+        print(f"Current Price: ${scalping_setups['current_price']:.4f}")
         
         if scalping_setups['opportunities']:
             print("\nActive Setups:")
@@ -268,7 +268,10 @@ def main():
                 print(f"• Strength: {setup['strength']}")
                 print("\nConfirmation Factors:")
                 for factor, value in setup['confirmation'].items():
-                    print(f"  - {factor}: {value}")
+                    if isinstance(value, float):
+                        print(f"  - {factor}: {value:.4f}")
+                    else:
+                        print(f"  - {factor}: {value}")
                 
                 # Calculate risk metrics
                 risk = abs(setup['entry'] - setup['stop_loss'])
@@ -276,8 +279,8 @@ def main():
                 risk_reward = reward / risk if risk > 0 else 0
                 
                 print(f"\nTrade Metrics:")
-                print(f"• Risk: ${risk:.2f}")
-                print(f"• Reward: ${reward:.2f}")
+                print(f"• Risk: ${risk:.4f}")
+                print(f"• Reward: ${reward:.4f}")
                 print(f"• R:R Ratio: {risk_reward:.2f}")
         else:
             print("\nNo scalping opportunities found at the moment")
