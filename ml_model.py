@@ -24,7 +24,7 @@ from sklearn.inspection import permutation_importance
 
 # Add these constants near the top of the file
 GRANULARITY_SETTINGS = {
-    'ONE_MINUTE': {'training_days': 30, 'feature_window': 100},
+    'ONE_MINUTE': {'training_days': 10, 'feature_window': 100},
     'FIVE_MINUTE': {'training_days': 60, 'feature_window': 200},
     'TEN_MINUTE': {'training_days': 75, 'feature_window': 250},
     'FIFTEEN_MINUTE': {'training_days': 90, 'feature_window': 300},
