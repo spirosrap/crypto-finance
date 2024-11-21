@@ -413,6 +413,106 @@ class MarketAnalyzer:
             self.logger.error(f"Error generating recommendation: {str(e)}")
             return "Error generating recommendation"
 
+    def _determine_signal_type(self, signal_strength: float) -> SignalType:
+        """
+        Determine signal type based on signal strength.
+        More sensitive thresholds for more frequent signals.
+        
+        Args:
+            signal_strength: Float value between -10 and 10
+            
+        Returns:
+            SignalType: The determined signal type
+        """
+        if signal_strength >= 4:  # Reduced from 7
+            return SignalType.STRONG_BUY
+        elif signal_strength >= 1.5:  # Reduced from 3
+            return SignalType.BUY
+        elif signal_strength <= -4:  # Changed from -7
+            return SignalType.STRONG_SELL
+        elif signal_strength <= -1.5:  # Changed from -3
+            return SignalType.SELL
+        else:
+            # Check if there's a slight bias even in the "neutral" zone
+            if signal_strength > 0.5:  # Slight bullish bias
+                return SignalType.BUY
+            elif signal_strength < -0.5:  # Slight bearish bias
+                return SignalType.SELL
+            return SignalType.HOLD
+
+    def _calculate_base_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
+        """Calculate the base signal without stability checks."""
+        try:
+            weights = self.set_product_weights()
+            signal_strength = 0.0
+            
+            # RSI Signal (-1 to 1 scale)
+            if 'rsi' in indicators:
+                rsi = indicators['rsi']
+                if rsi > self.config.rsi_overbought:
+                    signal_strength -= weights['rsi']
+                elif rsi < self.config.rsi_oversold:
+                    signal_strength += weights['rsi']
+                else:
+                    # More sensitive to RSI movements around the middle
+                    signal_strength += weights['rsi'] * ((rsi - 50) / 20)  # More sensitive
+
+            # MACD Signal
+            if all(k in indicators for k in ['macd', 'macd_signal', 'macd_histogram']):
+                macd = indicators['macd']
+                macd_signal = indicators['macd_signal']
+                histogram = indicators['macd_histogram']
+                
+                # More sensitive MACD signals
+                if macd > macd_signal:
+                    signal_strength += weights['macd'] * (1 + abs(histogram/macd) * 0.5)
+                else:
+                    signal_strength -= weights['macd'] * (1 + abs(histogram/macd) * 0.5)
+
+            # Bollinger Bands Signal
+            if 'bollinger' in indicators:
+                signal_strength += weights['bollinger'] * indicators['bollinger'] * 1.5  # Increased sensitivity
+
+            # ADX Signal - More sensitive to trend strength
+            if 'adx' in indicators:
+                adx = indicators['adx']
+                if adx > 15:  # Lowered from 20
+                    if indicators.get('trend_direction') == "Uptrend":
+                        signal_strength += weights['adx'] * (adx/40)  # More sensitive
+                    elif indicators.get('trend_direction') == "Downtrend":
+                        signal_strength -= weights['adx'] * (adx/40)
+
+            # MA Crossover Signal
+            if 'ma_crossover' in indicators:
+                signal_strength += weights['ma_crossover'] * indicators['ma_crossover'] * 1.25
+
+            # Market Condition Adjustment
+            condition_multipliers = {
+                'Bull Market': 1.3,
+                'Bear Market': 0.7,
+                'Bullish': 1.2,
+                'Bearish': 0.8,
+                'Neutral': 1.0
+            }
+            
+            # Apply market condition multiplier
+            multiplier = condition_multipliers.get(market_condition, 1.0)
+            signal_strength *= multiplier
+
+            # Add volume confirmation boost
+            if 'volume_trend' in indicators and indicators['volume_trend'] == "Increasing":
+                signal_strength *= 1.2
+
+            # Normalize signal strength to be between -10 and 10
+            signal_strength = max(min(signal_strength * 1.5, 10), -10)  # Increased sensitivity
+
+            self.logger.debug(f"Base signal strength calculated: {signal_strength}")
+            return signal_strength
+
+        except Exception as e:
+            self.logger.error(f"Error calculating base signal: {str(e)}")
+            return 0.0
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Crypto Market Analyzer')

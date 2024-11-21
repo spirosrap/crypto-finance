@@ -1,10 +1,10 @@
 from coinbase.rest import RESTClient
-from coinbase.rest import portfolios, products, orders
+from coinbase.rest import portfolios, products, orders, market_data
 from datetime import datetime, timedelta
 import time
 import uuid
 import logging
-from typing import Tuple
+from typing import Tuple, List
 from historicaldata import HistoricalData  # Import the new class
 
 class CoinbaseService:
@@ -16,6 +16,7 @@ class CoinbaseService:
         self.BRACKET_ORDER_TAKE_PROFIT_MULTIPLIER = 1.02
         self.BRACKET_ORDER_STOP_LOSS_MULTIPLIER = 0.98
         self.historical_data = HistoricalData(self.client)  # Initialize HistoricalData
+        self.logger = logging.getLogger(__name__)
 
     def get_portfolio_info(self):
         ports = portfolios.get_portfolios(self.client)["portfolios"]
@@ -159,5 +160,43 @@ class CoinbaseService:
             logger.info(f"Failed to place order. Retrying in {self.RETRY_DELAY_SECONDS} seconds...")
             time.sleep(self.RETRY_DELAY_SECONDS)
         logger.info("Max retries reached. Unable to place bracket order.")
+
+    def get_trading_pairs(self) -> List[str]:
+        """
+        Get list of available trading pairs from Coinbase.
+        
+        Returns:
+            List[str]: List of available trading pairs (e.g., ['BTC-USDC', 'ETH-USDC', ...])
+        """
+        try:
+            # Get all products using the public endpoint
+            response = self.client.get_public_products()
+            
+            # Filter for active USDC pairs
+            usdc_pairs = []
+            
+            if 'products' in response:
+                for product in response['products']:
+                    # Check if product is active and is a USDC pair
+                    if (product['quote_currency_id'] == 'USDC' and 
+                        product['status'] == 'online' and 
+                        not product.get('is_disabled', False) and
+                        not product.get('trading_disabled', False)):
+                        usdc_pairs.append(product['product_id'])
+            
+            # Sort pairs alphabetically
+            usdc_pairs.sort()
+            
+            self.logger.info(f"Found {len(usdc_pairs)} active USDC trading pairs")
+            
+            # Print first few pairs for verification
+            if usdc_pairs:
+                self.logger.debug(f"Sample pairs: {', '.join(usdc_pairs[:5])}")
+            
+            return usdc_pairs
+            
+        except Exception as e:
+            self.logger.error(f"Error getting trading pairs: {str(e)}")
+            return []
 
     # ... other existing methods ...
