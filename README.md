@@ -626,3 +626,67 @@ if analysis['signal'] == 'LONG':
 ### Warning
 
 Scalping requires extreme attention to detail and quick decision-making. This strategy involves frequent trading and can result in significant transaction costs. It is recommended only for experienced traders who understand the risks and have tested their strategy thoroughly in a paper trading environment.
+
+
+# Memecoin Analyzer
+
+A Python-based tool for analyzing and monitoring memecoin opportunities in the cryptocurrency market. This tool tracks social metrics, price movements, and various other indicators to help identify potential memecoin trading opportunities.
+
+## Features
+
+- Real-time monitoring of popular memecoins (DOGE, SHIB, PEPE, FLOKI, BONK)
+- Social media metrics analysis (Twitter, Reddit, Telegram)
+- Price momentum and volume analysis
+- Pump pattern detection
+- Risk level assessment
+- Opportunity scoring system
+- Continuous monitoring with customizable intervals
+
+## Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/memecoin-analyzer.git
+cd memecoin-analyzer
+```
+
+2. Install required dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+Run the analyzer:
+```bash
+python memecoin_analyzer.py
+```
+
+The tool will start monitoring memecoin opportunities and display reports at regular intervals.
+
+### Sample Output
+
+```
+==================================================
+Memecoin Opportunities Report - 2024-03-21 14:30:00
+==================================================
+
+Coin: DOGE (Dogecoin)
+Price: $0.12345678
+24h Change: 5.43%
+24h Volume: $1,234,567.89
+Social Score: 75.50
+Risk Level: MEDIUM
+Opportunity Score: 65.32
+------------------------------
+```
+
+## Metrics Explained
+
+- **Social Score**: Weighted combination of Twitter followers, Reddit subscribers, and Telegram members
+- **Risk Level**: Categorized as VERY LOW, LOW, MEDIUM, HIGH, or VERY HIGH based on price volatility, volume, and social metrics
+- **Opportunity Score**: Overall score (0-100) considering price action, volume, and social engagement
+
+## Disclaimer
+
+This tool is for informational purposes only. Cryptocurrency trading involves substantial risk, and memecoins are particularly volatile. Always conduct your own research before making investment decisions.
