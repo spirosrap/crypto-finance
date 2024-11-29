@@ -269,20 +269,36 @@ The bot combines multiple analysis methods for trading decisions:
 
 ## Market Analyzer
 
-The Market Analyzer is a powerful command-line tool that provides real-time technical analysis and trading signals for various cryptocurrency pairs. It analyzes market conditions using multiple technical indicators and generates detailed trading recommendations.
+The Market Analyzer is a sophisticated tool for analyzing cryptocurrency markets and generating trading signals based on technical analysis. It provides comprehensive market analysis including:
 
-### Market Analyzer Features
+### Features
 
-- Real-time market analysis with multiple technical indicators
-- Support for multiple cryptocurrency pairs
-- Configurable time intervals (granularity)
-- Risk metrics calculation
-- Market condition assessment
-- Confidence-based signals
-- Detailed recommendations
-- Performance monitoring
+- **Technical Indicators Analysis**
+  - RSI (Relative Strength Index)
+  - MACD (Moving Average Convergence Divergence)
+  - Bollinger Bands
+  - ADX (Average Directional Index)
+  - Volume Analysis
 
-### Market Analyzer Usage
+- **Market Condition Detection**
+  - Trend Analysis
+  - Support/Resistance Levels
+  - Consolidation Patterns
+  - Breakout/Breakdown Detection
+
+- **Trading Signals**
+  - Strong Buy/Sell Signals
+  - Conservative Buy/Sell Recommendations
+  - Hold/Neutral Signals
+  - Signal Confidence Levels
+
+- **Risk Management**
+  - Stop Loss Recommendations
+  - Take Profit Targets
+  - Position Sizing Suggestions
+  - Risk-Reward Ratios
+
+### Usage
 
 1. **Basic Usage:**
    ```bash
@@ -437,3 +453,176 @@ analysis = analyzer.get_market_signal()
 signal = analysis['signal']
 confidence = analysis['confidence']
 ```
+
+## Scalping Analyzer
+
+The Scalping Analyzer is a specialized tool designed for high-frequency trading and short-term price movements. It provides rapid analysis and real-time signals optimized for scalping strategies.
+
+### Features
+
+- **Real-Time Analysis**
+  - Price action patterns
+  - Volume profile analysis
+  - Order book depth
+  - Market microstructure
+  - Tick-by-tick data analysis
+
+- **Scalping-Specific Indicators**
+  - Momentum indicators (1-5 minute timeframes)
+  - Volume weighted average price (VWAP)
+  - Order flow analysis
+  - Price momentum index
+  - Market depth imbalances
+  - Tick volume analysis
+
+- **Risk Management Tools**
+  - Dynamic stop-loss calculation
+  - Quick take-profit targets
+  - Position sizing calculator
+  - Risk exposure monitor
+  - Slippage estimation
+  - Spread analysis
+
+- **Market Execution Analysis**
+  - Entry/exit point optimization
+  - Spread cost analysis
+  - Execution speed monitoring
+  - Liquidity analysis
+  - Trading cost estimation
+
+### Usage
+
+1. **Basic Usage:**
+   ```bash
+   python scalping_analyzer.py
+   ```
+
+2. **Custom Configuration:**
+   ```bash
+   python scalping_analyzer.py --product_id ETH-USDC --interval ONE_MINUTE --risk 0.01
+   ```
+
+3. **Advanced Options:**
+   ```bash
+   python scalping_analyzer.py --depth 10 --volume_threshold 1.5 --momentum_period 3
+   ```
+
+### Supported Timeframes
+
+- ONE_MINUTE
+- THREE_MINUTE
+- FIVE_MINUTE
+
+### Key Components
+
+1. **Price Action Analysis**
+   - Support/resistance levels
+   - Price patterns
+   - Momentum shifts
+   - Volatility breaks
+   - Range analysis
+
+2. **Volume Analysis**
+   - Volume spikes
+   - Buy/sell pressure
+   - Volume profile
+   - Cumulative volume delta
+   - Time and sales analysis
+
+3. **Order Book Analysis**
+   - Depth imbalances
+   - Large orders detection
+   - Spread analysis
+   - Liquidity pools
+   - Order flow patterns
+
+4. **Risk Parameters**
+   - Maximum position size
+   - Per-trade risk limit
+   - Maximum drawdown
+   - Quick exit rules
+   - Profit targets
+
+### Sample Output
+
+```
+=== Scalping Analysis Report ===
+Timestamp: 2024-11-15T14:30:15.123456
+Product: ETH-USDC
+Current Price: $2,456.78
+
+Market Conditions:
+  Spread: 0.12
+  Depth Ratio: 1.45
+  Volume Delta: +2500
+  Momentum: Strong Bullish
+  
+Quick Stats:
+  1min ROC: +0.15%
+  Volume Spike: 2.3x
+  Depth Imbalance: 65% Buy
+  
+Entry Zones:
+  Support 1: $2,455.50
+  Support 2: $2,454.25
+  Resistance 1: $2,458.00
+  Resistance 2: $2,459.50
+
+Risk Parameters:
+  Stop Loss: $2,454.00 (-0.11%)
+  Take Profit 1: $2,458.00 (+0.05%)
+  Take Profit 2: $2,459.50 (+0.11%)
+  Max Position: 0.75 ETH
+```
+
+### Best Practices for Scalping
+
+1. **Pre-Trading Checklist**
+   - Check spread levels
+   - Verify sufficient liquidity
+   - Confirm market volatility
+   - Review recent price action
+   - Check trading costs
+
+2. **Risk Management**
+   - Use tight stop losses
+   - Define clear exit points
+   - Limit position sizes
+   - Monitor cumulative risk
+   - Track win/loss ratio
+
+3. **Execution Guidelines**
+   - Wait for confirmation signals
+   - Monitor order book changes
+   - Use limit orders when possible
+   - Avoid high spread periods
+   - Exit quickly if wrong
+
+### Integration Example
+
+```python
+from scalping_analyzer import ScalpingAnalyzer
+
+# Initialize analyzer
+scalper = ScalpingAnalyzer(
+    product_id='ETH-USDC',
+    interval='ONE_MINUTE',
+    risk_per_trade=0.01,
+    max_position_size=1.0
+)
+
+# Get real-time analysis
+analysis = scalper.get_scalping_signals()
+
+# Check for trading opportunities
+if analysis['signal'] == 'LONG':
+    entry_price = analysis['entry_price']
+    stop_loss = analysis['stop_loss']
+    take_profit = analysis['take_profit']
+    position_size = analysis['position_size']
+    # Execute trade...
+```
+
+### Warning
+
+Scalping requires extreme attention to detail and quick decision-making. This strategy involves frequent trading and can result in significant transaction costs. It is recommended only for experienced traders who understand the risks and have tested their strategy thoroughly in a paper trading environment.
