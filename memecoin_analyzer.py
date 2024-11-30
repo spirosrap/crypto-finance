@@ -6,11 +6,13 @@ import time
 from typing import Dict, List, Tuple
 import logging
 from concurrent.futures import ThreadPoolExecutor
+import tweepy
+from config import BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET
 
 class MemecoinAnalyzer:
-    def __init__(self):
+    def __init__(self, use_twitter: bool = False):
         self.coingecko_api = "https://api.coingecko.com/api/v3"
-        self.twitter_trending = "https://api.twitter.com/2/trending"  # You'll need Twitter API credentials
+        self.twitter_trending = "https://api.twitter.com/2/trending"
         self.known_memecoins = {
             "dogecoin": "DOGE",
             "shiba-inu": "SHIB",
@@ -19,6 +21,8 @@ class MemecoinAnalyzer:
             "bonk": "BONK"
         }
         self.logger = self._setup_logger()
+        self.use_twitter = use_twitter
+        self.twitter_api = self._setup_twitter_api() if use_twitter else None
 
     def _setup_logger(self) -> logging.Logger:
         logger = logging.getLogger('MemecoinAnalyzer')
@@ -28,6 +32,21 @@ class MemecoinAnalyzer:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         return logger
+
+    def _setup_twitter_api(self) -> tweepy.Client:
+        """Setup Twitter API v2 authentication"""
+        try:
+            client = tweepy.Client(
+                bearer_token=BEARER_TOKEN,
+                consumer_key=CONSUMER_KEY,
+                consumer_secret=CONSUMER_SECRET,
+                access_token=ACCESS_TOKEN,
+                access_token_secret=ACCESS_TOKEN_SECRET
+            )
+            return client
+        except Exception as e:
+            self.logger.error(f"Error setting up Twitter API: {str(e)}")
+            return None
 
     def get_memecoin_data(self, coin_id: str) -> Dict:
         """Fetch detailed data for a specific memecoin"""
@@ -97,9 +116,54 @@ class MemecoinAnalyzer:
         # Suspicious patterns
         return vol_change > 3 and price_change > 0.3  # 300% volume increase and 30% price increase
 
+    def get_twitter_trending(self) -> Dict[str, int]:
+        """Analyze Twitter mentions for memecoins using search"""
+        try:
+            if not self.twitter_api:
+                return {}
+
+            coin_mentions = {symbol.lower(): 0 for symbol in self.known_memecoins.values()}
+            
+            # Search for each memecoin in the last 24 hours
+            for coin_id, symbol in self.known_memecoins.items():
+                try:
+                    # Search using both coin ID and symbol
+                    search_terms = [
+                        f"#{symbol.lower()}", 
+                        f"#{coin_id.replace('-', '')}", 
+                        symbol.lower(),
+                        coin_id
+                    ]
+                    
+                    total_mentions = 0
+                    for term in search_terms:
+                        # Use Twitter API v2 search endpoint
+                        response = self.twitter_api.search_recent_tweets(
+                            query=term,
+                            max_results=5,
+                            tweet_fields=['public_metrics']
+                        )
+                        
+                        if response and response.data:
+                            total_mentions += len(response.data)
+                    
+                    coin_mentions[symbol.lower()] = total_mentions
+                    time.sleep(2)  # Rate limiting precaution
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error searching for {symbol}: {str(e)}")
+                    continue
+            
+            return coin_mentions
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching Twitter data: {str(e)}")
+            return {}
+
     def find_opportunities(self) -> List[Dict]:
         """Find potential memecoin opportunities"""
         opportunities = []
+        twitter_mentions = self.get_twitter_trending() if self.use_twitter else {}
         
         for coin_id, symbol in self.known_memecoins.items():
             try:
@@ -121,6 +185,9 @@ class MemecoinAnalyzer:
                 # Analyze metrics
                 social_metrics = self.analyze_social_metrics(coin_data)
                 
+                # Add Twitter trending data to opportunity calculation only if enabled
+                mentions = twitter_mentions.get(symbol.lower(), 0) if self.use_twitter else 0
+                
                 # Calculate scores with safety checks
                 opportunity = {
                     'symbol': symbol,
@@ -137,10 +204,15 @@ class MemecoinAnalyzer:
                     'opportunity_score': self._calculate_opportunity_score(
                         float(price_change_24h),
                         float(volume_24h),
-                        float(social_metrics['social_score'])
+                        float(social_metrics['social_score']),
+                        mentions if self.use_twitter else 0
                     )
                 }
                 
+                # Only add Twitter mentions if Twitter is enabled
+                if self.use_twitter:
+                    opportunity['twitter_mentions'] = mentions
+
                 opportunities.append(opportunity)
                 
             except Exception as e:
@@ -168,18 +240,29 @@ class MemecoinAnalyzer:
             self.logger.error(f"Error calculating risk level: {str(e)}")
             return "UNKNOWN"
 
-    def _calculate_opportunity_score(self, price_change: float, volume: float, social_score: float) -> float:
-        """Calculate overall opportunity score"""
+    def _calculate_opportunity_score(self, price_change: float, volume: float, 
+                                  social_score: float, twitter_mentions: int = 0) -> float:
+        """Calculate overall opportunity score including Twitter trends if enabled"""
         try:
             volume_score = min(float(volume) / 1e6, 100)  # Cap at 100
             price_score = min(max(float(price_change), -100), 100)  # Cap between -100 and 100
             
-            # Weighted average of different factors
-            score = (
-                price_score * 0.4 +
-                volume_score * 0.3 +
-                float(social_score) * 0.3
-            )
+            if self.use_twitter:
+                twitter_score = min(twitter_mentions / 1000, 100)  # Normalize Twitter mentions
+                # Weighted average with Twitter
+                score = (
+                    price_score * 0.35 +
+                    volume_score * 0.25 +
+                    float(social_score) * 0.25 +
+                    twitter_score * 0.15
+                )
+            else:
+                # Weighted average without Twitter
+                score = (
+                    price_score * 0.4 +
+                    volume_score * 0.3 +
+                    float(social_score) * 0.3
+                )
             
             return round(max(0, score), 2)  # Ensure non-negative score
         except Exception as e:
@@ -219,11 +302,14 @@ class MemecoinAnalyzer:
             print(f"24h Volume: ${opp['volume_24h']:,.2f}")
             print(f"Social Score: {opp['social_score']:.2f}")
             print(f"Risk Level: {opp['risk_level']}")
+            if self.use_twitter and 'twitter_mentions' in opp:
+                print(f"Twitter Mentions: {opp['twitter_mentions']:,}")
             print(f"Opportunity Score: {opp['opportunity_score']}")
             print("-"*30)
 
 def main():
-    analyzer = MemecoinAnalyzer()
+    # Create analyzer with Twitter disabled by default
+    analyzer = MemecoinAnalyzer(use_twitter=False)
     analyzer.monitor_opportunities()
 
 if __name__ == "__main__":
