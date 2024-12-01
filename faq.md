@@ -67,13 +67,38 @@ How the bot interprets crossovers:
 - **Volume Validation**: Considers volume for signal strength
 
 8. How can I adjust the bot's parameters?
-The bot's configuration can be customized in the `config.py` file:
-- **Indicator Settings**: Periods, thresholds, and weights
-- **Risk Parameters**: Position sizing, stop-loss levels, maximum drawdown
-- **Trading Pairs**: Add or remove cryptocurrency pairs
-- **Timeframes**: Adjust analysis timeframes
-- **Strategy Weights**: Modify importance of different signals
-- **Backtesting**: Test parameter changes before live trading
+The bot's configuration can be customized in several key files:
+
+- **high_frequency_strategy.py**: Contains trading strategy parameters
+  ```python
+  # Example strategy parameters
+  RSI_PERIOD = 14
+  MACD_FAST = 12
+  MACD_SLOW = 26
+  BOLLINGER_PERIOD = 20
+  ```
+
+- **continuous_market_monitor.py**: Contains risk management and monitoring settings
+  ```python
+  # Example risk parameters
+  MAX_POSITION_SIZE = 0.1  # 10% of portfolio
+  STOP_LOSS_PERCENTAGE = 0.05  # 5% stop loss
+  MAX_DRAWDOWN = 0.25  # 25% maximum drawdown
+  ```
+
+- **backtester.py**: Contains backtesting parameters
+  ```python
+  # Example backtesting settings
+  BACKTEST_TIMEFRAME = '1h'
+  INITIAL_CAPITAL = 10000
+  ```
+
+- **config.py**: Contains only API keys and external service configurations
+  ```python
+  # API configurations only
+  COINBASE_API_KEY = 'your_api_key'
+  COINBASE_SECRET = 'your_secret'
+  ```
 
 Note: Always thoroughly test parameter changes in a backtesting environment before applying them to live trading.
 
