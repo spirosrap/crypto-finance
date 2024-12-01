@@ -67,7 +67,7 @@ How the bot interprets crossovers:
 - **Volume Validation**: Considers volume for signal strength
 
 8. How can I adjust the bot's parameters?
-The bot's configuration can be customized in the TechnicalAnalysisConfig class:
+The bot's configuration can be customized in the `config.py` file:
 - **Indicator Settings**: Periods, thresholds, and weights
 - **Risk Parameters**: Position sizing, stop-loss levels, maximum drawdown
 - **Trading Pairs**: Add or remove cryptocurrency pairs
