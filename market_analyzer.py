@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta, UTC
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis, SignalType, MarketCondition, TechnicalAnalysisConfig
@@ -8,6 +8,8 @@ from historicaldata import HistoricalData
 from coinbase.rest import RESTClient
 import argparse
 import time
+import numpy as np
+from enum import Enum
 
 # Add valid choices for granularity and products
 VALID_GRANULARITIES = [
@@ -33,6 +35,15 @@ VALID_PRODUCTS = [
     "DOT-USDC",
     "UNI-USDC"
 ]
+
+class PatternType(Enum):
+    DOUBLE_TOP = "Double Top"
+    DOUBLE_BOTTOM = "Double Bottom"
+    HEAD_SHOULDERS = "Head and Shoulders"
+    INV_HEAD_SHOULDERS = "Inverse Head and Shoulders"
+    TRIANGLE = "Triangle"
+    WEDGE = "Wedge"
+    NONE = "None"
 
 class MarketAnalyzer:
     """
@@ -65,6 +76,17 @@ class MarketAnalyzer:
         
         self._current_candles = []
         self.logger = logging.getLogger(__name__)
+        
+        # Add new attributes
+        self.pattern_memory = []
+        self.sentiment_scores = []
+        self.volatility_history = []
+        self.max_pattern_memory = 10
+        
+        # Initialize risk parameters
+        self.base_risk = 0.02  # 2% base risk
+        self.max_risk = 0.04   # 4% maximum risk
+        self.min_risk = 0.01   # 1% minimum risk
 
     def get_market_signal(self) -> Dict:
         """
@@ -151,6 +173,29 @@ class MarketAnalyzer:
                 }
             }
 
+            # Add pattern recognition
+            patterns = self.detect_chart_patterns(self._current_candles)
+            result['patterns'] = {
+                'type': patterns['type'].value,
+                'confidence': patterns['confidence'],
+                'target': patterns['target'],
+                'stop_loss': patterns['stop_loss']
+            }
+            
+            # Add dynamic risk calculation
+            dynamic_risk = self.calculate_dynamic_risk(self._current_candles)
+            result['risk_metrics']['dynamic_risk'] = dynamic_risk
+            
+            # Add pattern history
+            result['pattern_history'] = [
+                {
+                    'timestamp': p['timestamp'].isoformat(),
+                    'pattern': p['pattern']['type'].value,
+                    'confidence': p['pattern']['confidence']
+                }
+                for p in self.pattern_memory[-5:]  # Last 5 patterns
+            ]
+            
             return result
 
         except Exception as e:
@@ -512,6 +557,150 @@ class MarketAnalyzer:
         except Exception as e:
             self.logger.error(f"Error calculating base signal: {str(e)}")
             return 0.0
+
+    def detect_chart_patterns(self, candles: List[Dict]) -> Dict:
+        """Detect common chart patterns in the price data."""
+        try:
+            prices = np.array([c['close'] for c in candles])
+            highs = np.array([c['high'] for c in candles])
+            lows = np.array([c['low'] for c in candles])
+            
+            patterns = {
+                'type': PatternType.NONE,
+                'confidence': 0.0,
+                'target': None,
+                'stop_loss': None
+            }
+            
+            # Double Top Detection
+            if self._is_double_top(highs[-30:]):
+                patterns['type'] = PatternType.DOUBLE_TOP
+                patterns['confidence'] = 0.8
+                patterns['target'] = min(lows[-30:])
+                patterns['stop_loss'] = max(highs[-30:]) + (max(highs[-30:]) - min(lows[-30:])) * 0.1
+            
+            # Double Bottom Detection
+            elif self._is_double_bottom(lows[-30:]):
+                patterns['type'] = PatternType.DOUBLE_BOTTOM
+                patterns['confidence'] = 0.8
+                patterns['target'] = max(highs[-30:])
+                patterns['stop_loss'] = min(lows[-30:]) - (max(highs[-30:]) - min(lows[-30:])) * 0.1
+            
+            # Add pattern to memory
+            if patterns['type'] != PatternType.NONE:
+                self.pattern_memory.append({
+                    'timestamp': datetime.now(UTC),
+                    'pattern': patterns
+                })
+                
+                # Maintain pattern memory size
+                if len(self.pattern_memory) > self.max_pattern_memory:
+                    self.pattern_memory.pop(0)
+            
+            return patterns
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting chart patterns: {str(e)}")
+            return {'type': PatternType.NONE, 'confidence': 0.0}
+
+    def calculate_dynamic_risk(self, candles: List[Dict]) -> float:
+        """Calculate dynamic risk based on market volatility."""
+        try:
+            # Calculate current volatility
+            returns = np.diff(np.log([c['close'] for c in candles]))
+            current_vol = np.std(returns) * np.sqrt(252)  # Annualized volatility
+            
+            # Store volatility
+            self.volatility_history.append(current_vol)
+            if len(self.volatility_history) > 30:
+                self.volatility_history.pop(0)
+            
+            # Calculate relative volatility
+            avg_vol = np.mean(self.volatility_history)
+            vol_ratio = current_vol / avg_vol if avg_vol != 0 else 1
+            
+            # Adjust risk based on volatility
+            dynamic_risk = self.base_risk * (1 / vol_ratio)
+            
+            # Constrain risk within bounds
+            return max(min(dynamic_risk, self.max_risk), self.min_risk)
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating dynamic risk: {str(e)}")
+            return self.base_risk
+
+    def _is_double_top(self, prices: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect double top pattern."""
+        try:
+            peaks = self._find_peaks(prices)
+            if len(peaks) < 2:
+                return False
+                
+            # Get last two peaks
+            last_peaks = peaks[-2:]
+            peak_prices = prices[last_peaks]
+            
+            # Check if peaks are within threshold
+            price_diff = abs(peak_prices[0] - peak_prices[1]) / peak_prices[0]
+            time_diff = last_peaks[1] - last_peaks[0]
+            
+            return price_diff < threshold and 5 <= time_diff <= 20
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting double top: {str(e)}")
+            return False
+
+    def _is_double_bottom(self, prices: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect double bottom pattern."""
+        try:
+            troughs = self._find_troughs(prices)
+            if len(troughs) < 2:
+                return False
+                
+            # Get last two troughs
+            last_troughs = troughs[-2:]
+            trough_prices = prices[last_troughs]
+            
+            # Check if troughs are within threshold
+            price_diff = abs(trough_prices[0] - trough_prices[1]) / trough_prices[0]
+            time_diff = last_troughs[1] - last_troughs[0]
+            
+            return price_diff < threshold and 5 <= time_diff <= 20
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting double bottom: {str(e)}")
+            return False
+
+    def _find_peaks(self, prices: np.ndarray, window: int = 5) -> List[int]:
+        """Find peaks in price data."""
+        peaks = []
+        for i in range(window, len(prices) - window):
+            if all(prices[i] > prices[i-j] for j in range(1, window+1)) and \
+               all(prices[i] > prices[i+j] for j in range(1, window+1)):
+                peaks.append(i)
+        return peaks
+
+    def _find_troughs(self, prices: np.ndarray, window: int = 5) -> List[int]:
+        """Find troughs in price data."""
+        troughs = []
+        for i in range(window, len(prices) - window):
+            if all(prices[i] < prices[i-j] for j in range(1, window+1)) and \
+               all(prices[i] < prices[i+j] for j in range(1, window+1)):
+                troughs.append(i)
+        return troughs
+
+    def _generate_error_response(self) -> Dict:
+        """Generate standardized error response."""
+        return {
+            'error': 'Analysis error',
+            'timestamp': datetime.now(UTC).isoformat(),
+            'product_id': self.product_id,
+            'signal': 'HOLD',
+            'position': 'NEUTRAL',
+            'confidence': 0.0,
+            'patterns': {'type': PatternType.NONE.value, 'confidence': 0.0},
+            'risk_metrics': {'dynamic_risk': self.base_risk}
+        }
 
 def parse_arguments():
     """Parse command line arguments."""
