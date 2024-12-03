@@ -750,11 +750,10 @@ def list_options():
 def main():
     # Configure logging with more detail
     logging.basicConfig(
-        level=logging.INFO,  # Change to DEBUG level
+        level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    # Create analyzer instance with command line arguments
     args = parse_arguments()
     
     if args.list_products or args.list_granularities:
@@ -767,34 +766,96 @@ def main():
     )
     
     try:
-        # Get and print market analysis
         analysis = analyzer.get_market_signal()
         
-        # Print formatted results
-        print("\n=== Market Analysis Report ===")
+        # Enhanced formatted output
+        print("\n====== Comprehensive Market Analysis Report ======")
         print(f"Timestamp: {analysis['timestamp']}")
         print(f"Product: {analysis['product_id']}")
-        print(f"Current Price: ${analysis['current_price']:,.2f}")
-        print(f"\nSignal: {analysis['signal']}")
+        print(f"Current Price: ${analysis['current_price']:,.4f}")
+        
+        # Market Overview Section
+        print("\n=== Market Overview ===")
+        print(f"Signal: {analysis['signal']}")
         print(f"Position: {analysis['position']}")
         print(f"Confidence: {analysis['confidence']*100:.1f}%")
         print(f"Market Condition: {analysis['market_condition']}")
+        print(f"Signal Stability: {analysis['signal_stability']}")
         
-        if 'indicators' in analysis:
-            print("\nKey Indicators:")
-            for name, value in analysis['indicators'].items():
-                print(f"  {name}: {value}")
+        # Technical Indicators Section
+        print("\n=== Technical Indicators ===")
+        indicators = analysis['indicators']
+        print(f"RSI: {indicators['rsi']:.2f} ({'Overbought' if indicators['rsi'] > 70 else 'Oversold' if indicators['rsi'] < 30 else 'Neutral'})")
+        print(f"MACD: {indicators['macd']:.4f}")
+        print(f"MACD Signal: {indicators['macd_signal']:.4f}")
+        print(f"MACD Histogram: {indicators['macd_histogram']:.4f}")
+        print(f"ADX: {indicators['adx']:.2f} ({'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'})")
+        print(f"Trend Direction: {indicators['trend_direction']}")
         
-        if 'risk_metrics' in analysis:
-            print("\nRisk Metrics:")
-            for name, value in analysis['risk_metrics'].items():
-                if isinstance(value, float):
-                    print(f"  {name}: {value:.4f}")
-                else:
-                    print(f"  {name}: {value}")
+        # Bollinger Bands
+        print("\n=== Price Channels ===")
+        print(f"Bollinger Upper: ${indicators['bollinger_upper']:.4f}")
+        print(f"Bollinger Middle: ${indicators['bollinger_middle']:.4f}")
+        print(f"Bollinger Lower: ${indicators['bollinger_lower']:.4f}")
         
-        print(f"\nRecommendation:")
+        # Volume Analysis Section
+        print("\n=== Volume Analysis ===")
+        volume = analysis['volume_analysis']
+        print(f"Volume Change: {volume['change']:.1f}%")
+        print(f"Volume Trend: {volume['trend']}")
+        print(f"Volume Strength: {volume['strength']}")
+        print(f"Price Change: {volume['price_change']:.1f}%")
+        print(f"Volume Confirmation: {'Yes' if volume['is_confirming'] else 'No'}")
+        
+        # Pattern Recognition Section
+        print("\n=== Pattern Analysis ===")
+        patterns = analysis['patterns']
+        print(f"Current Pattern: {patterns['type']}")
+        if patterns['type'] != "None":
+            print(f"Pattern Confidence: {patterns['confidence']*100:.1f}%")
+            if patterns['target']:
+                print(f"Pattern Target: ${patterns['target']:.4f}")
+            if patterns['stop_loss']:
+                print(f"Suggested Stop Loss: ${patterns['stop_loss']:.4f}")
+        
+        # Pattern History
+        print("\n=== Recent Pattern History ===")
+        for pattern in analysis['pattern_history'][-3:]:  # Show last 3 patterns
+            print(f"• {pattern['pattern']} (Confidence: {pattern['confidence']*100:.1f}%) - {pattern['timestamp']}")
+        
+        # Risk Metrics Section
+        print("\n=== Risk Analysis ===")
+        risk = analysis['risk_metrics']
+        print(f"Dynamic Risk Level: {risk['dynamic_risk']*100:.1f}%")
+        if 'volatility' in risk:
+            print(f"Current Volatility: {risk['volatility']*100:.1f}%")
+        if 'risk_reward_ratio' in risk:
+            print(f"Risk/Reward Ratio: {risk['risk_reward_ratio']:.2f}")
+        
+        # Trading Recommendation Section
+        print("\n=== Trading Recommendation ===")
         print(analysis['recommendation'])
+        
+        # Key Levels and Potential Moves
+        print("\n=== Key Levels & Potential Moves ===")
+        atr = indicators.get('atr', (indicators['bollinger_upper'] - indicators['bollinger_lower']) / 4)
+        current_price = analysis['current_price']
+        
+        print(f"Potential Bullish Targets:")
+        print(f"• Conservative: ${current_price * 1.01:.4f} (+1%)")
+        print(f"• Moderate: ${current_price * 1.02:.4f} (+2%)")
+        print(f"• Aggressive: ${current_price * 1.05:.4f} (+5%)")
+        
+        print(f"\nPotential Bearish Targets:")
+        print(f"• Conservative: ${current_price * 0.99:.4f} (-1%)")
+        print(f"• Moderate: ${current_price * 0.98:.4f} (-2%)")
+        print(f"• Aggressive: ${current_price * 0.95:.4f} (-5%)")
+        
+        print(f"\nKey Support/Resistance Levels:")
+        print(f"• Major Resistance: ${indicators['bollinger_upper']:.4f}")
+        print(f"• Minor Resistance: ${(current_price + atr):.4f}")
+        print(f"• Minor Support: ${(current_price - atr):.4f}")
+        print(f"• Major Support: ${indicators['bollinger_lower']:.4f}")
 
     except Exception as e:
         print(f"\nError running market analysis: {str(e)}")
