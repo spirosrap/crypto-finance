@@ -851,6 +851,78 @@ def main():
         print(f"• Moderate: ${current_price * 0.98:.4f} (-2%)")
         print(f"• Aggressive: ${current_price * 0.95:.4f} (-5%)")
         
+        # Add directional bias analysis
+        print("\n=== Directional Bias ===")
+        bullish_points = 0
+        bearish_points = 0
+        
+        # RSI Analysis
+        if indicators['rsi'] > 50:
+            bullish_points += 1
+        else:
+            bearish_points += 1
+            
+        # MACD Analysis
+        if indicators['macd'] > indicators['macd_signal']:
+            bullish_points += 1
+        else:
+            bearish_points += 1
+            
+        # Trend Direction
+        if indicators['trend_direction'] == "Uptrend":
+            bullish_points += 2
+        elif indicators['trend_direction'] == "Downtrend":
+            bearish_points += 2
+            
+        # Volume Analysis
+        if volume['is_confirming'] and volume['price_change'] > 0:
+            bullish_points += 1
+        elif volume['is_confirming'] and volume['price_change'] < 0:
+            bearish_points += 1
+            
+        # Price relative to Bollinger Bands
+        if current_price > indicators['bollinger_middle']:
+            bullish_points += 1
+        else:
+            bearish_points += 1
+            
+        # Calculate confidence percentage
+        total_points = bullish_points + bearish_points
+        bullish_confidence = (bullish_points / total_points * 100) if total_points > 0 else 50
+        bearish_confidence = (bearish_points / total_points * 100) if total_points > 0 else 50
+        
+        print("Suggested Direction:")
+        if bullish_points > bearish_points:
+            print(f"BULLISH with {bullish_confidence:.1f}% confidence")
+            print("Supporting factors:")
+            if indicators['rsi'] > 50:
+                print(f"• RSI above midpoint ({indicators['rsi']:.1f})")
+            if indicators['macd'] > indicators['macd_signal']:
+                print("• MACD above signal line")
+            if indicators['trend_direction'] == "Uptrend":
+                print("• Established uptrend")
+            if volume['is_confirming'] and volume['price_change'] > 0:
+                print("• Volume confirming upward movement")
+            if current_price > indicators['bollinger_middle']:
+                print("• Price above BB middle band")
+        elif bearish_points > bullish_points:
+            print(f"BEARISH with {bearish_confidence:.1f}% confidence")
+            print("Supporting factors:")
+            if indicators['rsi'] < 50:
+                print(f"• RSI below midpoint ({indicators['rsi']:.1f})")
+            if indicators['macd'] < indicators['macd_signal']:
+                print("• MACD below signal line")
+            if indicators['trend_direction'] == "Downtrend":
+                print("• Established downtrend")
+            if volume['is_confirming'] and volume['price_change'] < 0:
+                print("• Volume confirming downward movement")
+            if current_price < indicators['bollinger_middle']:
+                print("• Price below BB middle band")
+        else:
+            print("NEUTRAL - No clear directional bias")
+            print("• Consider waiting for stronger directional signals")
+            print("• Monitor for breakout of recent trading range")
+            
         print(f"\nKey Support/Resistance Levels:")
         print(f"• Major Resistance: ${indicators['bollinger_upper']:.4f}")
         print(f"• Minor Resistance: ${(current_price + atr):.4f}")
