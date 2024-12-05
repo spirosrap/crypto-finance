@@ -851,8 +851,8 @@ def main():
         print(f"• Moderate: ${current_price * 0.98:.4f} (-2%)")
         print(f"• Aggressive: ${current_price * 0.95:.4f} (-5%)")
         
-        # Add directional bias analysis
-        print("\n=== Directional Bias ===")
+        # Add directional bias analysis with move specifics
+        print("\n=== Directional Bias & Move Analysis ===")
         bullish_points = 0
         bearish_points = 0
         
@@ -891,43 +891,76 @@ def main():
         bullish_confidence = (bullish_points / total_points * 100) if total_points > 0 else 50
         bearish_confidence = (bearish_points / total_points * 100) if total_points > 0 else 50
         
-        print("Suggested Direction:")
+        # Calculate move specifics
+        atr = indicators.get('atr', (indicators['bollinger_upper'] - indicators['bollinger_lower']) / 4)
+        bb_width = indicators['bollinger_upper'] - indicators['bollinger_lower']
+        price_volatility = bb_width / indicators['bollinger_middle']
+        
+        # Define move characteristics
+        move_speed = "Rapid" if price_volatility > 0.03 else "Gradual"
+        move_strength = "Strong" if abs(indicators['macd']) > abs(indicators['macd_signal']) * 1.5 else "Moderate"
+        
+        print("Move Analysis:")
         if bullish_points > bearish_points:
             print(f"BULLISH with {bullish_confidence:.1f}% confidence")
-            print("Supporting factors:")
+            print("\nMove Characteristics:")
+            print(f"• Expected Move Type: {move_speed} {move_strength} Advance")
+            print(f"• Momentum: {'Accelerating' if indicators['macd_histogram'] > 0 else 'Decelerating'}")
+            print(f"• Volume Profile: {'Supporting' if volume['is_confirming'] else 'Lacking'}")
+            
+            print("\nPrice Targets:")
+            print(f"• Initial Target: ${(current_price + atr):.4f} (+{(atr/current_price)*100:.1f}%)")
+            print(f"• Secondary Target: ${indicators['bollinger_upper']:.4f} (+{((indicators['bollinger_upper']-current_price)/current_price)*100:.1f}%)")
+            print(f"• Extended Target: ${(indicators['bollinger_upper'] + atr):.4f} (+{((indicators['bollinger_upper']+atr-current_price)/current_price)*100:.1f}%)")
+            
+            print("\nSupporting Factors:")
             if indicators['rsi'] > 50:
-                print(f"• RSI above midpoint ({indicators['rsi']:.1f})")
+                print(f"• RSI showing upward momentum ({indicators['rsi']:.1f})")
             if indicators['macd'] > indicators['macd_signal']:
-                print("• MACD above signal line")
+                print(f"• MACD bullish crossover (Spread: {(indicators['macd']-indicators['macd_signal']):.4f})")
             if indicators['trend_direction'] == "Uptrend":
-                print("• Established uptrend")
+                print("• Established uptrend with higher lows")
             if volume['is_confirming'] and volume['price_change'] > 0:
-                print("• Volume confirming upward movement")
+                print(f"• Volume increased by {volume['change']:.1f}% supporting price action")
             if current_price > indicators['bollinger_middle']:
-                print("• Price above BB middle band")
+                print("• Price trading above BB middle band showing strength")
+                
         elif bearish_points > bullish_points:
             print(f"BEARISH with {bearish_confidence:.1f}% confidence")
-            print("Supporting factors:")
+            print("\nMove Characteristics:")
+            print(f"• Expected Move Type: {move_speed} {move_strength} Decline")
+            print(f"• Momentum: {'Accelerating' if indicators['macd_histogram'] < 0 else 'Decelerating'}")
+            print(f"• Volume Profile: {'Supporting' if volume['is_confirming'] else 'Lacking'}")
+            
+            print("\nPrice Targets:")
+            print(f"• Initial Target: ${(current_price - atr):.4f} (-{(atr/current_price)*100:.1f}%)")
+            print(f"• Secondary Target: ${indicators['bollinger_lower']:.4f} (-{((current_price-indicators['bollinger_lower'])/current_price)*100:.1f}%)")
+            print(f"• Extended Target: ${(indicators['bollinger_lower'] - atr):.4f} (-{((current_price-(indicators['bollinger_lower']-atr))/current_price)*100:.1f}%)")
+            
+            print("\nSupporting Factors:")
             if indicators['rsi'] < 50:
-                print(f"• RSI below midpoint ({indicators['rsi']:.1f})")
+                print(f"• RSI showing downward momentum ({indicators['rsi']:.1f})")
             if indicators['macd'] < indicators['macd_signal']:
-                print("• MACD below signal line")
+                print(f"• MACD bearish crossover (Spread: {(indicators['macd_signal']-indicators['macd']):.4f})")
             if indicators['trend_direction'] == "Downtrend":
-                print("• Established downtrend")
+                print("• Established downtrend with lower highs")
             if volume['is_confirming'] and volume['price_change'] < 0:
-                print("• Volume confirming downward movement")
+                print(f"• Volume increased by {volume['change']:.1f}% supporting price action")
             if current_price < indicators['bollinger_middle']:
-                print("• Price below BB middle band")
+                print("• Price trading below BB middle band showing weakness")
         else:
-            print("NEUTRAL - No clear directional bias")
+            print("NEUTRAL - No Clear Directional Bias")
+            print("\nConsolidation Analysis:")
+            print(f"• Price Range: ${(current_price - atr):.4f} to ${(current_price + atr):.4f}")
+            print(f"• Volatility: {'High' if price_volatility > 0.03 else 'Low'} ({price_volatility*100:.1f}%)")
+            print(f"• Volume Profile: {volume['trend']} on {volume['change']:.1f}% change")
+            print("\nBreakout Levels:")
+            print(f"• Bullish Breakout Above: ${indicators['bollinger_upper']:.4f}")
+            print(f"• Bearish Breakdown Below: ${indicators['bollinger_lower']:.4f}")
+            print("\nRecommendation:")
             print("• Consider waiting for stronger directional signals")
             print("• Monitor for breakout of recent trading range")
-            
-        print(f"\nKey Support/Resistance Levels:")
-        print(f"• Major Resistance: ${indicators['bollinger_upper']:.4f}")
-        print(f"• Minor Resistance: ${(current_price + atr):.4f}")
-        print(f"• Minor Support: ${(current_price - atr):.4f}")
-        print(f"• Major Support: ${indicators['bollinger_lower']:.4f}")
+            print("• Prepare for potential volatility expansion")
 
     except Exception as e:
         print(f"\nError running market analysis: {str(e)}")
