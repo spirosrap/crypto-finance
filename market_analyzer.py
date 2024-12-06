@@ -196,6 +196,15 @@ class MarketAnalyzer:
                 for p in self.pattern_memory[-5:]  # Last 5 patterns
             ]
             
+            # Calculate probability of success
+            probability = self.calculate_success_probability(
+                result['indicators'],
+                result['volume_analysis'],
+                result['patterns']
+            )
+            
+            result['probability_analysis'] = probability
+            
             return result
 
         except Exception as e:
@@ -702,6 +711,88 @@ class MarketAnalyzer:
             'risk_metrics': {'dynamic_risk': self.base_risk}
         }
 
+    def calculate_success_probability(self, indicators: Dict, volume_info: Dict, patterns: Dict) -> Dict:
+        """Calculate probability of success for the suggested direction."""
+        try:
+            probability_factors = []
+            
+            # Trend alignment (0-20%)
+            if indicators['trend_direction'] == "Uptrend":
+                probability_factors.append(("Trend", 20 if indicators['adx'] > 25 else 10))
+            elif indicators['trend_direction'] == "Downtrend":
+                probability_factors.append(("Trend", 20 if indicators['adx'] > 25 else 10))
+            else:
+                probability_factors.append(("Trend", 5))
+
+            # RSI alignment (0-15%)
+            rsi = indicators['rsi']
+            if rsi > 70 or rsi < 30:
+                probability_factors.append(("RSI", 15))
+            elif 40 <= rsi <= 60:
+                probability_factors.append(("RSI", 5))
+            else:
+                probability_factors.append(("RSI", 10))
+
+            # MACD confirmation (0-15%)
+            try:
+                macd_diff = abs(indicators['macd'] - indicators['macd_signal'])
+                # Fix: Use absolute values for the ratio calculation and handle division by zero
+                macd_denominator = abs(indicators['macd_signal']) if indicators['macd_signal'] != 0 else 1
+                macd_strength = min(15, (macd_diff / macd_denominator) * 100)
+                macd_strength = max(0, min(15, macd_strength))  # Ensure between 0 and 15
+                probability_factors.append(("MACD", macd_strength))
+            except Exception as e:
+                self.logger.warning(f"Error calculating MACD strength: {str(e)}")
+                probability_factors.append(("MACD", 0))
+
+            # Volume confirmation (0-20%)
+            if volume_info['is_confirming']:
+                vol_strength = abs(volume_info['volume_change']) / 5  # Use absolute value
+                vol_strength = max(0, min(20, vol_strength))  # Ensure between 0 and 20
+                probability_factors.append(("Volume", vol_strength))
+            else:
+                probability_factors.append(("Volume", 5))
+
+            # Pattern recognition (0-15%)
+            if patterns['type'] != "None":
+                pattern_strength = max(0, min(15, patterns['confidence'] * 15))  # Ensure between 0 and 15
+                probability_factors.append(("Pattern", pattern_strength))
+            else:
+                probability_factors.append(("Pattern", 0))
+
+            # Market condition (0-15%)
+            if indicators.get('market_condition') in ["Bull Market", "Bear Market"]:
+                probability_factors.append(("Market", 15))
+            elif indicators.get('market_condition') in ["Bullish", "Bearish"]:
+                probability_factors.append(("Market", 10))
+            else:
+                probability_factors.append(("Market", 5))
+
+            # Calculate total probability
+            total_probability = sum(factor[1] for factor in probability_factors)
+            # Ensure total probability is between 0 and 100
+            total_probability = max(0, min(100, total_probability))
+            
+            # Calculate confidence level
+            confidence_level = "Very High" if total_probability >= 85 else \
+                             "High" if total_probability >= 70 else \
+                             "Moderate" if total_probability >= 50 else \
+                             "Low" if total_probability >= 30 else "Very Low"
+
+            return {
+                'total_probability': total_probability,
+                'confidence_level': confidence_level,
+                'factors': probability_factors
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error calculating success probability: {str(e)}")
+            return {
+                'total_probability': 0,
+                'confidence_level': "Error",
+                'factors': []
+            }
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Crypto Market Analyzer')
@@ -961,6 +1052,14 @@ def main():
             print("• Consider waiting for stronger directional signals")
             print("• Monitor for breakout of recent trading range")
             print("• Prepare for potential volatility expansion")
+
+        print("\n=== Probability Analysis ===")
+        prob = analysis['probability_analysis']
+        print(f"Overall Success Probability: {prob['total_probability']:.1f}%")
+        print(f"Confidence Level: {prob['confidence_level']}")
+        print("\nContributing Factors:")
+        for factor, value in prob['factors']:
+            print(f"• {factor}: {value:.1f}%")
 
     except Exception as e:
         print(f"\nError running market analysis: {str(e)}")
