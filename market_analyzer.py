@@ -717,15 +717,17 @@ class MarketAnalyzer:
             probability_factors = []
             
             # Trend alignment (0-20%)
-            if indicators['trend_direction'] == "Uptrend":
-                probability_factors.append(("Trend", 20 if indicators['adx'] > 25 else 10))
-            elif indicators['trend_direction'] == "Downtrend":
-                probability_factors.append(("Trend", 20 if indicators['adx'] > 25 else 10))
+            trend_direction = indicators.get('trend_direction', 'Unknown')
+            adx = indicators.get('adx', 0)
+            if trend_direction == "Uptrend":
+                probability_factors.append(("Trend", 20 if adx > 25 else 10))
+            elif trend_direction == "Downtrend":
+                probability_factors.append(("Trend", 20 if adx > 25 else 10))
             else:
                 probability_factors.append(("Trend", 5))
 
             # RSI alignment (0-15%)
-            rsi = indicators['rsi']
+            rsi = indicators.get('rsi', 50)
             if rsi > 70 or rsi < 30:
                 probability_factors.append(("RSI", 15))
             elif 40 <= rsi <= 60:
@@ -734,43 +736,46 @@ class MarketAnalyzer:
                 probability_factors.append(("RSI", 10))
 
             # MACD confirmation (0-15%)
-            try:
-                macd_diff = abs(indicators['macd'] - indicators['macd_signal'])
-                # Fix: Use absolute values for the ratio calculation and handle division by zero
-                macd_denominator = abs(indicators['macd_signal']) if indicators['macd_signal'] != 0 else 1
-                macd_strength = min(15, (macd_diff / macd_denominator) * 100)
-                macd_strength = max(0, min(15, macd_strength))  # Ensure between 0 and 15
+            macd = indicators.get('macd', 0)
+            macd_signal = indicators.get('macd_signal', 0)
+            if macd != 0 or macd_signal != 0:
+                macd_diff = abs(macd - macd_signal)
+                macd_strength = min(15, (macd_diff / (abs(macd_signal) + 0.00001)) * 15)
                 probability_factors.append(("MACD", macd_strength))
-            except Exception as e:
-                self.logger.warning(f"Error calculating MACD strength: {str(e)}")
+            else:
                 probability_factors.append(("MACD", 0))
 
             # Volume confirmation (0-20%)
-            if volume_info['is_confirming']:
-                vol_strength = abs(volume_info['volume_change']) / 5  # Use absolute value
-                vol_strength = max(0, min(20, vol_strength))  # Ensure between 0 and 20
+            volume_change = volume_info.get('volume_change', 0)
+            is_confirming = volume_info.get('is_confirming', False)
+            if is_confirming:
+                vol_strength = min(20, abs(volume_change) / 5)
                 probability_factors.append(("Volume", vol_strength))
             else:
                 probability_factors.append(("Volume", 5))
 
             # Pattern recognition (0-15%)
-            if patterns['type'] != "None":
-                pattern_strength = max(0, min(15, patterns['confidence'] * 15))  # Ensure between 0 and 15
+            pattern_type = patterns.get('type', 'None')
+            pattern_confidence = patterns.get('confidence', 0)
+            if pattern_type != "None":
+                pattern_strength = min(15, pattern_confidence * 15)
                 probability_factors.append(("Pattern", pattern_strength))
             else:
                 probability_factors.append(("Pattern", 0))
 
             # Market condition (0-15%)
-            if indicators.get('market_condition') in ["Bull Market", "Bear Market"]:
+            market_condition = indicators.get('market_condition', 'Unknown')
+            if market_condition in ["Bull Market", "Bear Market"]:
                 probability_factors.append(("Market", 15))
-            elif indicators.get('market_condition') in ["Bullish", "Bearish"]:
+            elif market_condition in ["Bullish", "Bearish"]:
                 probability_factors.append(("Market", 10))
             else:
                 probability_factors.append(("Market", 5))
 
             # Calculate total probability
             total_probability = sum(factor[1] for factor in probability_factors)
-            # Ensure total probability is between 0 and 100
+            
+            # Normalize total probability to be between 0 and 100
             total_probability = max(0, min(100, total_probability))
             
             # Calculate confidence level
@@ -782,15 +787,19 @@ class MarketAnalyzer:
             return {
                 'total_probability': total_probability,
                 'confidence_level': confidence_level,
-                'factors': probability_factors
+                'factors': [(factor[0], round(factor[1], 1)) for factor in probability_factors]
             }
 
         except Exception as e:
             self.logger.error(f"Error calculating success probability: {str(e)}")
+            # Return a valid response even in case of error
             return {
                 'total_probability': 0,
-                'confidence_level': "Error",
-                'factors': []
+                'confidence_level': "Low",
+                'factors': [
+                    ("Error", 0),
+                    ("Default", 0)
+                ]
             }
 
 def parse_arguments():
