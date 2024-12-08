@@ -31,7 +31,7 @@ GRANULARITY_SETTINGS = {
     'THIRTY_MINUTE': {'training_days': 180, 'feature_window': 400},
     'ONE_HOUR': {'training_days': 365*4, 'feature_window': 500}, #feature window was 50.
     'SIX_HOUR': {'training_days': 730, 'feature_window': 1000},
-    'ONE_DAY': {'training_days': 1460, 'feature_window': 2000},
+    'ONE_DAY': {'training_days': 2000, 'feature_window': 2000},
 }
 
 class StackingEnsemble(BaseEstimator, ClassifierMixin):
