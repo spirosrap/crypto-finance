@@ -997,10 +997,85 @@ class AdvancedMarketAnalyzer:
             self.logger.error(f"Error calculating pattern symmetry: {str(e)}")
             return 0.5
 
+    def _format_analysis_output(self, analysis: Dict) -> str:
+        """Format analysis results into a readable string."""
+        if 'error' in analysis:
+            return f"Error: {analysis['error']}"
+
+        output = []
+        output.append("=" * 80)
+        output.append(f"MARKET ANALYSIS REPORT - {analysis['product_id']}")
+        output.append(f"Generated at: {analysis['timestamp']}")
+        output.append("=" * 80)
+
+        # Current Price
+        output.append(f"\nCurrent Price: ${analysis['current_price']:,.2f}")
+
+        # Market Regime
+        output.append("\n📊 MARKET REGIME")
+        output.append("-" * 40)
+        regime = analysis['market_regime']
+        output.append(f"Type: {regime['type']}")
+        output.append(f"Confidence: {regime['confidence']:.2%}")
+        output.append(f"Volatility: {regime['volatility']:.2%}")
+        output.append(f"Trend Strength: {regime['trend_strength']:.2f}")
+
+        # Sentiment Analysis
+        output.append("\n🎭 MARKET SENTIMENT")
+        output.append("-" * 40)
+        sentiment = analysis['sentiment']
+        output.append(f"Category: {sentiment['category']}")
+        output.append(f"Score: {sentiment['score']:.2f}")
+        output.append(f"Confidence: {sentiment['confidence']:.2%}")
+
+        # Timeframe Analysis
+        output.append("\n⏱️ TIMEFRAME ANALYSIS")
+        output.append("-" * 40)
+        for interval, data in analysis['timeframe_analysis'].items():
+            output.append(f"\n{interval}:")
+            output.append(f"  Signal: {data['signal']}")
+            output.append(f"  Confidence: {data['confidence']:.2%}")
+            if data['patterns'] and data['patterns']['type'] != 'None':
+                output.append(f"  Pattern: {data['patterns']['type']}")
+                output.append(f"  Pattern Confidence: {data['patterns']['confidence']:.2%}")
+            output.append(f"  Volatility: {data['volatility']['historical']:.2%}")
+
+        # Risk Metrics
+        if 'risk_metrics' in analysis and analysis['risk_metrics']:
+            output.append("\n⚠️ RISK METRICS")
+            output.append("-" * 40)
+            risk = analysis['risk_metrics']
+            output.append(f"Volatility: {risk.get('volatility', 0):.2%}")
+            output.append(f"Value at Risk (95%): {risk.get('var_95', 0):.2%}")
+            output.append(f"Max Drawdown: {risk.get('max_drawdown', 0):.2%}")
+            output.append(f"Sharpe Ratio: {risk.get('sharpe_ratio', 0):.2f}")
+            output.append(f"Sortino Ratio: {risk.get('sortino_ratio', 0):.2f}")
+
+        # Trade Recommendations
+        if 'trade_recommendations' in analysis:
+            output.append("\n💡 TRADE RECOMMENDATIONS")
+            output.append("-" * 40)
+            trade = analysis['trade_recommendations']
+            output.append(f"Position: {trade['position']}")
+            output.append(f"Confidence: {trade['confidence']:.2%}")
+            if trade['entry_points']:
+                output.append(f"Entry Points: {', '.join(map(str, trade['entry_points']))}")
+            if trade['stop_loss']:
+                output.append(f"Stop Loss: ${trade['stop_loss']:,.2f}")
+            if trade['take_profit']:
+                output.append(f"Take Profit: ${trade['take_profit']:,.2f}")
+
+        output.append("\n" + "=" * 80)
+        return "\n".join(output)
+
 def main():
     parser = argparse.ArgumentParser(description='Advanced Crypto Market Analyzer')
-    parser.add_argument('--product_id', type=str, default='BTC-USDC')
-    parser.add_argument('--interval', type=str, default='ONE_HOUR')
+    parser.add_argument('--product_id', type=str, default='BTC-USDC',
+                      help='Product ID to analyze (e.g., BTC-USDC)')
+    parser.add_argument('--interval', type=str, default='ONE_HOUR',
+                      help='Primary interval for analysis (e.g., ONE_HOUR, FIFTEEN_MINUTE)')
+    parser.add_argument('--json', action='store_true',
+                      help='Output in JSON format instead of formatted text')
     args = parser.parse_args()
 
     analyzer = AdvancedMarketAnalyzer(
@@ -1009,8 +1084,11 @@ def main():
     )
     
     analysis = analyzer.get_advanced_analysis()
-    print("\nAdvanced Market Analysis Report:")
-    print(json.dumps(analysis, indent=2, cls=EnhancedJSONEncoder))
+    
+    if args.json:
+        print(json.dumps(analysis, indent=2, cls=EnhancedJSONEncoder))
+    else:
+        print(analyzer._format_analysis_output(analysis))
 
 if __name__ == "__main__":
     main() 
