@@ -690,3 +690,191 @@ Opportunity Score: 65.32
 ## Disclaimer
 
 This tool is for informational purposes only. Cryptocurrency trading involves substantial risk, and memecoins are particularly volatile. Always conduct your own research before making investment decisions.
+
+## Advanced Market Analyzer
+
+The Advanced Market Analyzer is a sophisticated tool that provides comprehensive market analysis using multiple timeframes, advanced pattern recognition, and sentiment analysis. It combines technical, fundamental, and sentiment data to generate detailed market insights.
+
+### Features
+
+- **Multi-Timeframe Analysis**
+  - Primary and secondary timeframe analysis
+  - Cross-timeframe confirmation
+  - Trend alignment detection
+
+- **Advanced Pattern Recognition**
+  - Double Top/Bottom
+  - Head and Shoulders
+  - Triangle Patterns (Ascending, Descending, Symmetrical)
+  - Flag Patterns
+  - Cup and Handle
+  - Rising/Falling Wedges
+
+- **Market Regime Detection**
+  - Trending markets
+  - Mean-reverting markets
+  - Random walk detection
+  - Volatility regime classification
+  - Market state transitions
+
+- **Sentiment Analysis**
+  - News sentiment integration
+  - Social media metrics
+  - Market sentiment scoring
+  - Sentiment volatility tracking
+
+- **Risk Metrics**
+  - Value at Risk (VaR)
+  - Sharpe Ratio
+  - Sortino Ratio
+  - Maximum Drawdown
+  - Volatility Analysis
+
+### Usage
+
+1. **Basic Analysis:**
+   ```bash
+   python advanced_market_analyzer.py
+   ```
+
+2. **Custom Product Analysis:**
+   ```bash
+   python advanced_market_analyzer.py --product_id ETH-USDC
+   ```
+
+3. **Different Timeframe:**
+   ```bash
+   python advanced_market_analyzer.py --interval FIFTEEN_MINUTE
+   ```
+
+4. **JSON Output:**
+   ```bash
+   python advanced_market_analyzer.py --json
+   ```
+
+### Sample Output
+
+```
+================================================================================
+MARKET ANALYSIS REPORT - BTC-USDC
+Generated at: 2024-03-21T15:30:00+00:00
+================================================================================
+
+Current Price: $65,432.10
+
+📊 MARKET REGIME
+----------------------------------------
+Type: Trending
+Confidence: 85.00%
+Volatility: 2.30%
+Trend Strength: 0.65
+
+🎭 MARKET SENTIMENT
+----------------------------------------
+Category: Bullish
+Score: 0.75
+Confidence: 80.00%
+
+⏱️ TIMEFRAME ANALYSIS
+----------------------------------------
+ONE_HOUR:
+  Signal: STRONG_BUY
+  Confidence: 85.00%
+  Pattern: Ascending Triangle
+  Pattern Confidence: 78.50%
+  Volatility: 2.15%
+
+⚠️ RISK METRICS
+----------------------------------------
+Volatility: 2.30%
+Value at Risk (95%): -3.20%
+Max Drawdown: 5.40%
+Sharpe Ratio: 2.15
+Sortino Ratio: 2.45
+
+💡 TRADE RECOMMENDATIONS
+----------------------------------------
+Position: LONG
+Confidence: 82.50%
+Entry Points: $65,400, $65,200, $65,000
+Stop Loss: $64,500
+Take Profit: $66,500
+```
+
+### Key Components
+
+1. **Market Regime Detection**
+   - Uses Hurst exponent for trend strength
+   - Implements stationarity tests
+   - Calculates volatility regimes
+   - Tracks regime transitions
+
+2. **Pattern Recognition**
+   - Advanced geometric pattern detection
+   - Volume confirmation analysis
+   - Pattern symmetry scoring
+   - Confidence metrics
+
+3. **Sentiment Analysis**
+   - News API integration
+   - Sentiment scoring system
+   - Volatility adjustment
+   - Confidence weighting
+
+4. **Risk Management**
+   - Dynamic position sizing
+   - ATR-based stop losses
+   - Multiple take-profit levels
+   - Risk-reward optimization
+
+### Integration Example
+
+```python
+from advanced_market_analyzer import AdvancedMarketAnalyzer
+
+# Initialize analyzer
+analyzer = AdvancedMarketAnalyzer(
+    product_id='BTC-USDC',
+    primary_interval='ONE_HOUR',
+    secondary_intervals=['FIFTEEN_MINUTE', 'SIX_HOUR', 'ONE_DAY']
+)
+
+# Get comprehensive analysis
+analysis = analyzer.get_advanced_analysis()
+
+# Access specific components
+market_regime = analysis['market_regime']
+sentiment = analysis['sentiment']
+signals = analysis['timeframe_analysis']
+risk_metrics = analysis['risk_metrics']
+recommendations = analysis['trade_recommendations']
+```
+
+### Best Practices
+
+1. **Multi-Timeframe Analysis**
+   - Use primary timeframe for main signals
+   - Confirm with higher timeframes
+   - Check lower timeframes for entry/exit
+
+2. **Pattern Trading**
+   - Wait for pattern completion
+   - Confirm with volume
+   - Use pattern confidence scores
+   - Consider market regime
+
+3. **Risk Management**
+   - Follow position sizing rules
+   - Use suggested stop losses
+   - Scale into positions
+   - Monitor risk metrics
+
+4. **Sentiment Integration**
+   - Consider sentiment direction
+   - Watch sentiment volatility
+   - Use as confirmation
+   - Don't trade against strong sentiment
+
+### Warning
+
+The Advanced Market Analyzer provides sophisticated analysis but should not be used as the sole basis for trading decisions. Always combine with proper risk management and consider market conditions before trading.
