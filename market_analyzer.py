@@ -45,6 +45,13 @@ class PatternType(Enum):
     WEDGE = "Wedge"
     NONE = "None"
 
+class MarketRegime(Enum):
+    TRENDING = "Trending"
+    RANGING = "Ranging"
+    VOLATILE = "Volatile"
+    BREAKOUT = "Breakout"
+    REVERSAL = "Reversal"
+
 class MarketAnalyzer:
     """
     A class that analyzes market conditions and generates trading signals
@@ -204,6 +211,18 @@ class MarketAnalyzer:
             )
             
             result['probability_analysis'] = probability
+            
+            # Add momentum analysis
+            momentum_analysis = self.calculate_momentum_score(formatted_candles)
+            result['momentum_analysis'] = momentum_analysis
+            
+            # Add regime analysis
+            regime_analysis = self.detect_market_regime(formatted_candles)
+            result['regime_analysis'] = {
+                'regime': regime_analysis['regime'].value,
+                'confidence': regime_analysis['confidence'],
+                'metrics': regime_analysis['metrics']
+            }
             
             return result
 
@@ -802,6 +821,130 @@ class MarketAnalyzer:
                 ]
             }
 
+    def calculate_momentum_score(self, candles: List[Dict]) -> Dict:
+        """
+        Calculate market momentum score using multiple indicators.
+        Returns score between -100 (strong bearish) to +100 (strong bullish).
+        """
+        try:
+            # Extract price data
+            prices = np.array([c['close'] for c in candles])
+            volumes = np.array([c['volume'] for c in candles])
+            
+            # Calculate momentum indicators
+            rsi = self.technical_analysis.compute_rsi(self.product_id, candles)
+            macd, signal, histogram = self.technical_analysis.compute_macd(self.product_id, candles)
+            adx_value, trend_direction = self.technical_analysis.get_trend_strength(candles)
+            
+            # Calculate rate of change
+            roc = ((prices[-1] - prices[-20]) / prices[-20]) * 100
+            
+            # Volume momentum
+            vol_sma = np.mean(volumes[-20:])
+            vol_momentum = ((volumes[-1] - vol_sma) / vol_sma) * 100
+            
+            # Calculate component scores
+            rsi_score = ((rsi - 50) * 2)  # -100 to +100
+            macd_score = (histogram / abs(macd) if abs(macd) > 0 else 0) * 100
+            trend_score = adx_value * (1 if trend_direction == "Uptrend" else -1)
+            roc_score = min(max(roc * 2, -100), 100)
+            vol_score = min(max(vol_momentum, -100), 100)
+            
+            # Weight the components
+            weights = {
+                'rsi': 0.2,
+                'macd': 0.25,
+                'trend': 0.25,
+                'roc': 0.2,
+                'volume': 0.1
+            }
+            
+            # Calculate final score
+            momentum_score = (
+                rsi_score * weights['rsi'] +
+                macd_score * weights['macd'] +
+                trend_score * weights['trend'] +
+                roc_score * weights['roc'] +
+                vol_score * weights['volume']
+            )
+            
+            return {
+                'total_score': round(momentum_score, 2),
+                'components': {
+                    'rsi_score': round(rsi_score, 2),
+                    'macd_score': round(macd_score, 2),
+                    'trend_score': round(trend_score, 2),
+                    'roc_score': round(roc_score, 2),
+                    'volume_score': round(vol_score, 2)
+                },
+                'interpretation': 'Strong Bullish' if momentum_score > 70 else
+                                'Bullish' if momentum_score > 30 else
+                                'Neutral' if momentum_score > -30 else
+                                'Bearish' if momentum_score > -70 else
+                                'Strong Bearish'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating momentum score: {str(e)}")
+            return {'total_score': 0, 'components': {}, 'interpretation': 'Error'}
+
+    def detect_market_regime(self, candles: List[Dict]) -> Dict:
+        """
+        Detect current market regime using volatility, trend strength, and price patterns.
+        """
+        try:
+            prices = np.array([c['close'] for c in candles])
+            
+            # Calculate volatility
+            returns = np.diff(np.log(prices))
+            volatility = np.std(returns) * np.sqrt(252)  # Annualized volatility
+            
+            # Get trend strength
+            adx_value, trend_direction = self.technical_analysis.get_trend_strength(candles)
+            
+            # Calculate price range
+            price_range = (np.max(prices) - np.min(prices)) / np.mean(prices)
+            
+            # Detect regime
+            regime = MarketRegime.RANGING
+            confidence = 0.0
+            
+            if volatility > 0.04:  # High volatility threshold
+                regime = MarketRegime.VOLATILE
+                confidence = min((volatility - 0.04) * 10, 1.0)
+            elif adx_value > 25:  # Strong trend threshold
+                regime = MarketRegime.TRENDING
+                confidence = min((adx_value - 25) / 75, 1.0)
+            elif price_range < 0.02:  # Tight range threshold
+                regime = MarketRegime.RANGING
+                confidence = min((0.02 - price_range) * 50, 1.0)
+            
+            # Check for breakouts
+            bb_upper, bb_middle, bb_lower = self.technical_analysis.compute_bollinger_bands(candles)
+            if prices[-1] > bb_upper or prices[-1] < bb_lower:
+                regime = MarketRegime.BREAKOUT
+                confidence = min(abs(prices[-1] - bb_middle) / (bb_upper - bb_middle), 1.0)
+            
+            # Check for reversals
+            momentum = self.calculate_momentum_score(candles)
+            if abs(momentum['total_score']) > 70 and np.sign(momentum['total_score']) != np.sign(returns[-1]):
+                regime = MarketRegime.REVERSAL
+                confidence = min(abs(momentum['total_score']) / 100, 1.0)
+            
+            return {
+                'regime': regime,
+                'confidence': round(confidence * 100, 2),
+                'metrics': {
+                    'volatility': round(volatility * 100, 2),
+                    'trend_strength': round(adx_value, 2),
+                    'price_range': round(price_range * 100, 2)
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting market regime: {str(e)}")
+            return {'regime': MarketRegime.RANGING, 'confidence': 0.0, 'metrics': {}}
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Crypto Market Analyzer')
@@ -922,6 +1065,25 @@ def main():
         print("\n=== Recent Pattern History ===")
         for pattern in analysis['pattern_history'][-3:]:  # Show last 3 patterns
             print(f"• {pattern['pattern']} (Confidence: {pattern['confidence']*100:.1f}%) - {pattern['timestamp']}")
+        
+        # Add Regime Analysis Section after Pattern History
+        print("\n=== Market Regime Analysis ===")
+        regime = analysis['regime_analysis']
+        print(f"Current Regime: {regime['regime']}")
+        print(f"Confidence: {regime['confidence']:.1f}%")
+        print("\nRegime Metrics:")
+        print(f"• Volatility: {regime['metrics']['volatility']:.1f}%")
+        print(f"• Trend Strength: {regime['metrics']['trend_strength']:.1f}")
+        print(f"• Price Range: {regime['metrics']['price_range']:.1f}%")
+        
+        # Add Momentum Analysis Section
+        print("\n=== Momentum Analysis ===")
+        momentum = analysis['momentum_analysis']
+        print(f"Overall Momentum: {momentum['interpretation']}")
+        print(f"Total Score: {momentum['total_score']:.1f}")
+        print("\nComponent Scores:")
+        for component, score in momentum['components'].items():
+            print(f"• {component.replace('_', ' ').title()}: {score:.1f}")
         
         # Risk Metrics Section
         print("\n=== Risk Analysis ===")
