@@ -1,12 +1,7 @@
-import time
 from datetime import datetime, timedelta, timezone
 from coinbase.rest import RESTClient
-from coinbase.rest import portfolios, products, market_data, orders
 import numpy as np
-import pandas as pd
-import requests
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-import nltk
 from typing import List, Tuple, Dict, Any, Optional
 from config import API_KEY, API_SECRET, NEWS_API_KEY
 #nltk.download('vader_lexicon')
@@ -16,8 +11,6 @@ from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
 from sentimentanalysis import SentimentAnalysis
 from historicaldata import HistoricalData
-import os
-import json
 import logging
 from tqdm import tqdm
 from backtester import Backtester
@@ -34,7 +27,6 @@ BOLLINGER_NUM_STD = 2
 TREND_WINDOW = 20
 
 # Configure logging
-#logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
@@ -297,9 +289,6 @@ def main():
     candles = trader.get_historical_data(args.product_id, start_date, end_date, args.granularity)
 
     display_portfolio_info(trader, args.product_id)
-    # display_technical_indicators(trader, args.product_id, candles)
-    # calculate_btc_eur_value(trader)
-    # display_sentiment_analysis(trader, args.product_id)
 
     initial_balance = 10000  # USD
     risk_per_trade = 0.02  # 2% risk per trade
