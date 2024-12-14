@@ -64,7 +64,6 @@ class HighFrequencyStrategy:
         # Get ML signal
         ml_signal = self.get_ml_signal(candles)
 
-        # Adjust weights to include ML signal
         weights = {
             'rsi': 0.15,
             'macd': 0.15,
@@ -72,7 +71,7 @@ class HighFrequencyStrategy:
             'obv': 0.1,
             'price_momentum': 0.15,
             'volume_trend': 0.1,
-            'ml_signal': 0.5  # Add weight for ML signal
+            'ml_signal': 0.5
         }
 
         combined_signal = (

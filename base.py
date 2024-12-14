@@ -99,7 +99,6 @@ class CryptoTrader:
         prices = [float(candle['close']) for candle in candles]
         return self.generate_bollinger_bands_signal(prices)
 
-
     def identify_trend(self, product_id: str, candles: List[dict], window: int = TREND_WINDOW) -> str:
         return self.technical_analysis.identify_trend(product_id, candles, window)
 
