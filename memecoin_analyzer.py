@@ -225,17 +225,44 @@ class MemecoinAnalyzer:
     def _calculate_risk_level(self, price_change: float, volume: float, social_score: float) -> str:
         """Calculate risk level based on various metrics"""
         try:
-            risk_score = abs(float(price_change)) * 0.4 + (float(volume) / 1e6) * 0.3 + float(social_score) * 0.3
+            # Base risk - all memecoins start with inherent risk
+            base_risk = 0.4  # 40% base risk for being a memecoin
             
-            if risk_score > 80:
+            # Price volatility risk (higher volatility = higher risk)
+            price_risk = min(abs(float(price_change)) / 10, 1)  # 10% change = 1.0
+            
+            # Volume risk - higher volume doesn't necessarily mean lower risk for memecoins
+            # Instead, look for abnormal volume patterns
+            avg_memecoin_volume = 100e6  # $100M as baseline
+            volume_ratio = float(volume) / avg_memecoin_volume
+            volume_risk = 0.5
+            if volume_ratio > 3:  # Unusually high volume
+                volume_risk = 0.7
+            elif volume_ratio < 0.3:  # Very low volume
+                volume_risk = 0.8
+            
+            # Social engagement risk
+            social_risk = max(1 - (float(social_score) / 1000), 0.3)  # Minimum 0.3 risk
+            
+            # Calculate weighted risk score with base risk included
+            risk_score = (
+                base_risk * 0.3 +          # Base memecoin risk
+                price_risk * 0.3 +         # Price volatility impact
+                volume_risk * 0.2 +        # Volume pattern risk
+                social_risk * 0.2          # Social engagement risk
+            ) * 100
+            
+            # Adjusted thresholds - higher baseline due to memecoin nature
+            if risk_score > 75:
                 return "VERY HIGH"
             elif risk_score > 60:
                 return "HIGH"
-            elif risk_score > 40:
+            elif risk_score > 45:
+                return "MEDIUM-HIGH"
+            elif risk_score > 35:
                 return "MEDIUM"
-            elif risk_score > 20:
-                return "LOW"
-            return "VERY LOW"
+            return "MEDIUM-LOW"  # No memecoin should be considered "very low" risk
+            
         except Exception as e:
             self.logger.error(f"Error calculating risk level: {str(e)}")
             return "UNKNOWN"
