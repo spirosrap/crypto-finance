@@ -1,9 +1,9 @@
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 from datetime import datetime, timedelta, UTC
 from coinbaseservice import CoinbaseService
-from technicalanalysis import TechnicalAnalysis, SignalType, MarketCondition, TechnicalAnalysisConfig
-from config import API_KEY, API_SECRET, NEWS_API_KEY
+from technicalanalysis import TechnicalAnalysis, SignalType, TechnicalAnalysisConfig
+from config import API_KEY, API_SECRET
 from historicaldata import HistoricalData
 from coinbase.rest import RESTClient
 import argparse
