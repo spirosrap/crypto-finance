@@ -1103,17 +1103,13 @@ def main():
         print("\n=== Technical Indicators ===")
         indicators = analysis['indicators']
         print(f"RSI: {indicators['rsi']:.2f} ({'Overbought' if indicators['rsi'] > 70 else 'Oversold' if indicators['rsi'] < 30 else 'Neutral'})")
-        print(f"MACD: {indicators['macd']:.4f}")
-        print(f"MACD Signal: {indicators['macd_signal']:.4f}")
-        print(f"MACD Histogram: {indicators['macd_histogram']:.4f}")
+        print(f"MACD: {indicators['macd']:.4f}, MACD Signal: {indicators['macd_signal']:.4f}, MACD Histogram: {indicators['macd_histogram']:.4f}")
         print(f"ADX: {indicators['adx']:.2f} ({'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'})")
         print(f"Trend Direction: {indicators['trend_direction']}")
         
         # Bollinger Bands
         print("\n=== Price Channels ===")
-        print(f"Bollinger Upper: ${indicators['bollinger_upper']:.4f}")
-        print(f"Bollinger Middle: ${indicators['bollinger_middle']:.4f}")
-        print(f"Bollinger Lower: ${indicators['bollinger_lower']:.4f}")
+        print(f"Bollinger Upper: ${indicators['bollinger_upper']:.4f}, Bollinger Middle: ${indicators['bollinger_middle']:.4f}, Bollinger Lower: ${indicators['bollinger_lower']:.4f}")
         
         # Volume Analysis Section
         print("\n=== Volume Analysis ===")
@@ -1335,9 +1331,7 @@ def main():
         
         print("\nPattern Analysis:")
         pattern = chars['pattern_analysis']
-        print(f"• Type: {pattern['type']}")
-        print(f"• Reliability: {pattern['reliability']:.2f}")
-        print(f"• Completion: {pattern['completion']:.1f}%")
+        print(f"• Type: {pattern['type']}, • Reliability: {pattern['reliability']:.2f}, • Completion: {pattern['completion']:.1f}%")
         
         print("\nFailure Points:")
         failure = prob['failure_points']
@@ -1348,9 +1342,7 @@ def main():
         if failure['momentum_failure_level']:
             print(f"• Momentum Failure: ${failure['momentum_failure_level']:.4f}")
         
-        print("\nContributing Factors:")
-        for factor, value in prob['factors']:
-            print(f"• {factor}: {value:.1f}%")
+        print("\nContributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
 
     except Exception as e:
         print(f"\nError running market analysis: {str(e)}")
