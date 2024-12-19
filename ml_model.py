@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple
 import talib
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV, train_test_split, cross_val_predict
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import accuracy_score, mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
@@ -13,7 +13,6 @@ from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.utils.class_weight import compute_class_weight
 from xgboost import XGBClassifier
 from imblearn.over_sampling import SMOTE
-import logging
 import joblib
 from datetime import datetime, timedelta
 import os

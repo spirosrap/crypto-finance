@@ -1,11 +1,9 @@
 import requests
-import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import logging
-from concurrent.futures import ThreadPoolExecutor
 import tweepy
 from config import BEARER_TOKEN, CONSUMER_KEY, CONSUMER_SECRET, ACCESS_TOKEN, ACCESS_TOKEN_SECRET
 
