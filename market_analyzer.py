@@ -465,7 +465,7 @@ class MarketAnalyzer:
                                            f"• Distance from Level: {rejection['distance_from_level']:.1f}%\n" \
                                            f"• Rejection Volume: {rejection['volume']:.2f}\n" \
                                            f"• Volume vs Average: {rejection['volume_ratio']:.1f}x\n" \
-                                           f"��� Confirming Candles: {rejection['confirming_candles']}\n" \
+                                           f"• Confirming Candles: {rejection['confirming_candles']}\n" \
                                            f"• Volume Confirmation: {'Yes' if rejection['volume_confirmation'] else 'No'}\n" \
                                            f"• Confirmation Strength: {confirmation_strength}"
                 else:  # support rejection
@@ -1086,105 +1086,105 @@ def main():
         analysis = analyzer.get_market_signal()
         
         # Enhanced formatted output
-        print("\n====== Comprehensive Market Analysis Report ======")
-        print(f"Timestamp: {analysis['timestamp']}")
-        print(f"Product: {analysis['product_id']}")
-        print(f"Current Price: ${analysis['current_price']:,.4f}")
+        print("\n====== 📊 Comprehensive Market Analysis Report 📊 ======")
+        print(f"🕒 Timestamp: {analysis['timestamp']}")
+        print(f"💱 Product: {analysis['product_id']}")
+        print(f"💵 Current Price: ${analysis['current_price']:,.4f}")
         
         # Market Overview Section
-        print("\n=== Market Overview ===")
-        print(f"Signal: {analysis['signal']}")
-        print(f"Position: {analysis['position']}")
-        print(f"Confidence: {analysis['confidence']*100:.1f}%")
-        print(f"Market Condition: {analysis['market_condition']}")
-        print(f"Signal Stability: {analysis['signal_stability']}")
+        print("\n=== 🎯 Market Overview ===")
+        print(f"📍 Signal: {analysis['signal']}")
+        print(f"📌 Position: {analysis['position']}")
+        print(f"🎯 Confidence: {analysis['confidence']*100:.1f}%")
+        print(f"📈 Market Condition: {analysis['market_condition']}")
+        print(f"🔒 Signal Stability: {analysis['signal_stability']}")
         
         # Technical Indicators Section
-        print("\n=== Technical Indicators ===")
+        print("\n=== 📐 Technical Indicators ===")
         indicators = analysis['indicators']
-        print(f"RSI: {indicators['rsi']:.2f} ({'Overbought' if indicators['rsi'] > 70 else 'Oversold' if indicators['rsi'] < 30 else 'Neutral'})")
-        print(f"MACD: {indicators['macd']:.4f}, MACD Signal: {indicators['macd_signal']:.4f}, MACD Histogram: {indicators['macd_histogram']:.4f}")
-        print(f"ADX: {indicators['adx']:.2f} ({'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'})")
-        print(f"Trend Direction: {indicators['trend_direction']}")
+        print(f"📊 RSI: {indicators['rsi']:.2f} ({'Overbought' if indicators['rsi'] > 70 else 'Oversold' if indicators['rsi'] < 30 else 'Neutral'})")
+        print(f"📈 MACD: {indicators['macd']:.4f}, MACD Signal: {indicators['macd_signal']:.4f}, MACD Histogram: {indicators['macd_histogram']:.4f}")
+        print(f"📏 ADX: {indicators['adx']:.2f} ({'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'})")
+        print(f"➡️ Trend Direction: {indicators['trend_direction']}")
         
         # Bollinger Bands
-        print("\n=== Price Channels ===")
-        print(f"Bollinger Upper: ${indicators['bollinger_upper']:.4f}, Bollinger Middle: ${indicators['bollinger_middle']:.4f}, Bollinger Lower: ${indicators['bollinger_lower']:.4f}")
+        print("\n=== 📉 Price Channels ===")
+        print(f"📊 Bollinger Upper: ${indicators['bollinger_upper']:.4f}, Bollinger Middle: ${indicators['bollinger_middle']:.4f}, Bollinger Lower: ${indicators['bollinger_lower']:.4f}")
         
         # Volume Analysis Section
-        print("\n=== Volume Analysis ===")
+        print("\n=== 📊 Volume Analysis ===")
         volume = analysis['volume_analysis']
-        print(f"Volume Change: {volume['change']:.1f}%")
-        print(f"Volume Trend: {volume['trend']}")
-        print(f"Volume Strength: {volume['strength']}")
-        print(f"Price Change: {volume['price_change']:.1f}%")
-        print(f"Volume Confirmation: {'Yes' if volume['is_confirming'] else 'No'}")
+        print(f"📈 Volume Change: {volume['change']:.1f}%")
+        print(f"📊 Volume Trend: {volume['trend']}")
+        print(f"💪 Volume Strength: {volume['strength']}")
+        print(f"📉 Price Change: {volume['price_change']:.1f}%")
+        print(f"✅ Volume Confirmation: {'Yes' if volume['is_confirming'] else 'No'}")
         
         # Pattern Recognition Section
-        print("\n=== Pattern Analysis ===")
+        print("\n=== 🔍 Pattern Analysis ===")
         patterns = analysis['patterns']
-        print(f"Current Pattern: {patterns['type']}")
+        print(f"📋 Current Pattern: {patterns['type']}")
         if patterns['type'] != "None":
-            print(f"Pattern Confidence: {patterns['confidence']*100:.1f}%")
+            print(f"🎯 Pattern Confidence: {patterns['confidence']*100:.1f}%")
             if patterns['target']:
-                print(f"Pattern Target: ${patterns['target']:.4f}")
+                print(f"🎯 Pattern Target: ${patterns['target']:.4f}")
             if patterns['stop_loss']:
-                print(f"Suggested Stop Loss: ${patterns['stop_loss']:.4f}")
+                print(f"🛑 Suggested Stop Loss: ${patterns['stop_loss']:.4f}")
         
         # Pattern History
-        print("\n=== Recent Pattern History ===")
+        print("\n=== 📜 Recent Pattern History ===")
         for pattern in analysis['pattern_history'][-3:]:  # Show last 3 patterns
             print(f"• {pattern['pattern']} (Confidence: {pattern['confidence']*100:.1f}%) - {pattern['timestamp']}")
         
         # Add Regime Analysis Section after Pattern History
-        print("\n=== Market Regime Analysis ===")
+        print("\n=== 🌊 Market Regime Analysis ===")
         regime = analysis['regime_analysis']
-        print(f"Current Regime: {regime['regime']}")
-        print(f"Confidence: {regime['confidence']:.1f}%")
-        print("\nRegime Metrics:")
-        print(f"• Volatility: {regime['metrics']['volatility']:.1f}%")
-        print(f"• Trend Strength: {regime['metrics']['trend_strength']:.1f}")
-        print(f"• Price Range: {regime['metrics']['price_range']:.1f}%")
+        print(f"📊 Current Regime: {regime['regime']}")
+        print(f"🎯 Confidence: {regime['confidence']:.1f}%")
+        print("\n📊 Regime Metrics:")
+        print(f"• 📈 Volatility: {regime['metrics']['volatility']:.1f}%")
+        print(f"• 💪 Trend Strength: {regime['metrics']['trend_strength']:.1f}")
+        print(f"• 📏 Price Range: {regime['metrics']['price_range']:.1f}%")
         
         # Add Momentum Analysis Section
-        print("\n=== Momentum Analysis ===")
+        print("\n=== 🚀 Momentum Analysis ===")
         momentum = analysis['momentum_analysis']
-        print(f"Overall Momentum: {momentum['interpretation']}")
-        print(f"Total Score: {momentum['total_score']:.1f}")
-        print("\nComponent Scores:")
+        print(f"📈 Overall Momentum: {momentum['interpretation']}")
+        print(f"📊 Total Score: {momentum['total_score']:.1f}")
+        print("\n📈 Component Scores:")
         for component, score in momentum['components'].items():
             print(f"• {component.replace('_', ' ').title()}: {score:.1f}")
         
         # Risk Metrics Section
-        print("\n=== Risk Analysis ===")
+        print("\n=== ⚠️ Risk Analysis ===")
         risk = analysis['risk_metrics']
-        print(f"Dynamic Risk Level: {risk['dynamic_risk']*100:.1f}%")
+        print(f"📊 Dynamic Risk Level: {risk['dynamic_risk']*100:.1f}%")
         if 'volatility' in risk:
-            print(f"Current Volatility: {risk['volatility']*100:.1f}%")
+            print(f"📈 Current Volatility: {risk['volatility']*100:.1f}%")
         if 'risk_reward_ratio' in risk:
-            print(f"Risk/Reward Ratio: {risk['risk_reward_ratio']:.2f}")
+            print(f"⚖️ Risk/Reward Ratio: {risk['risk_reward_ratio']:.2f}")
         
         # Trading Recommendation Section
-        print("\n=== Trading Recommendation ===")
+        print("\n=== 💡 Trading Recommendation ===")
         print(analysis['recommendation'])
         
         # Key Levels and Potential Moves
-        print("\n=== Key Levels & Potential Moves ===")
+        print("\n=== 🎯 Key Levels & Potential Moves ===")
         atr = indicators.get('atr', (indicators['bollinger_upper'] - indicators['bollinger_lower']) / 4)
         current_price = analysis['current_price']
         
-        print(f"Potential Bullish Targets:")
-        print(f"• Conservative: ${current_price * 1.01:.4f} (+1%)")
-        print(f"• Moderate: ${current_price * 1.02:.4f} (+2%)")
-        print(f"• Aggressive: ${current_price * 1.05:.4f} (+5%)")
+        print(f"📈 Potential Bullish Targets:")
+        print(f"• 🎯 Conservative: ${current_price * 1.01:.4f} (+1%)")
+        print(f"• 🎯 Moderate: ${current_price * 1.02:.4f} (+2%)")
+        print(f"• 🎯 Aggressive: ${current_price * 1.05:.4f} (+5%)")
         
-        print(f"\nPotential Bearish Targets:")
-        print(f"• Conservative: ${current_price * 0.99:.4f} (-1%)")
-        print(f"• Moderate: ${current_price * 0.98:.4f} (-2%)")
-        print(f"• Aggressive: ${current_price * 0.95:.4f} (-5%)")
+        print(f"\n📉 Potential Bearish Targets:")
+        print(f"• 🎯 Conservative: ${current_price * 0.99:.4f} (-1%)")
+        print(f"• 🎯 Moderate: ${current_price * 0.98:.4f} (-2%)")
+        print(f"• 🎯 Aggressive: ${current_price * 0.95:.4f} (-5%)")
         
         # Add directional bias analysis with move specifics
-        print("\n=== Directional Bias & Move Analysis ===")
+        print("\n=== 🎯 Directional Bias & Move Analysis ===")
         bullish_points = 0
         bearish_points = 0
         
@@ -1295,54 +1295,54 @@ def main():
             print("• Prepare for potential volatility expansion")
 
         # Enhanced Probability Analysis Section
-        print("\n====== Detailed Move Analysis ======")
+        print("\n====== 📊 Detailed Move Analysis 📊 ======")
         prob = analysis['probability_analysis']
-        print(f"\nOverall Success Probability: {prob['total_probability']:.1f}%")
-        print(f"Confidence Level: {prob['confidence_level']}")
+        print(f"\n🎯 Overall Success Probability: {prob['total_probability']:.1f}%")
+        print(f"📊 Confidence Level: {prob['confidence_level']}")
         
-        print("\nMove Quality:")
+        print("\n📈 Move Quality:")
         move_quality = prob['move_quality']
-        print(f"• Expected Speed: {move_quality['expected_speed']}")
-        print(f"• Expected Volatility: {move_quality['expected_volatility']}")
-        print(f"• Continuation Probability: {move_quality['continuation_probability']}")
-        print(f"• Reversal Risk: {move_quality['reversal_risk']}")
+        print(f"• ⚡ Expected Speed: {move_quality['expected_speed']}")
+        print(f"• 📊 Expected Volatility: {move_quality['expected_volatility']}")
+        print(f"• 🎯 Continuation Probability: {move_quality['continuation_probability']}")
+        print(f"• ⚠️ Reversal Risk: {move_quality['reversal_risk']}")
         
-        print("\nMove Characteristics:")
+        print("\n📈 Move Characteristics:")
         chars = prob['move_characteristics']
         
-        print("\nTrend Quality:")
+        print("\n📈 Trend Quality:")
         trend = chars['trend_quality']
-        print(f"• Strength: {trend['strength']}")
-        print(f"• Duration: {trend['duration']}")
-        print(f"• Momentum: {trend['momentum']}")
+        print(f"• 🎯 Strength: {trend['strength']}")
+        print(f"• 🎯 Duration: {trend['duration']}")
+        print(f"• 🎯 Momentum: {trend['momentum']}")
         
-        print("\nMomentum Analysis:")
+        print("\n📈 Momentum Analysis:")
         momentum = chars['momentum']
-        print(f"• Condition: {momentum['condition']}")
-        print(f"• Strength: {momentum['strength']:.2f}")
-        print(f"• Divergence: {momentum['divergence']}")
+        print(f"• 🎯 Condition: {momentum['condition']}")
+        print(f"• 🎯 Strength: {momentum['strength']:.2f}")
+        print(f"• 🎯 Divergence: {momentum['divergence']}")
         
-        print("\nVolume Quality:")
+        print("\n📈 Volume Quality:")
         volume = chars['volume_quality']
-        print(f"• Trend: {volume['trend']}")
-        print(f"• Strength: {volume['strength']}")
-        print(f"• Consistency: {volume['consistency']}")
-        print(f"• Price Alignment: {volume['price_alignment']}")
+        print(f"• 🎯 Trend: {volume['trend']}")
+        print(f"• 🎯 Strength: {volume['strength']}")
+        print(f"• 🎯 Consistency: {volume['consistency']}")
+        print(f"• 🎯 Price Alignment: {volume['price_alignment']}")
         
-        print("\nPattern Analysis:")
+        print("\n📈 Pattern Analysis:")
         pattern = chars['pattern_analysis']
-        print(f"• Type: {pattern['type']}, • Reliability: {pattern['reliability']:.2f}, • Completion: {pattern['completion']:.1f}%")
+        print(f"• 🎯 Type: {pattern['type']}, • 🎯 Reliability: {pattern['reliability']:.2f}, • 🎯 Completion: {pattern['completion']:.1f}%")
         
-        print("\nFailure Points:")
+        print("\n📉 Failure Points:")
         failure = prob['failure_points']
         if failure['immediate_stop']:
-            print(f"• Immediate Stop: ${failure['immediate_stop']:.4f}")
+            print(f"• 🛑 Immediate Stop: ${failure['immediate_stop']:.4f}")
         if failure['trend_reversal_point']:
-            print(f"• Trend Reversal: ${failure['trend_reversal_point']:.4f}")
+            print(f"• 🎯 Trend Reversal: ${failure['trend_reversal_point']:.4f}")
         if failure['momentum_failure_level']:
-            print(f"• Momentum Failure: ${failure['momentum_failure_level']:.4f}")
+            print(f"• 🎯 Momentum Failure: ${failure['momentum_failure_level']:.4f}")
         
-        print("\nContributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
+        print("\n📈 Contributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
 
     except Exception as e:
         print(f"\nError running market analysis: {str(e)}")
