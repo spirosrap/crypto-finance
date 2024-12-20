@@ -1,11 +1,11 @@
 from coinbase.rest import RESTClient
-from coinbase.rest import portfolios, products, orders, market_data
+from coinbase.rest import portfolios, products, orders
 from datetime import datetime, timedelta
 import time
 import uuid
 import logging
 from typing import Tuple, List
-from historicaldata import HistoricalData  # Import the new class
+from historicaldata import HistoricalData
 
 class CoinbaseService:
     def __init__(self, api_key, api_secret):
@@ -113,8 +113,7 @@ class CoinbaseService:
         except Exception as e:
             print(f"Error placing bracket order: {e}")
             return None            
-    # ... (other Coinbase-related methods)
-
+ 
     def calculate_trade_amount_and_fee(self, balance: float, price: float, is_buy: bool) -> Tuple[float, float]:
         """
         Calculate the trade amount and fee for a given balance and price.
@@ -198,5 +197,3 @@ class CoinbaseService:
         except Exception as e:
             self.logger.error(f"Error getting trading pairs: {str(e)}")
             return []
-
-    # ... other existing methods ...
