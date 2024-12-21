@@ -156,8 +156,7 @@ class CoinbaseService:
             else:
                 logger.error(f"{order}, Failed to place order.")
                 return
-            logger.info(f"Failed to place order. Retrying in {self.RETRY_DELAY_SECONDS} seconds...")
-            time.sleep(self.RETRY_DELAY_SECONDS)
+
         logger.info("Max retries reached. Unable to place bracket order.")
 
     def get_trading_pairs(self) -> List[str]:

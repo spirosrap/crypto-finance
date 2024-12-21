@@ -16,6 +16,9 @@ requests>=2.26.0
 pandas>=1.3.0
 numpy>=1.21.0
 tweepy>=4.10.0
+structlog
+datadog
+sentry-sdk
 
 # The following dependency is installed from GitHub:
 # INSTALL TA-lib from https://sourceforge.net/projects/ta-lib/files/ta-lib/0.4.0/ta-lib-0.4.0-src.tar.gz/download

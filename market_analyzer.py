@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List
+from typing import Dict, List, Any, Callable
 from datetime import datetime, timedelta, UTC
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis, SignalType, TechnicalAnalysisConfig
@@ -10,6 +10,8 @@ import argparse
 import time
 import numpy as np
 from enum import Enum
+from functools import wraps
+import logging.handlers
 
 # Add valid choices for granularity and products
 VALID_GRANULARITIES = [
@@ -52,6 +54,36 @@ class MarketRegime(Enum):
     BREAKOUT = "Breakout"
     REVERSAL = "Reversal"
 
+def performance_monitor(func: Callable) -> Callable:
+    """Decorator to monitor function performance."""
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        start_time = time.time()
+        result = func(self, *args, **kwargs)
+        execution_time = time.time() - start_time
+        
+        # Log performance metrics
+        self.logger.info(f"{func.__name__} execution time: {execution_time:.2f} seconds")
+        
+        # Store performance metrics
+        if not hasattr(self, '_performance_metrics'):
+            self._performance_metrics = {}
+        
+        if func.__name__ not in self._performance_metrics:
+            self._performance_metrics[func.__name__] = []
+        
+        self._performance_metrics[func.__name__].append({
+            'timestamp': datetime.now(UTC),
+            'execution_time': execution_time
+        })
+        
+        # Keep only last 100 metrics
+        if len(self._performance_metrics[func.__name__]) > 100:
+            self._performance_metrics[func.__name__].pop(0)
+        
+        return result
+    return wrapper
+
 class MarketAnalyzer:
     """
     A class that analyzes market conditions and generates trading signals
@@ -64,6 +96,25 @@ class MarketAnalyzer:
         self.coinbase_service = CoinbaseService(API_KEY, API_SECRET)
         self.client = RESTClient(API_KEY, API_SECRET)
         self.historical_data = HistoricalData(self.client)
+        
+        # Setup enhanced logging
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
+        
+        # Add file handler with rotation
+        file_handler = logging.handlers.RotatingFileHandler(
+            'market_analyzer.log',
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        )
+        file_handler.setFormatter(
+            logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        )
+        self.logger.addHandler(file_handler)
+        
+        # Initialize performance metrics
+        self._performance_metrics = {}
+        self._start_time = datetime.now(UTC)
         
         # Initialize custom technical analysis configuration
         self.ta_config = TechnicalAnalysisConfig(
@@ -82,7 +133,6 @@ class MarketAnalyzer:
         )
         
         self._current_candles = []
-        self.logger = logging.getLogger(__name__)
         
         # Add new attributes
         self.pattern_memory = []
@@ -95,6 +145,82 @@ class MarketAnalyzer:
         self.max_risk = 0.04   # 4% maximum risk
         self.min_risk = 0.01   # 1% minimum risk
 
+        # Add indicator cache
+        self._indicator_cache = {}
+        self._cache_timestamp = None
+        self._cache_expiry = timedelta(minutes=5)  # Cache expires after 5 minutes
+        
+        self.logger.info(f"MarketAnalyzer initialized for {product_id} with {candle_interval} interval")
+
+    def get_performance_stats(self) -> Dict:
+        """Get performance statistics for the analyzer."""
+        stats = {
+            'uptime': str(datetime.now(UTC) - self._start_time),
+            'metrics': {}
+        }
+        
+        for func_name, metrics in self._performance_metrics.items():
+            if metrics:
+                execution_times = [m['execution_time'] for m in metrics]
+                stats['metrics'][func_name] = {
+                    'avg_execution_time': sum(execution_times) / len(execution_times),
+                    'min_execution_time': min(execution_times),
+                    'max_execution_time': max(execution_times),
+                    'total_calls': len(metrics),
+                    'last_execution_time': metrics[-1]['execution_time']
+                }
+        
+        return stats
+
+    def _get_cached_indicator(self, indicator_name: str) -> Any:
+        """Get indicator from cache if valid."""
+        if self._cache_timestamp is None or \
+           datetime.now(UTC) - self._cache_timestamp > self._cache_expiry or \
+           indicator_name not in self._indicator_cache:
+            return None
+        return self._indicator_cache[indicator_name]
+
+    def _cache_indicator(self, indicator_name: str, value: Any):
+        """Cache an indicator value."""
+        self._indicator_cache[indicator_name] = value
+        self._cache_timestamp = datetime.now(UTC)
+
+    def _clear_indicator_cache(self):
+        """Clear the indicator cache."""
+        self._indicator_cache = {}
+        self._cache_timestamp = None
+
+    @performance_monitor
+    def _get_historical_data_with_retry(self, start_time: datetime, end_time: datetime, max_retries: int = 3, retry_delay: float = 1.0) -> List[Dict]:
+        """Get historical data with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                candles = self.historical_data.get_historical_data(
+                    self.product_id,
+                    start_time,
+                    end_time,
+                    self.candle_interval
+                )
+                if candles:
+                    return candles
+                raise ValueError("No candle data available")
+            except Exception as e:
+                if attempt == max_retries - 1:  # Last attempt
+                    raise Exception(f"Failed to get historical data after {max_retries} attempts: {str(e)}")
+                self.logger.warning(f"Attempt {attempt + 1} failed: {str(e)}. Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+
+    @performance_monitor
+    def _safe_indicator_calculation(self, calc_func: callable, *args, **kwargs) -> Any:
+        """Safely calculate an indicator with error handling."""
+        try:
+            return calc_func(*args, **kwargs)
+        except Exception as e:
+            self.logger.error(f"Error calculating indicator {calc_func.__name__}: {str(e)}")
+            return None
+
+    @performance_monitor
     def get_market_signal(self) -> Dict:
         """
         Analyze the market and generate a trading signal based on the last month of data.
@@ -102,48 +228,130 @@ class MarketAnalyzer:
         Returns:
             Dict containing the signal analysis results
         """
+        self.logger.info(f"Starting market analysis for {self.product_id}")
         try:
             # Get candle data for the last month
             end_time = datetime.now(UTC)
             start_time = end_time - timedelta(days=30)
             
-            # Get historical data using HistoricalData class
-            candles = self.historical_data.get_historical_data(
-                self.product_id,
-                start_time,
-                end_time,
-                self.candle_interval
-            )
-
-            if not candles:
-                raise ValueError("No candle data available")
+            # Get historical data using HistoricalData class with retry
+            try:
+                candles = self._get_historical_data_with_retry(start_time, end_time)
+                self.logger.info(f"Retrieved {len(candles)} candles from {start_time} to {end_time}")
+            except Exception as e:
+                self.logger.error(f"Failed to get historical data: {str(e)}")
+                return self._generate_error_response()
 
             # Format candles to match expected structure
-            formatted_candles = self._format_candles(candles)
+            try:
+                formatted_candles = self._format_candles(candles)
+            except Exception as e:
+                self.logger.error(f"Error formatting candles: {str(e)}")
+                return self._generate_error_response()
             
             # Store the formatted candles
             self._current_candles = formatted_candles
 
-            # Get comprehensive market analysis
-            analysis = self.technical_analysis.analyze_market(formatted_candles)
+            # Clear cache if candles have changed
+            if self._current_candles != formatted_candles:
+                self._clear_indicator_cache()
+
+            # Get comprehensive market analysis with error handling
+            try:
+                analysis = self.technical_analysis.analyze_market(formatted_candles)
+            except Exception as e:
+                self.logger.error(f"Error in market analysis: {str(e)}")
+                return self._generate_error_response()
             
-            # Get additional trend information
-            adx_value, trend_direction = self.technical_analysis.get_trend_strength(formatted_candles)
+            # Get additional trend information with caching and error handling
+            adx_value = self._get_cached_indicator('adx')
+            trend_direction = self._get_cached_indicator('trend_direction')
+            if adx_value is None or trend_direction is None:
+                try:
+                    adx_value, trend_direction = self._safe_indicator_calculation(
+                        self.technical_analysis.get_trend_strength,
+                        formatted_candles
+                    )
+                    if adx_value is not None and trend_direction is not None:
+                        self._cache_indicator('adx', adx_value)
+                        self._cache_indicator('trend_direction', trend_direction)
+                except Exception as e:
+                    self.logger.error(f"Error calculating trend strength: {str(e)}")
+                    adx_value = 0
+                    trend_direction = "Unknown"
             
-            # Calculate key indicators
-            rsi = self.technical_analysis.compute_rsi(self.product_id, formatted_candles)
-            macd, signal, histogram = self.technical_analysis.compute_macd(self.product_id, formatted_candles)
-            upper_band, middle_band, lower_band = self.technical_analysis.compute_bollinger_bands(formatted_candles)
-            current_price = float(formatted_candles[-1]['close'])
+            # Calculate key indicators with caching and error handling
+            indicators = {}
             
+            # RSI calculation
+            rsi = self._get_cached_indicator('rsi')
+            if rsi is None:
+                rsi = self._safe_indicator_calculation(
+                    self.technical_analysis.compute_rsi,
+                    self.product_id,
+                    formatted_candles
+                )
+                if rsi is not None:
+                    self._cache_indicator('rsi', rsi)
+            indicators['rsi'] = rsi or 50  # Default to neutral if calculation fails
+
+            # MACD calculation
+            macd = self._get_cached_indicator('macd')
+            signal = self._get_cached_indicator('macd_signal')
+            histogram = self._get_cached_indicator('macd_histogram')
+            if any(v is None for v in [macd, signal, histogram]):
+                try:
+                    macd, signal, histogram = self._safe_indicator_calculation(
+                        self.technical_analysis.compute_macd,
+                        self.product_id,
+                        formatted_candles
+                    )
+                    if all(v is not None for v in [macd, signal, histogram]):
+                        self._cache_indicator('macd', macd)
+                        self._cache_indicator('macd_signal', signal)
+                        self._cache_indicator('macd_histogram', histogram)
+                except Exception as e:
+                    self.logger.error(f"Error calculating MACD: {str(e)}")
+                    macd, signal, histogram = 0, 0, 0
+
+            # Bollinger Bands calculation
+            bb_upper = self._get_cached_indicator('bb_upper')
+            bb_middle = self._get_cached_indicator('bb_middle')
+            bb_lower = self._get_cached_indicator('bb_lower')
+            if any(v is None for v in [bb_upper, bb_middle, bb_lower]):
+                try:
+                    bb_upper, bb_middle, bb_lower = self._safe_indicator_calculation(
+                        self.technical_analysis.compute_bollinger_bands,
+                        formatted_candles
+                    )
+                    if all(v is not None for v in [bb_upper, bb_middle, bb_lower]):
+                        self._cache_indicator('bb_upper', bb_upper)
+                        self._cache_indicator('bb_middle', bb_middle)
+                        self._cache_indicator('bb_lower', bb_lower)
+                except Exception as e:
+                    self.logger.error(f"Error calculating Bollinger Bands: {str(e)}")
+                    current_price = float(formatted_candles[-1]['close'])
+                    bb_upper = current_price * 1.02
+                    bb_middle = current_price
+                    bb_lower = current_price * 0.98
+
+            try:
+                current_price = float(formatted_candles[-1]['close'])
+            except (IndexError, KeyError, ValueError) as e:
+                self.logger.error(f"Error getting current price: {str(e)}")
+                return self._generate_error_response()
+
             # Add signal stability information
             signal_stability = "High" if len(self.technical_analysis.signal_history) >= self.technical_analysis.trend_confirmation_period and \
                                   all(s['strength'] > 0 for s in self.technical_analysis.signal_history) or \
                                   all(s['strength'] < 0 for s in self.technical_analysis.signal_history) else "Low"
             
             # Get volume confirmation analysis
-            volume_info = self.technical_analysis.analyze_volume_confirmation(formatted_candles)
-            
+            volume_info = self._get_cached_indicator('volume_info')
+            if volume_info is None:
+                volume_info = self.technical_analysis.analyze_volume_confirmation(formatted_candles)
+                self._cache_indicator('volume_info', volume_info)
+
             # Create detailed analysis result
             result = {
                 'timestamp': datetime.now(UTC).isoformat(),
@@ -161,9 +369,9 @@ class MarketAnalyzer:
                     'macd': round(macd, 2),
                     'macd_signal': round(signal, 2),
                     'macd_histogram': round(histogram, 2),
-                    'bollinger_upper': round(upper_band, 2),
-                    'bollinger_middle': round(middle_band, 2),
-                    'bollinger_lower': round(lower_band, 2),
+                    'bollinger_upper': round(bb_upper, 2),
+                    'bollinger_middle': round(bb_middle, 2),
+                    'bollinger_lower': round(bb_lower, 2),
                     'adx': round(adx_value, 2),
                     'trend_direction': trend_direction
                 },
@@ -227,7 +435,7 @@ class MarketAnalyzer:
             return result
 
         except Exception as e:
-            self.logger.error(f"Error generating market signal: {str(e)}")
+            self.logger.error(f"Error in market analysis: {str(e)}", exc_info=True)
             return {
                 'error': str(e),
                 'timestamp': datetime.now(UTC).isoformat(),
@@ -364,7 +572,7 @@ class MarketAnalyzer:
                     'message': f"Bullish conditions detected. Consider a conservative LONG position:\n"
                               f"• Entry Price: ${current_price:.4f}\n"
                               f"• Position Type: LONG\n"
-                              f"• Leverage: 1x only\n\n"
+                              f" Leverage: 1x only\n\n"
                               f"Support Level: ${support_level:.4f}\n"
                               f"Resistance Level: ${resistance_level:.4f}\n\n"
                               f"Stop Loss: Place below support at ${(support_level - (atr * 0.5)):.4f}\n"
@@ -1083,7 +1291,27 @@ def main():
     )
     
     try:
+        # Get market analysis
+        analysis_start = time.time()
         analysis = analyzer.get_market_signal()
+        analysis_time = time.time() - analysis_start
+        
+        # Get performance stats
+        perf_stats = analyzer.get_performance_stats()
+        
+        # Print performance information
+        print("\n====== ⚡ Performance Metrics ⚡ ======")
+        print(f"🕒 Analyzer Uptime: {perf_stats['uptime']}")
+        print(f"⚡ Total Analysis Time: {analysis_time:.2f} seconds")
+        
+        print("\n📊 Function Performance:")
+        for func_name, metrics in perf_stats['metrics'].items():
+            print(f"\n• {func_name}:")
+            print(f"  - Average Time: {metrics['avg_execution_time']:.3f}s")
+            print(f"  - Min Time: {metrics['min_execution_time']:.3f}s")
+            print(f"  - Max Time: {metrics['max_execution_time']:.3f}s")
+            print(f"  - Total Calls: {metrics['total_calls']}")
+            print(f"  - Last Execution: {metrics['last_execution_time']:.3f}s")
         
         # Enhanced formatted output
         print("\n====== 📊 Comprehensive Market Analysis Report 📊 ======")
@@ -1345,7 +1573,8 @@ def main():
         print("\n📈 Contributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
 
     except Exception as e:
-        print(f"\nError running market analysis: {str(e)}")
+        logging.error(f"Error running market analysis: {str(e)}", exc_info=True)
+        return
 
 if __name__ == "__main__":
     main() 
