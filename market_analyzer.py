@@ -1296,22 +1296,22 @@ def main():
         analysis = analyzer.get_market_signal()
         analysis_time = time.time() - analysis_start
         
-        # Get performance stats
-        perf_stats = analyzer.get_performance_stats()
+        # # Get performance stats
+        # perf_stats = analyzer.get_performance_stats()
         
-        # Print performance information
-        print("\n====== ⚡ Performance Metrics ⚡ ======")
-        print(f"🕒 Analyzer Uptime: {perf_stats['uptime']}")
-        print(f"⚡ Total Analysis Time: {analysis_time:.2f} seconds")
+        # # Print performance information
+        # print("\n====== ⚡ Performance Metrics ⚡ ======")
+        # print(f"🕒 Analyzer Uptime: {perf_stats['uptime']}")
+        # print(f"⚡ Total Analysis Time: {analysis_time:.2f} seconds")
         
-        print("\n📊 Function Performance:")
-        for func_name, metrics in perf_stats['metrics'].items():
-            print(f"\n• {func_name}:")
-            print(f"  - Average Time: {metrics['avg_execution_time']:.3f}s")
-            print(f"  - Min Time: {metrics['min_execution_time']:.3f}s")
-            print(f"  - Max Time: {metrics['max_execution_time']:.3f}s")
-            print(f"  - Total Calls: {metrics['total_calls']}")
-            print(f"  - Last Execution: {metrics['last_execution_time']:.3f}s")
+        # print("\n📊 Function Performance:")
+        # for func_name, metrics in perf_stats['metrics'].items():
+        #     print(f"\n• {func_name}:")
+        #     print(f"  - Average Time: {metrics['avg_execution_time']:.3f}s")
+        #     print(f"  - Min Time: {metrics['min_execution_time']:.3f}s")
+        #     print(f"  - Max Time: {metrics['max_execution_time']:.3f}s")
+        #     print(f"  - Total Calls: {metrics['total_calls']}")
+        #     print(f"  - Last Execution: {metrics['last_execution_time']:.3f}s")
         
         # Enhanced formatted output
         print("\n====== 📊 Comprehensive Market Analysis Report 📊 ======")
