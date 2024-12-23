@@ -19,6 +19,7 @@ tweepy>=4.10.0
 structlog
 datadog
 sentry-sdk
+textblob
 
 # The following dependency is installed from GitHub:
 # INSTALL TA-lib from https://sourceforge.net/projects/ta-lib/files/ta-lib/0.4.0/ta-lib-0.4.0-src.tar.gz/download

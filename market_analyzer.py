@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Any, Callable
+from typing import Dict, List, Any, Callable, Optional
 from datetime import datetime, timedelta, UTC
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis, SignalType, TechnicalAnalysisConfig
@@ -12,6 +12,10 @@ import numpy as np
 from enum import Enum
 from functools import wraps
 import logging.handlers
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+import joblib
 
 # Add valid choices for granularity and products
 VALID_GRANULARITIES = [
@@ -53,6 +57,219 @@ class MarketRegime(Enum):
     VOLATILE = "Volatile"
     BREAKOUT = "Breakout"
     REVERSAL = "Reversal"
+
+class MarketSentiment(Enum):
+    VERY_BULLISH = "Very Bullish"
+    BULLISH = "Bullish"
+    NEUTRAL = "Neutral"
+    BEARISH = "Bearish"
+    VERY_BEARISH = "Very Bearish"
+
+class MLModel:
+    """Machine Learning model for market prediction."""
+    
+    def __init__(self, model_path: Optional[str] = None):
+        self.model = None
+        self.scaler = StandardScaler()
+        if model_path:
+            self.load_model(model_path)
+        else:
+            self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+            
+    def prepare_features(self, candles: List[Dict]) -> np.ndarray:
+        """Prepare features for ML model."""
+        df = pd.DataFrame(candles)
+        
+        # Technical indicators as features
+        features = []
+        prices = df['close'].values
+        volumes = df['volume'].values
+        
+        # Price-based features
+        features.append(np.gradient(prices))  # Price momentum
+        features.append(np.std(prices[-20:]))  # Volatility
+        
+        # Volume-based features
+        features.append(np.gradient(volumes))  # Volume momentum
+        features.append(volumes[-1] / np.mean(volumes[-20:]))  # Relative volume
+        
+        # Trend features
+        sma_20 = np.mean(prices[-20:])
+        sma_50 = np.mean(prices[-50:])
+        features.append((prices[-1] - sma_20) / sma_20)  # Price vs SMA20
+        features.append((sma_20 - sma_50) / sma_50)  # SMA20 vs SMA50
+        
+        return np.array(features).reshape(1, -1)
+        
+    def train(self, candles: List[Dict], labels: List[int]):
+        """Train the ML model."""
+        X = self.prepare_features(candles)
+        X_scaled = self.scaler.fit_transform(X)
+        self.model.fit(X_scaled, labels)
+        
+    def predict(self, candles: List[Dict]) -> float:
+        """Predict market direction."""
+        if self.model is None:
+            return 0.0
+            
+        X = self.prepare_features(candles)
+        X_scaled = self.scaler.transform(X)
+        probabilities = self.model.predict_proba(X_scaled)[0]
+        
+        # Convert probabilities to signal strength (-1 to 1)
+        return (probabilities[1] - probabilities[0]) * 2 - 1
+        
+    def save_model(self, path: str):
+        """Save model to file."""
+        if self.model is not None:
+            joblib.dump({'model': self.model, 'scaler': self.scaler}, path)
+            
+    def load_model(self, path: str):
+        """Load model from file."""
+        try:
+            saved = joblib.load(path)
+            self.model = saved['model']
+            self.scaler = saved['scaler']
+        except Exception as e:
+            logging.error(f"Error loading ML model: {str(e)}")
+
+class SentimentAnalyzer:
+    """Analyzes market sentiment from various sources."""
+    
+    def __init__(self):
+        self.sentiment_history = []
+        self.max_history = 100
+        
+    def analyze_news_sentiment(self, product_id: str) -> Dict:
+        """Analyze sentiment from crypto news sources."""
+        try:
+            # Example news API call (replace with actual API)
+            news_url = f"https://cryptonews-api.com/api/v1/news?tickers={product_id}"
+            # response = requests.get(news_url)
+            # news = response.json()
+            
+            # Simulate news sentiment for now
+            sentiment_scores = []
+            for _ in range(5):  # Simulate 5 news articles
+                score = np.random.normal(0.1, 0.3)  # Slightly bullish bias
+                sentiment_scores.append(score)
+            
+            avg_sentiment = np.mean(sentiment_scores)
+            sentiment_std = np.std(sentiment_scores)
+            
+            return {
+                'score': avg_sentiment,
+                'volatility': sentiment_std,
+                'confidence': 1.0 - sentiment_std,
+                'source': 'news'
+            }
+        except Exception as e:
+            logging.error(f"Error analyzing news sentiment: {str(e)}")
+            return {'score': 0, 'volatility': 0, 'confidence': 0, 'source': 'news'}
+            
+    def analyze_social_sentiment(self, product_id: str) -> Dict:
+        """Analyze sentiment from social media."""
+        try:
+            # Simulate social sentiment
+            sentiment_scores = []
+            for _ in range(10):  # Simulate 10 social posts
+                score = np.random.normal(0.2, 0.4)  # More volatile than news
+                sentiment_scores.append(score)
+            
+            avg_sentiment = np.mean(sentiment_scores)
+            sentiment_std = np.std(sentiment_scores)
+            
+            return {
+                'score': avg_sentiment,
+                'volatility': sentiment_std,
+                'confidence': 1.0 - sentiment_std,
+                'source': 'social'
+            }
+        except Exception as e:
+            logging.error(f"Error analyzing social sentiment: {str(e)}")
+            return {'score': 0, 'volatility': 0, 'confidence': 0, 'source': 'social'}
+            
+    def get_aggregated_sentiment(self, product_id: str) -> MarketSentiment:
+        """Get aggregated sentiment from all sources."""
+        news_sentiment = self.analyze_news_sentiment(product_id)
+        social_sentiment = self.analyze_social_sentiment(product_id)
+        
+        # Weight the sentiments by their confidence
+        total_score = (
+            news_sentiment['score'] * news_sentiment['confidence'] +
+            social_sentiment['score'] * social_sentiment['confidence']
+        ) / (news_sentiment['confidence'] + social_sentiment['confidence'])
+        
+        # Store sentiment history
+        self.sentiment_history.append({
+            'timestamp': datetime.now(UTC),
+            'score': total_score,
+            'news_score': news_sentiment['score'],
+            'social_score': social_sentiment['score']
+        })
+        
+        # Keep history size in check
+        if len(self.sentiment_history) > self.max_history:
+            self.sentiment_history.pop(0)
+        
+        # Convert score to sentiment enum
+        if total_score > 0.5:
+            return MarketSentiment.VERY_BULLISH
+        elif total_score > 0.1:
+            return MarketSentiment.BULLISH
+        elif total_score < -0.5:
+            return MarketSentiment.VERY_BEARISH
+        elif total_score < -0.1:
+            return MarketSentiment.BEARISH
+        else:
+            return MarketSentiment.NEUTRAL
+
+class AdaptiveWeights:
+    """Dynamically adjusts indicator weights based on performance."""
+    
+    def __init__(self, initial_weights: Dict[str, float]):
+        self.weights = initial_weights.copy()
+        self.performance_history = []
+        self.learning_rate = 0.1
+        self.max_history = 100
+        
+    def update_weights(self, indicator_performances: Dict[str, float]):
+        """Update weights based on indicator performance."""
+        total_performance = sum(abs(p) for p in indicator_performances.values())
+        if total_performance == 0:
+            return
+            
+        # Adjust weights based on relative performance
+        for indicator, performance in indicator_performances.items():
+            if indicator in self.weights:
+                relative_performance = performance / total_performance
+                self.weights[indicator] += self.learning_rate * relative_performance
+                
+        # Normalize weights
+        total_weight = sum(self.weights.values())
+        if total_weight > 0:
+            self.weights = {k: v/total_weight for k, v in self.weights.items()}
+            
+    def get_weight(self, indicator: str) -> float:
+        """Get current weight for an indicator."""
+        return self.weights.get(indicator, 0.0)
+        
+    def record_performance(self, indicator_signals: Dict[str, float], actual_movement: float):
+        """Record indicator performance for future weight updates."""
+        performance = {}
+        for indicator, signal in indicator_signals.items():
+            # Calculate how well the indicator predicted the movement
+            performance[indicator] = 1.0 - abs(signal - actual_movement)
+            
+        self.performance_history.append({
+            'timestamp': datetime.now(UTC),
+            'performance': performance
+        })
+        
+        if len(self.performance_history) > self.max_history:
+            self.performance_history.pop(0)
+            
+        self.update_weights(performance)
 
 def performance_monitor(func: Callable) -> Callable:
     """Decorator to monitor function performance."""
@@ -131,6 +348,25 @@ class MarketAnalyzer:
             candle_interval=candle_interval,
             product_id=product_id
         )
+        
+        # Initialize ML model
+        self.ml_model = MLModel()
+        
+        # Initialize sentiment analyzer
+        self.sentiment_analyzer = SentimentAnalyzer()
+        
+        # Initialize adaptive weights with default values
+        initial_weights = {
+            'rsi': 0.15,
+            'macd': 0.15,
+            'bollinger': 0.1,
+            'adx': 0.1,
+            'ma_crossover': 0.1,
+            'volume': 0.1,
+            'sentiment': 0.15,
+            'ml_prediction': 0.15
+        }
+        self.adaptive_weights = AdaptiveWeights(initial_weights)
         
         self._current_candles = []
         
@@ -263,6 +499,27 @@ class MarketAnalyzer:
                 self.logger.error(f"Error in market analysis: {str(e)}")
                 return self._generate_error_response()
             
+            # Get ML model prediction
+            try:
+                ml_prediction = self.ml_model.predict(formatted_candles)
+                ml_confidence = abs(ml_prediction)  # Higher absolute value means higher confidence
+            except Exception as e:
+                self.logger.error(f"Error getting ML prediction: {str(e)}")
+                ml_prediction = 0.0
+                ml_confidence = 0.0
+                
+            # Get market sentiment
+            try:
+                sentiment = self.sentiment_analyzer.get_aggregated_sentiment(self.product_id)
+                sentiment_data = {
+                    'news': self.sentiment_analyzer.analyze_news_sentiment(self.product_id),
+                    'social': self.sentiment_analyzer.analyze_social_sentiment(self.product_id)
+                }
+            except Exception as e:
+                self.logger.error(f"Error analyzing sentiment: {str(e)}")
+                sentiment = MarketSentiment.NEUTRAL
+                sentiment_data = {'news': {}, 'social': {}}
+            
             # Get additional trend information with caching and error handling
             adx_value = self._get_cached_indicator('adx')
             trend_direction = self._get_cached_indicator('trend_direction')
@@ -385,6 +642,22 @@ class MarketAnalyzer:
                     'strength': volume_info['strength'],
                     'is_confirming': volume_info['is_confirming'],
                     'price_change': round(volume_info['price_change'], 1)
+                },
+                'ml_analysis': {
+                    'prediction': ml_prediction,
+                    'confidence': ml_confidence,
+                    'direction': 'Bullish' if ml_prediction > 0 else 'Bearish' if ml_prediction < 0 else 'Neutral',
+                    'strength': abs(ml_prediction)
+                },
+                'sentiment_analysis': {
+                    'overall': sentiment.value,
+                    'news': sentiment_data['news'],
+                    'social': sentiment_data['social'],
+                    'history': self.sentiment_analyzer.sentiment_history[-5:]  # Last 5 sentiment records
+                },
+                'adaptive_weights': {
+                    'current_weights': self.adaptive_weights.weights,
+                    'performance_history': self.adaptive_weights.performance_history[-5:]  # Last 5 performance records
                 }
             }
 
@@ -722,70 +995,99 @@ class MarketAnalyzer:
             return SignalType.HOLD
 
     def _calculate_base_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
-        """Calculate the base signal without stability checks."""
+        """Calculate the base signal with enhanced features."""
         try:
-            weights = self.set_product_weights()
             signal_strength = 0.0
+            indicator_signals = {}
             
-            # RSI Signal (-1 to 1 scale)
+            # Technical indicators
             if 'rsi' in indicators:
                 rsi = indicators['rsi']
-                if rsi > self.config.rsi_overbought:
-                    signal_strength -= weights['rsi']
-                elif rsi < self.config.rsi_oversold:
-                    signal_strength += weights['rsi']
-                else:
-                    # More sensitive to RSI movements around the middle
-                    signal_strength += weights['rsi'] * ((rsi - 50) / 20)  # More sensitive
+                rsi_signal = ((rsi - 50) / 50) * self.adaptive_weights.get_weight('rsi')
+                indicator_signals['rsi'] = rsi_signal
+                signal_strength += rsi_signal
 
-            # MACD Signal
+            # MACD
             if all(k in indicators for k in ['macd', 'macd_signal', 'macd_histogram']):
                 macd = indicators['macd']
                 macd_signal = indicators['macd_signal']
                 histogram = indicators['macd_histogram']
                 
-                # More sensitive MACD signals
-                if macd > macd_signal:
-                    signal_strength += weights['macd'] * (1 + abs(histogram/macd) * 0.5)
+                macd_strength = (histogram / (abs(macd) + 0.00001)) * self.adaptive_weights.get_weight('macd')
+                indicator_signals['macd'] = macd_strength
+                signal_strength += macd_strength
+
+            # Bollinger Bands
+            if all(k in indicators for k in ['bollinger_upper', 'bollinger_middle', 'bollinger_lower']):
+                current_price = indicators.get('current_price', 0)
+                bb_upper = indicators['bollinger_upper']
+                bb_lower = indicators['bollinger_lower']
+                bb_middle = indicators['bollinger_middle']
+                
+                bb_signal = 0.0
+                if current_price > bb_upper:
+                    bb_signal = -1.0
+                elif current_price < bb_lower:
+                    bb_signal = 1.0
                 else:
-                    signal_strength -= weights['macd'] * (1 + abs(histogram/macd) * 0.5)
+                    bb_signal = (current_price - bb_middle) / (bb_upper - bb_middle)
+                
+                bb_strength = bb_signal * self.adaptive_weights.get_weight('bollinger')
+                indicator_signals['bollinger'] = bb_strength
+                signal_strength += bb_strength
 
-            # Bollinger Bands Signal
-            if 'bollinger' in indicators:
-                signal_strength += weights['bollinger'] * indicators['bollinger'] * 1.5  # Increased sensitivity
-
-            # ADX Signal - More sensitive to trend strength
-            if 'adx' in indicators:
+            # ADX and Trend
+            if 'adx' in indicators and 'trend_direction' in indicators:
                 adx = indicators['adx']
-                if adx > 15:  # Lowered from 20
-                    if indicators.get('trend_direction') == "Uptrend":
-                        signal_strength += weights['adx'] * (adx/40)  # More sensitive
-                    elif indicators.get('trend_direction') == "Downtrend":
-                        signal_strength -= weights['adx'] * (adx/40)
+                trend = indicators['trend_direction']
+                
+                adx_signal = (adx / 100.0) * (1 if trend == "Uptrend" else -1 if trend == "Downtrend" else 0)
+                adx_strength = adx_signal * self.adaptive_weights.get_weight('adx')
+                indicator_signals['adx'] = adx_strength
+                signal_strength += adx_strength
 
-            # MA Crossover Signal
-            if 'ma_crossover' in indicators:
-                signal_strength += weights['ma_crossover'] * indicators['ma_crossover'] * 1.25
+            # Volume Analysis
+            if 'volume_trend' in indicators:
+                volume_trend = indicators['volume_trend']
+                volume_signal = 1 if volume_trend == "Increasing" else -1 if volume_trend == "Decreasing" else 0
+                volume_strength = volume_signal * self.adaptive_weights.get_weight('volume')
+                indicator_signals['volume'] = volume_strength
+                signal_strength += volume_strength
+
+            # Add ML model prediction
+            ml_prediction = self.ml_model.predict(self._current_candles)
+            ml_strength = ml_prediction * self.adaptive_weights.get_weight('ml_prediction')
+            indicator_signals['ml_prediction'] = ml_strength
+            signal_strength += ml_strength
+
+            # Add sentiment analysis
+            sentiment = self.sentiment_analyzer.get_aggregated_sentiment(self.product_id)
+            sentiment_score = 1.0 if sentiment in [MarketSentiment.VERY_BULLISH, MarketSentiment.BULLISH] else \
+                            -1.0 if sentiment in [MarketSentiment.VERY_BEARISH, MarketSentiment.BEARISH] else 0.0
+            sentiment_strength = sentiment_score * self.adaptive_weights.get_weight('sentiment')
+            indicator_signals['sentiment'] = sentiment_strength
+            signal_strength += sentiment_strength
 
             # Market Condition Adjustment
             condition_multipliers = {
-                'Bull Market': 1.3,
-                'Bear Market': 0.7,
-                'Bullish': 1.2,
-                'Bearish': 0.8,
-                'Neutral': 1.0
+                "Bull Market": 1.3,
+                "Bear Market": 0.7,
+                "Bullish": 1.2,
+                "Bearish": 0.8,
+                "Neutral": 1.0
             }
             
             # Apply market condition multiplier
             multiplier = condition_multipliers.get(market_condition, 1.0)
             signal_strength *= multiplier
 
-            # Add volume confirmation boost
-            if 'volume_trend' in indicators and indicators['volume_trend'] == "Increasing":
-                signal_strength *= 1.2
-
             # Normalize signal strength to be between -10 and 10
-            signal_strength = max(min(signal_strength * 1.5, 10), -10)  # Increased sensitivity
+            signal_strength = max(min(signal_strength * 1.5, 10), -10)
+
+            # Record indicator performances for weight adaptation
+            if len(self._current_candles) >= 2:
+                actual_movement = (self._current_candles[-1]['close'] - self._current_candles[-2]['close']) / self._current_candles[-2]['close']
+                self.adaptive_weights.record_performance(indicator_signals, actual_movement)
 
             self.logger.debug(f"Base signal strength calculated: {signal_strength}")
             return signal_strength
