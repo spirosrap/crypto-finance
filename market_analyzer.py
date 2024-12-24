@@ -1249,82 +1249,126 @@ class MarketAnalyzer:
             # Trend alignment (0-20%)
             trend_direction = indicators.get('trend_direction', 'Unknown')
             adx = indicators.get('adx', 0)
+            prev_adx = indicators.get('prev_adx', 0)
+            
+            # Enhanced trend analysis with momentum consideration
+            trend_momentum = "Accelerating" if adx > prev_adx else "Decelerating"
+            trend_strength = "Strong" if adx > 25 else "Moderate" if adx > 15 else "Weak"
+            
             if trend_direction == "Uptrend":
-                probability_factors.append(("Trend", 20 if adx > 25 else 10))
+                trend_score = 20 if adx > 25 else 15 if adx > 15 else 10
+                # Add momentum bonus
+                if trend_momentum == "Accelerating":
+                    trend_score += 5
+                probability_factors.append(("Trend", trend_score))
                 move_characteristics['trend_quality'] = {
-                    'strength': 'Strong' if adx > 25 else 'Moderate' if adx > 15 else 'Weak',
+                    'strength': trend_strength,
                     'duration': 'Established' if adx > 30 else 'Developing',
-                    'momentum': 'Accelerating' if adx > indicators.get('prev_adx', 0) else 'Decelerating'
+                    'momentum': trend_momentum,
+                    'consistency': 'High' if adx > prev_adx else 'Moderate'
                 }
             elif trend_direction == "Downtrend":
-                probability_factors.append(("Trend", 20 if adx > 25 else 10))
+                trend_score = 20 if adx > 25 else 15 if adx > 15 else 10
+                # Add momentum bonus
+                if trend_momentum == "Accelerating":
+                    trend_score += 5
+                probability_factors.append(("Trend", trend_score))
                 move_characteristics['trend_quality'] = {
-                    'strength': 'Strong' if adx > 25 else 'Moderate' if adx > 15 else 'Weak',
+                    'strength': trend_strength,
                     'duration': 'Established' if adx > 30 else 'Developing',
-                    'momentum': 'Accelerating' if adx > indicators.get('prev_adx', 0) else 'Decelerating'
+                    'momentum': trend_momentum,
+                    'consistency': 'High' if adx > prev_adx else 'Moderate'
                 }
             else:
                 probability_factors.append(("Trend", 5))
                 move_characteristics['trend_quality'] = {
                     'strength': 'Weak',
                     'duration': 'Undefined',
-                    'momentum': 'Neutral'
+                    'momentum': 'Neutral',
+                    'consistency': 'Low'
                 }
 
-            # RSI alignment with detailed momentum analysis (0-15%)
+            # Enhanced RSI analysis with divergence detection (0-15%)
             rsi = indicators.get('rsi', 50)
+            rsi_prev = indicators.get('prev_rsi', 50)
+            price = indicators.get('current_price', 0)
+            price_prev = indicators.get('prev_price', price)
+            
+            # Detect RSI divergence
+            rsi_divergence = "Bullish" if rsi > rsi_prev and price < price_prev else \
+                           "Bearish" if rsi < rsi_prev and price > price_prev else "None"
+            
             rsi_momentum = {
                 'condition': 'Overbought' if rsi > 70 else 'Oversold' if rsi < 30 else 'Neutral',
                 'strength': abs(rsi - 50) / 50,
-                'divergence': 'None'  # Could be calculated with price comparison
+                'divergence': rsi_divergence,
+                'trend': 'Bullish' if rsi > rsi_prev else 'Bearish' if rsi < rsi_prev else 'Neutral'
             }
-            if rsi > 70 or rsi < 30:
-                probability_factors.append(("RSI", 15))
-            elif 40 <= rsi <= 60:
-                probability_factors.append(("RSI", 5))
-            else:
-                probability_factors.append(("RSI", 10))
+            
+            rsi_score = 15 if (rsi > 70 or rsi < 30) else \
+                       10 if (rsi > 60 or rsi < 40) else \
+                       5
+            
+            # Add divergence bonus
+            if rsi_divergence != "None":
+                rsi_score += 5
+                
+            probability_factors.append(("RSI", rsi_score))
             move_characteristics['momentum'] = rsi_momentum
 
-            # MACD confirmation with trend strength (0-15%)
+            # Enhanced MACD analysis with trend confirmation (0-15%)
             macd = indicators.get('macd', 0)
             macd_signal = indicators.get('macd_signal', 0)
             histogram = indicators.get('macd_histogram', 0)
+            prev_histogram = indicators.get('prev_macd_histogram', 0)
             
             macd_analysis = {
                 'crossover_type': 'Bullish' if macd > macd_signal else 'Bearish' if macd < macd_signal else 'None',
                 'histogram_strength': abs(histogram) / abs(macd) if macd != 0 else 0,
-                'momentum_quality': 'Increasing' if histogram > 0 and histogram > indicators.get('prev_histogram', 0) else
-                                  'Decreasing' if histogram < 0 and histogram < indicators.get('prev_histogram', 0) else 'Neutral'
+                'momentum_quality': 'Increasing' if histogram > 0 and histogram > prev_histogram else
+                                  'Decreasing' if histogram < 0 and histogram < prev_histogram else 'Neutral',
+                'trend_alignment': 'Aligned' if (macd > macd_signal and trend_direction == "Uptrend") or
+                                             (macd < macd_signal and trend_direction == "Downtrend") else 'Divergent'
             }
             
+            macd_score = 0
             if macd != 0 or macd_signal != 0:
                 macd_diff = abs(macd - macd_signal)
-                macd_strength = min(15, (macd_diff / (abs(macd_signal) + 0.00001)) * 15)
-                probability_factors.append(("MACD", macd_strength))
-            else:
-                probability_factors.append(("MACD", 0))
+                macd_score = min(15, (macd_diff / (abs(macd_signal) + 0.00001)) * 15)
+                # Add trend alignment bonus
+                if macd_analysis['trend_alignment'] == 'Aligned':
+                    macd_score += 5
+                    
+            probability_factors.append(("MACD", macd_score))
             move_characteristics['macd_analysis'] = macd_analysis
 
-            # Volume confirmation with detailed analysis (0-20%)
+            # Enhanced volume analysis with trend confirmation (0-20%)
             volume_change = volume_info.get('volume_change', 0)
             is_confirming = volume_info.get('is_confirming', False)
+            volume_trend = volume_info.get('volume_trend', 'Neutral')
             
             volume_quality = {
-                'trend': volume_info.get('volume_trend', 'Neutral'),
+                'trend': volume_trend,
                 'strength': 'Strong' if abs(volume_change) > 50 else 'Moderate' if abs(volume_change) > 20 else 'Weak',
                 'consistency': 'High' if is_confirming else 'Low',
-                'price_alignment': 'Confirmed' if is_confirming else 'Divergent'
+                'price_alignment': 'Confirmed' if is_confirming else 'Divergent',
+                'trend_support': 'Strong' if volume_trend == "Increasing" and is_confirming else
+                               'Weak' if volume_trend == "Decreasing" else 'Neutral'
             }
             
+            volume_score = 0
             if is_confirming:
-                vol_strength = min(20, abs(volume_change) / 5)
-                probability_factors.append(("Volume", vol_strength))
+                volume_score = min(20, abs(volume_change) / 5)
+                # Add trend support bonus
+                if volume_quality['trend_support'] == 'Strong':
+                    volume_score += 5
             else:
-                probability_factors.append(("Volume", 5))
+                volume_score = 5
+                
+            probability_factors.append(("Volume", volume_score))
             move_characteristics['volume_quality'] = volume_quality
 
-            # Pattern recognition with failure points (0-15%)
+            # Enhanced pattern recognition with failure points (0-15%)
             pattern_type = patterns.get('type', 'None')
             pattern_confidence = patterns.get('confidence', 0)
             
@@ -1335,51 +1379,79 @@ class MarketAnalyzer:
                 'failure_points': {
                     'immediate': patterns.get('stop_loss', None),
                     'pattern_invalidation': patterns.get('invalidation_level', None)
-                }
+                },
+                'confirmation_status': 'Confirmed' if is_confirming and pattern_confidence > 0.7 else
+                                     'Partial' if pattern_confidence > 0.5 else 'Unconfirmed'
             }
             
+            pattern_score = 0
             if pattern_type != "None":
-                pattern_strength = min(15, pattern_confidence * 15)
-                probability_factors.append(("Pattern", pattern_strength))
-            else:
-                probability_factors.append(("Pattern", 0))
+                pattern_score = min(15, pattern_confidence * 15)
+                # Add confirmation bonus
+                if pattern_analysis['confirmation_status'] == 'Confirmed':
+                    pattern_score += 5
+                elif pattern_analysis['confirmation_status'] == 'Partial':
+                    pattern_score += 2
+                    
+            probability_factors.append(("Pattern", pattern_score))
             move_characteristics['pattern_analysis'] = pattern_analysis
 
-            # Market condition analysis (0-15%)
+            # Enhanced market condition analysis (0-15%)
             market_condition = indicators.get('market_condition', 'Unknown')
+            volatility = indicators.get('volatility', 'Normal')
             
             market_context = {
                 'condition': market_condition,
-                'volatility': indicators.get('volatility', 'Normal'),
+                'volatility': volatility,
                 'liquidity': 'High' if volume_info.get('volume_change', 0) > 0 else 'Normal',
-                'support_resistance_proximity': indicators.get('price_level_proximity', 'Far')
+                'support_resistance_proximity': indicators.get('price_level_proximity', 'Far'),
+                'market_phase': 'Accumulation' if market_condition == "Bull Market" and volume_trend == "Increasing" else
+                               'Distribution' if market_condition == "Bear Market" and volume_trend == "Decreasing" else
+                               'Transition'
             }
             
-            if market_condition in ["Bull Market", "Bear Market"]:
-                probability_factors.append(("Market", 15))
-            elif market_condition in ["Bullish", "Bearish"]:
-                probability_factors.append(("Market", 10))
-            else:
-                probability_factors.append(("Market", 5))
+            market_score = 15 if market_condition in ["Bull Market", "Bear Market"] else \
+                         10 if market_condition in ["Bullish", "Bearish"] else 5
+                         
+            # Add market phase bonus
+            if market_context['market_phase'] in ['Accumulation', 'Distribution']:
+                market_score += 5
+                
+            probability_factors.append(("Market", market_score))
             move_characteristics['market_context'] = market_context
 
-            # Calculate total probability
+            # Calculate total probability with weighted factors
             total_probability = sum(factor[1] for factor in probability_factors)
             total_probability = max(0, min(100, total_probability))
             
             # Determine move quality characteristics
             move_quality = {
                 'expected_speed': 'Rapid' if total_probability > 80 else 'Moderate' if total_probability > 60 else 'Slow',
-                'expected_volatility': 'High' if market_context['volatility'] == 'High' else 'Normal',
+                'expected_volatility': 'High' if volatility == 'High' else 'Normal',
                 'continuation_probability': f"{total_probability:.1f}%",
-                'reversal_risk': 'Low' if total_probability > 75 else 'Moderate' if total_probability > 50 else 'High'
+                'reversal_risk': 'Low' if total_probability > 75 else 'Moderate' if total_probability > 50 else 'High',
+                'strength_rating': 'Very Strong' if total_probability > 85 else
+                                 'Strong' if total_probability > 70 else
+                                 'Moderate' if total_probability > 50 else 'Weak'
             }
 
-            # Calculate confidence level
+            # Calculate confidence level with more granularity
             confidence_level = "Very High" if total_probability >= 85 else \
                              "High" if total_probability >= 70 else \
                              "Moderate" if total_probability >= 50 else \
                              "Low" if total_probability >= 30 else "Very Low"
+
+            # Add failure points analysis
+            failure_points = {
+                'immediate_stop': pattern_analysis['failure_points']['immediate'],
+                'trend_reversal_point': pattern_analysis['failure_points']['pattern_invalidation'],
+                'momentum_failure_level': indicators.get('key_reversal_level', None),
+                'risk_levels': {
+                    'critical': patterns.get('stop_loss', None),
+                    'warning': indicators.get('support_level' if trend_direction == "Uptrend" else 'resistance_level', None),
+                    'alert': indicators.get('pivot_point', None)
+                }
+            }
 
             return {
                 'total_probability': total_probability,
@@ -1387,11 +1459,7 @@ class MarketAnalyzer:
                 'factors': [(factor[0], round(factor[1], 1)) for factor in probability_factors],
                 'move_characteristics': move_characteristics,
                 'move_quality': move_quality,
-                'failure_points': {
-                    'immediate_stop': pattern_analysis['failure_points']['immediate'],
-                    'trend_reversal_point': pattern_analysis['failure_points']['pattern_invalidation'],
-                    'momentum_failure_level': indicators.get('key_reversal_level', None)
-                }
+                'failure_points': failure_points
             }
 
         except Exception as e:
@@ -1634,7 +1702,8 @@ def main():
         indicators = analysis['indicators']
         print(f"📊 RSI: {indicators['rsi']:.2f} ({'Overbought' if indicators['rsi'] > 70 else 'Oversold' if indicators['rsi'] < 30 else 'Neutral'})")
         print(f"📈 MACD: {indicators['macd']:.4f}, MACD Signal: {indicators['macd_signal']:.4f}, MACD Histogram: {indicators['macd_histogram']:.4f}")
-        print(f"📏 ADX: {indicators['adx']:.2f} ({'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'})")
+        adx_trend = 'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'
+        print(f"📏 ADX: {indicators['adx']:.2f} ({adx_trend})")
         print(f"➡️ Trend Direction: {indicators['trend_direction']}")
         
         # Bollinger Bands
