@@ -386,7 +386,430 @@ class MarketAnalyzer:
         self._cache_timestamp = None
         self._cache_expiry = timedelta(minutes=5)  # Cache expires after 5 minutes
         
+        # Add new attributes for enhanced analysis
+        self.support_resistance_levels = []
+        self.pivot_points = []
+        self.fibonacci_levels = []
+        self.market_cycles = []
+        self.order_flow_data = []
+        self.liquidity_zones = []
+        
+        # Add market cycle tracking
+        self.cycle_phases = {
+            'accumulation': {'start': None, 'end': None},
+            'markup': {'start': None, 'end': None},
+            'distribution': {'start': None, 'end': None},
+            'markdown': {'start': None, 'end': None}
+        }
+        
+        # Add market efficiency ratio tracking
+        self.market_efficiency_window = 20
+        self.efficiency_ratios = []
+        
+        # Add order flow tracking
+        self.order_flow_window = 50
+        self.order_flow_history = []
+        
+        # Add market microstructure
+        self.tick_data = []
+        self.spread_history = []
+        self.depth_imbalance = []
+        
+        # Add volatility tracking
+        self.volatility_windows = [20, 50, 100]  # Multiple timeframes
+        self.volatility_metrics = {
+            'historical': [],
+            'implied': [],
+            'realized': []
+        }
+        
+        # Add market correlation tracking
+        self.correlation_assets = ['BTC-USDC', 'ETH-USDC']  # Base pairs to track
+        self.correlation_history = {}
+        
+        # Add market breadth indicators
+        self.market_breadth = {
+            'advancing_declining_ratio': [],
+            'new_highs_lows_ratio': [],
+            'volume_breadth': []
+        }
+        
+        # Add adaptive thresholds
+        self.adaptive_thresholds = {
+            'volatility': self._initialize_adaptive_threshold(0.02),  # 2% base
+            'volume': self._initialize_adaptive_threshold(1.0),       # 1x base
+            'momentum': self._initialize_adaptive_threshold(0.5)      # 0.5 base
+        }
+        
         self.logger.info(f"MarketAnalyzer initialized for {product_id} with {candle_interval} interval")
+        self.logger.info("Enhanced market analyzer initialized with additional features")
+
+    def _initialize_adaptive_threshold(self, base_value: float) -> Dict:
+        """Initialize an adaptive threshold with base value and adjustment parameters."""
+        return {
+            'base': base_value,
+            'current': base_value,
+            'history': [],
+            'adjustment_factor': 0.1,
+            'max_adjustment': 2.0,
+            'min_adjustment': 0.5
+        }
+
+    def update_adaptive_thresholds(self):
+        """Update adaptive thresholds based on market conditions."""
+        try:
+            if not self._current_candles:
+                return
+                
+            # Calculate recent volatility
+            returns = np.diff([c['close'] for c in self._current_candles[-20:]])
+            current_volatility = np.std(returns)
+            
+            # Update volatility threshold
+            vol_threshold = self.adaptive_thresholds['volatility']
+            vol_adjustment = self._calculate_threshold_adjustment(
+                current_volatility,
+                vol_threshold['history'][-20:] if vol_threshold['history'] else [vol_threshold['base']]
+            )
+            vol_threshold['current'] = vol_threshold['base'] * vol_adjustment
+            vol_threshold['history'].append(vol_threshold['current'])
+            
+            # Update volume threshold similarly
+            volumes = [c['volume'] for c in self._current_candles[-20:]]
+            avg_volume = np.mean(volumes)
+            vol_threshold = self.adaptive_thresholds['volume']
+            volume_adjustment = self._calculate_threshold_adjustment(
+                avg_volume,
+                vol_threshold['history'][-20:] if vol_threshold['history'] else [vol_threshold['base']]
+            )
+            vol_threshold['current'] = vol_threshold['base'] * volume_adjustment
+            vol_threshold['history'].append(vol_threshold['current'])
+            
+            # Update momentum threshold
+            momentum = self.calculate_momentum_score(self._current_candles)
+            mom_threshold = self.adaptive_thresholds['momentum']
+            mom_adjustment = self._calculate_threshold_adjustment(
+                abs(momentum['total_score']),
+                mom_threshold['history'][-20:] if mom_threshold['history'] else [mom_threshold['base']]
+            )
+            mom_threshold['current'] = mom_threshold['base'] * mom_adjustment
+            mom_threshold['history'].append(mom_threshold['current'])
+            
+            self.logger.debug("Adaptive thresholds updated successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error updating adaptive thresholds: {str(e)}")
+
+    def _calculate_threshold_adjustment(self, current_value: float, history: List[float]) -> float:
+        """Calculate threshold adjustment factor based on recent market behavior."""
+        if not history:
+            return 1.0
+            
+        avg_historical = np.mean(history)
+        if avg_historical == 0:
+            return 1.0
+            
+        # Calculate relative change
+        relative_change = current_value / avg_historical
+        
+        # Apply sigmoid function to smooth adjustment
+        adjustment = 2 / (1 + np.exp(-relative_change)) - 1
+        
+        # Constrain adjustment
+        return max(min(1.0 + adjustment, 2.0), 0.5)
+
+    def analyze_market_cycles(self) -> Dict:
+        """Analyze market cycles and identify current phase."""
+        try:
+            if not self._current_candles or len(self._current_candles) < 50:
+                return {'phase': 'Unknown', 'confidence': 0.0}
+                
+            prices = np.array([c['close'] for c in self._current_candles])
+            volumes = np.array([c['volume'] for c in self._current_candles])
+            
+            # Calculate trend metrics
+            sma20 = np.mean(prices[-20:])
+            sma50 = np.mean(prices[-50:])
+            vol_sma20 = np.mean(volumes[-20:])
+            
+            # Calculate momentum and volatility
+            momentum = self.calculate_momentum_score(self._current_candles)
+            volatility = np.std(np.diff(np.log(prices[-20:])))
+            
+            # Identify cycle phase
+            phase = 'Unknown'
+            confidence = 0.0
+            
+            if prices[-1] > sma20 > sma50:  # Uptrend
+                if volumes[-1] > vol_sma20 and momentum['total_score'] > 50:
+                    phase = 'Markup'
+                    confidence = min((momentum['total_score'] / 100) * (volumes[-1] / vol_sma20), 1.0)
+                else:
+                    phase = 'Accumulation'
+                    confidence = 0.7
+            else:  # Downtrend
+                if volumes[-1] > vol_sma20 and momentum['total_score'] < -50:
+                    phase = 'Markdown'
+                    confidence = min(abs(momentum['total_score'] / 100) * (volumes[-1] / vol_sma20), 1.0)
+                else:
+                    phase = 'Distribution'
+                    confidence = 0.7
+            
+            # Update cycle tracking
+            current_time = datetime.now(UTC)
+            if self.cycle_phases[phase.lower()]['start'] is None:
+                self.cycle_phases[phase.lower()]['start'] = current_time
+            
+            # Record cycle transition
+            for p in self.cycle_phases:
+                if p != phase.lower() and self.cycle_phases[p]['start'] is not None and self.cycle_phases[p]['end'] is None:
+                    self.cycle_phases[p]['end'] = current_time
+                    self.market_cycles.append({
+                        'phase': p,
+                        'start': self.cycle_phases[p]['start'],
+                        'end': current_time,
+                        'duration': (current_time - self.cycle_phases[p]['start']).total_seconds() / 3600  # hours
+                    })
+            
+            return {
+                'phase': phase,
+                'confidence': confidence,
+                'metrics': {
+                    'price_trend': 'Bullish' if prices[-1] > sma20 else 'Bearish',
+                    'volume_trend': 'Increasing' if volumes[-1] > vol_sma20 else 'Decreasing',
+                    'momentum': momentum['interpretation'],
+                    'volatility': volatility
+                },
+                'cycle_history': self.market_cycles[-5:]  # Last 5 cycle transitions
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing market cycles: {str(e)}")
+            return {'phase': 'Unknown', 'confidence': 0.0}
+
+    def analyze_order_flow(self) -> Dict:
+        """Analyze order flow patterns and market microstructure."""
+        try:
+            if not self._current_candles or len(self._current_candles) < self.order_flow_window:
+                return {'signal': 'Neutral', 'strength': 0.0}
+                
+            # Calculate order flow metrics
+            buys = []
+            sells = []
+            
+            for candle in self._current_candles[-self.order_flow_window:]:
+                if candle['close'] > candle['open']:
+                    buys.append(candle['volume'] * (candle['close'] - candle['open']))
+                else:
+                    sells.append(candle['volume'] * (candle['open'] - candle['close']))
+            
+            buy_pressure = sum(buys)
+            sell_pressure = sum(sells)
+            
+            # Calculate order flow ratio
+            total_pressure = buy_pressure + sell_pressure
+            if total_pressure == 0:
+                flow_ratio = 0
+            else:
+                flow_ratio = (buy_pressure - sell_pressure) / total_pressure
+            
+            # Analyze tick data if available
+            tick_analysis = {}
+            if self.tick_data:
+                tick_analysis = {
+                    'micro_trend': 'Up' if sum(1 for tick in self.tick_data[-100:] if tick > 0) > 50 else 'Down',
+                    'tick_volume': len(self.tick_data),
+                    'tick_volatility': np.std(self.tick_data[-100:]) if len(self.tick_data) >= 100 else 0
+                }
+            
+            # Calculate market depth imbalance
+            depth_imbalance = sum(self.depth_imbalance[-20:]) / 20 if self.depth_imbalance else 0
+            
+            # Determine signal
+            signal = 'Neutral'
+            strength = abs(flow_ratio)
+            
+            if flow_ratio > 0.2:
+                signal = 'Buy' if depth_imbalance > 0 else 'Weak Buy'
+            elif flow_ratio < -0.2:
+                signal = 'Sell' if depth_imbalance < 0 else 'Weak Sell'
+            
+            # Update order flow history
+            self.order_flow_history.append({
+                'timestamp': datetime.now(UTC),
+                'flow_ratio': flow_ratio,
+                'buy_pressure': buy_pressure,
+                'sell_pressure': sell_pressure,
+                'depth_imbalance': depth_imbalance
+            })
+            
+            # Keep history size in check
+            if len(self.order_flow_history) > self.order_flow_window:
+                self.order_flow_history.pop(0)
+            
+            return {
+                'signal': signal,
+                'strength': strength,
+                'metrics': {
+                    'flow_ratio': flow_ratio,
+                    'buy_pressure': buy_pressure,
+                    'sell_pressure': sell_pressure,
+                    'depth_imbalance': depth_imbalance
+                },
+                'tick_analysis': tick_analysis,
+                'history': self.order_flow_history[-5:]  # Last 5 records
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing order flow: {str(e)}")
+            return {'signal': 'Neutral', 'strength': 0.0}
+
+    def analyze_liquidity_zones(self) -> Dict:
+        """Analyze liquidity zones and identify potential support/resistance levels."""
+        try:
+            if not self._current_candles or len(self._current_candles) < 50:
+                return {'zones': [], 'current_zone': None}
+                
+            prices = np.array([c['close'] for c in self._current_candles])
+            volumes = np.array([c['volume'] for c in self._current_candles])
+            
+            # Calculate volume profile
+            price_levels = np.linspace(min(prices), max(prices), 50)
+            volume_profile = []
+            
+            for level in price_levels:
+                # Find candles near this price level
+                mask = (prices >= level * 0.995) & (prices <= level * 1.005)
+                volume_profile.append({
+                    'price': level,
+                    'volume': np.sum(volumes[mask]),
+                    'trades': np.sum(mask)
+                })
+            
+            # Identify high volume nodes
+            avg_volume = np.mean([v['volume'] for v in volume_profile])
+            high_volume_nodes = [
+                v for v in volume_profile 
+                if v['volume'] > avg_volume * 1.5
+            ]
+            
+            # Identify low volume nodes (potential breakout zones)
+            low_volume_nodes = [
+                v for v in volume_profile 
+                if v['volume'] < avg_volume * 0.5
+            ]
+            
+            # Calculate current price zone
+            current_price = prices[-1]
+            current_zone = None
+            
+            for node in high_volume_nodes:
+                if node['price'] * 0.995 <= current_price <= node['price'] * 1.005:
+                    current_zone = {
+                        'type': 'High Volume',
+                        'price': node['price'],
+                        'volume': node['volume'],
+                        'strength': node['volume'] / avg_volume
+                    }
+                    break
+            
+            if not current_zone:
+                for node in low_volume_nodes:
+                    if node['price'] * 0.995 <= current_price <= node['price'] * 1.005:
+                        current_zone = {
+                            'type': 'Low Volume',
+                            'price': node['price'],
+                            'volume': node['volume'],
+                            'strength': avg_volume / node['volume']
+                        }
+                        break
+            
+            # Update liquidity zones
+            self.liquidity_zones = {
+                'high_volume_nodes': high_volume_nodes,
+                'low_volume_nodes': low_volume_nodes,
+                'volume_profile': volume_profile
+            }
+            
+            return {
+                'zones': {
+                    'high_volume': [
+                        {
+                            'price': node['price'],
+                            'strength': node['volume'] / avg_volume,
+                            'type': 'Support' if node['price'] < current_price else 'Resistance'
+                        }
+                        for node in high_volume_nodes
+                    ],
+                    'low_volume': [
+                        {
+                            'price': node['price'],
+                            'strength': avg_volume / node['volume'],
+                            'type': 'Breakout Zone'
+                        }
+                        for node in low_volume_nodes
+                    ]
+                },
+                'current_zone': current_zone,
+                'volume_profile_summary': {
+                    'total_volume': np.sum([v['volume'] for v in volume_profile]),
+                    'price_range': {
+                        'min': min(prices),
+                        'max': max(prices)
+                    }
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing liquidity zones: {str(e)}")
+            return {'zones': [], 'current_zone': None}
+
+    def analyze_market_efficiency(self) -> Dict:
+        """Analyze market efficiency and predictability."""
+        try:
+            if not self._current_candles or len(self._current_candles) < self.market_efficiency_window:
+                return {'ratio': 0.0, 'interpretation': 'Unknown'}
+                
+            prices = np.array([c['close'] for c in self._current_candles[-self.market_efficiency_window:]])
+            
+            # Calculate directional movement
+            directional_movement = abs(prices[-1] - prices[0])
+            
+            # Calculate total movement
+            price_changes = np.abs(np.diff(prices))
+            total_movement = np.sum(price_changes)
+            
+            # Calculate efficiency ratio
+            if total_movement == 0:
+                efficiency_ratio = 0
+            else:
+                efficiency_ratio = directional_movement / total_movement
+            
+            # Store ratio
+            self.efficiency_ratios.append(efficiency_ratio)
+            if len(self.efficiency_ratios) > 100:  # Keep last 100 values
+                self.efficiency_ratios.pop(0)
+            
+            # Interpret efficiency
+            interpretation = 'Trending' if efficiency_ratio > 0.7 else \
+                           'Ranging' if efficiency_ratio < 0.3 else \
+                           'Moderately Trending'
+            
+            return {
+                'ratio': efficiency_ratio,
+                'interpretation': interpretation,
+                'metrics': {
+                    'directional_movement': directional_movement,
+                    'total_movement': total_movement,
+                    'average_efficiency': np.mean(self.efficiency_ratios[-20:])
+                },
+                'trend_quality': 'High' if efficiency_ratio > 0.8 else \
+                               'Medium' if efficiency_ratio > 0.5 else 'Low'
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing market efficiency: {str(e)}")
+            return {'ratio': 0.0, 'interpretation': 'Unknown'}
 
     def get_performance_stats(self) -> Dict:
         """Get performance statistics for the analyzer."""
@@ -704,6 +1127,25 @@ class MarketAnalyzer:
                 'confidence': regime_analysis['confidence'],
                 'metrics': regime_analysis['metrics']
             }
+            
+            # Update adaptive thresholds
+            self.update_adaptive_thresholds()
+            
+            # Add enhanced analysis
+            result.update({
+                'market_cycles': self.analyze_market_cycles(),
+                'order_flow': self.analyze_order_flow(),
+                'liquidity_zones': self.analyze_liquidity_zones(),
+                'market_efficiency': self.analyze_market_efficiency(),
+                'adaptive_thresholds': {
+                    name: {
+                        'current': threshold['current'],
+                        'base': threshold['base'],
+                        'adjustment': threshold['current'] / threshold['base']
+                    }
+                    for name, threshold in self.adaptive_thresholds.items()
+                }
+            })
             
             return result
 
@@ -1718,6 +2160,93 @@ def main():
         print(f"💪 Volume Strength: {volume['strength']}")
         print(f"📉 Price Change: {volume['price_change']:.1f}%")
         print(f"✅ Volume Confirmation: {'Yes' if volume['is_confirming'] else 'No'}")
+
+        # Add new enhanced analysis sections
+        print("\n====== 🔄 Enhanced Market Analysis ======")
+
+        # Market Cycles Analysis - Simplified Critical Information
+        print("\n=== 🔄 Critical Market Cycle Indicators ===")
+        cycles = analysis['market_cycles']
+        
+        # Current market phase with emoji indicators
+        phase_emojis = {
+            'Accumulation': '🟢',
+            'Markup': '📈',
+            'Distribution': '🟡',
+            'Markdown': '📉',
+            'Unknown': '❓'
+        }
+        phase_emoji = phase_emojis.get(cycles['phase'], '❓')
+        print(f"{phase_emoji} Market Phase: {cycles['phase']}")
+        print(f"├─ Confidence: {cycles['confidence']*100:.1f}%")
+        
+        # Critical market conditions
+        print("\n🎯 Market Direction:")
+        print(f"├─ Price Trend: {cycles['metrics']['price_trend']}")
+        print(f"└─ Momentum: {cycles['metrics']['momentum']}")
+        
+        # Show only significant cycle transitions
+        if cycles['cycle_history']:
+            print("\n⚡ Recent Major Transition:")
+            latest_cycle = cycles['cycle_history'][-1]  # Get most recent transition
+            print(f"└─ {latest_cycle['phase'].title()} → {cycles['phase']} ({latest_cycle['duration']:.1f}h)")
+
+        # Order Flow Analysis
+        print("\n=== 📊 Order Flow Analysis ===")
+        flow = analysis['order_flow']
+        print(f"Signal: {flow['signal']} (Strength: {flow['strength']:.2f})")
+        print("\nMetrics:")
+        print(f"• Flow Ratio: {flow['metrics']['flow_ratio']:.2f}")
+        print(f"• Buy Pressure: {flow['metrics']['buy_pressure']:.2f}")
+        print(f"• Sell Pressure: {flow['metrics']['sell_pressure']:.2f}")
+        print(f"• Depth Imbalance: {flow['metrics']['depth_imbalance']:.2f}")
+
+        if flow['tick_analysis']:
+            print("\nTick Analysis:")
+            for key, value in flow['tick_analysis'].items():
+                print(f"• {key.replace('_', ' ').title()}: {value}")
+
+        # Liquidity Zones Analysis
+        print("\n=== 💧 Liquidity Zones Analysis ===")
+        liquidity = analysis['liquidity_zones']
+        
+        if liquidity['current_zone']:
+            print("\nCurrent Zone:")
+            zone = liquidity['current_zone']
+            print(f"• Type: {zone['type']}")
+            print(f"• Price: ${zone['price']:.4f}")
+            print(f"• Strength: {zone['strength']:.2f}")
+
+        print("\nHigh Volume Zones:")
+        for zone in liquidity['zones']['high_volume'][:3]:  # Show top 3
+            print(f"• ${zone['price']:.4f} ({zone['type']}, Strength: {zone['strength']:.2f})")
+
+        print("\nBreakout Zones:")
+        for zone in liquidity['zones']['low_volume'][:3]:  # Show top 3
+            print(f"• ${zone['price']:.4f} (Strength: {zone['strength']:.2f})")
+
+        # Market Efficiency Analysis
+        print("\n=== 📈 Market Efficiency Analysis ===")
+        efficiency = analysis['market_efficiency']
+        print(f"Efficiency Ratio: {efficiency['ratio']:.2f}")
+        print(f"Interpretation: {efficiency['interpretation']}")
+        print(f"Trend Quality: {efficiency['trend_quality']}")
+        print("\nMetrics:")
+        print(f"• Directional Movement: {efficiency['metrics']['directional_movement']:.4f}")
+        print(f"• Total Movement: {efficiency['metrics']['total_movement']:.4f}")
+        print(f"• Average Efficiency: {efficiency['metrics']['average_efficiency']:.2f}")
+
+        # Adaptive Thresholds
+        print("\n=== 🎚️ Adaptive Thresholds ===")
+        thresholds = analysis['adaptive_thresholds']
+        for name, threshold in thresholds.items():
+            print(f"\n{name.title()}:")
+            print(f"• Current: {threshold['current']:.4f}")
+            print(f"• Base: {threshold['base']:.4f}")
+            print(f"• Adjustment: {threshold['adjustment']:.2f}x")
+
+        print("\n" + "="*50)
+
         
         # Pattern Recognition Section
         print("\n=== 🔍 Pattern Analysis ===")
@@ -1924,7 +2453,7 @@ def main():
         print("\n📈 Volume Quality:")
         volume = chars['volume_quality']
         print(f"• 🎯 Trend: {volume['trend']}")
-        print(f"• 🎯 Strength: {volume['strength']}")
+        print(f"���� 🎯 Strength: {volume['strength']}")
         print(f"• 🎯 Consistency: {volume['consistency']}")
         print(f"• 🎯 Price Alignment: {volume['price_alignment']}")
         
