@@ -2459,8 +2459,35 @@ def main():
         # Define move characteristics
         move_speed = "Rapid" if price_volatility > 0.03 else "Gradual"
         move_strength = "Strong" if abs(indicators['macd']) > abs(indicators['macd_signal']) * 1.5 else "Moderate"
+
+        # Correlation Analysis
+        print("\n=== 📈 Market Correlation Analysis ===")
+        correlation_analysis = analysis['correlation_analysis']
+        print(f"📊 Average Correlation: {correlation_analysis['average_correlation']:.2f}")
+        print(f"🎯 Market Independence: {correlation_analysis['independence_score']:.2f}")
+        print("\nInterpretation:")
+        for insight, description in correlation_analysis['interpretation'].items():
+            print(f"• {insight}: {description}")
+        print("\nCorrelation Details:")
+        for asset, details in correlation_analysis['correlations'].items():
+            print(f"\n💱 {asset}:")
+            if 'error' in details:
+                print(f"❌ Error: {details['error']}")
+            else:
+                try:
+                    print(f"📊 Correlation Coefficient: {details['coefficient']:.2f}")
+                    print(f"🎯 Correlation Type: {details['type']}")
+                    print(f"📈 Price Movement: Current Asset vs. {asset}")
+                    print(f"• Current Asset: {details['price_movement']['current_asset']}")
+                    print(f"• {asset}: {details['price_movement']['correlated_asset']}")
+                    print(f"📅 Last Updated: {details['timestamp']}")
+                except KeyError as e:
+                    print(f"❌ Error: Missing data - {str(e)}")
+                except Exception as e:
+                    print(f"❌ Error: {str(e)}")        
         
-        print("Move Analysis:")
+        print("")
+        print("============== Move Analysis: ==============")
         if bullish_points > bearish_points:
             print(f"BULLISH with {bullish_confidence:.1f}% confidence")
             print("\nMove Characteristics:")
@@ -2572,31 +2599,7 @@ def main():
         
         print("\n📈 Contributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
 
-        # Correlation Analysis
-        print("\n=== 📈 Market Correlation Analysis ===")
-        correlation_analysis = analysis['correlation_analysis']
-        print(f"📊 Average Correlation: {correlation_analysis['average_correlation']:.2f}")
-        print(f"🎯 Market Independence: {correlation_analysis['independence_score']:.2f}")
-        print("\nInterpretation:")
-        for insight, description in correlation_analysis['interpretation'].items():
-            print(f"• {insight}: {description}")
-        print("\nCorrelation Details:")
-        for asset, details in correlation_analysis['correlations'].items():
-            print(f"\n💱 {asset}:")
-            if 'error' in details:
-                print(f"❌ Error: {details['error']}")
-            else:
-                try:
-                    print(f"📊 Correlation Coefficient: {details['coefficient']:.2f}")
-                    print(f"🎯 Correlation Type: {details['type']}")
-                    print(f"📈 Price Movement: Current Asset vs. {asset}")
-                    print(f"• Current Asset: {details['price_movement']['current_asset']}")
-                    print(f"• {asset}: {details['price_movement']['correlated_asset']}")
-                    print(f"📅 Last Updated: {details['timestamp']}")
-                except KeyError as e:
-                    print(f"❌ Error: Missing data - {str(e)}")
-                except Exception as e:
-                    print(f"❌ Error: {str(e)}")
+
 
     except Exception as e:
         logging.error(f"Error running market analysis: {str(e)}", exc_info=True)
