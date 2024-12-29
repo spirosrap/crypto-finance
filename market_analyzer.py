@@ -850,12 +850,14 @@ class MarketAnalyzer:
         self._cache_timestamp = None
 
     @performance_monitor
-    def _get_historical_data_with_retry(self, start_time: datetime, end_time: datetime, max_retries: int = 3, retry_delay: float = 1.0) -> List[Dict]:
+    def _get_historical_data_with_retry(self, start_time: datetime, end_time: datetime, product_id: str = None, max_retries: int = 3, retry_delay: float = 1.0) -> List[Dict]:
         """Get historical data with retry logic."""
         for attempt in range(max_retries):
             try:
+                # Use provided product_id or fall back to self.product_id
+                target_product = product_id if product_id is not None else self.product_id
                 candles = self.historical_data.get_historical_data(
-                    self.product_id,
+                    target_product,
                     start_time,
                     end_time,
                     self.candle_interval
@@ -1032,6 +1034,9 @@ class MarketAnalyzer:
                 volume_info = self.technical_analysis.analyze_volume_confirmation(formatted_candles)
                 self._cache_indicator('volume_info', volume_info)
 
+            # Get market correlation analysis
+            correlation_analysis = self.analyze_market_correlations()
+
             # Create detailed analysis result
             result = {
                 'timestamp': datetime.now(UTC).isoformat(),
@@ -1081,7 +1086,8 @@ class MarketAnalyzer:
                 'adaptive_weights': {
                     'current_weights': self.adaptive_weights.weights,
                     'performance_history': self.adaptive_weights.performance_history[-5:]  # Last 5 performance records
-                }
+                },
+                'correlation_analysis': correlation_analysis
             }
 
             # Add pattern recognition
@@ -2039,6 +2045,119 @@ class MarketAnalyzer:
             self.logger.error(f"Error detecting market regime: {str(e)}")
             return {'regime': MarketRegime.RANGING, 'confidence': 0.0, 'metrics': {}}
 
+    def analyze_market_correlations(self) -> Dict:
+        """
+        Analyze correlations between the current cryptocurrency and other major cryptocurrencies.
+        Returns correlation coefficients and insights about market relationships.
+        """
+        try:
+            # Get historical data for current product and correlation assets
+            end_time = datetime.now(UTC)
+            start_time = end_time - timedelta(days=30)
+            
+            correlations = {}
+            current_product_data = None
+            
+            # Get data for current product
+            try:
+                current_product_data = self._get_historical_data_with_retry(start_time, end_time)
+                current_prices = np.array([float(c['close']) for c in current_product_data])
+            except Exception as e:
+                self.logger.error(f"Error getting data for {self.product_id}: {str(e)}")
+                return {'error': str(e)}
+            
+            # Calculate correlations with each asset
+            for asset in self.correlation_assets:
+                if asset == self.product_id:
+                    continue
+                    
+                try:
+                    # Get comparison asset data
+                    asset_data = self._get_historical_data_with_retry(
+                        start_time,
+                        end_time,
+                        product_id=asset
+                    )
+                    asset_prices = np.array([float(c['close']) for c in asset_data])
+                    
+                    # Ensure both arrays have the same length
+                    min_length = min(len(current_prices), len(asset_prices))
+                    if min_length < 2:
+                        continue
+                        
+                    current_prices_adj = current_prices[-min_length:]
+                    asset_prices_adj = asset_prices[-min_length:]
+                    
+                    # Calculate correlation coefficient
+                    correlation = np.corrcoef(current_prices_adj, asset_prices_adj)[0, 1]
+                    
+                    # Calculate recent price movements
+                    current_change = (current_prices_adj[-1] - current_prices_adj[0]) / current_prices_adj[0]
+                    asset_change = (asset_prices_adj[-1] - asset_prices_adj[0]) / asset_prices_adj[0]
+                    
+                    # Determine correlation strength and type
+                    correlation_strength = abs(correlation)
+                    correlation_type = "Positive" if correlation > 0 else "Negative"
+                    
+                    correlations[asset] = {
+                        'coefficient': correlation,
+                        'strength': 'Strong' if correlation_strength > 0.7 else
+                                  'Moderate' if correlation_strength > 0.4 else 'Weak',
+                        'type': correlation_type,
+                        'price_movement': {
+                            'current_asset': f"{current_change*100:.1f}%",
+                            'correlated_asset': f"{asset_change*100:.1f}%"
+                        },
+                        'timestamp': datetime.now(UTC).isoformat()
+                    }
+                    
+                    # Store correlation history
+                    if asset not in self.correlation_history:
+                        self.correlation_history[asset] = []
+                    
+                    self.correlation_history[asset].append({
+                        'timestamp': datetime.now(UTC),
+                        'correlation': correlation,
+                        'current_price_change': current_change,
+                        'asset_price_change': asset_change
+                    })
+                    
+                    # Keep history size in check
+                    if len(self.correlation_history[asset]) > 100:
+                        self.correlation_history[asset].pop(0)
+                        
+                except Exception as e:
+                    self.logger.error(f"Error calculating correlation with {asset}: {str(e)}")
+                    correlations[asset] = {'error': str(e)}
+            
+            # Calculate average correlation
+            valid_correlations = [c['coefficient'] for c in correlations.values() 
+                                if isinstance(c.get('coefficient'), (int, float))]
+            avg_correlation = np.mean(valid_correlations) if valid_correlations else 0
+            
+            # Determine market independence
+            independence_score = 1 - abs(avg_correlation)
+            
+            return {
+                'correlations': correlations,
+                'average_correlation': avg_correlation,
+                'independence_score': independence_score,
+                'interpretation': {
+                    'market_independence': 'High' if independence_score > 0.7 else
+                                         'Moderate' if independence_score > 0.4 else 'Low',
+                    'dominant_correlation': 'Positive' if avg_correlation > 0 else 'Negative',
+                    'trading_implications': [
+                        "High independence suggests unique price drivers",
+                        "Consider pair trading opportunities" if abs(avg_correlation) > 0.7 else
+                        "Market specific factors dominate price action"
+                    ]
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error in market correlation analysis: {str(e)}")
+            return {'error': str(e)}
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Crypto Market Analyzer')
@@ -2452,6 +2571,32 @@ def main():
             print(f"• 🎯 Momentum Failure: ${failure['momentum_failure_level']:.4f}")
         
         print("\n📈 Contributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
+
+        # Correlation Analysis
+        print("\n=== 📈 Market Correlation Analysis ===")
+        correlation_analysis = analysis['correlation_analysis']
+        print(f"📊 Average Correlation: {correlation_analysis['average_correlation']:.2f}")
+        print(f"🎯 Market Independence: {correlation_analysis['independence_score']:.2f}")
+        print("\nInterpretation:")
+        for insight, description in correlation_analysis['interpretation'].items():
+            print(f"• {insight}: {description}")
+        print("\nCorrelation Details:")
+        for asset, details in correlation_analysis['correlations'].items():
+            print(f"\n💱 {asset}:")
+            if 'error' in details:
+                print(f"❌ Error: {details['error']}")
+            else:
+                try:
+                    print(f"📊 Correlation Coefficient: {details['coefficient']:.2f}")
+                    print(f"🎯 Correlation Type: {details['type']}")
+                    print(f"📈 Price Movement: Current Asset vs. {asset}")
+                    print(f"• Current Asset: {details['price_movement']['current_asset']}")
+                    print(f"• {asset}: {details['price_movement']['correlated_asset']}")
+                    print(f"📅 Last Updated: {details['timestamp']}")
+                except KeyError as e:
+                    print(f"❌ Error: Missing data - {str(e)}")
+                except Exception as e:
+                    print(f"❌ Error: {str(e)}")
 
     except Exception as e:
         logging.error(f"Error running market analysis: {str(e)}", exc_info=True)
