@@ -2240,17 +2240,22 @@ def main():
         print(f"🔒 Signal Stability: {analysis['signal_stability']}")
         
         # Technical Indicators Section
-        print("\n=== 📐 Technical Indicators ===")
+        print("\n=== 📐 Technical Analysis Overview ===")
         indicators = analysis['indicators']
+        print("Core Indicators:")
         print(f"📊 RSI: {indicators['rsi']:.2f} ({'Overbought' if indicators['rsi'] > 70 else 'Oversold' if indicators['rsi'] < 30 else 'Neutral'})")
-        print(f"📈 MACD: {indicators['macd']:.4f}, MACD Signal: {indicators['macd_signal']:.4f}, MACD Histogram: {indicators['macd_histogram']:.4f}")
+        print(f"📈 MACD: {indicators['macd']:.4f}, Signal: {indicators['macd_signal']:.4f}, Histogram: {indicators['macd_histogram']:.4f}")
         adx_trend = 'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'
         print(f"📏 ADX: {indicators['adx']:.2f} ({adx_trend})")
         print(f"➡️ Trend Direction: {indicators['trend_direction']}")
         
-        # Bollinger Bands
-        print("\n=== 📉 Price Channels ===")
-        print(f"📊 Bollinger Upper: ${indicators['bollinger_upper']:.4f}, Bollinger Middle: ${indicators['bollinger_middle']:.4f}, Bollinger Lower: ${indicators['bollinger_lower']:.4f}")
+        print("\nPrice Channels:")
+        print(f"📊 Bollinger Bands:")
+        print(f"  • Upper: ${indicators['bollinger_upper']:.4f}")
+        print(f"  • Middle: ${indicators['bollinger_middle']:.4f}")
+        print(f"  • Lower: ${indicators['bollinger_lower']:.4f}")
+        print(f"  • Band Width: ${(indicators['bollinger_upper'] - indicators['bollinger_lower']):.4f}")
+        print(f"  • Position: {'Above' if analysis['current_price'] > indicators['bollinger_middle'] else 'Below'} Middle Band")
         
         # Volume Analysis Section
         print("\n=== 📊 Volume Analysis ===")
