@@ -158,6 +158,62 @@ class MemecoinAnalyzer:
             self.logger.error(f"Error fetching Twitter data: {str(e)}")
             return {}
 
+    def analyze_price_patterns(self, coin_id: str) -> Dict:
+        """Analyze historical price patterns to identify common trading patterns"""
+        try:
+            # Get 90 days of historical data
+            url = f"{self.coingecko_api}/coins/{coin_id}/market_chart"
+            params = {'vs_currency': 'usd', 'days': '90', 'interval': 'daily'}
+            response = requests.get(url, params=params)
+            data = response.json()
+            
+            if not data or 'prices' not in data:
+                return {'pattern': 'UNKNOWN', 'strength': 0}
+            
+            prices = [price[1] for price in data['prices']]
+            if len(prices) < 14:  # Need at least 14 days for pattern analysis
+                return {'pattern': 'INSUFFICIENT_DATA', 'strength': 0}
+            
+            # Calculate moving averages
+            ma7 = np.mean(prices[-7:])
+            ma14 = np.mean(prices[-14:])
+            ma30 = np.mean(prices[-30:]) if len(prices) >= 30 else ma14
+            
+            current_price = prices[-1]
+            
+            # Pattern detection
+            pattern = 'NEUTRAL'
+            strength = 0
+            
+            # Uptrend pattern
+            if ma7 > ma14 > ma30 and current_price > ma7:
+                pattern = 'UPTREND'
+                strength = min(((current_price / ma30) - 1) * 100, 100)
+            
+            # Downtrend pattern
+            elif ma7 < ma14 < ma30 and current_price < ma7:
+                pattern = 'DOWNTREND'
+                strength = min(((ma30 / current_price) - 1) * 100, 100)
+            
+            # Potential reversal
+            elif (ma7 > ma14 and ma14 < ma30) or (ma7 < ma14 and ma14 > ma30):
+                pattern = 'POTENTIAL_REVERSAL'
+                strength = 50
+            
+            # Consolidation
+            elif abs((ma7 / ma30) - 1) < 0.02:
+                pattern = 'CONSOLIDATION'
+                strength = 30
+            
+            return {
+                'pattern': pattern,
+                'strength': round(strength, 2)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing price patterns for {coin_id}: {str(e)}")
+            return {'pattern': 'ERROR', 'strength': 0}
+
     def find_opportunities(self) -> List[Dict]:
         """Find potential memecoin opportunities"""
         opportunities = []
@@ -211,6 +267,15 @@ class MemecoinAnalyzer:
                 if self.use_twitter:
                     opportunity['twitter_mentions'] = mentions
 
+                # Add price pattern analysis
+                price_patterns = self.analyze_price_patterns(coin_id)
+                opportunity['price_pattern'] = price_patterns['pattern']
+                opportunity['pattern_strength'] = price_patterns['strength']
+                
+                # Adjust opportunity score based on price patterns
+                pattern_score = price_patterns['strength'] * 0.2  # 20% weight for pattern analysis
+                opportunity['opportunity_score'] = (opportunity['opportunity_score'] * 0.8 + pattern_score)
+                
                 opportunities.append(opportunity)
                 
             except Exception as e:
@@ -329,6 +394,7 @@ class MemecoinAnalyzer:
             print(f"Risk Level: {opp['risk_level']}")
             if self.use_twitter and 'twitter_mentions' in opp:
                 print(f"Twitter Mentions: {opp['twitter_mentions']:,}")
+            print(f"Price Pattern: {opp['price_pattern']} (Strength: {opp['pattern_strength']:.2f})")
             print(f"Opportunity Score: {opp['opportunity_score']}")
             print("-"*30)
 
