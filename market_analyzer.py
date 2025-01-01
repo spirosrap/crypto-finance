@@ -1023,10 +1023,57 @@ class MarketAnalyzer:
                 self.logger.error(f"Error getting current price: {str(e)}")
                 return self._generate_error_response()
 
-            # Add signal stability information
-            signal_stability = "High" if len(self.technical_analysis.signal_history) >= self.technical_analysis.trend_confirmation_period and \
-                                  all(s['strength'] > 0 for s in self.technical_analysis.signal_history) or \
-                                  all(s['strength'] < 0 for s in self.technical_analysis.signal_history) else "Low"
+            # Add signal stability information with enhanced detail
+            signal_history = self.technical_analysis.signal_history
+            total_signals = len(signal_history)
+            
+            if total_signals > 0:
+                # Calculate the percentage of consistent signals
+                positive_signals = sum(1 for s in signal_history if s['strength'] > 0)
+                negative_signals = sum(1 for s in signal_history if s['strength'] < 0)
+                consistency_ratio = max(positive_signals, negative_signals) / total_signals
+                
+                # Calculate average signal strength
+                avg_strength = abs(sum(s['strength'] for s in signal_history) / total_signals)
+                
+                # Determine stability level with more granularity
+                if total_signals >= self.technical_analysis.trend_confirmation_period:
+                    if consistency_ratio >= 0.9 and avg_strength >= 0.7:
+                        stability_level = "Very High"
+                    elif consistency_ratio >= 0.8 and avg_strength >= 0.5:
+                        stability_level = "High"
+                    elif consistency_ratio >= 0.6 and avg_strength >= 0.3:
+                        stability_level = "Moderate"
+                    elif consistency_ratio >= 0.4:
+                        stability_level = "Low"
+                    else:
+                        stability_level = "Very Low"
+                else:
+                    # For shorter history, use more lenient thresholds
+                    if consistency_ratio >= 0.8 and avg_strength >= 0.6:
+                        stability_level = "Emerging High"
+                    elif consistency_ratio >= 0.6 and avg_strength >= 0.4:
+                        stability_level = "Emerging Moderate"
+                    else:
+                        stability_level = "Emerging Low"
+                
+                signal_stability = {
+                    'level': stability_level,
+                    'consistency_ratio': round(consistency_ratio * 100, 1),
+                    'avg_strength': round(avg_strength * 100, 1),
+                    'duration': total_signals,
+                    'direction': 'Bullish' if positive_signals > negative_signals else 'Bearish' if negative_signals > positive_signals else 'Neutral',
+                    'confirmation_status': 'Confirmed' if total_signals >= self.technical_analysis.trend_confirmation_period else 'Developing'
+                }
+            else:
+                signal_stability = {
+                    'level': "Insufficient Data",
+                    'consistency_ratio': 0.0,
+                    'avg_strength': 0.0,
+                    'duration': 0,
+                    'direction': 'Neutral',
+                    'confirmation_status': 'None'
+                }
             
             # Get volume confirmation analysis
             volume_info = self._get_cached_indicator('volume_info')
@@ -1061,7 +1108,14 @@ class MarketAnalyzer:
                     'trend_direction': trend_direction
                 },
                 'recommendation': self._generate_recommendation(analysis['signal'].signal_type),
-                'signal_stability': signal_stability,
+                'signal_stability': {
+                    'level': signal_stability['level'],
+                    'consistency': f"{signal_stability['consistency_ratio']}%",
+                    'strength': f"{signal_stability['avg_strength']}%",
+                    'duration': signal_stability['duration'],
+                    'direction': signal_stability['direction'],
+                    'confirmation_status': signal_stability['confirmation_status']
+                },
                 'signals_analyzed': len(self.technical_analysis.signal_history),
                 'time_since_last_change': time.time() - (self.technical_analysis.last_signal_time or time.time()),
                 'volume_analysis': {
