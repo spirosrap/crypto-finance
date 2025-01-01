@@ -1043,8 +1043,8 @@ class MarketAnalyzer:
                 'product_id': self.product_id,
                 'current_price': current_price,
                 'signal': analysis['signal'].signal_type.value,
-                'position': 'LONG' if analysis['signal'].signal_type in [SignalType.STRONG_BUY, SignalType.BUY] 
-                           else 'SHORT' if analysis['signal'].signal_type in [SignalType.STRONG_SELL, SignalType.SELL]
+                'position': 'LONG' if analysis['signal'].signal_type in [SignalType.STRONG_BUY, SignalType.BUY] \
+                           else 'SHORT' if analysis['signal'].signal_type in [SignalType.STRONG_SELL, SignalType.SELL] \
                            else 'NEUTRAL',
                 'confidence': analysis['signal'].confidence,
                 'market_condition': analysis['signal'].market_condition.value,
