@@ -944,7 +944,14 @@ class MarketAnalyzer:
                 self.logger.error(f"Error analyzing sentiment: {str(e)}")
                 sentiment = MarketSentiment.NEUTRAL
                 sentiment_data = {'news': {}, 'social': {}}
-            
+
+            # Get divergence analysis
+            try:
+                divergence_analysis = self.detect_divergences(formatted_candles)
+            except Exception as e:
+                self.logger.error(f"Error analyzing divergences: {str(e)}")
+                divergence_analysis = {'divergences': [], 'error': str(e)}
+
             # Get additional trend information with caching and error handling
             adx_value = self._get_cached_indicator('adx')
             trend_direction = self._get_cached_indicator('trend_direction')
@@ -1207,6 +1214,24 @@ class MarketAnalyzer:
                 }
             })
             
+            # Add divergence analysis to the result
+            result['divergence_analysis'] = divergence_analysis
+            
+            # Update signal strength based on divergences
+            if divergence_analysis.get('divergences'):
+                # Adjust confidence based on highest confidence divergence
+                highest_div_confidence = divergence_analysis['summary']['highest_confidence']
+                result['confidence'] = (result['confidence'] + highest_div_confidence) / 2
+                
+                # Add divergence bias to recommendation
+                div_bias = divergence_analysis['summary']['primary_bias']
+                if div_bias == 'Bullish' and result['signal'] in ['BUY', 'STRONG_BUY']:
+                    result['confidence'] *= 1.2  # Increase confidence when aligned
+                elif div_bias == 'Bearish' and result['signal'] in ['SELL', 'STRONG_SELL']:
+                    result['confidence'] *= 1.2  # Increase confidence when aligned
+                else:
+                    result['confidence'] *= 0.8  # Decrease confidence when conflicting
+
             return result
 
         except Exception as e:
@@ -2212,6 +2237,175 @@ class MarketAnalyzer:
             self.logger.error(f"Error in market correlation analysis: {str(e)}")
             return {'error': str(e)}
 
+    def detect_divergences(self, candles: List[Dict], lookback_period: int = 20) -> Dict:
+        """
+        Detect and analyze regular and hidden divergences between price and indicators.
+        
+        Args:
+            candles: List of candle data
+            lookback_period: Period to look back for divergence patterns
+            
+        Returns:
+            Dict containing divergence analysis results
+        """
+        try:
+            if len(candles) < lookback_period:
+                return {'divergences': [], 'error': 'Insufficient data'}
+                
+            # Extract price data
+            prices = np.array([c['close'] for c in candles[-lookback_period:]])
+            highs = np.array([c['high'] for c in candles[-lookback_period:]])
+            lows = np.array([c['low'] for c in candles[-lookback_period:]])
+            
+            # Calculate indicators
+            rsi = self.technical_analysis.compute_rsi(self.product_id, candles[-lookback_period:])
+            macd, signal, histogram = self.technical_analysis.compute_macd(self.product_id, candles[-lookback_period:])
+            
+            # Ensure RSI is a numpy array
+            if isinstance(rsi, (int, float)):
+                rsi_values = np.array([rsi] * len(prices))
+            elif isinstance(rsi, list):
+                rsi_values = np.array(rsi)
+            else:
+                rsi_values = np.array(rsi)
+                
+            # Ensure MACD histogram is a numpy array
+            if isinstance(histogram, (int, float)):
+                macd_values = np.array([histogram] * len(prices))
+            elif isinstance(histogram, list):
+                macd_values = np.array(histogram)
+            else:
+                macd_values = np.array(histogram)
+            
+            divergences = []
+            
+            # Find price pivots
+            price_highs = self._find_peaks(highs)
+            price_lows = self._find_troughs(lows)
+            
+            # Find indicator pivots
+            rsi_highs = self._find_peaks(rsi_values)
+            rsi_lows = self._find_troughs(rsi_values)
+            
+            # Regular Bullish Divergence (Lower price lows but higher indicator lows)
+            if len(price_lows) >= 2 and len(rsi_lows) >= 2:
+                if lows[price_lows[-1]] < lows[price_lows[-2]] and \
+                   rsi_values[rsi_lows[-1]] > rsi_values[rsi_lows[-2]]:
+                    divergences.append({
+                        'type': 'Regular Bullish',
+                        'indicator': 'RSI',
+                        'strength': abs(rsi_values[rsi_lows[-1]] - rsi_values[rsi_lows[-2]]),
+                        'price_points': [lows[price_lows[-2]], lows[price_lows[-1]]],
+                        'indicator_points': [rsi_values[rsi_lows[-2]], rsi_values[rsi_lows[-1]]],
+                        'confidence': min(1.0, abs(rsi_values[rsi_lows[-1]] - rsi_values[rsi_lows[-2]]) / 30)
+                    })
+            
+            # Regular Bearish Divergence (Higher price highs but lower indicator highs)
+            if len(price_highs) >= 2 and len(rsi_highs) >= 2:
+                if highs[price_highs[-1]] > highs[price_highs[-2]] and \
+                   rsi_values[rsi_highs[-1]] < rsi_values[rsi_highs[-2]]:
+                    divergences.append({
+                        'type': 'Regular Bearish',
+                        'indicator': 'RSI',
+                        'strength': abs(rsi_values[rsi_highs[-1]] - rsi_values[rsi_highs[-2]]),
+                        'price_points': [highs[price_highs[-2]], highs[price_highs[-1]]],
+                        'indicator_points': [rsi_values[rsi_highs[-2]], rsi_values[rsi_highs[-1]]],
+                        'confidence': min(1.0, abs(rsi_values[rsi_highs[-1]] - rsi_values[rsi_highs[-2]]) / 30)
+                    })
+            
+            # Hidden Bullish Divergence (Higher price lows but lower indicator lows)
+            if len(price_lows) >= 2 and len(rsi_lows) >= 2:
+                if lows[price_lows[-1]] > lows[price_lows[-2]] and \
+                   rsi_values[rsi_lows[-1]] < rsi_values[rsi_lows[-2]]:
+                    divergences.append({
+                        'type': 'Hidden Bullish',
+                        'indicator': 'RSI',
+                        'strength': abs(rsi_values[rsi_lows[-1]] - rsi_values[rsi_lows[-2]]),
+                        'price_points': [lows[price_lows[-2]], lows[price_lows[-1]]],
+                        'indicator_points': [rsi_values[rsi_lows[-2]], rsi_values[rsi_lows[-1]]],
+                        'confidence': min(1.0, abs(rsi_values[rsi_lows[-1]] - rsi_values[rsi_lows[-2]]) / 30)
+                    })
+            
+            # Hidden Bearish Divergence (Lower price highs but higher indicator highs)
+            if len(price_highs) >= 2 and len(rsi_highs) >= 2:
+                if highs[price_highs[-1]] < highs[price_highs[-2]] and \
+                   rsi_values[rsi_highs[-1]] > rsi_values[rsi_highs[-2]]:
+                    divergences.append({
+                        'type': 'Hidden Bearish',
+                        'indicator': 'RSI',
+                        'strength': abs(rsi_values[rsi_highs[-1]] - rsi_values[rsi_highs[-2]]),
+                        'price_points': [highs[price_highs[-2]], highs[price_highs[-1]]],
+                        'indicator_points': [rsi_values[rsi_highs[-2]], rsi_values[rsi_highs[-1]]],
+                        'confidence': min(1.0, abs(rsi_values[rsi_highs[-1]] - rsi_values[rsi_highs[-2]]) / 30)
+                    })
+            
+            # MACD Divergences
+            macd_highs = self._find_peaks(macd_values)
+            macd_lows = self._find_troughs(macd_values)
+            
+            # Regular MACD Divergences
+            if len(price_highs) >= 2 and len(macd_highs) >= 2:
+                if highs[price_highs[-1]] > highs[price_highs[-2]] and \
+                   macd_values[macd_highs[-1]] < macd_values[macd_highs[-2]]:
+                    divergences.append({
+                        'type': 'Regular Bearish',
+                        'indicator': 'MACD',
+                        'strength': abs(macd_values[macd_highs[-1]] - macd_values[macd_highs[-2]]),
+                        'price_points': [highs[price_highs[-2]], highs[price_highs[-1]]],
+                        'indicator_points': [macd_values[macd_highs[-2]], macd_values[macd_highs[-1]]],
+                        'confidence': min(1.0, abs(macd_values[macd_highs[-1]] - macd_values[macd_highs[-2]]) / 0.1)
+                    })
+            
+            if len(price_lows) >= 2 and len(macd_lows) >= 2:
+                if lows[price_lows[-1]] < lows[price_lows[-2]] and \
+                   macd_values[macd_lows[-1]] > macd_values[macd_lows[-2]]:
+                    divergences.append({
+                        'type': 'Regular Bullish',
+                        'indicator': 'MACD',
+                        'strength': abs(macd_values[macd_lows[-1]] - macd_values[macd_lows[-2]]),
+                        'price_points': [lows[price_lows[-2]], lows[price_lows[-1]]],
+                        'indicator_points': [macd_values[macd_lows[-2]], macd_values[macd_lows[-1]]],
+                        'confidence': min(1.0, abs(macd_values[macd_lows[-1]] - macd_values[macd_lows[-2]]) / 0.1)
+                    })
+            
+            # Analyze divergence significance
+            for div in divergences:
+                # Calculate price change percentage
+                price_change = abs(div['price_points'][1] - div['price_points'][0]) / div['price_points'][0] * 100
+                
+                # Calculate time between points (assuming sequential indices)
+                time_span = abs(price_highs[-1] - price_highs[-2] if 'Bearish' in div['type'] 
+                              else price_lows[-1] - price_lows[-2])
+                
+                # Adjust confidence based on price change and time span
+                div['confidence'] *= (1 + price_change / 100)  # More significant price changes increase confidence
+                div['confidence'] *= max(0.5, min(1.0, 1 - (time_span / lookback_period)))  # Closer points are more significant
+                
+                # Add additional analysis
+                div['analysis'] = {
+                    'price_change_percent': price_change,
+                    'time_span': time_span,
+                    'significance': 'High' if div['confidence'] > 0.7 else 'Medium' if div['confidence'] > 0.4 else 'Low',
+                    'suggested_action': 'Consider Short' if 'Bearish' in div['type'] else 'Consider Long',
+                    'stop_loss': min(div['price_points']) if 'Bullish' in div['type'] else max(div['price_points'])
+                }
+            
+            return {
+                'divergences': divergences,
+                'summary': {
+                    'total_divergences': len(divergences),
+                    'bullish_count': sum(1 for d in divergences if 'Bullish' in d['type']),
+                    'bearish_count': sum(1 for d in divergences if 'Bearish' in d['type']),
+                    'highest_confidence': max([d['confidence'] for d in divergences]) if divergences else 0,
+                    'primary_bias': 'Bullish' if sum(1 for d in divergences if 'Bullish' in d['type']) > 
+                                              sum(1 for d in divergences if 'Bearish' in d['type']) else 'Bearish'
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting divergences: {str(e)}")
+            return {'divergences': [], 'error': str(e)}
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Crypto Market Analyzer')
@@ -2658,7 +2852,33 @@ def main():
         
         print("\n📈 Contributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
 
-
+        # Add Divergence Analysis Section
+        print("\n====== 📊 Divergence Analysis 📊 ======")
+        divergences = analysis.get('divergence_analysis', {})
+        
+        if 'error' in divergences:
+            print(f"❌ Error analyzing divergences: {divergences['error']}")
+        else:
+            summary = divergences.get('summary', {})
+            print(f"Total Divergences Found: {summary.get('total_divergences', 0)}")
+            print(f"Primary Bias: {summary.get('primary_bias', 'None')}")
+            print(f"Confidence: {summary.get('highest_confidence', 0)*100:.1f}%")
+            
+            if divergences.get('divergences'):
+                print("\nDetailed Divergences:")
+                for div in divergences['divergences']:
+                    print(f"\n🔍 {div['type']} ({div['indicator']})")
+                    print(f"├─ Strength: {div['strength']:.4f}")
+                    print(f"├─ Confidence: {div['confidence']*100:.1f}%")
+                    
+                    analysis = div.get('analysis', {})
+                    print(f"├─ Price Change: {analysis.get('price_change_percent', 0):.1f}%")
+                    print(f"├─ Significance: {analysis.get('significance', 'Unknown')}")
+                    print(f"├─ Suggested Action: {analysis.get('suggested_action', 'None')}")
+                    if 'stop_loss' in analysis:
+                        print(f"└─ Suggested Stop Loss: ${analysis['stop_loss']:.4f}")
+            else:
+                print("\nNo significant divergences detected in current market conditions.")
 
     except Exception as e:
         logging.error(f"Error running market analysis: {str(e)}", exc_info=True)
