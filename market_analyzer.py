@@ -1232,6 +1232,12 @@ class MarketAnalyzer:
                 else:
                     result['confidence'] *= 0.8  # Decrease confidence when conflicting
 
+            # Add volatility regime analysis
+            volatility_regime = self.analyze_volatility_regime(formatted_candles)
+            
+            # Add volatility regime to the result dictionary
+            result['volatility_regime'] = volatility_regime
+
             return result
 
         except Exception as e:
@@ -2406,6 +2412,125 @@ class MarketAnalyzer:
             self.logger.error(f"Error detecting divergences: {str(e)}")
             return {'divergences': [], 'error': str(e)}
 
+    def analyze_volatility_regime(self, candles: List[Dict]) -> Dict:
+        """
+        Analyze and classify the current volatility regime of the market.
+        
+        Args:
+            candles: List of candle data
+            
+        Returns:
+            Dict containing volatility regime analysis
+        """
+        try:
+            if len(candles) < 50:  # Need sufficient data for analysis
+                return {
+                    'regime': 'Unknown',
+                    'confidence': 0.0,
+                    'metrics': {}
+                }
+            
+            # Calculate returns and volatility metrics
+            prices = np.array([c['close'] for c in candles])
+            returns = np.diff(np.log(prices))
+            
+            # Calculate different volatility measures
+            current_vol = np.std(returns[-20:]) * np.sqrt(252)  # 20-day volatility annualized
+            long_vol = np.std(returns) * np.sqrt(252)  # Full period volatility
+            
+            # Calculate volatility of volatility (vol-of-vol)
+            rolling_vol = []
+            for i in range(20, len(returns)):
+                period_vol = np.std(returns[i-20:i]) * np.sqrt(252)
+                rolling_vol.append(period_vol)
+            vol_of_vol = np.std(rolling_vol) if rolling_vol else 0
+            
+            # Calculate volatility ratios
+            vol_ratio = current_vol / long_vol if long_vol != 0 else 1
+            
+            # Define regime thresholds
+            low_vol_threshold = 0.15  # 15% annualized volatility
+            high_vol_threshold = 0.40  # 40% annualized volatility
+            vol_of_vol_threshold = 0.10  # 10% vol-of-vol threshold
+            
+            # Classify the regime
+            regime = 'Normal Volatility'
+            confidence = 0.7  # Base confidence
+            
+            if current_vol < low_vol_threshold:
+                regime = 'Low Volatility'
+                confidence = min(1.0, (low_vol_threshold - current_vol) / low_vol_threshold + 0.5)
+            elif current_vol > high_vol_threshold:
+                regime = 'High Volatility'
+                confidence = min(1.0, (current_vol - high_vol_threshold) / high_vol_threshold + 0.5)
+            
+            # Check for volatility clustering
+            if vol_of_vol > vol_of_vol_threshold:
+                regime = 'Volatility Clustering'
+                confidence = min(1.0, vol_of_vol / vol_of_vol_threshold)
+            
+            # Check for regime transition
+            vol_trend = 'Increasing' if len(rolling_vol) >= 2 and rolling_vol[-1] > rolling_vol[-2] else 'Decreasing'
+            
+            # Calculate volatility percentile
+            vol_percentile = sum(v < current_vol for v in rolling_vol) / len(rolling_vol) if rolling_vol else 0.5
+            
+            # Prepare detailed metrics
+            metrics = {
+                'current_volatility': current_vol,
+                'long_term_volatility': long_vol,
+                'volatility_of_volatility': vol_of_vol,
+                'volatility_ratio': vol_ratio,
+                'volatility_percentile': vol_percentile,
+                'volatility_trend': vol_trend,
+                'regime_thresholds': {
+                    'low_volatility': low_vol_threshold,
+                    'high_volatility': high_vol_threshold,
+                    'vol_of_vol': vol_of_vol_threshold
+                }
+            }
+            
+            # Add trading implications
+            implications = []
+            if regime == 'Low Volatility':
+                implications.extend([
+                    'Consider mean reversion strategies',
+                    'Reduce position sizes',
+                    'Prepare for potential volatility expansion'
+                ])
+            elif regime == 'High Volatility':
+                implications.extend([
+                    'Focus on trend following strategies',
+                    'Increase stop distances',
+                    'Consider reducing leverage'
+                ])
+            elif regime == 'Volatility Clustering':
+                implications.extend([
+                    'Expect continued volatility swings',
+                    'Use adaptive position sizing',
+                    'Monitor for regime change signals'
+                ])
+            
+            return {
+                'regime': regime,
+                'confidence': confidence,
+                'metrics': metrics,
+                'implications': implications,
+                'description': f"Market is in a {regime} regime with {confidence*100:.1f}% confidence. "
+                             f"Current volatility is at the {vol_percentile*100:.1f}th percentile "
+                             f"and is {vol_trend.lower()}."
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing volatility regime: {str(e)}")
+            return {
+                'regime': 'Unknown',
+                'confidence': 0.0,
+                'metrics': {},
+                'implications': [],
+                'description': 'Error analyzing volatility regime'
+            }
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Crypto Market Analyzer')
@@ -2801,6 +2926,27 @@ def main():
             print("• Consider waiting for stronger directional signals")
             print("• Monitor for breakout of recent trading range")
             print("• Prepare for potential volatility expansion")
+
+        # Add Volatility Regime Analysis Section
+        print("\n====== 📊 Volatility Regime Analysis 📊 ======")
+        vol_regime = analysis.get('volatility_regime', {})
+        if vol_regime:
+            print(f"Current Regime: {vol_regime['regime']}")
+            print(f"Confidence: {vol_regime['confidence']*100:.1f}%")
+            print(f"\nDescription: {vol_regime['description']}")
+            
+            print("\nKey Metrics:")
+            metrics = vol_regime.get('metrics', {})
+            print(f"• Current Volatility: {metrics.get('current_volatility', 0)*100:.1f}%")
+            print(f"• Long-term Volatility: {metrics.get('long_term_volatility', 0)*100:.1f}%")
+            print(f"• Volatility of Volatility: {metrics.get('volatility_of_volatility', 0)*100:.1f}%")
+            print(f"• Volatility Trend: {metrics.get('volatility_trend', 'Unknown')}")
+            print(f"• Volatility Percentile: {metrics.get('volatility_percentile', 0)*100:.1f}%")
+            
+            print("\nTrading Implications:")
+            for implication in vol_regime.get('implications', []):
+                print(f"• {implication}")
+
 
         # Enhanced Probability Analysis Section
         print("\n====== 📊 Detailed Move Analysis 📊 ======")
