@@ -1238,6 +1238,14 @@ class MarketAnalyzer:
             # Add volatility regime to the result dictionary
             result['volatility_regime'] = volatility_regime
 
+            # Add liquidity depth analysis
+            try:
+                liquidity_analysis = self.analyze_liquidity_depth(formatted_candles)
+                result['liquidity_analysis'] = liquidity_analysis
+            except Exception as e:
+                self.logger.error(f"Error in liquidity analysis: {str(e)}")
+                result['liquidity_analysis'] = {'status': 'error', 'error': str(e)}
+
             return result
 
         except Exception as e:
@@ -2531,6 +2539,130 @@ class MarketAnalyzer:
                 'description': 'Error analyzing volatility regime'
             }
 
+    def analyze_liquidity_depth(self, candles: List[Dict]) -> Dict:
+        """
+        Analyze market liquidity depth and order book imbalances.
+        
+        Args:
+            candles: List of candle data
+            
+        Returns:
+            Dict containing liquidity analysis results
+        """
+        try:
+            if not candles or len(candles) < 20:
+                return {
+                    'status': 'insufficient_data',
+                    'liquidity_score': 0.0,
+                    'metrics': {}
+                }
+            
+            # Extract volume and price data
+            volumes = np.array([c['volume'] for c in candles])
+            prices = np.array([c['close'] for c in candles])
+            highs = np.array([c['high'] for c in candles])
+            lows = np.array([c['low'] for c in candles])
+            
+            # Calculate volume-weighted average price (VWAP)
+            typical_prices = (highs + lows + prices) / 3
+            vwap = np.sum(typical_prices * volumes) / np.sum(volumes)
+            
+            # Calculate liquidity metrics
+            avg_volume = np.mean(volumes)
+            volume_std = np.std(volumes)
+            price_impact = np.abs(prices - vwap) / vwap
+            
+            # Calculate volume profile
+            volume_profile = []
+            price_levels = np.linspace(min(lows), max(highs), 20)
+            for level in price_levels:
+                mask = (typical_prices >= level * 0.995) & (typical_prices <= level * 1.005)
+                volume_at_level = np.sum(volumes[mask])
+                volume_profile.append({
+                    'price_level': level,
+                    'volume': volume_at_level,
+                    'percentage': volume_at_level / np.sum(volumes) * 100 if np.sum(volumes) > 0 else 0
+                })
+            
+            # Identify liquidity clusters
+            clusters = []
+            current_cluster = []
+            for i, level in enumerate(volume_profile):
+                if level['percentage'] > 5:  # Significant volume threshold
+                    current_cluster.append(level)
+                elif current_cluster:
+                    clusters.append(current_cluster)
+                    current_cluster = []
+            if current_cluster:
+                clusters.append(current_cluster)
+            
+            # Calculate liquidity score (0-100)
+            volume_consistency = 1 - (volume_std / avg_volume)
+            price_efficiency = 1 - np.mean(price_impact)
+            cluster_strength = len(clusters) / len(volume_profile)
+            
+            liquidity_score = (
+                volume_consistency * 0.4 +
+                price_efficiency * 0.4 +
+                cluster_strength * 0.2
+            ) * 100
+            
+            # Identify potential liquidity gaps
+            gaps = []
+            for i in range(1, len(volume_profile)):
+                if volume_profile[i]['percentage'] < 1 and volume_profile[i-1]['percentage'] > 5:
+                    gaps.append({
+                        'start_price': volume_profile[i-1]['price_level'],
+                        'end_price': volume_profile[i]['price_level'],
+                        'size': volume_profile[i-1]['percentage'] - volume_profile[i]['percentage']
+                    })
+            
+            # Calculate market depth imbalance
+            buy_volume = np.sum(volumes[prices > vwap])
+            sell_volume = np.sum(volumes[prices < vwap])
+            total_volume = buy_volume + sell_volume
+            imbalance_ratio = (buy_volume - sell_volume) / total_volume if total_volume > 0 else 0
+            
+            return {
+                'status': 'success',
+                'liquidity_score': liquidity_score,
+                'metrics': {
+                    'vwap': vwap,
+                    'average_volume': avg_volume,
+                    'volume_consistency': volume_consistency * 100,
+                    'price_efficiency': price_efficiency * 100,
+                    'cluster_strength': cluster_strength * 100,
+                    'imbalance_ratio': imbalance_ratio
+                },
+                'volume_profile': volume_profile,
+                'liquidity_clusters': [
+                    {
+                        'price_range': (min(c['price_level'] for c in cluster),
+                                      max(c['price_level'] for c in cluster)),
+                        'total_volume': sum(c['volume'] for c in cluster),
+                        'strength': len(cluster) / len(volume_profile)
+                    }
+                    for cluster in clusters
+                ],
+                'liquidity_gaps': gaps,
+                'market_depth': {
+                    'buy_side_volume': buy_volume,
+                    'sell_side_volume': sell_volume,
+                    'imbalance_ratio': imbalance_ratio,
+                    'interpretation': 'Buy Heavy' if imbalance_ratio > 0.2 else
+                                    'Sell Heavy' if imbalance_ratio < -0.2 else 'Balanced'
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing liquidity depth: {str(e)}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'liquidity_score': 0.0,
+                'metrics': {}
+            }
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Crypto Market Analyzer')
@@ -2947,6 +3079,53 @@ def main():
             for implication in vol_regime.get('implications', []):
                 print(f"• {implication}")
 
+        # Add Liquidity Depth Analysis Section
+        print("\n====== 📊 Liquidity Depth Analysis 📊 ======")
+        liquidity_analysis = analysis.get('liquidity_analysis', {})
+        
+        if not liquidity_analysis:
+            print("❌ No liquidity analysis data available")
+        elif liquidity_analysis.get('status') == 'success':
+            print(f"Liquidity Score: {liquidity_analysis['liquidity_score']:.1f}%")
+            print("\nMetrics:")
+            metrics = liquidity_analysis.get('metrics', {})
+            for metric, value in metrics.items():
+                if isinstance(value, (int, float)):
+                    print(f"• {metric.replace('_', ' ').title()}: {value:.1f}%")
+                else:
+                    print(f"• {metric.replace('_', ' ').title()}: {value}")
+                    
+            print("\nVolume Profile:")
+            for profile in liquidity_analysis.get('volume_profile', []):
+                print(f"• Price Level: ${profile.get('price_level', 0):.4f}, "
+                      f"Volume: {profile.get('volume', 0)}, "
+                      f"Percentage: {profile.get('percentage', 0):.1f}%")
+                      
+            print("\nLiquidity Clusters:")
+            for cluster in liquidity_analysis.get('liquidity_clusters', []):
+                price_range = cluster.get('price_range', (0, 0))
+                print(f"• Price Range: ${price_range[0]:.4f} to ${price_range[1]:.4f}, "
+                      f"Total Volume: {cluster.get('total_volume', 0)}, "
+                      f"Strength: {cluster.get('strength', 0):.1f}%")
+                      
+            print("\nLiquidity Gaps:")
+            for gap in liquidity_analysis.get('liquidity_gaps', []):
+                print(f"• Start Price: ${gap.get('start_price', 0):.4f}, "
+                      f"End Price: ${gap.get('end_price', 0):.4f}, "
+                      f"Size: {gap.get('size', 0):.1f}%")
+                      
+            print("\nMarket Depth:")
+            market_depth = liquidity_analysis.get('market_depth', {})
+            print(f"• Buy Side Volume: {market_depth.get('buy_side_volume', 0)}")
+            print(f"• Sell Side Volume: {market_depth.get('sell_side_volume', 0)}")
+            print(f"• Imbalance Ratio: {market_depth.get('imbalance_ratio', 0):.2f} "
+                  f"({market_depth.get('interpretation', 'Unknown')})")
+                  
+        elif liquidity_analysis.get('status') == 'insufficient_data':
+            print("⚠️ Insufficient data to analyze liquidity depth")
+        else:
+            error_msg = liquidity_analysis.get('error', 'Unknown error occurred')
+            print(f"❌ Error analyzing liquidity depth: {error_msg}")
 
         # Enhanced Probability Analysis Section
         print("\n====== 📊 Detailed Move Analysis 📊 ======")
