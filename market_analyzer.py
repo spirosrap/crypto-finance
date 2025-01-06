@@ -2441,6 +2441,7 @@ class MarketAnalyzer:
             # Calculate returns and volatility metrics
             prices = np.array([c['close'] for c in candles])
             returns = np.diff(np.log(prices))
+            volumes = np.array([c['volume'] for c in candles])
             
             # Calculate different volatility measures
             current_vol = np.std(returns[-20:]) * np.sqrt(252)  # 20-day volatility annualized
@@ -2465,7 +2466,26 @@ class MarketAnalyzer:
             regime = 'Normal Volatility'
             confidence = 0.7  # Base confidence
             
-            if current_vol < low_vol_threshold:
+            # NEW: Detect market exhaustion
+            # Calculate price momentum and volume trend
+            price_momentum = returns[-5:].mean() if len(returns) >= 5 else 0
+            volume_trend = (volumes[-5:].mean() - volumes[-10:-5].mean()) / volumes[-10:-5].mean() if len(volumes) >= 10 else 0
+            
+            # Calculate RSI for exhaustion detection
+            rsi = self.technical_analysis.compute_rsi(self.product_id, candles)
+            
+            # Define exhaustion conditions
+            price_exhaustion = abs(price_momentum) > np.std(returns) * 2  # Price movement 2 std devs from mean
+            volume_exhaustion = abs(volume_trend) > 0.5  # 50% volume change
+            rsi_exhaustion = rsi > 75 or rsi < 25  # Extreme RSI levels
+            
+            # Check for exhaustion pattern
+            if (price_exhaustion and volume_exhaustion and rsi_exhaustion):
+                regime = 'Exhaustion'
+                confidence = min(1.0, (abs(price_momentum) / np.std(returns)) * 0.5 +
+                               abs(volume_trend) * 0.3 +
+                               (abs(rsi - 50) / 50) * 0.2)
+            elif current_vol < low_vol_threshold:
                 regime = 'Low Volatility'
                 confidence = min(1.0, (low_vol_threshold - current_vol) / low_vol_threshold + 0.5)
             elif current_vol > high_vol_threshold:
@@ -2473,7 +2493,7 @@ class MarketAnalyzer:
                 confidence = min(1.0, (current_vol - high_vol_threshold) / high_vol_threshold + 0.5)
             
             # Check for volatility clustering
-            if vol_of_vol > vol_of_vol_threshold:
+            if vol_of_vol > vol_of_vol_threshold and regime != 'Exhaustion':
                 regime = 'Volatility Clustering'
                 confidence = min(1.0, vol_of_vol / vol_of_vol_threshold)
             
@@ -2483,6 +2503,19 @@ class MarketAnalyzer:
             # Calculate volatility percentile
             vol_percentile = sum(v < current_vol for v in rolling_vol) / len(rolling_vol) if rolling_vol else 0.5
             
+            # NEW: Add exhaustion metrics
+            exhaustion_metrics = {
+                'price_momentum': price_momentum,
+                'volume_trend': volume_trend,
+                'rsi_level': rsi,
+                'exhaustion_score': (abs(price_momentum) / np.std(returns) +
+                                   abs(volume_trend) +
+                                   abs(rsi - 50) / 50) / 3 if len(returns) > 0 else 0,
+                'is_price_exhausted': price_exhaustion,
+                'is_volume_exhausted': volume_exhaustion,
+                'is_rsi_exhausted': rsi_exhaustion
+            }
+            
             # Prepare detailed metrics
             metrics = {
                 'current_volatility': current_vol,
@@ -2491,6 +2524,7 @@ class MarketAnalyzer:
                 'volatility_ratio': vol_ratio,
                 'volatility_percentile': vol_percentile,
                 'volatility_trend': vol_trend,
+                'exhaustion_metrics': exhaustion_metrics,  # NEW: Add exhaustion metrics
                 'regime_thresholds': {
                     'low_volatility': low_vol_threshold,
                     'high_volatility': high_vol_threshold,
@@ -2518,6 +2552,13 @@ class MarketAnalyzer:
                     'Use adaptive position sizing',
                     'Monitor for regime change signals'
                 ])
+            elif regime == 'Exhaustion':  # NEW: Add exhaustion implications
+                implications.extend([
+                    'Prepare for potential trend reversal',
+                    'Tighten stop losses on existing positions',
+                    'Look for confirmation of reversal patterns',
+                    'Consider contrarian positions with strict risk management'
+                ])
             
             return {
                 'regime': regime,
@@ -2527,6 +2568,7 @@ class MarketAnalyzer:
                 'description': f"Market is in a {regime} regime with {confidence*100:.1f}% confidence. "
                              f"Current volatility is at the {vol_percentile*100:.1f}th percentile "
                              f"and is {vol_trend.lower()}."
+                             + (" Showing signs of exhaustion." if regime == 'Exhaustion' else "")
             }
             
         except Exception as e:
