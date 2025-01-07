@@ -2665,6 +2665,64 @@ class MarketAnalyzer:
             total_volume = buy_volume + sell_volume
             imbalance_ratio = (buy_volume - sell_volume) / total_volume if total_volume > 0 else 0
             
+            # NEW: Track historical market depth imbalances
+            current_time = datetime.now(UTC)
+            self.depth_imbalance.append({
+                'timestamp': current_time,
+                'imbalance_ratio': imbalance_ratio,
+                'buy_volume': buy_volume,
+                'sell_volume': sell_volume,
+                'vwap': vwap,
+                'current_price': prices[-1]
+            })
+            
+            # Keep depth imbalance history within limit
+            if len(self.depth_imbalance) > 100:  # Keep last 100 records
+                self.depth_imbalance.pop(0)
+            
+            # NEW: Calculate historical imbalance metrics
+            if len(self.depth_imbalance) > 1:
+                historical_imbalances = [d['imbalance_ratio'] for d in self.depth_imbalance]
+                imbalance_mean = np.mean(historical_imbalances)
+                imbalance_std = np.std(historical_imbalances)
+                current_imbalance_zscore = (imbalance_ratio - imbalance_mean) / imbalance_std if imbalance_std > 0 else 0
+                
+                # Detect imbalance trends
+                recent_imbalances = historical_imbalances[-5:]  # Last 5 periods
+                imbalance_trend = 'Increasing' if np.all(np.diff(recent_imbalances) > 0) else \
+                                'Decreasing' if np.all(np.diff(recent_imbalances) < 0) else \
+                                'Fluctuating'
+                
+                # Calculate cumulative imbalance
+                cumulative_imbalance = sum(historical_imbalances[-5:])  # Last 5 periods
+                
+                # Detect potential price pressure
+                price_pressure = 'Strong Buy' if cumulative_imbalance > 2 else \
+                               'Moderate Buy' if cumulative_imbalance > 1 else \
+                               'Strong Sell' if cumulative_imbalance < -2 else \
+                               'Moderate Sell' if cumulative_imbalance < -1 else \
+                               'Neutral'
+                
+                historical_analysis = {
+                    'mean_imbalance': imbalance_mean,
+                    'imbalance_volatility': imbalance_std,
+                    'current_zscore': current_imbalance_zscore,
+                    'imbalance_trend': imbalance_trend,
+                    'cumulative_imbalance': cumulative_imbalance,
+                    'price_pressure': price_pressure,
+                    'trend_strength': abs(cumulative_imbalance) / 5  # Normalized to 0-1
+                }
+            else:
+                historical_analysis = {
+                    'mean_imbalance': 0,
+                    'imbalance_volatility': 0,
+                    'current_zscore': 0,
+                    'imbalance_trend': 'Insufficient Data',
+                    'cumulative_imbalance': 0,
+                    'price_pressure': 'Neutral',
+                    'trend_strength': 0
+                }
+            
             return {
                 'status': 'success',
                 'liquidity_score': liquidity_score,
@@ -2693,7 +2751,9 @@ class MarketAnalyzer:
                     'imbalance_ratio': imbalance_ratio,
                     'interpretation': 'Buy Heavy' if imbalance_ratio > 0.2 else
                                     'Sell Heavy' if imbalance_ratio < -0.2 else 'Balanced'
-                }
+                },
+                'historical_depth_analysis': historical_analysis,  # NEW: Added historical analysis
+                'depth_imbalance_history': self.depth_imbalance[-5:]  # NEW: Last 5 records
             }
             
         except Exception as e:
