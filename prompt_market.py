@@ -23,12 +23,14 @@ except subprocess.CalledProcessError as e:
 client = OpenAI(api_key=OPENAI_KEY)
 
 # Now include the market analysis in your OpenAI prompt
-response = client.chat.completions.create(
-    model="gpt-4o-2024-11-20",  # Using the latest available model
-    messages=[
-        {"role": "system", "content": "You are a financial advisor/trader"},
-        {"role": "user", "content": f"Here's the latest market analysis:\n{market_analysis_output}\nGive me only a SELL AT <PRICE> or BUY AT <PRICE> or HOLD UNTIL <PRICE> and a one paragraph rationale about the decision."}
-    ]
-)
-
-print(response.choices[0].message.content)
+try:
+    response = client.chat.completions.create(
+        model="gpt-4o-2024-11-20",  # Using the latest available model
+        messages=[
+            {"role": "system", "content": "You are a financial advisor/trader"},
+            {"role": "user", "content": f"Here's the latest market analysis:\n{market_analysis_output}\nGive me only a SELL AT <PRICE> (or now) or BUY AT <PRICE> (or now) or HOLD UNTIL <PRICE> and a 150 word rationale about the decision."}
+        ]
+    )
+    print(response.choices[0].message.content)
+except Exception as e:
+    print(f"Error getting trading recommendation: {str(e)}")
