@@ -26,8 +26,8 @@ client = OpenAI(api_key=OPENAI_KEY)
 response = client.chat.completions.create(
     model="gpt-4o-2024-11-20",  # Using the latest available model
     messages=[
-        {"role": "system", "content": "You are a financial advisor."},
-        {"role": "user", "content": f"Here's the latest market analysis:\n{market_analysis_output}\nGive me only a SELL AT <PRICE> or BUY AT <PRICE> and a one paragraph rationale about the decision."}
+        {"role": "system", "content": "You are a financial advisor/trader"},
+        {"role": "user", "content": f"Here's the latest market analysis:\n{market_analysis_output}\nGive me only a SELL AT <PRICE> or BUY AT <PRICE> or HOLD UNTIL <PRICE> and a one paragraph rationale about the decision."}
     ]
 )
 
