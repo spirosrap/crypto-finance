@@ -3638,6 +3638,7 @@ def main():
                         print(f"\n🔍 {div['type']} ({div['indicator']})")
                         print(f"├─ Strength: {div['strength']:.4f}")
                         print(f"├─ Confidence: {div['confidence']*100:.1f}%")
+                        print(f"├─ Timeframe: {div.get('timeframe', 'Current')}")
                         
                         analysis = div.get('analysis', {})
                         print(f"├─ Price Change: {analysis.get('price_change_percent', 0):.1f}%")
