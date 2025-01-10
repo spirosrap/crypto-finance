@@ -445,7 +445,7 @@ class MarketAnalyzer:
         self.logger.info("Enhanced market analyzer initialized with additional features")
         
         # Initialize alert system
-        self.alert_system = AlertSystem(self.logger)
+        self.alert_system = AlertSystem(self.logger, market_analyzer=self)
         
         # Add default alerts
         self.alert_system.add_volatility_alert(0.05, AlertPriority.HIGH)  # 5% volatility alert
@@ -2800,6 +2800,71 @@ class MarketAnalyzer:
                 'metrics': {}
             }
 
+    @performance_monitor
+    def detect_manipulation_patterns(self, candles: List[Dict]) -> Dict:
+        """
+        Detects potential market manipulation patterns by analyzing volume and price anomalies.
+        
+        Args:
+            candles: List of candlestick data
+            
+        Returns:
+            Dict containing detected patterns and their confidence levels
+        """
+        try:
+            df = pd.DataFrame(self._format_candles(candles))
+            patterns = {
+                'pump_and_dump': False,
+                'wash_trading': False,
+                'spoofing': False,
+                'confidence': 0.0,
+                'details': [],
+                'market_condition': 'Normal'  # Default market condition
+            }
+            
+            # Detect sudden volume spikes with price pumps
+            volume_mean = df['volume'].mean()
+            price_std = df['close'].pct_change().std()
+            
+            for i in range(1, len(df)):
+                # Check for pump and dump patterns
+                if (df['volume'].iloc[i] > volume_mean * 3 and  # 3x normal volume
+                    df['close'].iloc[i] > df['close'].iloc[i-1] * 1.1):  # 10% price jump
+                    patterns['pump_and_dump'] = True
+                    patterns['market_condition'] = 'Suspicious'
+                    patterns['details'].append({
+                        'timestamp': df.index[i],
+                        'pattern': 'Pump and Dump',
+                        'volume_ratio': df['volume'].iloc[i] / volume_mean
+                    })
+                
+                # Check for potential wash trading
+                if (df['volume'].iloc[i] > volume_mean * 2 and  # High volume
+                    abs(df['close'].iloc[i] - df['close'].iloc[i-1]) < price_std * 0.5):  # Small price change
+                    patterns['wash_trading'] = True
+                    patterns['market_condition'] = 'Suspicious'
+                    patterns['details'].append({
+                        'timestamp': df.index[i],
+                        'pattern': 'Wash Trading',
+                        'price_change': abs(df['close'].iloc[i] - df['close'].iloc[i-1])
+                    })
+            
+            # Calculate confidence based on number and strength of patterns
+            pattern_count = sum([patterns['pump_and_dump'], patterns['wash_trading'], patterns['spoofing']])
+            patterns['confidence'] = min(0.95, pattern_count * 0.35)
+            
+            # Update market condition based on overall analysis
+            if pattern_count > 1:
+                patterns['market_condition'] = 'Highly Suspicious'
+            elif pattern_count == 1:
+                patterns['market_condition'] = 'Suspicious'
+            
+            return patterns
+            
+        except Exception as e:
+            self.logger.error(f"Error in detect_manipulation_patterns: {str(e)}")
+            return self._generate_error_response()
+
 class AlertType(Enum):
     PRICE = "Price Alert"
     TECHNICAL = "Technical Alert"
@@ -2809,6 +2874,7 @@ class AlertType(Enum):
     DIVERGENCE = "Divergence Alert"
     MOMENTUM = "Momentum Alert"
     VOLUME = "Volume Alert"
+    MANIPULATION = "Manipulation Alert"
 
 class AlertPriority(Enum):
     LOW = "Low"
@@ -2830,14 +2896,14 @@ class Alert:
         self.trigger_condition = None
 
 class AlertSystem:
-    """Handles market condition monitoring and alert generation."""
+    """System for managing and triggering market alerts."""
     
-    def __init__(self, logger=None):
-        self.alerts = []
+    def __init__(self, logger=None, market_analyzer=None):
+        self.logger = logger or logging.getLogger(__name__)
         self.active_alerts = []
         self.alert_history = []
+        self.market_analyzer = market_analyzer
         self.max_history = 100
-        self.logger = logger or logging.getLogger(__name__)
         
         # Alert thresholds
         self.price_change_threshold = 0.02  # 2% price change
@@ -3000,6 +3066,23 @@ class AlertSystem:
         if liquidity.get('liquidity_score', 100) < 30:
             alert = Alert(AlertType.LIQUIDITY, "Low market liquidity detected", AlertPriority.HIGH)
             auto_alerts.append(alert)
+        
+        # Get manipulation patterns
+        manipulation_patterns = self.market_analyzer.detect_manipulation_patterns(market_data.get('candles', []))
+        
+        if manipulation_patterns.get('pump_and_dump'):
+            auto_alerts.append(Alert(
+                AlertType.MANIPULATION,
+                "Potential pump and dump pattern detected",
+                AlertPriority.CRITICAL,
+            ))
+        
+        if manipulation_patterns.get('wash_trading'):
+            auto_alerts.append(Alert(
+                AlertType.MANIPULATION,
+                "Potential wash trading activity detected",
+                AlertPriority.HIGH,
+            ))
         
         return auto_alerts
         
