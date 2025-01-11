@@ -627,6 +627,46 @@ if analysis['signal'] == 'LONG':
 
 Scalping requires extreme attention to detail and quick decision-making. This strategy involves frequent trading and can result in significant transaction costs. It is recommended only for experienced traders who understand the risks and have tested their strategy thoroughly in a paper trading environment.
 
+## AI-Powered Market Analysis
+
+The `prompt_market.py` tool provides AI-powered market analysis and trading recommendations by combining the comprehensive market analysis from `market_analyzer.py` with advanced language models.
+
+### Features
+
+- AI-driven trading recommendations
+- Natural language analysis of market conditions
+- Clear BUY/SELL/HOLD signals with price targets
+- Concise rationale for trading decisions
+
+### Usage
+
+1. **Basic Analysis:**
+   ```bash
+   python prompt_market.py
+   ```
+
+2. **Analyze Specific Product:**
+   ```bash
+   python prompt_market.py --product_id ETH-USDC
+   ```
+
+3. **Change Time Interval:**
+   ```bash
+   python prompt_market.py --granularity ONE_HOUR
+   ```
+
+### Output Format
+
+The tool provides clear, actionable trading recommendations in the following format:
+- Trading Action (BUY/SELL/HOLD)
+- Price Target or Entry Point
+- Concise rationale for the recommendation
+
+### Prerequisites
+
+- OpenAI API key (set in `config.py`)
+- Market analyzer dependencies
+- Python 3.11 or higher
 
 # Memecoin Analyzer
 
