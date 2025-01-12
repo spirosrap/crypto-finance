@@ -4,7 +4,17 @@ import subprocess
 import os
 import argparse
 import json
+import time
 from typing import Dict, Optional
+from datetime import datetime
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='prompt_market.log'
+)
 
 def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
     """Run market analysis and return the output as a dictionary."""
@@ -17,27 +27,15 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
             )
         return {'success': True, 'data': result}
     except subprocess.CalledProcessError as e:
+        logging.error(f"Market analyzer error: {str(e)}")
         return {'success': False, 'error': str(e)}
+    except Exception as e:
+        logging.error(f"Unexpected error in market analysis: {str(e)}")
+        return {'success': False, 'error': f"Unexpected error: {str(e)}"}
 
-# Set up argument parser
-parser = argparse.ArgumentParser(description='Analyze market data and get AI trading recommendations')
-parser.add_argument('--product_id', type=str, default='BTC-USDC', help='Trading pair to analyze (e.g., BTC-USDC, ETH-USDC)')
-parser.add_argument('--granularity', type=str, default='ONE_HOUR', help='Time granularity for analysis (e.g., ONE_MINUTE, FIVE_MINUTES, ONE_HOUR, ONE_DAY)')
-args = parser.parse_args()
-
-# Run market analysis
-analysis_result = run_market_analysis(args.product_id, args.granularity)
-
-if not analysis_result['success']:
-    print(f"Error running market analyzer: {analysis_result['error']}")
-    exit(1)
-
-market_analysis_output = analysis_result['data']
-
-client = OpenAI(api_key=OPENAI_KEY)
-
-# Comprehensive system prompt for better trading recommendations
-SYSTEM_PROMPT = """You are an expert cryptocurrency trading advisor. Your role is to:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, max_retries: int = 3) -> Optional[str]:
+    """Get trading recommendation with retry logic."""
+    SYSTEM_PROMPT = """You are an expert cryptocurrency trading advisor. Your role is to:
 1. Analyze market data and technical indicators
 2. Provide clear, actionable trading recommendations
 3. Specify exact entry, exit, and risk management levels
@@ -47,20 +45,101 @@ SYSTEM_PROMPT = """You are an expert cryptocurrency trading advisor. Your role i
 Your response should be structured as:
 1. Primary recommendation (SELL/BUY/HOLD with specific price)
 2. Brief rationale (2-3 sentences maximum)
-3. Risk management levels (stop-loss and take-profit)"""
+3. Risk management levels (stop-loss and take-profit)
+4. Market alerts and warnings (if any)
+5. Key technical levels to watch"""
 
-try:
-    response = client.chat.completions.create(
-        model="gpt-4",  # Using the stable GPT-4 model
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Here's the latest market analysis for {args.product_id}:\n{market_analysis_output}\nBased on this analysis, provide a trading recommendation."}
-        ],
-        temperature=0.3,  # Lower temperature for more consistent outputs
-        max_tokens=300,   # Limit response length for conciseness
-        presence_penalty=0.1,  # Slight penalty to avoid repetition
-        frequency_penalty=0.1  # Slight penalty to avoid repetition
-    )
-    print(response.choices[0].message.content)
-except Exception as e:
-    print(f"Error getting trading recommendation: {str(e)}")
+    for attempt in range(max_retries):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
+                ],
+                temperature=0.3,
+                max_tokens=300,
+                presence_penalty=0.1,
+                frequency_penalty=0.1
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logging.error(f"Failed to get trading recommendation after {max_retries} attempts: {str(e)}")
+                return None
+            logging.warning(f"Attempt {attempt + 1} failed, retrying... Error: {str(e)}")
+            time.sleep(2 ** attempt)  # Exponential backoff
+
+def format_output(recommendation: str, analysis_result: Dict) -> None:
+    """Format and print the trading recommendation with enhanced market insights."""
+    print("\n====== 🤖 AI Trading Recommendation ======")
+    print(recommendation)
+
+    if 'data' in analysis_result:
+        try:
+            # Parse the market analysis data
+            analysis_data = json.loads(analysis_result['data'])
+            
+            # Print market alerts if available
+            if 'alerts' in analysis_data:
+                print("\n====== 🔔 Market Alerts ======")
+                alerts = analysis_data['alerts']
+                if alerts.get('triggered_alerts'):
+                    print("\n🚨 Active Alerts:")
+                    for alert in alerts['triggered_alerts']:
+                        print(f"• [{alert['priority']}] {alert['type']}: {alert['message']}")
+
+            # Print key levels if available
+            if 'key_levels' in analysis_data:
+                print("\n====== 🎯 Key Price Levels ======")
+                levels = analysis_data['key_levels']
+                print(f"• Support: ${levels.get('support', 'N/A')}")
+                print(f"• Resistance: ${levels.get('resistance', 'N/A')}")
+                print(f"• Pivot: ${levels.get('pivot', 'N/A')}")
+
+            # Print risk metrics if available
+            if 'risk_metrics' in analysis_data:
+                print("\n====== ⚠️ Risk Analysis ======")
+                risk = analysis_data['risk_metrics']
+                print(f"• Risk Level: {risk.get('dynamic_risk', 0)*100:.1f}%")
+                print(f"• Volatility: {risk.get('volatility', 0)*100:.1f}%")
+                print(f"• Risk/Reward: {risk.get('risk_reward_ratio', 'N/A')}")
+
+        except json.JSONDecodeError:
+            logging.warning("Could not parse market analysis JSON data")
+        except Exception as e:
+            logging.error(f"Error formatting output: {str(e)}")
+
+def main():
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Analyze market data and get AI trading recommendations')
+    parser.add_argument('--product_id', type=str, default='BTC-USDC', help='Trading pair to analyze (e.g., BTC-USDC, ETH-USDC)')
+    parser.add_argument('--granularity', type=str, default='ONE_HOUR', help='Time granularity for analysis (e.g., ONE_MINUTE, FIVE_MINUTES, ONE_HOUR, ONE_DAY)')
+    args = parser.parse_args()
+
+    try:
+        # Run market analysis
+        analysis_result = run_market_analysis(args.product_id, args.granularity)
+        if not analysis_result['success']:
+            print(f"Error running market analyzer: {analysis_result['error']}")
+            exit(1)
+
+        # Initialize OpenAI client
+        client = OpenAI(api_key=OPENAI_KEY)
+
+        # Get trading recommendation
+        recommendation = get_trading_recommendation(client, analysis_result['data'], args.product_id)
+        if recommendation is None:
+            print("Failed to get trading recommendation. Check the logs for details.")
+            exit(1)
+
+        # Format and display the output
+        format_output(recommendation, analysis_result)
+
+    except Exception as e:
+        logging.error(f"Unexpected error in main: {str(e)}")
+        print(f"An unexpected error occurred. Check the logs for details.")
+        exit(1)
+
+if __name__ == "__main__":
+    main()

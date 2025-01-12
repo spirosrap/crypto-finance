@@ -59,3 +59,4 @@ backtest_results/trades_DOGE-USDC_2024-01-01_2024-12-31.csv
 signals/signals_DOGE-USDC_20241121.json
 advanced_market_analyzer_BTC-USDC.log
 market_analyzer.log
+prompt_market.log
