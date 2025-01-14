@@ -8,6 +8,7 @@ import time
 from typing import Dict, Optional
 from datetime import datetime
 import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # Configure logging
 logging.basicConfig(
@@ -15,6 +16,16 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     filename='prompt_market.log'
 )
+
+def validate_api_key() -> bool:
+    """Validate that the OpenAI API key is set and well-formed."""
+    if not OPENAI_KEY or not isinstance(OPENAI_KEY, str):
+        logging.error("OpenAI API key is not set or invalid")
+        return False
+    if not OPENAI_KEY.startswith('sk-'):
+        logging.error("OpenAI API key appears to be malformed")
+        return False
+    return True
 
 def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
     """Run market analysis and return the output as a dictionary."""
@@ -33,8 +44,16 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         logging.error(f"Unexpected error in market analysis: {str(e)}")
         return {'success': False, 'error': f"Unexpected error: {str(e)}"}
 
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, max_retries: int = 3) -> Optional[str]:
-    """Get trading recommendation with retry logic."""
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type((Exception)),
+    before_sleep=lambda retry_state: logging.warning(
+        f"Attempt {retry_state.attempt_number} failed, retrying..."
+    )
+)
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str) -> Optional[str]:
+    """Get trading recommendation with improved retry logic."""
     SYSTEM_PROMPT = """You are an expert cryptocurrency trading advisor. Your role is to:
 1. Analyze market data and technical indicators
 2. Provide clear, actionable trading recommendations
@@ -49,26 +68,22 @@ Your response should be structured as:
 4. Market alerts and warnings (if any)
 5. Key technical levels to watch"""
 
-    for attempt in range(max_retries):
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
-                ],
-                temperature=0.3,
-                max_tokens=300,
-                presence_penalty=0.1,
-                frequency_penalty=0.1
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            if attempt == max_retries - 1:
-                logging.error(f"Failed to get trading recommendation after {max_retries} attempts: {str(e)}")
-                return None
-            logging.warning(f"Attempt {attempt + 1} failed, retrying... Error: {str(e)}")
-            time.sleep(2 ** attempt)  # Exponential backoff
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
+            ],
+            temperature=0.3,
+            max_tokens=300,
+            presence_penalty=0.1,
+            frequency_penalty=0.1
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logging.error(f"Failed to get trading recommendation: {str(e)}")
+        raise
 
 def format_output(recommendation: str, analysis_result: Dict) -> None:
     """Format and print the trading recommendation with enhanced market insights."""
@@ -118,6 +133,11 @@ def main():
     args = parser.parse_args()
 
     try:
+        # Validate API key first
+        if not validate_api_key():
+            print("Invalid or missing OpenAI API key. Please check your configuration.")
+            exit(1)
+
         # Run market analysis
         analysis_result = run_market_analysis(args.product_id, args.granularity)
         if not analysis_result['success']:
