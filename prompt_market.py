@@ -17,6 +17,13 @@ logging.basicConfig(
     filename='prompt_market.log'
 )
 
+# Initialize OpenAI client at module level
+client = None
+try:
+    client = OpenAI(api_key=OPENAI_KEY)
+except Exception as e:
+    logging.error(f"Failed to initialize OpenAI client: {str(e)}")
+
 def validate_api_key() -> bool:
     """Validate that the OpenAI API key is set and well-formed."""
     if not OPENAI_KEY or not isinstance(OPENAI_KEY, str):
@@ -54,6 +61,9 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
 )
 def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str) -> Optional[str]:
     """Get trading recommendation with improved retry logic."""
+    if client is None:
+        raise ValueError("OpenAI client not properly initialized")
+
     SYSTEM_PROMPT = """You are an expert cryptocurrency trading advisor. Your role is to:
 1. Analyze market data and technical indicators
 2. Provide clear, actionable trading recommendations
@@ -87,7 +97,8 @@ Your response should be structured as:
 
 def format_output(recommendation: str, analysis_result: Dict) -> None:
     """Format and print the trading recommendation with enhanced market insights."""
-    print("\n====== 🤖 AI Trading Recommendation ======")
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n====== 🤖 AI Trading Recommendation ({current_time}) ======")
     print(recommendation)
 
     if 'data' in analysis_result:
@@ -138,14 +149,15 @@ def main():
             print("Invalid or missing OpenAI API key. Please check your configuration.")
             exit(1)
 
+        if client is None:
+            print("OpenAI client not initialized. Please check your API key and configuration.")
+            exit(1)
+
         # Run market analysis
         analysis_result = run_market_analysis(args.product_id, args.granularity)
         if not analysis_result['success']:
             print(f"Error running market analyzer: {analysis_result['error']}")
             exit(1)
-
-        # Initialize OpenAI client
-        client = OpenAI(api_key=OPENAI_KEY)
 
         # Get trading recommendation
         recommendation = get_trading_recommendation(client, analysis_result['data'], args.product_id)
@@ -156,6 +168,9 @@ def main():
         # Format and display the output
         format_output(recommendation, analysis_result)
 
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user.")
+        exit(0)
     except Exception as e:
         logging.error(f"Unexpected error in main: {str(e)}")
         print(f"An unexpected error occurred. Check the logs for details.")
