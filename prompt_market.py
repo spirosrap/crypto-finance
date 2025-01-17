@@ -64,19 +64,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     if client is None:
         raise ValueError("OpenAI client not properly initialized")
 
-    SYSTEM_PROMPT = """You are an expert cryptocurrency trading advisor. Your role is to:
-1. Analyze market data and technical indicators
-2. Provide clear, actionable trading recommendations
-3. Specify exact entry, exit, and risk management levels
-4. Consider market context and volatility
-5. Format recommendations consistently as 'ACTION AT PRICE' or 'HOLD UNTIL PRICE'
-
-Your response should be structured as:
-1. Primary recommendation (SELL/BUY/HOLD with specific price)
-2. Brief rationale (2-3 sentences maximum)
-3. Risk management levels (stop-loss and take-profit)
-4. Market alerts and warnings (if any)
-5. Key technical levels to watch"""
+    SYSTEM_PROMPT = """Write "SELL AT <PRICE>" or "BUY AT <PRICE?>" based on the market analysis. Leave a an empty line after the recommendation and add a paragraph of explanation."""
 
     try:
         response = client.chat.completions.create(
