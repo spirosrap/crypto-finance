@@ -9,6 +9,7 @@ from typing import Dict, Optional
 from datetime import datetime
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import openai
 
 # Configure logging
 logging.basicConfig(
@@ -54,7 +55,13 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
-    retry=retry_if_exception_type((Exception)),
+    retry=retry_if_exception_type((
+        TimeoutError,
+        ConnectionError,
+        openai.APIError,
+        openai.APIConnectionError,
+        openai.RateLimitError
+    )),
     before_sleep=lambda retry_state: logging.warning(
         f"Attempt {retry_state.attempt_number} failed, retrying..."
     )
@@ -73,7 +80,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
             ],
-            temperature=0.3,
+            temperature=0.1,
             max_tokens=300,
             presence_penalty=0.1,
             frequency_penalty=0.1
