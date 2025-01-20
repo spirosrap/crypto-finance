@@ -85,7 +85,16 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             presence_penalty=0.1,
             frequency_penalty=0.1
         )
+        if not response.choices:
+            logging.error("OpenAI response contained no choices")
+            return None
         return response.choices[0].message.content
+    except openai.RateLimitError:
+        logging.error("Rate limit exceeded with OpenAI API")
+        raise
+    except openai.APIError as e:
+        logging.error(f"OpenAI API error: {str(e)}")
+        raise
     except Exception as e:
         logging.error(f"Failed to get trading recommendation: {str(e)}")
         raise
