@@ -71,7 +71,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     if client is None:
         raise ValueError("OpenAI client not properly initialized")
 
-    SYSTEM_PROMPT = """Write "SELL AT <PRICE>" or "BUY AT <PRICE?>" based on the market analysis. Leave a an empty line after the recommendation and add a paragraph of explanation."""
+    SYSTEM_PROMPT = """Reply only with "BUY AT <PRICE> and SELL AT <PRICE>" or "SELL AT <PRICE> and BUY BACK AT <PRICE>"""
 
     try:
         response = client.chat.completions.create(
@@ -102,7 +102,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 def format_output(recommendation: str, analysis_result: Dict) -> None:
     """Format and print the trading recommendation with enhanced market insights."""
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n====== 🤖 AI Trading Recommendation ({current_time}) ======")
+    print(f"====== 🤖 AI Trading Recommendation ({current_time}) ======")
     print(recommendation)
 
     if 'data' in analysis_result:
