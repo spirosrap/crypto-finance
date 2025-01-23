@@ -42,9 +42,13 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
             result = subprocess.check_output(
                 ['python', 'market_analyzer.py', '--product_id', product_id, '--granularity', granularity],
                 text=True,
-                stderr=devnull
+                stderr=devnull,
+                timeout=300  # 5 minute timeout
             )
         return {'success': True, 'data': result}
+    except subprocess.TimeoutExpired:
+        logging.error("Market analyzer timed out after 5 minutes")
+        return {'success': False, 'error': "Analysis timed out"}
     except subprocess.CalledProcessError as e:
         logging.error(f"Market analyzer error: {str(e)}")
         return {'success': False, 'error': str(e)}
@@ -88,7 +92,14 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         if not response.choices:
             logging.error("OpenAI response contained no choices")
             return None
-        return response.choices[0].message.content
+            
+        recommendation = response.choices[0].message.content
+        # Validate recommendation format
+        if not (("BUY AT" in recommendation and "SELL AT" in recommendation) or 
+                ("SELL AT" in recommendation and "BUY BACK AT" in recommendation)):
+            logging.error(f"Invalid recommendation format: {recommendation}")
+            return None
+        return recommendation
     except openai.RateLimitError:
         logging.error("Rate limit exceeded with OpenAI API")
         raise
