@@ -53,114 +53,165 @@ class BitcoinPredictionModel:
         self.ensemble = None
 
     def prepare_data(self, candles, external_data=None):
-        df = pd.DataFrame(candles)
-        
-        # Convert numeric columns to float, handling non-numeric values
-        numeric_columns = ['open', 'high', 'low', 'close', 'volume', 'start']
-        for col in numeric_columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Convert 'start' column to datetime
-        df['start'] = pd.to_datetime(df['start'].astype(int), unit='s')
-        
-        if df.empty:
-            self.logger.error("Candles data is empty. Cannot proceed with data preparation.")
+        # First, check if candles data is valid and log its structure
+        if not candles or len(candles) == 0:
+            self.logger.error("Empty candles data received")
             return None, None, None
 
-        df['date'] = df['start'].dt.date
+        # Debug logging
+        self.logger.debug(f"Candles data type: {type(candles)}")
+        self.logger.debug(f"First candle: {candles[0] if candles else None}")
+        self.logger.debug(f"First candle type: {type(candles[0]) if candles else None}")
         
-        # Calculate RSI (14 * 1hr = 14hr)
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        # Calculate MACD (12 * 1hr = 12hr, 26 * 1hr = 26hr, 9 * 1hr = 9hr)
-        exp1 = df['close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = exp1 - exp2
-        df['signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-        
-        # Add percentage change
-        df['pct_change'] = df['close'].pct_change()
-        
-        # Add volatility (20 * 1hr = 20hr rolling standard deviation of returns)
-        df['volatility'] = df['pct_change'].rolling(window=20).std()
-        
-        # Add direction (1 for up, 0 for down or no change)
-        df['direction'] = (df['close'].shift(-24) > df['close']).astype(int)  # Shift by 24 periods (24 hours)
+        try:
+            # Create a list of dictionaries with the correct structure
+            data = []
+            for i, candle in enumerate(candles):
+                # The candles are already dictionaries, just extract the data
+                try:
+                    data.append({
+                        'start': str(candle['start']),
+                        'low': str(candle['low']),
+                        'high': str(candle['high']),
+                        'open': str(candle['open']),
+                        'close': str(candle['close']),
+                        'volume': str(candle['volume'])
+                    })
+                except Exception as e:
+                    self.logger.error(f"Error processing candle {i}: {e}")
+                    self.logger.debug(f"Problematic candle: {candle}")
+                    continue
+            
+            self.logger.debug(f"Processed {len(data)} candles out of {len(candles)} total")
+            
+            if not data:
+                self.logger.error("No valid candles data after processing")
+                return None, None, None
+            
+            # Create DataFrame from the structured data
+            df = pd.DataFrame(data)
+            self.logger.debug(f"DataFrame columns: {df.columns}")
+            self.logger.debug(f"Initial DataFrame head:\n{df.head()}")
+            self.logger.debug(f"Initial DataFrame info:\n{df.info()}")
+            
+            # Convert numeric columns to float, handling non-numeric values
+            numeric_columns = ['open', 'high', 'low', 'close', 'volume']
+            for col in numeric_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                    self.logger.debug(f"Converted {col} column to numeric")
+            
+            # Convert 'start' column to datetime
+            if 'start' in df.columns:
+                df['start'] = pd.to_datetime(df['start'].astype(int), unit='s')
+                self.logger.debug("Converted start column to datetime")
+            
+            if df.empty:
+                self.logger.error("DataFrame is empty after conversion")
+                return None, None, None
+            
+            # Log DataFrame info for debugging
+            self.logger.debug(f"DataFrame shape: {df.shape}")
+            self.logger.debug(f"DataFrame columns after processing: {df.columns}")
+            self.logger.debug(f"Final DataFrame head:\n{df.head()}")
+            
+            df['date'] = df['start'].dt.date
+            
+            # Calculate RSI (14 * 1hr = 14hr)
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['rsi'] = 100 - (100 / (1 + rs))
+            
+            # Calculate MACD (12 * 1hr = 12hr, 26 * 1hr = 26hr, 9 * 1hr = 9hr)
+            exp1 = df['close'].ewm(span=12, adjust=False).mean()
+            exp2 = df['close'].ewm(span=26, adjust=False).mean()
+            df['macd'] = exp1 - exp2
+            df['signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+            
+            # Add percentage change
+            df['pct_change'] = df['close'].pct_change()
+            
+            # Add volatility (20 * 1hr = 20hr rolling standard deviation of returns)
+            df['volatility'] = df['pct_change'].rolling(window=20).std()
+            
+            # Add direction (1 for up, 0 for down or no change)
+            df['direction'] = (df['close'].shift(-24) > df['close']).astype(int)  # Shift by 24 periods (24 hours)
 
-        # Add market condition (this is a placeholder, you may want to calculate it based on your analysis)
-        df['market_condition'] = 0  # Default value, you can modify this later based on your analysis
+            # Add market condition (this is a placeholder, you may want to calculate it based on your analysis)
+            df['market_condition'] = 0  # Default value, you can modify this later based on your analysis
 
-        # Add lagged features
-        df['lagged_close'] = df['close'].shift(1)
-        df['lagged_volume'] = df['volume'].shift(1)
-        df['lagged_rsi'] = df['rsi'].shift(1)
-        df['lagged_macd'] = df['macd'].shift(1)
-        df['lagged_signal'] = df['signal'].shift(1)
-        df['lagged_pct_change'] = df['pct_change'].shift(1)
-        df['lagged_volatility'] = df['volatility'].shift(1)
+            # Add lagged features
+            df['lagged_close'] = df['close'].shift(1)
+            df['lagged_volume'] = df['volume'].shift(1)
+            df['lagged_rsi'] = df['rsi'].shift(1)
+            df['lagged_macd'] = df['macd'].shift(1)
+            df['lagged_signal'] = df['signal'].shift(1)
+            df['lagged_pct_change'] = df['pct_change'].shift(1)
+            df['lagged_volatility'] = df['volatility'].shift(1)
 
-        if external_data is not None:
-            # Convert external_data 'date' column to date type if it's not already
-            external_data['date'] = pd.to_datetime(external_data['date']).dt.date
+            if external_data is not None:
+                # Convert external_data 'date' column to date type if it's not already
+                external_data['date'] = pd.to_datetime(external_data['date']).dt.date
 
-            # Add external data
-            df = pd.merge(df, external_data, on='date', how='left')
+                # Add external data
+                df = pd.merge(df, external_data, on='date', how='left')
 
-            # Add new features
-            if 'btc_market_cap' in df.columns and 'total_crypto_market_cap' in df.columns:
-                df['btc_dominance'] = df['btc_market_cap'] / df['total_crypto_market_cap']
-            else:
-                print("Warning: Unable to calculate btc_dominance due to missing columns")
-                df['btc_dominance'] = np.nan
+                # Add new features
+                if 'btc_market_cap' in df.columns and 'total_crypto_market_cap' in df.columns:
+                    df['btc_dominance'] = df['btc_market_cap'] / df['total_crypto_market_cap']
+                else:
+                    print("Warning: Unable to calculate btc_dominance due to missing columns")
+                    df['btc_dominance'] = np.nan
 
-            if 'hash_rate' in df.columns:
-                df['hash_rate_ma'] = df['hash_rate'].rolling(window=24).mean()  # 24-hour moving average
-            else:
-                print("Warning: Unable to calculate hash_rate_ma due to missing hash_rate column")
-                df['hash_rate_ma'] = np.nan
+                if 'hash_rate' in df.columns:
+                    df['hash_rate_ma'] = df['hash_rate'].rolling(window=24).mean()  # 24-hour moving average
+                else:
+                    print("Warning: Unable to calculate hash_rate_ma due to missing hash_rate column")
+                    df['hash_rate_ma'] = np.nan
 
-            # Add percentage change for external data
-            df['hash_rate_pct_change'] = df['hash_rate'].pct_change()
-            df['total_market_cap_pct_change'] = df['total_crypto_market_cap'].pct_change()
-            df['sp500_pct_change'] = df['sp500'].pct_change()
+                # Add percentage change for external data
+                df['hash_rate_pct_change'] = df['hash_rate'].pct_change()
+                df['total_market_cap_pct_change'] = df['total_crypto_market_cap'].pct_change()
+                df['sp500_pct_change'] = df['sp500'].pct_change()
 
-            # Add lagged external features
-            df['lagged_hash_rate'] = df['hash_rate'].shift(1)
-            df['lagged_btc_dominance'] = df['btc_dominance'].shift(1)
-            df['lagged_total_crypto_market_cap'] = df['total_crypto_market_cap'].shift(1)
-            df['lagged_sp500'] = df['sp500'].shift(1)
+                # Add lagged external features
+                df['lagged_hash_rate'] = df['hash_rate'].shift(1)
+                df['lagged_btc_dominance'] = df['btc_dominance'].shift(1)
+                df['lagged_total_crypto_market_cap'] = df['total_crypto_market_cap'].shift(1)
+                df['lagged_sp500'] = df['sp500'].shift(1)
 
-        df = df.dropna().reset_index(drop=True)
+            df = df.dropna().reset_index(drop=True)
 
-        if df.empty:
-            self.logger.error("Dataframe is empty after preparation. Check for NaN values or insufficient data.")
+            if df.empty:
+                self.logger.error("Dataframe is empty after preparation. Check for NaN values or insufficient data.")
+                return None, None, None
+
+            # Define all potential features
+            all_features = ['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
+                            'market_condition', 'lagged_close', 'lagged_volume', 
+                            'lagged_rsi', 'lagged_macd', 'lagged_signal', 
+                            'lagged_pct_change', 'lagged_volatility']
+
+            if external_data is not None:
+                all_features.extend(['btc_dominance', 'hash_rate_ma', 'hash_rate_pct_change',
+                                     'total_market_cap_pct_change', 'sp500_pct_change',
+                                     'lagged_hash_rate', 'lagged_btc_dominance',
+                                     'lagged_total_crypto_market_cap', 'lagged_sp500'])
+
+            X = df[all_features].copy()
+
+            y = df['close'].shift(-1)
+
+            df = df.iloc[:-1]
+            X = X.iloc[:-1]
+            y = y.iloc[:-1]
+            
+            return df, X, y
+        except Exception as e:
+            print(f"An error occurred during data preparation: {e}")
             return None, None, None
-
-        # Define all potential features
-        all_features = ['volume', 'rsi', 'macd', 'signal', 'pct_change', 'volatility', 
-                        'market_condition', 'lagged_close', 'lagged_volume', 
-                        'lagged_rsi', 'lagged_macd', 'lagged_signal', 
-                        'lagged_pct_change', 'lagged_volatility']
-
-        if external_data is not None:
-            all_features.extend(['btc_dominance', 'hash_rate_ma', 'hash_rate_pct_change',
-                                 'total_market_cap_pct_change', 'sp500_pct_change',
-                                 'lagged_hash_rate', 'lagged_btc_dominance',
-                                 'lagged_total_crypto_market_cap', 'lagged_sp500'])
-
-        X = df[all_features].copy()
-
-        y = df['close'].shift(-1)
-
-        df = df.iloc[:-1]
-        X = X.iloc[:-1]
-        y = y.iloc[:-1]
-        
-        return df, X, y
 
     def select_features(self, X, y, max_time=600):  # max_time in seconds (10 minutes)
         print("Starting feature selection...")
