@@ -127,9 +127,13 @@ class CoinbaseService:
         if balance < 5:
             return 0.0, 0.0
         
-        transaction_summary = self.client.get_transaction_summary()
-        fee_tier = transaction_summary.get('fee_tier', {})
-        fee_rate = float(fee_tier.get('taker_fee_rate', self.DEFAULT_FEE_RATE))
+        try:
+            transaction_summary = self.client.get_transaction_summary()
+            # Access fee_tier directly from the response object
+            fee_rate = float(transaction_summary.fee_tier.taker_fee_rate if hasattr(transaction_summary, 'fee_tier') else self.DEFAULT_FEE_RATE)
+        except Exception as e:
+            self.logger.warning(f"Could not get fee tier, using default fee rate: {e}")
+            fee_rate = self.DEFAULT_FEE_RATE
         
         if is_buy:
             trade_amount = (balance / price) / (1 + fee_rate)
