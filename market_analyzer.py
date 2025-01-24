@@ -3761,9 +3761,11 @@ def main():
             for alert_type, count in summary.get('alerts_by_type', {}).items():
                 print(f"• {alert_type}: {count}")
 
+        except KeyboardInterrupt:
+            print("\n\n⛔ Analysis stopped by user")
         except Exception as e:
-            logging.error(f"Error running market analysis: {str(e)}", exc_info=True)
-            return
+            print(f"\n❌ Error during market analysis: {str(e)}")
+            logging.error(f"Error during market analysis: {str(e)}", exc_info=True)
 
 if __name__ == "__main__":
     main() 
