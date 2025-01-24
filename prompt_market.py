@@ -141,7 +141,7 @@ def format_output(recommendation: str, analysis_result: Dict, reasoning: Optiona
 
     if reasoning:
         print("\n====== 🧠 Reasoning ======")
-        print(reasoning)
+        print(' '.join(reasoning.split()[:20])) # Just for verification
 
     if 'data' in analysis_result:
         try:
