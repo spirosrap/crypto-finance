@@ -37,11 +37,13 @@ class StackingEnsemble(BaseEstimator, ClassifierMixin):
     def __init__(self, base_models, meta_model):
         self.base_models = base_models
         self.meta_model = meta_model
-        self.classes_ = None
+        self._classes = None
+        self.fitted_base_models_ = None
+        self.fitted_meta_model_ = None
 
     def fit(self, X, y):
         # Store unique class labels
-        self.classes_ = np.unique(y)
+        self._classes = np.unique(y)
 
         # Train base models
         self.fitted_base_models_ = []
@@ -62,6 +64,9 @@ class StackingEnsemble(BaseEstimator, ClassifierMixin):
         return self
 
     def predict_proba(self, X):
+        if not hasattr(self, 'fitted_base_models_') or not hasattr(self, 'fitted_meta_model_'):
+            raise RuntimeError("Model must be fitted before making predictions")
+        
         meta_features = np.column_stack([
             model.predict_proba(X)[:, 1] for model in self.fitted_base_models_
         ])
@@ -83,6 +88,8 @@ class StackingEnsemble(BaseEstimator, ClassifierMixin):
 
     @property
     def classes_(self):
+        if self._classes is None:
+            raise AttributeError("Model not fitted yet")
         return self._classes
 
     @classes_.setter
@@ -104,22 +111,51 @@ class MLSignal:
             self.logger.debug(f"Not enough candles for ML features. Got {len(candles)}, need at least {self.settings['feature_window']}.")
             return np.array([]), np.array([])
 
-        df = pd.DataFrame(candles)
+        print("\nFirst candle structure:", candles[0])
+        print("Converting candles to DataFrame format...")
         
         try:
-            df['close'] = df['close'].astype(float)
-            df['high'] = df['high'].astype(float)
-            df['low'] = df['low'].astype(float)
-            df['volume'] = df['volume'].astype(float)
+            # Convert the list of dictionaries to a list of lists for DataFrame creation
+            candle_data = []
+            for i, candle in enumerate(candles):
+                if i % 5000 == 0:  # Progress update every 5000 candles
+                    print(f"Processing candle {i}/{len(candles)}")
+                candle_data.append([
+                    float(candle['close']),
+                    float(candle['high']),
+                    float(candle['low']),
+                    float(candle['volume']),
+                    float(candle['open']),
+                    candle['start']
+                ])
             
-            # Calculate technical indicators
+            print("Creating DataFrame...")
+            df = pd.DataFrame(
+                candle_data,
+                columns=['close', 'high', 'low', 'volume', 'open', 'start']
+            )
+            
+            print("\nCalculating technical indicators...")
+            print("- Calculating RSI...")
             df['rsi'] = talib.RSI(df['close'], timeperiod=14)
+            
+            print("- Calculating MACD...")
             df['macd'], _, _ = talib.MACD(df['close'])
+            
+            print("- Calculating SMAs...")
             df['sma_short'] = talib.SMA(df['close'], timeperiod=10)
             df['sma_long'] = talib.SMA(df['close'], timeperiod=30)
+            
+            print("- Calculating returns...")
             df['returns'] = df['close'].pct_change()
+            
+            print("- Calculating ATR...")
             df['atr'] = talib.ATR(df['high'], df['low'], df['close'], timeperiod=14)
+            
+            print("- Calculating Bollinger Bands...")
             df['bbw'] = (talib.BBANDS(df['close'], timeperiod=20)[0] - talib.BBANDS(df['close'], timeperiod=20)[2]) / df['close']
+            
+            print("- Calculating additional indicators...")
             df['roc'] = talib.ROC(df['close'], timeperiod=10)
             df['mfi'] = talib.MFI(df['high'], df['low'], df['close'], df['volume'], timeperiod=14)
             df['adx'] = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14)
@@ -131,35 +167,31 @@ class MLSignal:
             df['cci'] = talib.CCI(df['high'], df['low'], df['close'], timeperiod=14)
             df['obv'] = talib.OBV(df['close'], df['volume'])
             
-            # Add more features
+            print("- Calculating stochastic oscillator...")
             df['stoch_k'], df['stoch_d'] = talib.STOCH(df['high'], df['low'], df['close'])
+            
+            print("- Calculating final indicators...")
             df['willr'] = talib.WILLR(df['high'], df['low'], df['close'])
             df['mom'] = talib.MOM(df['close'], timeperiod=10)
             df['log_return'] = np.log(df['close'] / df['close'].shift(1))
             df['volatility'] = df['log_return'].rolling(window=20).std() * np.sqrt(252)
 
-            # New features
+            print("- Creating derivative features...")
             df['ema_crossover'] = np.where(df['ema_fast'] > df['ema_slow'], 1, -1)
             df['rsi_overbought'] = np.where(df['rsi'] > 70, 1, 0)
             df['rsi_oversold'] = np.where(df['rsi'] < 30, 1, 0)
             df['macd_signal'] = np.where(df['macd'] > 0, 1, -1)
             df['bbw_high'] = np.where(df['bbw'] > df['bbw'].rolling(window=20).mean(), 1, 0)
 
-            # Create target variable (1 if price goes up, 0 if it goes down)
+            print("- Creating target variable...")
             df['target'] = (df['returns'].shift(-1) > 0).astype(int)
             
-            # Handle missing values
-            # First, forward fill
-            df = df.ffill()
-            
-            # Then, backward fill any remaining NaNs at the beginning
-            df = df.bfill()
-            
-            # If there are still NaNs, drop those rows
+            print("Handling missing values...")
+            df = df.ffill().bfill()
             df = df.dropna()
             
             if df.empty:
-                self.logger.warning("All rows removed after feature calculation and NaN removal.")
+                print("Warning: All rows removed after feature calculation and NaN removal.")
                 return np.array([]), np.array([])
             
             features = ['rsi', 'macd', 'sma_short', 'sma_long', 'volume', 'returns', 'atr', 'bbw', 'roc', 'mfi', 'adx', 
@@ -167,56 +199,69 @@ class MLSignal:
                         'stoch_k', 'stoch_d', 'willr', 'mom', 'log_return', 'volatility',
                         'ema_crossover', 'rsi_overbought', 'rsi_oversold', 'macd_signal', 'bbw_high']
             
+            print("Preparing final X and y arrays...")
             X = df[features].values
             y = df['target'].values
-
+            
+            print(f"Final dataset shape - X: {X.shape}, y: {y.shape}")
             return X, y
+        
         except Exception as e:
             self.logger.error(f"Error in prepare_features: {str(e)}")
-            return np.array([]), np.array([])
+            raise  # Re-raise the exception to see the full traceback
 
     def train_model(self):
         # Get historical data for the specified number of days
         end_date = datetime.now()
         start_date = end_date - timedelta(days=self.settings['training_days'])
-        print(f"Training model for {self.product_id} with granularity {self.granularity} for {self.settings['training_days']} days")
-        candles = self.historical_data.get_historical_data(self.product_id, start_date, end_date, granularity=self.granularity)
+        print(f"\nFetching historical data from {start_date.date()} to {end_date.date()}")
+        print(f"Training window: {self.settings['training_days']} days")
+        print(f"Feature window size: {self.settings['feature_window']} candles")
         
+        candles = self.historical_data.get_historical_data(self.product_id, start_date, end_date, granularity=self.granularity)
+        print(f"Retrieved {len(candles)} candles")
+        
+        print("\nPreparing features...")
         X, y = self.prepare_features(candles)
         
         if X.size == 0 or y.size == 0:
-            self.logger.warning("Not enough data to train ML model.")
+            print("Error: Not enough data to train ML model.")
             return
 
         # Log class distribution
         unique, counts = np.unique(y, return_counts=True)
         class_distribution = dict(zip(unique, counts))
-        self.logger.info(f"Class distribution: {class_distribution}")
+        print(f"\nClass distribution:")
+        print(f"Upward movements (1): {class_distribution.get(1, 0)}")
+        print(f"Downward movements (0): {class_distribution.get(0, 0)}")
 
-        # Calculate class weights
-        class_weights = compute_class_weight('balanced', classes=np.unique(y), y=y)
-        class_weight_dict = dict(zip(np.unique(y), class_weights))
-
+        print("\nSplitting data into train/validation/test sets...")
         # Split the data into training, validation, and testing sets
         X_train_val, X_test, y_train_val, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
         X_train, X_val, y_train, y_val = train_test_split(X_train_val, y_train_val, test_size=0.2, shuffle=False)
+        
+        print(f"Training set size: {len(X_train)}")
+        print(f"Validation set size: {len(X_val)}")
+        print(f"Test set size: {len(X_test)}")
 
-        # Handle class imbalance
+        print("\nApplying SMOTE to balance classes...")
         smote = SMOTE(random_state=42)
         X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
-
-        # Create a preprocessing pipeline
+        
+        # Create preprocessing pipeline
         preprocessor = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='mean')),
             ('scaler', StandardScaler())
         ])
-
-        # Feature selection using permutation importance
+        
+        print("\nSelecting important features...")
         feature_selector = self.select_features(X_train_resampled, y_train_resampled, preprocessor)
 
-        class_counts = np.bincount(y)
+        # Calculate class weights for XGBoost
+        class_counts = np.bincount(y_train_resampled)
         scale_pos_weight = class_counts[0] / class_counts[1] if len(class_counts) > 1 else 1
 
+        print("\nStarting hyperparameter search...")
         # Define base models
         base_models = [
             ('lr', LogisticRegression(random_state=42, class_weight='balanced', max_iter=3000)),
@@ -251,15 +296,16 @@ class MLSignal:
         random_search = RandomizedSearchCV(
             self.ml_model, param_distributions, n_iter=10,
             cv=TimeSeriesSplit(n_splits=3), scoring='neg_log_loss',
-            random_state=42, n_jobs=-1
+            random_state=42, n_jobs=-1, verbose=2
         )
         random_search.fit(X_train_resampled, y_train_resampled)
 
-        # Set the best model
+        # Set the best model from random search
         self.ml_model = random_search.best_estimator_
 
-        self.logger.info(f"Best parameters: {random_search.best_params_}")
-        self.logger.info(f"Best score: {-random_search.best_score_:.4f}")
+        print("\nModel Performance Summary:")
+        print(f"Best parameters: {random_search.best_params_}")
+        print(f"Best cross-validation score: {-random_search.best_score_:.4f}")
 
         # Evaluate the model on training, validation, and test sets
         sets = [
@@ -268,20 +314,33 @@ class MLSignal:
             ("Test", X_test, y_test)
         ]
 
+        print("\nPerformance metrics:")
         for set_name, X_set, y_set in sets:
-            y_pred = self.ml_model.predict(X_set)
-            y_pred_proba = self.ml_model.predict_proba(X_set)[:, 1]
+            try:
+                y_pred = self.ml_model.predict(X_set)
+                y_pred_proba = self.ml_model.predict_proba(X_set)[:, 1]
 
-            mse = mean_squared_error(y_set, y_pred_proba)
-            mae = mean_absolute_error(y_set, y_pred_proba)
-            r2 = r2_score(y_set, y_pred_proba)
+                accuracy = accuracy_score(y_set, y_pred)
+                mse = mean_squared_error(y_set, y_pred_proba)
+                mae = mean_absolute_error(y_set, y_pred_proba)
+                r2 = r2_score(y_set, y_pred_proba)
 
-            self.logger.info(f"{set_name} set - MSE: {mse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
+                print(f"\n{set_name} set metrics:")
+                print(f"  Accuracy: {accuracy:.4f}")
+                print(f"  MSE: {mse:.4f}")
+                print(f"  MAE: {mae:.4f}")
+                print(f"  R2: {r2:.4f}")
+            except Exception as e:
+                print(f"Error evaluating {set_name} set: {str(e)}")
 
         # Save the trained model
-        os.makedirs(os.path.dirname(self.model_file), exist_ok=True)  # Create the 'models' directory if it doesn't exist
-        joblib.dump(self.ml_model, self.model_file)
-        self.logger.info(f"ML model trained and saved to {self.model_file}")
+        try:
+            print(f"\nSaving model to {self.model_file}")
+            os.makedirs(os.path.dirname(self.model_file), exist_ok=True)
+            joblib.dump(self.ml_model, self.model_file)
+            print("Model training completed!")
+        except Exception as e:
+            print(f"Error saving model: {str(e)}")
 
     def select_features(self, X, y, preprocessor):
         # Preprocess the data
