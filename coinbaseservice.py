@@ -128,11 +128,38 @@ class CoinbaseService:
             return 0.0, 0.0
         
         try:
-            transaction_summary = self.client.get_transaction_summary()
-            # Access fee_tier directly from the response object
-            fee_rate = float(transaction_summary.fee_tier.taker_fee_rate if hasattr(transaction_summary, 'fee_tier') else self.DEFAULT_FEE_RATE)
+            # Get the transaction summary which includes fee rates
+            summary = self.client.get_transaction_summary()
+            
+            if hasattr(summary, 'fee_tier'):
+                fee_tier = summary.fee_tier
+                
+                # Try to get the fee rate from the fee_tier object
+                try:
+                    if isinstance(fee_tier, dict):
+                        if 'taker_fee_rate' in fee_tier:
+                            fee_rate = float(fee_tier['taker_fee_rate'])
+                            # self.logger.info(f"Using taker fee rate: {fee_rate}")
+                        elif 'maker_fee_rate' in fee_tier:
+                            fee_rate = float(fee_tier['maker_fee_rate'])
+                            self.logger.info(f"Using maker fee rate: {fee_rate}")
+                        else:
+                            fee_rate = self.DEFAULT_FEE_RATE
+                            self.logger.warning("No fee rate found in fee_tier dictionary")
+                    else:
+                        fee_rate = self.DEFAULT_FEE_RATE
+                        self.logger.warning("Fee tier is not a dictionary")
+                except Exception as e:
+                    self.logger.warning(f"Error accessing fee rate: {str(e)}")
+                    fee_rate = self.DEFAULT_FEE_RATE
+            else:
+                fee_rate = self.DEFAULT_FEE_RATE
+                self.logger.warning(f"No fee_tier attribute found in summary")
+            
+            # self.logger.info(f"Using fee rate: {fee_rate}")
+                
         except Exception as e:
-            self.logger.warning(f"Could not get fee tier, using default fee rate: {e}")
+            self.logger.warning(f"Could not get fee rates, using default fee rate. Error: {str(e)}")
             fee_rate = self.DEFAULT_FEE_RATE
         
         if is_buy:
@@ -147,19 +174,27 @@ class CoinbaseService:
     def monitor_price_and_place_bracket_order(self, product_id, target_price, size):
         logger = logging.getLogger(__name__)
         logger.info(f"Placing bracket order with target price {target_price}.")
+        
         for attempt in range(self.MAX_RETRIES):
+            # Assuming we want to place a buy order when monitoring price
             order = self.place_bracket_order(
-                product_id, 
-                size, 
-                target_price * self.BRACKET_ORDER_TAKE_PROFIT_MULTIPLIER, 
-                target_price * self.BRACKET_ORDER_STOP_LOSS_MULTIPLIER
+                product_id=product_id,
+                side="BUY",  # Added missing side parameter
+                size=size,
+                entry_price=target_price,  # Use target_price as entry_price
+                take_profit_price=target_price * self.BRACKET_ORDER_TAKE_PROFIT_MULTIPLIER,
+                stop_loss_price=target_price * self.BRACKET_ORDER_STOP_LOSS_MULTIPLIER
             )
-            if order["success"] == True:
-                logger.info(f"{order}, Bracket order placed successfully.")
+            
+            # Check if order is not None before accessing success key
+            if order and order.get("success", False):
+                logger.info(f"Bracket order placed successfully: {order}")
                 return
             else:
-                logger.error(f"{order}, Failed to place order.")
-                return
+                logger.error(f"Failed to place order: {order}")
+                if attempt < self.MAX_RETRIES - 1:  # Only sleep if we're going to retry
+                    time.sleep(self.RETRY_DELAY_SECONDS)
+                continue
 
         logger.info("Max retries reached. Unable to place bracket order.")
 

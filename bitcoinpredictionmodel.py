@@ -58,11 +58,6 @@ class BitcoinPredictionModel:
             self.logger.error("Empty candles data received")
             return None, None, None
 
-        # Debug logging
-        self.logger.debug(f"Candles data type: {type(candles)}")
-        self.logger.debug(f"First candle: {candles[0] if candles else None}")
-        self.logger.debug(f"First candle type: {type(candles[0]) if candles else None}")
-        
         try:
             # Create a list of dictionaries with the correct structure
             data = []
@@ -79,10 +74,7 @@ class BitcoinPredictionModel:
                     })
                 except Exception as e:
                     self.logger.error(f"Error processing candle {i}: {e}")
-                    self.logger.debug(f"Problematic candle: {candle}")
                     continue
-            
-            self.logger.debug(f"Processed {len(data)} candles out of {len(candles)} total")
             
             if not data:
                 self.logger.error("No valid candles data after processing")
@@ -90,30 +82,20 @@ class BitcoinPredictionModel:
             
             # Create DataFrame from the structured data
             df = pd.DataFrame(data)
-            self.logger.debug(f"DataFrame columns: {df.columns}")
-            self.logger.debug(f"Initial DataFrame head:\n{df.head()}")
-            self.logger.debug(f"Initial DataFrame info:\n{df.info()}")
             
             # Convert numeric columns to float, handling non-numeric values
             numeric_columns = ['open', 'high', 'low', 'close', 'volume']
             for col in numeric_columns:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-                    self.logger.debug(f"Converted {col} column to numeric")
-            
+        
             # Convert 'start' column to datetime
             if 'start' in df.columns:
                 df['start'] = pd.to_datetime(df['start'].astype(int), unit='s')
-                self.logger.debug("Converted start column to datetime")
-            
+        
             if df.empty:
                 self.logger.error("DataFrame is empty after conversion")
                 return None, None, None
-            
-            # Log DataFrame info for debugging
-            self.logger.debug(f"DataFrame shape: {df.shape}")
-            self.logger.debug(f"DataFrame columns after processing: {df.columns}")
-            self.logger.debug(f"Final DataFrame head:\n{df.head()}")
             
             df['date'] = df['start'].dt.date
             

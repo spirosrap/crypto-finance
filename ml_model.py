@@ -111,15 +111,13 @@ class MLSignal:
             self.logger.debug(f"Not enough candles for ML features. Got {len(candles)}, need at least {self.settings['feature_window']}.")
             return np.array([]), np.array([])
 
-        print("\nFirst candle structure:", candles[0])
-        print("Converting candles to DataFrame format...")
+        # print("\nFirst candle structure:", candles[0])
+        # print("Converting candles to DataFrame format...")
         
         try:
             # Convert the list of dictionaries to a list of lists for DataFrame creation
             candle_data = []
             for i, candle in enumerate(candles):
-                if i % 5000 == 0:  # Progress update every 5000 candles
-                    print(f"Processing candle {i}/{len(candles)}")
                 candle_data.append([
                     float(candle['close']),
                     float(candle['high']),
@@ -129,33 +127,33 @@ class MLSignal:
                     candle['start']
                 ])
             
-            print("Creating DataFrame...")
+            # print("Creating DataFrame...")
             df = pd.DataFrame(
                 candle_data,
                 columns=['close', 'high', 'low', 'volume', 'open', 'start']
             )
             
-            print("\nCalculating technical indicators...")
-            print("- Calculating RSI...")
+            # print("\nCalculating technical indicators...")
+            # print("- Calculating RSI...")
             df['rsi'] = talib.RSI(df['close'], timeperiod=14)
             
-            print("- Calculating MACD...")
+            # print("- Calculating MACD...")
             df['macd'], _, _ = talib.MACD(df['close'])
             
-            print("- Calculating SMAs...")
+            # print("- Calculating SMAs...")
             df['sma_short'] = talib.SMA(df['close'], timeperiod=10)
             df['sma_long'] = talib.SMA(df['close'], timeperiod=30)
             
-            print("- Calculating returns...")
+            # print("- Calculating returns...")
             df['returns'] = df['close'].pct_change()
             
-            print("- Calculating ATR...")
+            # print("- Calculating ATR...")
             df['atr'] = talib.ATR(df['high'], df['low'], df['close'], timeperiod=14)
             
-            print("- Calculating Bollinger Bands...")
+            # print("- Calculating Bollinger Bands...")
             df['bbw'] = (talib.BBANDS(df['close'], timeperiod=20)[0] - talib.BBANDS(df['close'], timeperiod=20)[2]) / df['close']
             
-            print("- Calculating additional indicators...")
+            # print("- Calculating additional indicators...")
             df['roc'] = talib.ROC(df['close'], timeperiod=10)
             df['mfi'] = talib.MFI(df['high'], df['low'], df['close'], df['volume'], timeperiod=14)
             df['adx'] = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14)
@@ -167,26 +165,26 @@ class MLSignal:
             df['cci'] = talib.CCI(df['high'], df['low'], df['close'], timeperiod=14)
             df['obv'] = talib.OBV(df['close'], df['volume'])
             
-            print("- Calculating stochastic oscillator...")
+            # print("- Calculating stochastic oscillator...")
             df['stoch_k'], df['stoch_d'] = talib.STOCH(df['high'], df['low'], df['close'])
             
-            print("- Calculating final indicators...")
+            # print("- Calculating final indicators...")
             df['willr'] = talib.WILLR(df['high'], df['low'], df['close'])
             df['mom'] = talib.MOM(df['close'], timeperiod=10)
             df['log_return'] = np.log(df['close'] / df['close'].shift(1))
             df['volatility'] = df['log_return'].rolling(window=20).std() * np.sqrt(252)
 
-            print("- Creating derivative features...")
+            # print("- Creating derivative features...")
             df['ema_crossover'] = np.where(df['ema_fast'] > df['ema_slow'], 1, -1)
             df['rsi_overbought'] = np.where(df['rsi'] > 70, 1, 0)
             df['rsi_oversold'] = np.where(df['rsi'] < 30, 1, 0)
             df['macd_signal'] = np.where(df['macd'] > 0, 1, -1)
             df['bbw_high'] = np.where(df['bbw'] > df['bbw'].rolling(window=20).mean(), 1, 0)
 
-            print("- Creating target variable...")
+            # print("- Creating target variable...")
             df['target'] = (df['returns'].shift(-1) > 0).astype(int)
             
-            print("Handling missing values...")
+            # print("Handling missing values...")
             df = df.ffill().bfill()
             df = df.dropna()
             
@@ -199,11 +197,11 @@ class MLSignal:
                         'stoch_k', 'stoch_d', 'willr', 'mom', 'log_return', 'volatility',
                         'ema_crossover', 'rsi_overbought', 'rsi_oversold', 'macd_signal', 'bbw_high']
             
-            print("Preparing final X and y arrays...")
+            # print("Preparing final X and y arrays...")
             X = df[features].values
             y = df['target'].values
             
-            print(f"Final dataset shape - X: {X.shape}, y: {y.shape}")
+            # print(f"Final dataset shape - X: {X.shape}, y: {y.shape}")
             return X, y
         
         except Exception as e:
