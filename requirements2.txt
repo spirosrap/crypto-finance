@@ -10,3 +10,5 @@ matplotlib
 statsmodels
 yfinance
 newsapi-python
+schedule
+websockets<14

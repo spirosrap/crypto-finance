@@ -41,59 +41,88 @@ class StackingEnsemble(BaseEstimator, ClassifierMixin):
         self.fitted_base_models_ = None
         self.fitted_meta_model_ = None
 
+    def __sklearn_is_fitted__(self):
+        """Return whether the model is fitted."""
+        return (hasattr(self, 'fitted_base_models_') and 
+                hasattr(self, 'fitted_meta_model_') and 
+                self.fitted_base_models_ is not None and 
+                self.fitted_meta_model_ is not None)
+
+    def get_feature_names_out(self, feature_names_in=None):
+        """Get output feature names."""
+        return np.array([f'meta_feature_{i}' for i in range(len(self.base_models))])
+
     def fit(self, X, y):
+        """Fit the stacking ensemble."""
         # Store unique class labels
         self._classes = np.unique(y)
-
+        
         # Train base models
         self.fitted_base_models_ = []
-        for model in self.base_models:
+        meta_features = np.zeros((X.shape[0], len(self.base_models)))
+        
+        # Train each base model and get predictions
+        for i, model in enumerate(self.base_models):
             fitted_model = clone(model)
             fitted_model.fit(X, y)
             self.fitted_base_models_.append(fitted_model)
-
-        # Generate meta-features
-        meta_features = np.column_stack([
-            cross_val_predict(model, X, y, cv=5, method='predict_proba')[:, 1]
-            for model in self.base_models
-        ])
+            meta_features[:, i] = fitted_model.predict_proba(X)[:, 1]
 
         # Train meta-model
         self.fitted_meta_model_ = clone(self.meta_model)
         self.fitted_meta_model_.fit(meta_features, y)
+        
         return self
 
     def predict_proba(self, X):
-        if not hasattr(self, 'fitted_base_models_') or not hasattr(self, 'fitted_meta_model_'):
+        """Predict class probabilities for X."""
+        if not self.__sklearn_is_fitted__():
             raise RuntimeError("Model must be fitted before making predictions")
         
-        meta_features = np.column_stack([
-            model.predict_proba(X)[:, 1] for model in self.fitted_base_models_
-        ])
+        meta_features = np.zeros((X.shape[0], len(self.fitted_base_models_)))
+        for i, model in enumerate(self.fitted_base_models_):
+            meta_features[:, i] = model.predict_proba(X)[:, 1]
+            
         return self.fitted_meta_model_.predict_proba(meta_features)
 
     def predict(self, X):
-        return self.predict_proba(X)[:, 1] > 0.5
+        """Predict class labels for X."""
+        probas = self.predict_proba(X)
+        return np.where(probas[:, 1] > 0.5, 1, 0)
 
     def get_params(self, deep=True):
-        return {
+        """Get parameters for this estimator."""
+        params = {
             "base_models": self.base_models,
             "meta_model": self.meta_model
         }
+        if deep:
+            base_params = {}
+            for i, model in enumerate(self.base_models):
+                model_params = model.get_params(deep=True)
+                base_params.update({f'base_models__{i}__{key}': value 
+                                  for key, value in model_params.items()})
+            params.update(base_params)
+            params.update({f'meta_model__{key}': value 
+                          for key, value in self.meta_model.get_params(deep=True).items()})
+        return params
 
     def set_params(self, **parameters):
+        """Set the parameters of this estimator."""
         for parameter, value in parameters.items():
             setattr(self, parameter, value)
         return self
 
     @property
     def classes_(self):
+        """Get the classes seen during fit."""
         if self._classes is None:
             raise AttributeError("Model not fitted yet")
         return self._classes
 
     @classes_.setter
     def classes_(self, value):
+        """Set the classes."""
         self._classes = value
 
 class MLSignal:
@@ -246,56 +275,53 @@ class MLSignal:
         smote = SMOTE(random_state=42)
         X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
         
-        # Create preprocessing pipeline
-        preprocessor = Pipeline(steps=[
+        print("\nSelecting important features...")
+        feature_selector = self.select_features(X_train_resampled, y_train_resampled)
+
+        # Create base pipeline components
+        preprocessor = Pipeline([
             ('imputer', SimpleImputer(strategy='mean')),
             ('scaler', StandardScaler())
         ])
         
-        print("\nSelecting important features...")
-        feature_selector = self.select_features(X_train_resampled, y_train_resampled, preprocessor)
-
-        # Calculate class weights for XGBoost
-        class_counts = np.bincount(y_train_resampled)
-        scale_pos_weight = class_counts[0] / class_counts[1] if len(class_counts) > 1 else 1
-
-        print("\nStarting hyperparameter search...")
-        # Define base models
+        # Create base models with simpler configuration
         base_models = [
-            ('lr', LogisticRegression(random_state=42, class_weight='balanced', max_iter=3000)),
-            ('rf', RandomForestClassifier(random_state=42, class_weight='balanced')),
-            ('xgb', XGBClassifier(random_state=42, scale_pos_weight=scale_pos_weight))
+            LogisticRegression(random_state=42, max_iter=3000),
+            RandomForestClassifier(random_state=42),
+            XGBClassifier(random_state=42)
         ]
-
-        # Define meta-model
+        
+        # Create meta model
         meta_model = LogisticRegression(random_state=42)
-
-        # Create stacking ensemble
-        stacking_ensemble = StackingEnsemble(base_models=[model for _, model in base_models], meta_model=meta_model)
-
-        # Create a pipeline with preprocessing, feature selection, and stacking ensemble
+        
+        # Create the full pipeline
         self.ml_model = Pipeline([
             ('preprocessor', preprocessor),
             ('feature_selector', feature_selector),
-            ('stacking_ensemble', stacking_ensemble)
+            ('classifier', StackingEnsemble(base_models=base_models, meta_model=meta_model))
         ])
 
-        # Simplified hyperparameter search space
+        # Simplified parameter grid
         param_distributions = {
-            'stacking_ensemble__base_models__0__C': [0.1, 1, 10],
-            'stacking_ensemble__base_models__1__n_estimators': [100, 200],
-            'stacking_ensemble__base_models__1__max_depth': [10, 20, None],
-            'stacking_ensemble__base_models__2__n_estimators': [100, 200],
-            'stacking_ensemble__base_models__2__learning_rate': [0.01, 0.1],
-            'stacking_ensemble__meta_model__C': [0.1, 1, 10]
+            'classifier__base_models__0__C': [0.1, 1.0, 10.0],
+            'classifier__base_models__1__n_estimators': [100, 200],
+            'classifier__base_models__2__learning_rate': [0.01, 0.1],
+            'classifier__meta_model__C': [0.1, 1.0, 10.0]
         }
 
-        # Perform randomized search
+        # Create and fit random search
         random_search = RandomizedSearchCV(
-            self.ml_model, param_distributions, n_iter=10,
-            cv=TimeSeriesSplit(n_splits=3), scoring='neg_log_loss',
-            random_state=42, n_jobs=-1, verbose=2
+            estimator=self.ml_model,
+            param_distributions=param_distributions,
+            n_iter=5,  # Reduced number of iterations for faster testing
+            cv=TimeSeriesSplit(n_splits=3),
+            scoring='accuracy',
+            random_state=42,
+            n_jobs=-1,
+            verbose=2
         )
+
+        # Fit the random search
         random_search.fit(X_train_resampled, y_train_resampled)
 
         # Set the best model from random search
@@ -340,16 +366,13 @@ class MLSignal:
         except Exception as e:
             print(f"Error saving model: {str(e)}")
 
-    def select_features(self, X, y, preprocessor):
-        # Preprocess the data
-        X_preprocessed = preprocessor.fit_transform(X)
-
+    def select_features(self, X, y):
         # Train a simple model for feature importance
         rf = RandomForestClassifier(n_estimators=100, random_state=42)
-        rf.fit(X_preprocessed, y)
+        rf.fit(X, y)
 
         # Calculate feature importance
-        importances = permutation_importance(rf, X_preprocessed, y, n_repeats=10, random_state=42)
+        importances = permutation_importance(rf, X, y, n_repeats=10, random_state=42)
         feature_importance = pd.DataFrame({'feature': self.get_feature_names(), 'importance': importances.importances_mean})
         feature_importance = feature_importance.sort_values('importance', ascending=False).reset_index(drop=True)
 
@@ -367,7 +390,7 @@ class MLSignal:
 
         # Create a selector based on the selected features
         selector = SelectFromModel(estimator=rf, prefit=False, threshold=importance_threshold)
-        selector.fit(X_preprocessed, y)  # Fit the selector here
+        selector.fit(X, y)  # Fit the selector here
         return selector
 
     def get_feature_names(self):
