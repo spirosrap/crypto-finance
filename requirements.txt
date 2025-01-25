@@ -1,38 +1,14 @@
-matplotlib==3.7.1
-yfinance==0.2.18
-statsmodels
 coinbase-advanced-py
+numpy
+nltk
+scikit-learn
+pandas
+git+https://github.com/TA-Lib/ta-lib-python.git
+xgboost
+imblearn
+matplotlib
+statsmodels
+yfinance
 newsapi-python
 schedule
-hmmlearn
-scikit-learn
-scikit-fuzzy
-xgboost
-joblib==1.1.0
-scikit-optimize
-shap
-catboost
-requests>=2.26.0
-pandas>=1.3.0
-numpy>=1.21.0
-tweepy>=4.10.0
-structlog
-datadog
-sentry-sdk
-textblob
-tenacity>=8.0.0
-
-# The following dependency is installed from GitHub:
-# INSTALL TA-lib from https://sourceforge.net/projects/ta-lib/files/ta-lib/0.4.0/ta-lib-0.4.0-src.tar.gz/download
-
-#LINUX
-#$ tar -xzf ta-lib-0.4.0-src.tar.gz
-#$ cd ta-lib/
-#$ ./configure --prefix=/usr
-#$ make
-#$ sudo make install
-# MAC
-#brew install ta-lib
-
-git+https://github.com/TA-Lib/ta-lib-python.git
-
+websockets<14
