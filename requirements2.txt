@@ -1,0 +1,12 @@
+coinbase-advanced-py
+numpy
+nltk
+scikit-learn
+pandas
+git+https://github.com/TA-Lib/ta-lib-python.git
+xgboost
+imblearn
+matplotlib
+statsmodels
+yfinance
+newsapi-python
