@@ -12,3 +12,4 @@ yfinance
 newsapi-python
 schedule
 websockets<14
+openai
