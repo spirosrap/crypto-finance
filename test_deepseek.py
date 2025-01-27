@@ -20,3 +20,6 @@ response = client.chat.completions.create(
     model="deepseek-reasoner",
     messages=messages
 )
+
+print(reasoning_content)
+print(content)
