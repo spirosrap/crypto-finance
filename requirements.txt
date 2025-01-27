@@ -4,6 +4,8 @@ nltk
 scikit-learn
 pandas
 git+https://github.com/TA-Lib/ta-lib-python.git
+# in linux do this instead:
+# $ python -m pip install TA-Lib
 xgboost
 imblearn
 matplotlib
