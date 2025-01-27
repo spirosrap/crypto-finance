@@ -1,5 +1,5 @@
 from openai import OpenAI
-from config import OPENAI_KEY, DEEPSEEK_KEY
+from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY
 import subprocess
 import os
 import argparse
@@ -20,10 +20,15 @@ logging.basicConfig(
 
 # Initialize client at module level
 client = None
-def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False):
+def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False):
     global client
     try:
-        if use_deepseek or use_reasoner:
+        if use_grok:
+            if not XAI_KEY:
+                logging.error("X AI API key is not set")
+                return False
+            client = OpenAI(api_key=XAI_KEY, base_url="https://api.x.ai/v1")
+        elif use_deepseek or use_reasoner:
             if not DEEPSEEK_KEY:
                 logging.error("DeepSeek API key is not set")
                 return False
@@ -38,13 +43,22 @@ def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False):
         logging.error(f"Failed to initialize API client: {str(e)}")
         return False
 
-def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False) -> bool:
+def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False) -> bool:
     """Validate that the API key is set and well-formed."""
-    api_key = DEEPSEEK_KEY if (use_deepseek or use_reasoner) else OPENAI_KEY
+    if use_grok:
+        api_key = XAI_KEY
+        provider = 'X AI'
+    elif use_deepseek or use_reasoner:
+        api_key = DEEPSEEK_KEY
+        provider = 'DeepSeek'
+    else:
+        api_key = OPENAI_KEY
+        provider = 'OpenAI'
+
     if not api_key or not isinstance(api_key, str):
-        logging.error(f"{'DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'} API key is not set or invalid")
+        logging.error(f"{provider} API key is not set or invalid")
         return False
-    if not (use_deepseek or use_reasoner) and not api_key.startswith('sk-'):
+    if provider == 'OpenAI' and not api_key.startswith('sk-'):
         logging.error("OpenAI API key appears to be malformed")
         return False
     return True
@@ -84,7 +98,7 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         f"Attempt {retry_state.attempt_number} failed, retrying..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
     if client is None:
         raise ValueError("API client not properly initialized")
@@ -92,7 +106,14 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     SYSTEM_PROMPT = """Reply only with "BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>" or "SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>"""
 
     try:
-        model = "deepseek-reasoner" if use_reasoner else ("deepseek-chat" if use_deepseek else "gpt-4")
+        if use_grok:
+            model = "grok-2-latest"
+        elif use_reasoner:
+            model = "deepseek-reasoner"
+        elif use_deepseek:
+            model = "deepseek-chat"
+        else:
+            model = "gpt-4o"
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -141,7 +162,7 @@ def format_output(recommendation: str, analysis_result: Dict, reasoning: Optiona
 
     if reasoning:
         print("\n====== 🧠 Reasoning ======")
-        print(' '.join(reasoning.split()[:20])) # Just for verification
+        print(' '.join(reasoning.split()[:30])) # Just for verification
 
     if 'data' in analysis_result:
         try:
@@ -185,21 +206,24 @@ def main():
     parser.add_argument('--granularity', type=str, default='ONE_HOUR', help='Time granularity for analysis (e.g., ONE_MINUTE, FIVE_MINUTES, ONE_HOUR, ONE_DAY)')
     parser.add_argument('--use_deepseek', action='store_true', help='Use DeepSeek Chat API instead of OpenAI')
     parser.add_argument('--use_reasoner', action='store_true', help='Use DeepSeek Reasoner API (includes reasoning steps)')
+    parser.add_argument('--use_grok', action='store_true', help='Use X AI Grok API')
     args = parser.parse_args()
 
-    if args.use_deepseek and args.use_reasoner:
-        print("Please choose either --use_deepseek or --use_reasoner, not both.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, or --use_grok.")
         exit(1)
 
     try:
         # Validate API key first
-        if not validate_api_key(args.use_deepseek, args.use_reasoner):
-            print(f"Invalid or missing {'DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI'} API key. Please check your configuration.")
+        if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok):
+            provider = 'X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI')
+            print(f"Invalid or missing {provider} API key. Please check your configuration.")
             exit(1)
 
         # Initialize the client
-        if not initialize_client(args.use_deepseek, args.use_reasoner):
-            print(f"{'DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI'} client not initialized. Please check your API key and configuration.")
+        if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok):
+            provider = 'X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI')
+            print(f"{provider} client not initialized. Please check your API key and configuration.")
             exit(1)
 
         # Run market analysis
@@ -209,7 +233,8 @@ def main():
             exit(1)
 
         # Get trading recommendation
-        recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, args.use_deepseek, args.use_reasoner)
+        recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
+                                                            args.use_deepseek, args.use_reasoner, args.use_grok)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
