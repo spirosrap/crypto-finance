@@ -20,6 +20,25 @@ logging.basicConfig(
 
 # Initialize client at module level
 client = None
+
+# Add at the top with other constants
+MODEL_CONFIG = {
+    'grok': 'grok-2-latest',
+    'reasoner': 'deepseek-reasoner',
+    'deepseek': 'deepseek-chat',
+    'default': 'gpt-4o'
+}
+
+# Add color constants at the top
+COLORS = {
+    'red': '\033[91m',
+    'green': '\033[92m',
+    'yellow': '\033[93m',
+    'cyan': '\033[96m',
+    'bold': '\033[1m',
+    'end': '\033[0m'
+}
+
 def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False):
     global client
     try:
@@ -60,6 +79,19 @@ def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use
         return False
     if provider == 'OpenAI' and not api_key.startswith('sk-'):
         logging.error("OpenAI API key appears to be malformed")
+        return False
+    return True
+
+def validate_inputs(product_id: str, granularity: str) -> bool:
+    """Validate product ID and granularity parameters."""
+    valid_products = ['BTC-USDC', 'ETH-USDC', "DOGE-USDC"]  # Add more as needed
+    valid_granularities = ['ONE_MINUTE', 'FIVE_MINUTES', 'ONE_HOUR', 'ONE_DAY']
+    
+    if product_id not in valid_products:
+        logging.error(f"Invalid product ID: {product_id}")
+        return False
+    if granularity not in valid_granularities:
+        logging.error(f"Invalid granularity: {granularity}")
         return False
     return True
 
@@ -110,14 +142,15 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     )
     
     try:
+        # Simplified model selection
+        model = MODEL_CONFIG['default']
         if use_grok:
-            model = "grok-2-latest"
+            model = MODEL_CONFIG['grok']
         elif use_reasoner:
-            model = "deepseek-reasoner"
+            model = MODEL_CONFIG['reasoner']
         elif use_deepseek:
-            model = "deepseek-chat"
-        else:
-            model = "gpt-4o"
+            model = MODEL_CONFIG['deepseek']
+            
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -161,12 +194,12 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 def format_output(recommendation: str, analysis_result: Dict, reasoning: Optional[str] = None) -> None:
     """Format and print the trading recommendation with enhanced market insights."""
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"====== 🤖 AI Trading Recommendation ({current_time}) ======")
-    print(recommendation)
+    print(f"{COLORS['cyan']}====== 🤖 AI Trading Recommendation ({current_time}) ======{COLORS['end']}")
+    print(f"{COLORS['bold']}{recommendation}{COLORS['end']}")
 
     if reasoning:
-        print("\n====== 🧠 Reasoning ======")
-        print(' '.join(reasoning.split()[:40])) # Just for verification
+        print(f"\n{COLORS['yellow']}====== 🧠 Reasoning ======{COLORS['end']}")
+        print(' '.join(reasoning.split()[:40]) + '...')  # Add ellipsis for truncation
 
     if 'data' in analysis_result:
         try:
@@ -198,10 +231,27 @@ def format_output(recommendation: str, analysis_result: Dict, reasoning: Optiona
                 print(f"• Volatility: {risk.get('volatility', 0)*100:.1f}%")
                 print(f"• Risk/Reward: {risk.get('risk_reward_ratio', 'N/A')}")
 
-        except json.JSONDecodeError:
-            logging.warning("Could not parse market analysis JSON data")
+        except json.JSONDecodeError as e:
+            logging.warning(f"Could not parse market analysis JSON data: {str(e)}")
+            logging.debug(f"Invalid JSON data received: {analysis_result['data'][:200]}...")  # Truncated for brevity
+        except KeyError as e:
+            logging.error(f"Missing expected key in analysis data: {str(e)}")
         except Exception as e:
             logging.error(f"Error formatting output: {str(e)}")
+
+def validate_configuration() -> bool:
+    """Validate all required configuration parameters."""
+    required_env_vars = {
+        'OPENAI_KEY': OPENAI_KEY,
+        'DEEPSEEK_KEY': DEEPSEEK_KEY,
+        'XAI_KEY': XAI_KEY
+    }
+    
+    for name, value in required_env_vars.items():
+        if not value or not isinstance(value, str):
+            logging.error(f"Missing required environment variable: {name}")
+            return False
+    return True
 
 def main():
     # Set up argument parser
@@ -228,6 +278,16 @@ def main():
         if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok):
             provider = 'X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI')
             print(f"{provider} client not initialized. Please check your API key and configuration.")
+            exit(1)
+
+        # Add input validation
+        if not validate_inputs(args.product_id, args.granularity):
+            print("Invalid input parameters")
+            exit(1)
+
+        # Add configuration validation
+        if not validate_configuration():
+            print("Missing required configuration parameters")
             exit(1)
 
         # Run market analysis
