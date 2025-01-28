@@ -103,7 +103,11 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     if client is None:
         raise ValueError("API client not properly initialized")
 
-    SYSTEM_PROMPT = """Reply only with "BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>" or "SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>."""
+    SYSTEM_PROMPT = (
+        "Reply only with \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>\" or "
+        "\"SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. "
+        "Probability of success: <PROBABILITY>. Suggest HOLD only when there's a strong probability for reversal."
+    )
 
     try:
         if use_grok:
