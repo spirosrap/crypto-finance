@@ -29,3 +29,5 @@ except Exception as e:
         print("Rate limit exceeded. Please wait a moment before trying again.")
     elif "model" in error_msg:
         print("Invalid model specified. Please check if 'deepseek-chat' is the correct model name.")
+    else:
+        print(error_msg)
