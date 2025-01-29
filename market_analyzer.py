@@ -49,6 +49,12 @@ class PatternType(Enum):
     INV_HEAD_SHOULDERS = "Inverse Head and Shoulders"
     TRIANGLE = "Triangle"
     WEDGE = "Wedge"
+    FLAG = "Flag"
+    PENNANT = "Pennant"
+    CHANNEL = "Channel"
+    CUP_HANDLE = "Cup and Handle"
+    ROUNDING_BOTTOM = "Rounding Bottom"
+    ROUNDING_TOP = "Rounding Top"
     NONE = "None"
 
 class MarketRegime(Enum):
@@ -1675,31 +1681,118 @@ class MarketAnalyzer:
     def detect_chart_patterns(self, candles: List[Dict]) -> Dict:
         """Detect common chart patterns in the price data."""
         try:
+            if len(candles) < 30:
+                return {'type': PatternType.NONE, 'confidence': 0.0}
+                
             prices = np.array([c['close'] for c in candles])
             highs = np.array([c['high'] for c in candles])
             lows = np.array([c['low'] for c in candles])
+            volumes = np.array([c['volume'] for c in candles])
             
             patterns = {
                 'type': PatternType.NONE,
                 'confidence': 0.0,
                 'target': None,
-                'stop_loss': None
+                'stop_loss': None,
+                'completion_percentage': 0.0,
+                'invalidation_level': None
             }
             
-            # Double Top Detection
-            if self._is_double_top(highs[-30:]):
+            # Head and Shoulders Detection
+            if self._is_head_and_shoulders(highs, lows):
+                patterns['type'] = PatternType.HEAD_SHOULDERS
+                patterns['confidence'] = 0.8
+                # Target is typically the distance from head to neckline projected downward
+                head_height = max(highs[-20:]) - min(lows[-20:])
+                patterns['target'] = min(lows[-20:]) - head_height
+                patterns['stop_loss'] = max(highs[-20:]) + (head_height * 0.1)
+                
+            # Inverse Head and Shoulders Detection
+            elif self._is_inverse_head_and_shoulders(highs, lows):
+                patterns['type'] = PatternType.INV_HEAD_SHOULDERS
+                patterns['confidence'] = 0.8
+                # Target is typically the distance from head to neckline projected upward
+                head_depth = max(highs[-20:]) - min(lows[-20:])
+                patterns['target'] = max(highs[-20:]) + head_depth
+                patterns['stop_loss'] = min(lows[-20:]) - (head_depth * 0.1)
+                
+            # Triangle Detection
+            elif self._is_triangle(highs, lows):
+                patterns['type'] = PatternType.TRIANGLE
+                patterns['confidence'] = 0.75
+                height = max(highs[-20:]) - min(lows[-20:])
+                if highs[-1] > highs[-2]:  # Ascending triangle
+                    patterns['target'] = max(highs[-20:]) + height
+                else:  # Descending or symmetrical triangle
+                    patterns['target'] = min(lows[-20:]) - height
+                patterns['stop_loss'] = lows[-1] - (height * 0.1)
+                
+            # Channel Detection
+            elif self._is_channel(highs, lows):
+                patterns['type'] = PatternType.CHANNEL
+                patterns['confidence'] = 0.7
+                channel_height = np.mean(highs[-10:]) - np.mean(lows[-10:])
+                if prices[-1] > prices[-5]:  # Ascending channel
+                    patterns['target'] = prices[-1] + channel_height
+                else:  # Descending channel
+                    patterns['target'] = prices[-1] - channel_height
+                patterns['stop_loss'] = prices[-1] - (channel_height * 0.5)
+                
+            # Flag/Pennant Detection
+            elif self._is_flag_or_pennant(prices, volumes):
+                is_flag = abs(np.corrcoef(range(len(prices[-10:])), prices[-10:])[0, 1]) > 0.8
+                patterns['type'] = PatternType.FLAG if is_flag else PatternType.PENNANT
+                patterns['confidence'] = 0.7
+                trend_height = abs(prices[-1] - prices[-10])
+                if prices[-10] < prices[-1]:  # Bullish flag/pennant
+                    patterns['target'] = prices[-1] + trend_height
+                else:  # Bearish flag/pennant
+                    patterns['target'] = prices[-1] - trend_height
+                patterns['stop_loss'] = prices[-10]
+                
+            # Cup and Handle Detection
+            elif self._is_cup_and_handle(prices, volumes):
+                patterns['type'] = PatternType.CUP_HANDLE
+                patterns['confidence'] = 0.8
+                cup_depth = max(prices[-30:]) - min(prices[-30:])
+                patterns['target'] = max(prices[-30:]) + cup_depth
+                patterns['stop_loss'] = min(prices[-10:])
+                
+            # Rounding Bottom/Top Detection
+            elif self._is_rounding_pattern(prices, volumes):
+                is_bottom = prices[-1] > np.mean(prices[-20:])
+                patterns['type'] = PatternType.ROUNDING_BOTTOM if is_bottom else PatternType.ROUNDING_TOP
+                patterns['confidence'] = 0.7
+                pattern_height = max(prices[-20:]) - min(prices[-20:])
+                if is_bottom:
+                    patterns['target'] = prices[-1] + pattern_height
+                else:
+                    patterns['target'] = prices[-1] - pattern_height
+                patterns['stop_loss'] = min(prices[-20:]) if is_bottom else max(prices[-20:])
+                
+            # Double Top/Bottom Detection (existing code)
+            elif self._is_double_top(highs):
                 patterns['type'] = PatternType.DOUBLE_TOP
                 patterns['confidence'] = 0.8
                 patterns['target'] = min(lows[-30:])
                 patterns['stop_loss'] = max(highs[-30:]) + (max(highs[-30:]) - min(lows[-30:])) * 0.1
-            
-            # Double Bottom Detection
-            elif self._is_double_bottom(lows[-30:]):
+                
+            elif self._is_double_bottom(lows):
                 patterns['type'] = PatternType.DOUBLE_BOTTOM
                 patterns['confidence'] = 0.8
                 patterns['target'] = max(highs[-30:])
                 patterns['stop_loss'] = min(lows[-30:]) - (max(highs[-30:]) - min(lows[-30:])) * 0.1
-            
+                
+            # Calculate pattern completion percentage
+            if patterns['type'] != PatternType.NONE:
+                patterns['completion_percentage'] = self._calculate_pattern_completion(
+                    patterns['type'],
+                    prices,
+                    highs,
+                    lows,
+                    volumes
+                )
+                
             # Add pattern to memory
             if patterns['type'] != PatternType.NONE:
                 self.pattern_memory.append({
@@ -1710,7 +1803,7 @@ class MarketAnalyzer:
                 # Maintain pattern memory size
                 if len(self.pattern_memory) > self.max_pattern_memory:
                     self.pattern_memory.pop(0)
-            
+                
             return patterns
             
         except Exception as e:
@@ -2864,6 +2957,194 @@ class MarketAnalyzer:
         except Exception as e:
             self.logger.error(f"Error in detect_manipulation_patterns: {str(e)}")
             return self._generate_error_response()
+
+    def _is_head_and_shoulders(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect head and shoulders pattern."""
+        try:
+            peaks = self._find_peaks(highs)
+            if len(peaks) < 3:
+                return False
+                
+            # Get last three peaks
+            last_peaks = peaks[-3:]
+            peak_prices = highs[last_peaks]
+            
+            # Check if middle peak (head) is higher than shoulders
+            if peak_prices[1] > peak_prices[0] and peak_prices[1] > peak_prices[2]:
+                # Check if shoulders are at similar levels
+                shoulder_diff = abs(peak_prices[0] - peak_prices[2]) / peak_prices[0]
+                if shoulder_diff < threshold:
+                    # Check if neckline is relatively flat
+                    troughs = self._find_troughs(lows)
+                    if len(troughs) >= 2:
+                        neckline_diff = abs(lows[troughs[-1]] - lows[troughs[-2]]) / lows[troughs[-2]]
+                        return neckline_diff < threshold
+                        
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting head and shoulders: {str(e)}")
+            return False
+
+    def _is_inverse_head_and_shoulders(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect inverse head and shoulders pattern."""
+        try:
+            troughs = self._find_troughs(lows)
+            if len(troughs) < 3:
+                return False
+                
+            # Get last three troughs
+            last_troughs = troughs[-3:]
+            trough_prices = lows[last_troughs]
+            
+            # Check if middle trough (head) is lower than shoulders
+            if trough_prices[1] < trough_prices[0] and trough_prices[1] < trough_prices[2]:
+                # Check if shoulders are at similar levels
+                shoulder_diff = abs(trough_prices[0] - trough_prices[2]) / trough_prices[0]
+                if shoulder_diff < threshold:
+                    # Check if neckline is relatively flat
+                    peaks = self._find_peaks(highs)
+                    if len(peaks) >= 2:
+                        neckline_diff = abs(highs[peaks[-1]] - highs[peaks[-2]]) / highs[peaks[-2]]
+                        return neckline_diff < threshold
+                        
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting inverse head and shoulders: {str(e)}")
+            return False
+
+    def _is_triangle(self, highs: np.ndarray, lows: np.ndarray, min_points: int = 5) -> bool:
+        """Detect triangle patterns (ascending, descending, or symmetrical)."""
+        try:
+            peaks = self._find_peaks(highs[-20:])
+            troughs = self._find_troughs(lows[-20:])
+            
+            if len(peaks) < min_points or len(troughs) < min_points:
+                return False
+                
+            # Calculate slopes of upper and lower trend lines
+            peak_slope = np.polyfit(peaks, highs[peaks], 1)[0]
+            trough_slope = np.polyfit(troughs, lows[troughs], 1)[0]
+            
+            # Check for convergence
+            return abs(peak_slope - trough_slope) < 0.1
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting triangle: {str(e)}")
+            return False
+
+    def _is_channel(self, highs: np.ndarray, lows: np.ndarray, min_points: int = 5) -> bool:
+        """Detect price channel patterns."""
+        try:
+            peaks = self._find_peaks(highs[-20:])
+            troughs = self._find_troughs(lows[-20:])
+            
+            if len(peaks) < min_points or len(troughs) < min_points:
+                return False
+                
+            # Calculate slopes of upper and lower trend lines
+            peak_slope = np.polyfit(peaks, highs[peaks], 1)[0]
+            trough_slope = np.polyfit(troughs, lows[troughs], 1)[0]
+            
+            # Check for parallel lines
+            return abs(peak_slope - trough_slope) < 0.01
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting channel: {str(e)}")
+            return False
+
+    def _is_flag_or_pennant(self, prices: np.ndarray, volumes: np.ndarray) -> bool:
+        """Detect flag or pennant patterns."""
+        try:
+            # Check for strong trend before the pattern
+            trend_start = prices[-20:-10]
+            trend_strength = abs(trend_start[-1] - trend_start[0]) / trend_start[0]
+            
+            if trend_strength < 0.05:  # Require 5% move
+                return False
+                
+            # Check for consolidation with lower volume
+            consolidation = prices[-10:]
+            consolidation_volume = volumes[-10:]
+            trend_volume = volumes[-20:-10]
+            
+            volume_decline = np.mean(consolidation_volume) < np.mean(trend_volume)
+            price_range = (max(consolidation) - min(consolidation)) / np.mean(consolidation)
+            
+            return volume_decline and price_range < 0.03  # 3% range
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting flag/pennant: {str(e)}")
+            return False
+
+    def _is_cup_and_handle(self, prices: np.ndarray, volumes: np.ndarray) -> bool:
+        """Detect cup and handle pattern."""
+        try:
+            if len(prices) < 30:
+                return False
+                
+            # Check for U-shaped cup
+            cup_prices = prices[-30:-10]
+            cup_fit = np.polyfit(range(len(cup_prices)), cup_prices, 2)
+            
+            # Parabola should open upward
+            if cup_fit[0] > 0:
+                # Check for handle (small downward drift)
+                handle_prices = prices[-10:]
+                handle_slope = np.polyfit(range(len(handle_prices)), handle_prices, 1)[0]
+                
+                return handle_slope < 0 and abs(handle_slope) < abs(cup_fit[0])
+                
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting cup and handle: {str(e)}")
+            return False
+
+    def _is_rounding_pattern(self, prices: np.ndarray, volumes: np.ndarray) -> bool:
+        """Detect rounding bottom or top patterns."""
+        try:
+            if len(prices) < 20:
+                return False
+                
+            # Fit a quadratic function to the prices
+            x = np.arange(len(prices[-20:]))
+            fit = np.polyfit(x, prices[-20:], 2)
+            
+            # Check if the curve is significant
+            return abs(fit[0]) > 0.0001
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting rounding pattern: {str(e)}")
+            return False
+
+    def _calculate_pattern_completion(self, pattern_type: PatternType, prices: np.ndarray, 
+                                    highs: np.ndarray, lows: np.ndarray, volumes: np.ndarray) -> float:
+        """Calculate the completion percentage of a pattern."""
+        try:
+            if pattern_type in [PatternType.HEAD_SHOULDERS, PatternType.INV_HEAD_SHOULDERS]:
+                # Check if neckline is broken
+                neckline = np.mean(lows[-5:])
+                return min(100, max(0, abs(prices[-1] - neckline) / (max(highs) - min(lows)) * 100))
+                
+            elif pattern_type in [PatternType.TRIANGLE, PatternType.FLAG, PatternType.PENNANT]:
+                # Calculate distance to apex
+                apex_distance = len(prices) - np.argmax(highs)
+                return min(100, max(0, (1 - apex_distance / len(prices)) * 100))
+                
+            elif pattern_type == PatternType.CUP_HANDLE:
+                # Calculate handle completion
+                handle_range = max(prices[-10:]) - min(prices[-10:])
+                cup_range = max(prices[-30:]) - min(prices[-30:])
+                return min(100, max(0, (1 - handle_range / cup_range) * 100))
+                
+            else:
+                return 50.0  # Default completion percentage
+                
+        except Exception as e:
+            self.logger.error(f"Error calculating pattern completion: {str(e)}")
+            return 0.0
 
 class AlertType(Enum):
     PRICE = "Price Alert"
