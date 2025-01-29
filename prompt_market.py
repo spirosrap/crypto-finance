@@ -42,23 +42,34 @@ COLORS = {
 def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False):
     global client
     try:
+        provider = 'X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI')
+        api_key = XAI_KEY if use_grok else (DEEPSEEK_KEY if (use_deepseek or use_reasoner) else OPENAI_KEY)
+        
+        if not api_key:
+            logging.error(f"{provider} API key is not set in the configuration")
+            print(f"{COLORS['red']}Error: {provider} API key is not set. Please add it to your configuration.{COLORS['end']}")
+            return False
+            
+        if provider == 'OpenAI' and not api_key.startswith('sk-'):
+            logging.error("Invalid OpenAI API key format")
+            print(f"{COLORS['red']}Error: Invalid OpenAI API key format. Key should start with 'sk-'{COLORS['end']}")
+            return False
+
         if use_grok:
-            if not XAI_KEY:
-                logging.error("X AI API key is not set")
-                return False
             client = OpenAI(api_key=XAI_KEY, base_url="https://api.x.ai/v1")
         elif use_deepseek or use_reasoner:
-            if not DEEPSEEK_KEY:
-                logging.error("DeepSeek API key is not set")
-                return False
             client = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
         else:
-            if not OPENAI_KEY:
-                logging.error("OpenAI API key is not set")
-                return False
             client = OpenAI(api_key=OPENAI_KEY)
         return True
     except Exception as e:
+        error_msg = str(e).lower()
+        if 'unauthorized' in error_msg or 'invalid api key' in error_msg:
+            print(f"{COLORS['red']}Error: Invalid {provider} API key. Please check your credentials.{COLORS['end']}")
+        elif 'connection' in error_msg:
+            print(f"{COLORS['red']}Error: Could not connect to {provider} API. Please check your internet connection.{COLORS['end']}")
+        else:
+            print(f"{COLORS['red']}Error initializing {provider} client: {str(e)}{COLORS['end']}")
         logging.error(f"Failed to initialize API client: {str(e)}")
         return False
 
@@ -127,13 +138,16 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         openai.RateLimitError
     )),
     before_sleep=lambda retry_state: logging.warning(
-        f"Attempt {retry_state.attempt_number} failed, retrying..."
+        f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
 def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
     if client is None:
         raise ValueError("API client not properly initialized")
+
+    # Define provider at the start of the function
+    provider = 'X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI')
 
     SYSTEM_PROMPT = (
         "Reply only with \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>\" or "
@@ -182,12 +196,28 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             return None, None
         return recommendation, reasoning
     except openai.RateLimitError:
-        logging.error("Rate limit exceeded with API")
+        error_msg = f"{COLORS['red']}Error: {provider} API rate limit exceeded. Please wait a few minutes and try again.{COLORS['end']}"
+        print(error_msg)
+        logging.error(f"{provider} rate limit exceeded")
+        raise
+    except openai.APIConnectionError as e:
+        error_msg = f"{COLORS['red']}Error: Could not connect to {provider} API. Please check your internet connection.{COLORS['end']}"
+        print(error_msg)
+        logging.error(f"API connection error: {str(e)}")
+        raise
+    except openai.AuthenticationError as e:
+        error_msg = f"{COLORS['red']}Error: Invalid {provider} API key or authentication failed.{COLORS['end']}"
+        print(error_msg)
+        logging.error(f"Authentication error: {str(e)}")
         raise
     except openai.APIError as e:
+        error_msg = f"{COLORS['red']}Error: {provider} API error occurred: {str(e)}{COLORS['end']}"
+        print(error_msg)
         logging.error(f"API error: {str(e)}")
         raise
     except Exception as e:
+        error_msg = f"{COLORS['red']}Error: Unexpected error while getting trading recommendation: {str(e)}{COLORS['end']}"
+        print(error_msg)
         logging.error(f"Failed to get trading recommendation: {str(e)}")
         raise
 
@@ -271,14 +301,12 @@ def main():
         # Validate API key first
         if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok):
             provider = 'X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI')
-            print(f"Invalid or missing {provider} API key. Please check your configuration.")
+            print(f"{COLORS['red']}Error: Invalid or missing {provider} API key. Please check your configuration.{COLORS['end']}")
             exit(1)
 
         # Initialize the client
         if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok):
-            provider = 'X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI')
-            print(f"{provider} client not initialized. Please check your API key and configuration.")
-            exit(1)
+            exit(1)  # Error message already printed in initialize_client
 
         # Add input validation
         if not validate_inputs(args.product_id, args.granularity):
@@ -307,11 +335,11 @@ def main():
         format_output(recommendation, analysis_result, reasoning)
 
     except KeyboardInterrupt:
-        print("\nOperation cancelled by user.")
+        print(f"\n{COLORS['yellow']}Operation cancelled by user.{COLORS['end']}")
         exit(0)
     except Exception as e:
+        print(f"{COLORS['red']}An unexpected error occurred: {str(e)}{COLORS['end']}")
         logging.error(f"Unexpected error in main: {str(e)}")
-        print(f"An unexpected error occurred. Check the logs for details.")
         exit(1)
 
 if __name__ == "__main__":
