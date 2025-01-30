@@ -7,6 +7,7 @@ import traceback
 app = Flask(__name__)
 trader = CryptoTrader(API_KEY, API_SECRET)
 
+
 @app.route('/backtest', methods=['GET'])
 def run_backtest():
     try:
