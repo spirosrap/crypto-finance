@@ -229,7 +229,7 @@ def format_output(recommendation: str, analysis_result: Dict, reasoning: Optiona
 
     if reasoning:
         print(f"\n{COLORS['yellow']}====== 🧠 Reasoning ======{COLORS['end']}")
-        print(' '.join(reasoning.split()[:40]) + '...')  # Add ellipsis for truncation
+        print(' '.join(reasoning.split()[:120]) + '...')  # Add ellipsis for truncation
 
     if 'data' in analysis_result:
         try:
