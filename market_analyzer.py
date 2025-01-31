@@ -76,7 +76,7 @@ class MLModel:
     
     def __init__(self, model_path: Optional[str] = None):
         self.model = None
-        self.scaler = StandardScaler()
+        self.scaler = None  # Initialize as None, will create when needed
         if model_path:
             self.load_model(model_path)
         else:
@@ -84,51 +84,101 @@ class MLModel:
             
     def prepare_features(self, candles: List[Dict]) -> np.ndarray:
         """Prepare features for ML model."""
-        df = pd.DataFrame(candles)
-        
-        # Technical indicators as features
-        features = []
-        prices = df['close'].values
-        volumes = df['volume'].values
-        
-        # Price-based features
-        features.append(np.gradient(prices))  # Price momentum
-        features.append(np.std(prices[-20:]))  # Volatility
-        
-        # Volume-based features
-        features.append(np.gradient(volumes))  # Volume momentum
-        features.append(volumes[-1] / np.mean(volumes[-20:]))  # Relative volume
-        
-        # Trend features
-        sma_20 = np.mean(prices[-20:])
-        sma_50 = np.mean(prices[-50:])
-        features.append((prices[-1] - sma_20) / sma_20)  # Price vs SMA20
-        features.append((sma_20 - sma_50) / sma_50)  # SMA20 vs SMA50
-        
-        return np.array(features).reshape(1, -1)
-        
+        try:
+            df = pd.DataFrame(candles)
+            
+            # Ensure we have enough data
+            if len(df) < 50:  # Need at least 50 candles for features
+                return np.array([]).reshape(0, 6)  # Return empty array with correct shape
+            
+            # Convert price and volume columns to numeric
+            df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
+            
+            # Get numpy arrays
+            prices = df['close'].values
+            volumes = df['volume'].values
+            
+            # Initialize features list
+            features = []
+            
+            # Price momentum (last 20 periods)
+            price_momentum = np.gradient(prices[-20:])[-1] if len(prices) >= 20 else 0
+            features.append(price_momentum)
+            
+            # Volatility (20-period standard deviation)
+            volatility = np.std(prices[-20:]) if len(prices) >= 20 else 0
+            features.append(volatility)
+            
+            # Volume momentum (last 20 periods)
+            volume_momentum = np.gradient(volumes[-20:])[-1] if len(volumes) >= 20 else 0
+            features.append(volume_momentum)
+            
+            # Relative volume (current volume vs 20-period average)
+            avg_volume = np.mean(volumes[-20:]) if len(volumes) >= 20 else volumes[-1]
+            rel_volume = volumes[-1] / avg_volume if avg_volume != 0 else 1.0
+            features.append(rel_volume)
+            
+            # Moving averages
+            sma_20 = np.mean(prices[-20:]) if len(prices) >= 20 else prices[-1]
+            sma_50 = np.mean(prices[-50:]) if len(prices) >= 50 else prices[-1]
+            
+            # Price vs SMA20
+            price_sma20 = (prices[-1] - sma_20) / sma_20 if sma_20 != 0 else 0
+            features.append(price_sma20)
+            
+            # SMA20 vs SMA50
+            sma_ratio = (sma_20 - sma_50) / sma_50 if sma_50 != 0 else 0
+            features.append(sma_ratio)
+            
+            # Convert features to numpy array and reshape
+            features_array = np.array(features, dtype=np.float64)
+            return features_array.reshape(1, -1)
+            
+        except Exception as e:
+            logging.error(f"Error preparing ML features: {str(e)}")
+            return np.array([]).reshape(0, 6)  # Return empty array with correct shape
+            
     def train(self, candles: List[Dict], labels: List[int]):
         """Train the ML model."""
         X = self.prepare_features(candles)
+        if X.size == 0:  # Check if features array is empty
+            return
+            
+        # Initialize scaler if not already done
+        if self.scaler is None:
+            self.scaler = StandardScaler()
+            
+        # Fit and transform the data
         X_scaled = self.scaler.fit_transform(X)
         self.model.fit(X_scaled, labels)
         
     def predict(self, candles: List[Dict]) -> float:
         """Predict market direction."""
-        if self.model is None:
+        if self.model is None or self.scaler is None:
             return 0.0
             
         X = self.prepare_features(candles)
-        X_scaled = self.scaler.transform(X)
-        probabilities = self.model.predict_proba(X_scaled)[0]
-        
-        # Convert probabilities to signal strength (-1 to 1)
-        return (probabilities[1] - probabilities[0]) * 2 - 1
+        if X.size == 0:  # Check if features array is empty
+            return 0.0
+            
+        try:
+            X_scaled = self.scaler.transform(X)
+            probabilities = self.model.predict_proba(X_scaled)[0]
+            
+            # Convert probabilities to signal strength (-1 to 1)
+            return (probabilities[1] - probabilities[0]) * 2 - 1
+        except Exception as e:
+            logging.error(f"Error in ML prediction: {str(e)}")
+            return 0.0
         
     def save_model(self, path: str):
         """Save model to file."""
-        if self.model is not None:
-            joblib.dump({'model': self.model, 'scaler': self.scaler}, path)
+        if self.model is not None and self.scaler is not None:
+            joblib.dump({
+                'model': self.model,
+                'scaler': self.scaler
+            }, path)
             
     def load_model(self, path: str):
         """Load model from file."""
@@ -136,8 +186,16 @@ class MLModel:
             saved = joblib.load(path)
             self.model = saved['model']
             self.scaler = saved['scaler']
+            
+            # Verify both model and scaler are loaded
+            if self.model is None or self.scaler is None:
+                raise ValueError("Failed to load model or scaler")
+                
         except Exception as e:
             logging.error(f"Error loading ML model: {str(e)}")
+            # Reset to initial state
+            self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+            self.scaler = None
 
 class SentimentAnalyzer:
     """Analyzes market sentiment from various sources."""
