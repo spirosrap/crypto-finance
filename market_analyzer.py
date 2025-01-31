@@ -3759,6 +3759,11 @@ def main():
                 print(f"Move Quality: {analysis['probability_analysis']['move_quality']['strength_rating']}")
                 print(f"Current Price: ${analysis['current_price']:.4f}")
 
+                # Add volatility conditions in one line
+                vol_regime = analysis.get('volatility_regime', {})
+                if vol_regime:
+                    print(f"Volatility Conditions: {vol_regime.get('regime', 'Unknown')} ({vol_regime.get('metrics', {}).get('current_volatility', 0)*100:.1f}% {vol_regime.get('metrics', {}).get('volatility_trend', 'Unknown')})")
+
                 # Add trade suggestion
                 if analysis['position'] == 'LONG':
                     entry_price = analysis['current_price']
@@ -4195,32 +4200,42 @@ def main():
                 print(f"• ⚠️ Reversal Risk: {move_quality['reversal_risk']}")
                 
                 print("\n📈 Move Characteristics:")
-                chars = prob['move_characteristics']
+                chars = prob.get('move_characteristics', {})
                 
-                print("\n📈 Trend Quality:")
-                trend = chars['trend_quality']
-                print(f"• 🎯 Strength: {trend['strength']}")
-                print(f"• 🎯 Duration: {trend['duration']}")
-                print(f"• 🎯 Momentum: {trend['momentum']}")
+                # Only print trend quality if it exists
+                if 'trend_quality' in chars:
+                    print("\n📈 Trend Quality:")
+                    trend = chars['trend_quality']
+                    print(f"• 🎯 Strength: {trend.get('strength', 'N/A')}")
+                    print(f"• 🎯 Duration: {trend.get('duration', 'N/A')}")
+                    print(f"• 🎯 Momentum: {trend.get('momentum', 'N/A')}")
                 
-                print("\n📈 Momentum Analysis:")
-                momentum = chars['momentum']
-                print(f"• 🎯 Condition: {momentum['condition']}")
-                print(f"• 🎯 Strength: {momentum['strength']:.2f}")
-                print(f"• 🎯 Divergence: {momentum['divergence']}")
+                # Only print momentum analysis if it exists
+                if 'momentum' in chars:
+                    print("\n📈 Momentum Analysis:")
+                    momentum = chars['momentum']
+                    print(f"• 🎯 Condition: {momentum.get('condition', 'N/A')}")
+                    print(f"• 🎯 Strength: {momentum.get('strength', 0):.2f}")
+                    print(f"• 🎯 Divergence: {momentum.get('divergence', 'N/A')}")
                 
-                print("\n📈 Volume Quality:")
-                volume = chars['volume_quality']
-                print(f"• 🎯 Trend: {volume['trend']}")
-                print(f" 🎯 Strength: {volume['strength']}")
-                print(f"• 🎯 Consistency: {volume['consistency']}")
-                print(f"• 🎯 Price Alignment: {volume['price_alignment']}")
+                # Only print volume quality if it exists
+                if 'volume_quality' in chars:
+                    print("\n📈 Volume Quality:")
+                    volume = chars['volume_quality']
+                    print(f"• 🎯 Trend: {volume.get('trend', 'N/A')}")
+                    print(f"• 🎯 Strength: {volume.get('strength', 'N/A')}")
+                    print(f"• 🎯 Consistency: {volume.get('consistency', 'N/A')}")
+                    print(f"• 🎯 Price Alignment: {volume.get('price_alignment', 'N/A')}")
                 
-                print("\n📈 Pattern Analysis:")
-                pattern = chars['pattern_analysis']
-                print(f"• 🎯 Type: {pattern['type']}, • 🎯 Reliability: {pattern['reliability']:.2f}, • 🎯 Completion: {pattern['completion']:.1f}%")
-                
-                print("\n📉 Failure Points:")
+                # Only print pattern analysis if it exists
+                if 'pattern_analysis' in chars:
+                    print("\n📈 Pattern Analysis:")
+                    pattern = chars['pattern_analysis']
+                    print(f"• 🎯 Type: {pattern.get('type', 'N/A')}")
+                    print(f"• 🎯 Reliability: {pattern.get('reliability', 0):.2f}")
+                    print(f"• 🎯 Completion: {pattern.get('completion', 0):.1f}%")
+
+                # Add failure points analysis
                 failure = prob['failure_points']
                 if failure['immediate_stop']:
                     print(f"• 🛑 Immediate Stop: ${failure['immediate_stop']:.4f}")
