@@ -3609,6 +3609,12 @@ def parse_arguments():
         action='store_true',
         help='List all available granularities'
     )
+
+    parser.add_argument(
+        '--simple',
+        action='store_true',
+        help='Print only position confidence and success probability'
+    )
     
     return parser.parse_args()
 
@@ -3701,569 +3707,600 @@ def main():
             # Single analysis run
             analysis = analyzer.get_market_signal()
             
-            # Get order book visualization
-            order_book = analyzer.visualize_order_book()
-            
-            # Enhanced formatted output
-            print("\n====== 📊 Comprehensive Market Analysis Report 📊 ======")
-            print(f"🕒 Timestamp: {analysis['timestamp']}")
-            print(f"💱 Product: {analysis['product_id']}")
-            print(f"💵 Current Price: ${analysis['current_price']:,.4f}")
-            
-            # Market Overview Section
-            print("\n=== 🎯 Market Overview ===")
-            print(f"📍 Signal: {analysis['signal']}")
-            print(f"📌 Position: {analysis['position']}")
-            print(f"🎯 Confidence: {analysis['confidence']*100:.1f}%")
-            print(f"📈 Market Condition: {analysis['market_condition']}")
-            print(f"🔒 Signal Stability: {analysis['signal_stability']}")
-            
-            # Technical Indicators Section
-            print("\n=== 📐 Technical Analysis Overview ===")
-            indicators = analysis['indicators']
-            print("Core Indicators:")
-            print(f"📊 RSI: {indicators['rsi']:.2f} ({'Overbought' if indicators['rsi'] > 70 else 'Oversold' if indicators['rsi'] < 30 else 'Neutral'})")
-            print(f"📈 MACD: {indicators['macd']:.4f}, Signal: {indicators['macd_signal']:.4f}, Histogram: {indicators['macd_histogram']:.4f}")
-            adx_trend = 'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'
-            print(f"📏 ADX: {indicators['adx']:.2f} ({adx_trend})")
-            print(f"➡️ Trend Direction: {indicators['trend_direction']}")
-            
-            print("\nPrice Channels:")
-            print(f"📊 Bollinger Bands:")
-            print(f"  • Upper: ${indicators['bollinger_upper']:.4f}")
-            print(f"  • Middle: ${indicators['bollinger_middle']:.4f}")
-            print(f"  • Lower: ${indicators['bollinger_lower']:.4f}")
-            print(f"  • Band Width: ${(indicators['bollinger_upper'] - indicators['bollinger_lower']):.4f}")
-            print(f"  • Position: {'Above' if analysis['current_price'] > indicators['bollinger_middle'] else 'Below'} Middle Band")
-            
-            # Volume Analysis Section
-            print("\n=== 📊 Volume Analysis ===")
-            volume = analysis['volume_analysis']
-            print(f"📈 Volume Change: {volume['change']:.1f}%")
-            print(f"📊 Volume Trend: {volume['trend']}")
-            print(f"💪 Volume Strength: {volume['strength']}")
-            print(f"📉 Price Change: {volume['price_change']:.1f}%")
-            print(f"✅ Volume Confirmation: {'Yes' if volume['is_confirming'] else 'No'}")
+            if args.simple:
+                # Print only confidence and success probability
+                print(f"\n====== 📊 Simple Market Analysis 📊 ======")
+                print(f"Position: {analysis['position']}")
+                print(f"Signal Confidence: {analysis['confidence']*100:.1f}%")
+                print(f"Success Probability: {analysis['probability_analysis']['total_probability']:.1f}%")
+                print(f"Move Quality: {analysis['probability_analysis']['move_quality']['strength_rating']}")
+                print(f"Current Price: ${analysis['current_price']:.4f}")
 
-            # Add new enhanced analysis sections
-            print("\n====== 🔄 Enhanced Market Analysis ======")
-
-            # Market Cycles Analysis - Simplified Critical Information
-            print("\n=== 🔄 Critical Market Cycle Indicators ===")
-            cycles = analysis['market_cycles']
-            
-            # Current market phase with emoji indicators
-            phase_emojis = {
-                'Accumulation': '🟢',
-                'Markup': '📈',
-                'Distribution': '🟡',
-                'Markdown': '📉',
-                'Unknown': '❓'
-            }
-            phase_emoji = phase_emojis.get(cycles['phase'], '❓')
-            print(f"{phase_emoji} Market Phase: {cycles['phase']}")
-            print(f"├─ Confidence: {cycles['confidence']*100:.1f}%")
-            
-            # Critical market conditions
-            print("\n🎯 Market Direction:")
-            print(f"├─ Price Trend: {cycles['metrics']['price_trend']}")
-            print(f"└─ Momentum: {cycles['metrics']['momentum']}")
-            
-            # Show only significant cycle transitions
-            if cycles['cycle_history']:
-                print("\n⚡ Recent Major Transition:")
-                latest_cycle = cycles['cycle_history'][-1]  # Get most recent transition
-                print(f"└─ {latest_cycle['phase'].title()} → {cycles['phase']} ({latest_cycle['duration']:.1f}h)")
-
-            # Order Flow Analysis
-            print("\n=== 📊 Order Flow Analysis ===")
-            flow = analysis['order_flow']
-            print(f"Signal: {flow['signal']} (Strength: {flow['strength']:.2f})")
-            print("\nMetrics:")
-            print(f"• Flow Ratio: {flow['metrics']['flow_ratio']:.2f}")
-            print(f"• Buy Pressure: {flow['metrics']['buy_pressure']:.2f}")
-            print(f"• Sell Pressure: {flow['metrics']['sell_pressure']:.2f}")
-            print(f"• Depth Imbalance: {flow['metrics']['depth_imbalance']:.2f}")
-
-            if flow['tick_analysis']:
-                print("\nTick Analysis:")
-                for key, value in flow['tick_analysis'].items():
-                    print(f"• {key.replace('_', ' ').title()}: {value}")
-
-            # Liquidity Zones Analysis
-            print("\n=== 💧 Liquidity Zones Analysis ===")
-            liquidity = analysis['liquidity_zones']
-            
-            if liquidity['current_zone']:
-                print("\nCurrent Zone:")
-                zone = liquidity['current_zone']
-                print(f"• Type: {zone['type']}")
-                print(f"• Price: ${zone['price']:.4f}")
-                print(f"• Strength: {zone['strength']:.2f}")
-
-            print("\nHigh Volume Zones:")
-            for zone in liquidity['zones']['high_volume'][:3]:  # Show top 3
-                print(f"• ${zone['price']:.4f} ({zone['type']}, Strength: {zone['strength']:.2f})")
-
-            print("\nBreakout Zones:")
-            for zone in liquidity['zones']['low_volume'][:3]:  # Show top 3
-                print(f"• ${zone['price']:.4f} (Strength: {zone['strength']:.2f})")
-
-            # Market Efficiency Analysis
-            print("\n=== 📈 Market Efficiency Analysis ===")
-            efficiency = analysis['market_efficiency']
-            print(f"Efficiency Ratio: {efficiency['ratio']:.2f}")
-            print(f"Interpretation: {efficiency['interpretation']}")
-            print(f"Trend Quality: {efficiency['trend_quality']}")
-            print("\nMetrics:")
-            print(f"• Directional Movement: {efficiency['metrics']['directional_movement']:.4f}")
-            print(f"• Total Movement: {efficiency['metrics']['total_movement']:.4f}")
-            print(f"• Average Efficiency: {efficiency['metrics']['average_efficiency']:.2f}")
-
-            # Adaptive Thresholds
-            print("\n=== 🎚️ Adaptive Thresholds ===")
-            thresholds = analysis['adaptive_thresholds']
-            for name, threshold in thresholds.items():
-                print(f"\n{name.title()}:")
-                print(f"• Current: {threshold['current']:.4f}")
-                print(f"• Base: {threshold['base']:.4f}")
-                print(f"• Adjustment: {threshold['adjustment']:.2f}x")
-
-            print("\n" + "="*50)
-
-            
-            # Pattern Recognition Section
-            print("\n=== 🔍 Pattern Analysis ===")
-            patterns = analysis['patterns']
-            print(f"📋 Current Pattern: {patterns['type']}")
-            if patterns['type'] != "None":
-                print(f"🎯 Pattern Confidence: {patterns['confidence']*100:.1f}%")
-                if patterns['target']:
-                    print(f"🎯 Pattern Target: ${patterns['target']:.4f}")
-                if patterns['stop_loss']:
-                    print(f"🛑 Suggested Stop Loss: ${patterns['stop_loss']:.4f}")
-            
-            # Pattern History
-            print("\n=== 📜 Recent Pattern History ===")
-            for pattern in analysis['pattern_history'][-3:]:  # Show last 3 patterns
-                print(f"• {pattern['pattern']} (Confidence: {pattern['confidence']*100:.1f}%) - {pattern['timestamp']}")
-            
-            # Add Regime Analysis Section after Pattern History
-            print("\n=== 🌊 Market Regime Analysis ===")
-            regime = analysis['regime_analysis']
-            print(f"📊 Current Regime: {regime['regime']}")
-            print(f"🎯 Confidence: {regime['confidence']:.1f}%")
-            print("\n📊 Regime Metrics:")
-            print(f"• 📈 Volatility: {regime['metrics']['volatility']:.1f}%")
-            print(f"• 💪 Trend Strength: {regime['metrics']['trend_strength']:.1f}")
-            print(f"• 📏 Price Range: {regime['metrics']['price_range']:.1f}%")
-            
-            # Add Momentum Analysis Section
-            print("\n=== 🚀 Momentum Analysis ===")
-            momentum = analysis['momentum_analysis']
-            print(f"📈 Overall Momentum: {momentum['interpretation']}")
-            print(f"📊 Total Score: {momentum['total_score']:.1f}")
-            print("\n📈 Component Scores:")
-            for component, score in momentum['components'].items():
-                print(f"• {component.replace('_', ' ').title()}: {score:.1f}")
-            
-            # Risk Metrics Section
-            print("\n=== ⚠️ Risk Analysis ===")
-            risk = analysis['risk_metrics']
-            print(f"📊 Dynamic Risk Level: {risk['dynamic_risk']*100:.1f}%")
-            if 'volatility' in risk:
-                print(f"📈 Current Volatility: {risk['volatility']*100:.1f}%")
-            if 'risk_reward_ratio' in risk:
-                print(f"⚖️ Risk/Reward Ratio: {risk['risk_reward_ratio']:.2f}")
-            
-            # Trading Recommendation Section
-            print("\n=== 💡 Trading Recommendation ===")
-            print(analysis['recommendation'])
-            
-            # Key Levels and Potential Moves
-            print("\n=== 🎯 Key Levels & Potential Moves ===")
-            atr = indicators.get('atr', (indicators['bollinger_upper'] - indicators['bollinger_lower']) / 4)
-            current_price = analysis['current_price']
-            
-            print(f"📈 Potential Bullish Targets:")
-            print(f"• 🎯 Conservative: ${current_price * 1.01:.4f} (+1%)")
-            print(f"• 🎯 Moderate: ${current_price * 1.02:.4f} (+2%)")
-            print(f"• 🎯 Aggressive: ${current_price * 1.05:.4f} (+5%)")
-            
-            print(f"\n📉 Potential Bearish Targets:")
-            print(f"• 🎯 Conservative: ${current_price * 0.99:.4f} (-1%)")
-            print(f"• 🎯 Moderate: ${current_price * 0.98:.4f} (-2%)")
-            print(f"• 🎯 Aggressive: ${current_price * 0.95:.4f} (-5%)")
-            
-            # Add directional bias analysis with move specifics
-            print("\n=== 🎯 Directional Bias & Move Analysis ===")
-            bullish_points = 0
-            bearish_points = 0
-            
-            # RSI Analysis
-            if indicators['rsi'] > 50:
-                bullish_points += 1
-            else:
-                bearish_points += 1
-                
-            # MACD Analysis
-            if indicators['macd'] > indicators['macd_signal']:
-                bullish_points += 1
-            else:
-                bearish_points += 1
-                
-            # Trend Direction
-            if indicators['trend_direction'] == "Uptrend":
-                bullish_points += 2
-            elif indicators['trend_direction'] == "Downtrend":
-                bearish_points += 2
-                
-            # Volume Analysis
-            if volume['is_confirming'] and volume['price_change'] > 0:
-                bullish_points += 1
-            elif volume['is_confirming'] and volume['price_change'] < 0:
-                bearish_points += 1
-                
-            # Price relative to Bollinger Bands
-            if current_price > indicators['bollinger_middle']:
-                bullish_points += 1
-            else:
-                bearish_points += 1
-                
-            # Calculate confidence percentage
-            total_points = bullish_points + bearish_points
-            bullish_confidence = (bullish_points / total_points * 100) if total_points > 0 else 50
-            bearish_confidence = (bearish_points / total_points * 100) if total_points > 0 else 50
-            
-            # Calculate move specifics
-            atr = indicators.get('atr', (indicators['bollinger_upper'] - indicators['bollinger_lower']) / 4)
-            bb_width = indicators['bollinger_upper'] - indicators['bollinger_lower']
-            price_volatility = bb_width / indicators['bollinger_middle']
-            
-            # Define move characteristics
-            move_speed = "Rapid" if price_volatility > 0.03 else "Gradual"
-            move_strength = "Strong" if abs(indicators['macd']) > abs(indicators['macd_signal']) * 1.5 else "Moderate"
-
-            # Correlation Analysis
-            print("\n=== 📈 Market Correlation Analysis ===")
-            correlation_analysis = analysis['correlation_analysis']
-            print(f"📊 Average Correlation: {correlation_analysis['average_correlation']:.2f}")
-            print(f"🎯 Market Independence: {correlation_analysis['independence_score']:.2f}")
-            print("\nInterpretation:")
-            for insight, description in correlation_analysis['interpretation'].items():
-                print(f"• {insight}: {description}")
-            print("\nCorrelation Details:")
-            for asset, details in correlation_analysis['correlations'].items():
-                print(f"\n💱 {asset}:")
-                if 'error' in details:
-                    print(f"❌ Error: {details['error']}")
+                # Add trade suggestion
+                if analysis['position'] == 'LONG':
+                    entry_price = analysis['current_price']
+                    stop_loss = analysis['patterns'].get('stop_loss', entry_price * 0.98)  # Default to 2% stop loss
+                    target = analysis['patterns'].get('target', entry_price * 1.03)  # Default to 3% target
+                    print("\n📈 Trade Suggestion:")
+                    print(f"BUY at ${entry_price:.4f}")
+                    print(f"Target: ${target:.4f} (+{((target-entry_price)/entry_price)*100:.1f}%)")
+                    print(f"Stop Loss: ${stop_loss:.4f} (-{((entry_price-stop_loss)/entry_price)*100:.1f}%)")
+                    print(f"Risk/Reward: {abs((target-entry_price)/(stop_loss-entry_price)):.2f}")
+                elif analysis['position'] == 'SHORT':
+                    entry_price = analysis['current_price']
+                    stop_loss = analysis['patterns'].get('stop_loss', entry_price * 1.02)  # Default to 2% stop loss
+                    target = analysis['patterns'].get('target', entry_price * 0.97)  # Default to 3% target
+                    print("\n📉 Trade Suggestion:")
+                    print(f"SELL at ${entry_price:.4f}")
+                    print(f"Target: ${target:.4f} (-{((entry_price-target)/entry_price)*100:.1f}%)")
+                    print(f"Stop Loss: ${stop_loss:.4f} (+{((stop_loss-entry_price)/entry_price)*100:.1f}%)")
+                    print(f"Risk/Reward: {abs((entry_price-target)/(stop_loss-entry_price)):.2f}")
                 else:
-                    try:
-                        print(f"📊 Correlation Coefficient: {details['coefficient']:.2f}")
-                        print(f"🎯 Correlation Type: {details['type']}")
-                        print(f"📈 Price Movement: Current Asset vs. {asset}")
-                        print(f"• Current Asset: {details['price_movement']['current_asset']}")
-                        print(f"• {asset}: {details['price_movement']['correlated_asset']}")
-                        print(f"📅 Last Updated: {details['timestamp']}")
-                    except KeyError as e:
-                        print(f"❌ Error: Missing data - {str(e)}")
-                    except Exception as e:
-                        print(f"❌ Error: {str(e)}")        
-            
-            print("")
-            print("============== Move Analysis: ==============")
-            if bullish_points > bearish_points:
-                print(f"BULLISH with {bullish_confidence:.1f}% confidence")
-                print("\nMove Characteristics:")
-                print(f"• Expected Move Type: {move_speed} {move_strength} Advance")
-                print(f"• Momentum: {'Accelerating' if indicators['macd_histogram'] > 0 else 'Decelerating'}")
-                print(f"• Volume Profile: {'Supporting' if volume['is_confirming'] else 'Lacking'}")
-                
-                print("\nPrice Targets:")
-                print(f"• Initial Target: ${(current_price + atr):.4f} (+{(atr/current_price)*100:.1f}%)")
-                print(f"• Secondary Target: ${indicators['bollinger_upper']:.4f} (+{((indicators['bollinger_upper']-current_price)/current_price)*100:.1f}%)")
-                print(f"• Extended Target: ${(indicators['bollinger_upper'] + atr):.4f} (+{((indicators['bollinger_upper']+atr-current_price)/current_price)*100:.1f}%)")
-                
-                print("\nSupporting Factors:")
-                if indicators['rsi'] > 50:
-                    print(f"• RSI showing upward momentum ({indicators['rsi']:.1f})")
-                if indicators['macd'] > indicators['macd_signal']:
-                    print(f"• MACD bullish crossover (Spread: {(indicators['macd']-indicators['macd_signal']):.4f})")
-                if indicators['trend_direction'] == "Uptrend":
-                    print("• Established uptrend with higher lows")
-                if volume['is_confirming'] and volume['price_change'] > 0:
-                    print(f"• Volume increased by {volume['change']:.1f}% supporting price action")
-                if current_price > indicators['bollinger_middle']:
-                    print("• Price trading above BB middle band showing strength")
-                    
-            elif bearish_points > bullish_points:
-                print(f"BEARISH with {bearish_confidence:.1f}% confidence")
-                print("\nMove Characteristics:")
-                print(f"• Expected Move Type: {move_speed} {move_strength} Decline")
-                print(f"• Momentum: {'Accelerating' if indicators['macd_histogram'] < 0 else 'Decelerating'}")
-                print(f"• Volume Profile: {'Supporting' if volume['is_confirming'] else 'Lacking'}")
-                
-                print("\nPrice Targets:")
-                print(f"• Initial Target: ${(current_price - atr):.4f} (-{(atr/current_price)*100:.1f}%)")
-                print(f"• Secondary Target: ${indicators['bollinger_lower']:.4f} (-{((current_price-indicators['bollinger_lower'])/current_price)*100:.1f}%)")
-                print(f"• Extended Target: ${(indicators['bollinger_lower'] - atr):.4f} (-{((current_price-(indicators['bollinger_lower']-atr))/current_price)*100:.1f}%)")
-                
-                print("\nSupporting Factors:")
-                if indicators['rsi'] < 50:
-                    print(f"• RSI showing downward momentum ({indicators['rsi']:.1f})")
-                if indicators['macd'] < indicators['macd_signal']:
-                    print(f"• MACD bearish crossover (Spread: {(indicators['macd_signal']-indicators['macd']):.4f})")
-                if indicators['trend_direction'] == "Downtrend":
-                    print("• Established downtrend with lower highs")
-                if volume['is_confirming'] and volume['price_change'] < 0:
-                    print(f"• Volume increased by {volume['change']:.1f}% supporting price action")
-                if current_price < indicators['bollinger_middle']:
-                    print("• Price trading below BB middle band showing weakness")
+                    print("\n⚖️ Trade Suggestion: HOLD - No clear setup")
             else:
-                print("NEUTRAL - No Clear Directional Bias")
-                print("\nConsolidation Analysis:")
-                print(f"• Price Range: ${(current_price - atr):.4f} to ${(current_price + atr):.4f}")
-                print(f"• Volatility: {'High' if price_volatility > 0.03 else 'Low'} ({price_volatility*100:.1f}%)")
-                print(f"• Volume Profile: {volume['trend']} on {volume['change']:.1f}% change")
-                print("\nBreakout Levels:")
-                print(f"• Bullish Breakout Above: ${indicators['bollinger_upper']:.4f}")
-                print(f"• Bearish Breakdown Below: ${indicators['bollinger_lower']:.4f}")
-                print("\nRecommendation:")
-                print("• Consider waiting for stronger directional signals")
-                print("• Monitor for breakout of recent trading range")
-                print("• Prepare for potential volatility expansion")
-
-            # Add Volatility Regime Analysis Section
-            print("\n====== 📊 Volatility Regime Analysis 📊 ======")
-            vol_regime = analysis.get('volatility_regime', {})
-            if vol_regime:
-                print(f"Current Regime: {vol_regime['regime']}")
-                print(f"Confidence: {vol_regime['confidence']*100:.1f}%")
-                print(f"\nDescription: {vol_regime['description']}")
+                # Get order book visualization
+                order_book = analyzer.visualize_order_book()
                 
-                print("\nKey Metrics:")
-                metrics = vol_regime.get('metrics', {})
-                print(f"• Current Volatility: {metrics.get('current_volatility', 0)*100:.1f}%")
-                print(f"• Long-term Volatility: {metrics.get('long_term_volatility', 0)*100:.1f}%")
-                print(f"• Volatility of Volatility: {metrics.get('volatility_of_volatility', 0)*100:.1f}%")
-                print(f"• Volatility Trend: {metrics.get('volatility_trend', 'Unknown')}")
-                print(f"• Volatility Percentile: {metrics.get('volatility_percentile', 0)*100:.1f}%")
+                # Enhanced formatted output
+                print("\n====== 📊 Comprehensive Market Analysis Report 📊 ======")
+                print(f"🕒 Timestamp: {analysis['timestamp']}")
+                print(f"💱 Product: {analysis['product_id']}")
+                print(f"💵 Current Price: ${analysis['current_price']:,.4f}")
                 
-                print("\nTrading Implications:")
-                for implication in vol_regime.get('implications', []):
-                    print(f"• {implication}")
+                # Market Overview Section
+                print("\n=== 🎯 Market Overview ===")
+                print(f"📍 Signal: {analysis['signal']}")
+                print(f"📌 Position: {analysis['position']}")
+                print(f"🎯 Confidence: {analysis['confidence']*100:.1f}%")
+                print(f"📈 Market Condition: {analysis['market_condition']}")
+                print(f"🔒 Signal Stability: {analysis['signal_stability']}")
+                
+                # Technical Indicators Section
+                print("\n=== 📐 Technical Analysis Overview ===")
+                indicators = analysis['indicators']
+                print("Core Indicators:")
+                print(f"📊 RSI: {indicators['rsi']:.2f} ({'Overbought' if indicators['rsi'] > 70 else 'Oversold' if indicators['rsi'] < 30 else 'Neutral'})")
+                print(f"📈 MACD: {indicators['macd']:.4f}, Signal: {indicators['macd_signal']:.4f}, Histogram: {indicators['macd_histogram']:.4f}")
+                adx_trend = 'Strong Trend' if indicators['adx'] > 25 else 'Weak Trend'
+                print(f"📏 ADX: {indicators['adx']:.2f} ({adx_trend})")
+                print(f"➡️ Trend Direction: {indicators['trend_direction']}")
+                
+                print("\nPrice Channels:")
+                print(f"📊 Bollinger Bands:")
+                print(f"  • Upper: ${indicators['bollinger_upper']:.4f}")
+                print(f"  • Middle: ${indicators['bollinger_middle']:.4f}")
+                print(f"  • Lower: ${indicators['bollinger_lower']:.4f}")
+                print(f"  • Band Width: ${(indicators['bollinger_upper'] - indicators['bollinger_lower']):.4f}")
+                print(f"  • Position: {'Above' if analysis['current_price'] > indicators['bollinger_middle'] else 'Below'} Middle Band")
+                
+                # Volume Analysis Section
+                print("\n=== 📊 Volume Analysis ===")
+                volume = analysis['volume_analysis']
+                print(f"📈 Volume Change: {volume['change']:.1f}%")
+                print(f"📊 Volume Trend: {volume['trend']}")
+                print(f"💪 Volume Strength: {volume['strength']}")
+                print(f"📉 Price Change: {volume['price_change']:.1f}%")
+                print(f"✅ Volume Confirmation: {'Yes' if volume['is_confirming'] else 'No'}")
 
-            # Add Liquidity Depth Analysis Section
-            print("\n====== 📊 Liquidity Depth Analysis 📊 ======")
-            liquidity_analysis = analysis.get('liquidity_analysis', {})
-            
-            if not liquidity_analysis:
-                print("❌ No liquidity analysis data available")
-            elif liquidity_analysis.get('status') == 'success':
-                print(f"Liquidity Score: {liquidity_analysis['liquidity_score']:.1f}%")
+                # Add new enhanced analysis sections
+                print("\n====== 🔄 Enhanced Market Analysis ======")
+
+                # Market Cycles Analysis - Simplified Critical Information
+                print("\n=== 🔄 Critical Market Cycle Indicators ===")
+                cycles = analysis['market_cycles']
+                
+                # Current market phase with emoji indicators
+                phase_emojis = {
+                    'Accumulation': '🟢',
+                    'Markup': '📈',
+                    'Distribution': '🟡',
+                    'Markdown': '📉',
+                    'Unknown': '❓'
+                }
+                phase_emoji = phase_emojis.get(cycles['phase'], '❓')
+                print(f"{phase_emoji} Market Phase: {cycles['phase']}")
+                print(f"├─ Confidence: {cycles['confidence']*100:.1f}%")
+                
+                # Critical market conditions
+                print("\n🎯 Market Direction:")
+                print(f"├─ Price Trend: {cycles['metrics']['price_trend']}")
+                print(f"└─ Momentum: {cycles['metrics']['momentum']}")
+                
+                # Show only significant cycle transitions
+                if cycles['cycle_history']:
+                    print("\n⚡ Recent Major Transition:")
+                    latest_cycle = cycles['cycle_history'][-1]  # Get most recent transition
+                    print(f"└─ {latest_cycle['phase'].title()} → {cycles['phase']} ({latest_cycle['duration']:.1f}h)")
+
+                # Order Flow Analysis
+                print("\n=== 📊 Order Flow Analysis ===")
+                flow = analysis['order_flow']
+                print(f"Signal: {flow['signal']} (Strength: {flow['strength']:.2f})")
                 print("\nMetrics:")
-                metrics = liquidity_analysis.get('metrics', {})
-                for metric, value in metrics.items():
-                    if isinstance(value, (int, float)):
-                        print(f"• {metric.replace('_', ' ').title()}: {value:.1f}%")
-                    else:
-                        print(f"• {metric.replace('_', ' ').title()}: {value}")
-                        
-                print("\nVolume Profile:")
-                for profile in liquidity_analysis.get('volume_profile', []):
-                    print(f"• Price Level: ${profile.get('price_level', 0):.4f}, "
-                          f"Volume: {profile.get('volume', 0)}, "
-                          f"Percentage: {profile.get('percentage', 0):.1f}%")
-                          
-                print("\nLiquidity Clusters:")
-                for cluster in liquidity_analysis.get('liquidity_clusters', []):
-                    price_range = cluster.get('price_range', (0, 0))
-                    print(f"• Price Range: ${price_range[0]:.4f} to ${price_range[1]:.4f}, "
-                          f"Total Volume: {cluster.get('total_volume', 0)}, "
-                          f"Strength: {cluster.get('strength', 0):.1f}%")
-                          
-                print("\nLiquidity Gaps:")
-                for gap in liquidity_analysis.get('liquidity_gaps', []):
-                    print(f"• Start Price: ${gap.get('start_price', 0):.4f}, "
-                          f"End Price: ${gap.get('end_price', 0):.4f}, "
-                          f"Size: {gap.get('size', 0):.1f}%")
-                          
-                print("\nMarket Depth:")
-                market_depth = liquidity_analysis.get('market_depth', {})
-                print(f"• Buy Side Volume: {market_depth.get('buy_side_volume', 0)}")
-                print(f"• Sell Side Volume: {market_depth.get('sell_side_volume', 0)}")
-                print(f"• Imbalance Ratio: {market_depth.get('imbalance_ratio', 0):.2f} "
-                      f"({market_depth.get('interpretation', 'Unknown')})")
-                      
-            elif liquidity_analysis.get('status') == 'insufficient_data':
-                print("⚠️ Insufficient data to analyze liquidity depth")
-            else:
-                error_msg = liquidity_analysis.get('error', 'Unknown error occurred')
-                print(f"❌ Error analyzing liquidity depth: {error_msg}")
+                print(f"• Flow Ratio: {flow['metrics']['flow_ratio']:.2f}")
+                print(f"• Buy Pressure: {flow['metrics']['buy_pressure']:.2f}")
+                print(f"• Sell Pressure: {flow['metrics']['sell_pressure']:.2f}")
+                print(f"• Depth Imbalance: {flow['metrics']['depth_imbalance']:.2f}")
 
-            # Enhanced Probability Analysis Section
-            print("\n====== 📊 Detailed Move Analysis 📊 ======")
-            prob = analysis['probability_analysis']
-            print(f"\n🎯 Overall Success Probability: {prob['total_probability']:.1f}%")
-            print(f"📊 Confidence Level: {prob['confidence_level']}")
-            
-            print("\n📈 Move Quality:")
-            move_quality = prob['move_quality']
-            print(f"• ⚡ Expected Speed: {move_quality['expected_speed']}")
-            print(f"• 📊 Expected Volatility: {move_quality['expected_volatility']}")
-            print(f"• 🎯 Continuation Probability: {move_quality['continuation_probability']}")
-            print(f"• ⚠️ Reversal Risk: {move_quality['reversal_risk']}")
-            
-            print("\n📈 Move Characteristics:")
-            chars = prob['move_characteristics']
-            
-            print("\n📈 Trend Quality:")
-            trend = chars['trend_quality']
-            print(f"• 🎯 Strength: {trend['strength']}")
-            print(f"• 🎯 Duration: {trend['duration']}")
-            print(f"• 🎯 Momentum: {trend['momentum']}")
-            
-            print("\n📈 Momentum Analysis:")
-            momentum = chars['momentum']
-            print(f"• 🎯 Condition: {momentum['condition']}")
-            print(f"• 🎯 Strength: {momentum['strength']:.2f}")
-            print(f"• 🎯 Divergence: {momentum['divergence']}")
-            
-            print("\n📈 Volume Quality:")
-            volume = chars['volume_quality']
-            print(f"• 🎯 Trend: {volume['trend']}")
-            print(f" 🎯 Strength: {volume['strength']}")
-            print(f"• 🎯 Consistency: {volume['consistency']}")
-            print(f"• 🎯 Price Alignment: {volume['price_alignment']}")
-            
-            print("\n📈 Pattern Analysis:")
-            pattern = chars['pattern_analysis']
-            print(f"• 🎯 Type: {pattern['type']}, • 🎯 Reliability: {pattern['reliability']:.2f}, • 🎯 Completion: {pattern['completion']:.1f}%")
-            
-            print("\n📉 Failure Points:")
-            failure = prob['failure_points']
-            if failure['immediate_stop']:
-                print(f"• 🛑 Immediate Stop: ${failure['immediate_stop']:.4f}")
-            if failure['trend_reversal_point']:
-                print(f"• 🎯 Trend Reversal: ${failure['trend_reversal_point']:.4f}")
-            if failure['momentum_failure_level']:
-                print(f"• 🎯 Momentum Failure: ${failure['momentum_failure_level']:.4f}")
-            
-            print("\n📈 Contributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
+                if flow['tick_analysis']:
+                    print("\nTick Analysis:")
+                    for key, value in flow['tick_analysis'].items():
+                        print(f"• {key.replace('_', ' ').title()}: {value}")
 
-            # Add Divergence Analysis Section
-            print("\n====== 📊 Divergence Analysis 📊 ======")
-            divergences = analysis.get('divergence_analysis', {})
-            
-            if 'error' in divergences:
-                print(f"❌ Error analyzing divergences: {divergences['error']}")
-            else:
-                summary = divergences.get('summary', {})
-                print(f"Total Divergences Found: {summary.get('total_divergences', 0)}")
-                print(f"Primary Bias: {summary.get('primary_bias', 'None')}")
-                print(f"Confidence: {summary.get('highest_confidence', 0)*100:.1f}%")
+                # Liquidity Zones Analysis
+                print("\n=== 💧 Liquidity Zones Analysis ===")
+                liquidity = analysis['liquidity_zones']
                 
-                if divergences.get('divergences'):
-                    print("\nDetailed Divergences:")
-                    for div in divergences['divergences']:
-                        print(f"\n🔍 {div['type']} ({div['indicator']})")
-                        print(f"├─ Strength: {div['strength']:.4f}")
-                        print(f"├─ Confidence: {div['confidence']*100:.1f}%")
-                        print(f"├─ Timeframe: {div.get('timeframe', 'Current')}")
-                        
-                        analysis = div.get('analysis', {})
-                        print(f"├─ Price Change: {analysis.get('price_change_percent', 0):.1f}%")
-                        print(f"├─ Significance: {analysis.get('significance', 'Unknown')}")
-                        print(f"├─ Suggested Action: {analysis.get('suggested_action', 'None')}")
-                        if 'stop_loss' in analysis:
-                            print(f"└─ Suggested Stop Loss: ${analysis['stop_loss']:.4f}")
+                if liquidity['current_zone']:
+                    print("\nCurrent Zone:")
+                    zone = liquidity['current_zone']
+                    print(f"• Type: {zone['type']}")
+                    print(f"• Price: ${zone['price']:.4f}")
+                    print(f"• Strength: {zone['strength']:.2f}")
+
+                print("\nHigh Volume Zones:")
+                for zone in liquidity['zones']['high_volume'][:3]:  # Show top 3
+                    print(f"• ${zone['price']:.4f} ({zone['type']}, Strength: {zone['strength']:.2f})")
+
+                print("\nBreakout Zones:")
+                for zone in liquidity['zones']['low_volume'][:3]:  # Show top 3
+                    print(f"• ${zone['price']:.4f} (Strength: {zone['strength']:.2f})")
+
+                # Market Efficiency Analysis
+                print("\n=== 📈 Market Efficiency Analysis ===")
+                efficiency = analysis['market_efficiency']
+                print(f"Efficiency Ratio: {efficiency['ratio']:.2f}")
+                print(f"Interpretation: {efficiency['interpretation']}")
+                print(f"Trend Quality: {efficiency['trend_quality']}")
+                print("\nMetrics:")
+                print(f"• Directional Movement: {efficiency['metrics']['directional_movement']:.4f}")
+                print(f"• Total Movement: {efficiency['metrics']['total_movement']:.4f}")
+                print(f"• Average Efficiency: {efficiency['metrics']['average_efficiency']:.2f}")
+
+                # Adaptive Thresholds
+                print("\n=== 🎚️ Adaptive Thresholds ===")
+                thresholds = analysis['adaptive_thresholds']
+                for name, threshold in thresholds.items():
+                    print(f"\n{name.title()}:")
+                    print(f"• Current: {threshold['current']:.4f}")
+                    print(f"• Base: {threshold['base']:.4f}")
+                    print(f"• Adjustment: {threshold['adjustment']:.2f}x")
+
+                print("\n" + "="*50)
+
+                
+                # Pattern Recognition Section
+                print("\n=== 🔍 Pattern Analysis ===")
+                patterns = analysis['patterns']
+                print(f"📋 Current Pattern: {patterns['type']}")
+                if patterns['type'] != "None":
+                    print(f"🎯 Pattern Confidence: {patterns['confidence']*100:.1f}%")
+                    if patterns['target']:
+                        print(f"🎯 Pattern Target: ${patterns['target']:.4f}")
+                    if patterns['stop_loss']:
+                        print(f"🛑 Suggested Stop Loss: ${patterns['stop_loss']:.4f}")
+                
+                # Pattern History
+                print("\n=== 📜 Recent Pattern History ===")
+                for pattern in analysis['pattern_history'][-3:]:  # Show last 3 patterns
+                    print(f"• {pattern['pattern']} (Confidence: {pattern['confidence']*100:.1f}%) - {pattern['timestamp']}")
+                
+                # Add Regime Analysis Section after Pattern History
+                print("\n=== 🌊 Market Regime Analysis ===")
+                regime = analysis['regime_analysis']
+                print(f"📊 Current Regime: {regime['regime']}")
+                print(f"🎯 Confidence: {regime['confidence']:.1f}%")
+                print("\n📊 Regime Metrics:")
+                print(f"• 📈 Volatility: {regime['metrics']['volatility']:.1f}%")
+                print(f"• 💪 Trend Strength: {regime['metrics']['trend_strength']:.1f}")
+                print(f"• 📏 Price Range: {regime['metrics']['price_range']:.1f}%")
+                
+                # Add Momentum Analysis Section
+                print("\n=== 🚀 Momentum Analysis ===")
+                momentum = analysis['momentum_analysis']
+                print(f"📈 Overall Momentum: {momentum['interpretation']}")
+                print(f"📊 Total Score: {momentum['total_score']:.1f}")
+                print("\n📈 Component Scores:")
+                for component, score in momentum['components'].items():
+                    print(f"• {component.replace('_', ' ').title()}: {score:.1f}")
+                
+                # Risk Metrics Section
+                print("\n=== ⚠️ Risk Analysis ===")
+                risk = analysis['risk_metrics']
+                print(f"📊 Dynamic Risk Level: {risk['dynamic_risk']*100:.1f}%")
+                if 'volatility' in risk:
+                    print(f"📈 Current Volatility: {risk['volatility']*100:.1f}%")
+                if 'risk_reward_ratio' in risk:
+                    print(f"⚖️ Risk/Reward Ratio: {risk['risk_reward_ratio']:.2f}")
+                
+                # Trading Recommendation Section
+                print("\n=== 💡 Trading Recommendation ===")
+                print(analysis['recommendation'])
+                
+                # Key Levels and Potential Moves
+                print("\n=== 🎯 Key Levels & Potential Moves ===")
+                atr = indicators.get('atr', (indicators['bollinger_upper'] - indicators['bollinger_lower']) / 4)
+                current_price = analysis['current_price']
+                
+                print(f"📈 Potential Bullish Targets:")
+                print(f"• 🎯 Conservative: ${current_price * 1.01:.4f} (+1%)")
+                print(f"• 🎯 Moderate: ${current_price * 1.02:.4f} (+2%)")
+                print(f"• 🎯 Aggressive: ${current_price * 1.05:.4f} (+5%)")
+                
+                print(f"\n📉 Potential Bearish Targets:")
+                print(f"• 🎯 Conservative: ${current_price * 0.99:.4f} (-1%)")
+                print(f"• 🎯 Moderate: ${current_price * 0.98:.4f} (-2%)")
+                print(f"• 🎯 Aggressive: ${current_price * 0.95:.4f} (-5%)")
+                
+                # Add directional bias analysis with move specifics
+                print("\n=== 🎯 Directional Bias & Move Analysis ===")
+                bullish_points = 0
+                bearish_points = 0
+                
+                # RSI Analysis
+                if indicators['rsi'] > 50:
+                    bullish_points += 1
                 else:
-                    print("\nNo significant divergences detected in current market conditions.")
+                    bearish_points += 1
+                    
+                # MACD Analysis
+                if indicators['macd'] > indicators['macd_signal']:
+                    bullish_points += 1
+                else:
+                    bearish_points += 1
+                    
+                # Trend Direction
+                if indicators['trend_direction'] == "Uptrend":
+                    bullish_points += 2
+                elif indicators['trend_direction'] == "Downtrend":
+                    bearish_points += 2
+                    
+                # Volume Analysis
+                if volume['is_confirming'] and volume['price_change'] > 0:
+                    bullish_points += 1
+                elif volume['is_confirming'] and volume['price_change'] < 0:
+                    bearish_points += 1
+                    
+                # Price relative to Bollinger Bands
+                if current_price > indicators['bollinger_middle']:
+                    bullish_points += 1
+                else:
+                    bearish_points += 1
+                    
+                # Calculate confidence percentage
+                total_points = bullish_points + bearish_points
+                bullish_confidence = (bullish_points / total_points * 100) if total_points > 0 else 50
+                bearish_confidence = (bearish_points / total_points * 100) if total_points > 0 else 50
+                
+                # Calculate move specifics
+                atr = indicators.get('atr', (indicators['bollinger_upper'] - indicators['bollinger_lower']) / 4)
+                bb_width = indicators['bollinger_upper'] - indicators['bollinger_lower']
+                price_volatility = bb_width / indicators['bollinger_middle']
+                
+                # Define move characteristics
+                move_speed = "Rapid" if price_volatility > 0.03 else "Gradual"
+                move_strength = "Strong" if abs(indicators['macd']) > abs(indicators['macd_signal']) * 1.5 else "Moderate"
 
-            # Add Alerts Section to the output
-            print("\n====== 🔔 Market Alerts 🔔 ======")
-            alerts = analysis.get('alerts', {})
-            
-            if alerts.get('triggered_alerts'):
-                print("\n🚨 Triggered Alerts:")
-                for alert in alerts['triggered_alerts']:
-                    print(f"• [{alert['priority']}] {alert['type']}: {alert['message']}")
-                    print(f"  Time: {alert['timestamp']}")
-            
-            if alerts.get('auto_alerts'):
-                print("\n📢 Automatic Alerts:")
-                for alert in alerts['auto_alerts']:
-                    print(f"• [{alert['priority']}] {alert['type']}: {alert['message']}")
-                    print(f"  Time: {alert['timestamp']}")
-            
-            summary = alerts.get('alert_summary', {})
-            print("\n📊 Alert Summary:")
-            print(f"• Active Alerts: {summary.get('active_alerts', 0)}")
-            print(f"• Triggered Alerts: {summary.get('triggered_alerts', 0)}")
-            
-            print("\nAlert Distribution by Priority:")
-            for priority, count in summary.get('alerts_by_priority', {}).items():
-                print(f"• {priority}: {count}")
-            
-            print("\nAlert Distribution by Type:")
-            for alert_type, count in summary.get('alerts_by_type', {}).items():
-                print(f"• {alert_type}: {count}")
+                # Correlation Analysis
+                print("\n=== 📈 Market Correlation Analysis ===")
+                correlation_analysis = analysis['correlation_analysis']
+                print(f"📊 Average Correlation: {correlation_analysis['average_correlation']:.2f}")
+                print(f"🎯 Market Independence: {correlation_analysis['independence_score']:.2f}")
+                print("\nInterpretation:")
+                for insight, description in correlation_analysis['interpretation'].items():
+                    print(f"• {insight}: {description}")
+                print("\nCorrelation Details:")
+                for asset, details in correlation_analysis['correlations'].items():
+                    print(f"\n💱 {asset}:")
+                    if 'error' in details:
+                        print(f"❌ Error: {details['error']}")
+                    else:
+                        try:
+                            print(f"📊 Correlation Coefficient: {details['coefficient']:.2f}")
+                            print(f"🎯 Correlation Type: {details['type']}")
+                            print(f"📈 Price Movement: Current Asset vs. {asset}")
+                            print(f"• Current Asset: {details['price_movement']['current_asset']}")
+                            print(f"• {asset}: {details['price_movement']['correlated_asset']}")
+                            print(f"📅 Last Updated: {details['timestamp']}")
+                        except KeyError as e:
+                            print(f"❌ Error: Missing data - {str(e)}")
+                        except Exception as e:
+                            print(f"❌ Error: {str(e)}")        
+                
+                print("")
+                print("============== Move Analysis: ==============")
+                if bullish_points > bearish_points:
+                    print(f"BULLISH with {bullish_confidence:.1f}% confidence")
+                    print("\nMove Characteristics:")
+                    print(f"• Expected Move Type: {move_speed} {move_strength} Advance")
+                    print(f"• Momentum: {'Accelerating' if indicators['macd_histogram'] > 0 else 'Decelerating'}")
+                    print(f"• Volume Profile: {'Supporting' if volume['is_confirming'] else 'Lacking'}")
+                    
+                    print("\nPrice Targets:")
+                    print(f"• Initial Target: ${(current_price + atr):.4f} (+{(atr/current_price)*100:.1f}%)")
+                    print(f"• Secondary Target: ${indicators['bollinger_upper']:.4f} (+{((indicators['bollinger_upper']-current_price)/current_price)*100:.1f}%)")
+                    print(f"• Extended Target: ${(indicators['bollinger_upper'] + atr):.4f} (+{((indicators['bollinger_upper']+atr-current_price)/current_price)*100:.1f}%)")
+                    
+                    print("\nSupporting Factors:")
+                    if indicators['rsi'] > 50:
+                        print(f"• RSI showing upward momentum ({indicators['rsi']:.1f})")
+                    if indicators['macd'] > indicators['macd_signal']:
+                        print(f"• MACD bullish crossover (Spread: {(indicators['macd']-indicators['macd_signal']):.4f})")
+                    if indicators['trend_direction'] == "Uptrend":
+                        print("• Established uptrend with higher lows")
+                    if volume['is_confirming'] and volume['price_change'] > 0:
+                        print(f"• Volume increased by {volume['change']:.1f}% supporting price action")
+                    if current_price > indicators['bollinger_middle']:
+                        print("• Price trading above BB middle band showing strength")
+                        
+                elif bearish_points > bullish_points:
+                    print(f"BEARISH with {bearish_confidence:.1f}% confidence")
+                    print("\nMove Characteristics:")
+                    print(f"• Expected Move Type: {move_speed} {move_strength} Decline")
+                    print(f"• Momentum: {'Accelerating' if indicators['macd_histogram'] < 0 else 'Decelerating'}")
+                    print(f"• Volume Profile: {'Supporting' if volume['is_confirming'] else 'Lacking'}")
+                    
+                    print("\nPrice Targets:")
+                    print(f"• Initial Target: ${(current_price - atr):.4f} (-{(atr/current_price)*100:.1f}%)")
+                    print(f"• Secondary Target: ${indicators['bollinger_lower']:.4f} (-{((current_price-indicators['bollinger_lower'])/current_price)*100:.1f}%)")
+                    print(f"• Extended Target: ${(indicators['bollinger_lower'] - atr):.4f} (-{((current_price-(indicators['bollinger_lower']-atr))/current_price)*100:.1f}%)")
+                    
+                    print("\nSupporting Factors:")
+                    if indicators['rsi'] < 50:
+                        print(f"• RSI showing downward momentum ({indicators['rsi']:.1f})")
+                    if indicators['macd'] < indicators['macd_signal']:
+                        print(f"• MACD bearish crossover (Spread: {(indicators['macd_signal']-indicators['macd']):.4f})")
+                    if indicators['trend_direction'] == "Downtrend":
+                        print("• Established downtrend with lower highs")
+                    if volume['is_confirming'] and volume['price_change'] < 0:
+                        print(f"• Volume increased by {volume['change']:.1f}% supporting price action")
+                    if current_price < indicators['bollinger_middle']:
+                        print("• Price trading below BB middle band showing weakness")
+                else:
+                    print("NEUTRAL - No Clear Directional Bias")
+                    print("\nConsolidation Analysis:")
+                    print(f"• Price Range: ${(current_price - atr):.4f} to ${(current_price + atr):.4f}")
+                    print(f"• Volatility: {'High' if price_volatility > 0.03 else 'Low'} ({price_volatility*100:.1f}%)")
+                    print(f"• Volume Profile: {volume['trend']} on {volume['change']:.1f}% change")
+                    print("\nBreakout Levels:")
+                    print(f"• Bullish Breakout Above: ${indicators['bollinger_upper']:.4f}")
+                    print(f"• Bearish Breakdown Below: ${indicators['bollinger_lower']:.4f}")
+                    print("\nRecommendation:")
+                    print("• Consider waiting for stronger directional signals")
+                    print("• Monitor for breakout of recent trading range")
+                    print("• Prepare for potential volatility expansion")
 
-            # Add Order Book Analysis Section
-            print("\n====== 📚 Order Book Analysis 📚 ======")
-            if order_book['status'] == 'success':
-                print("\n=== 📊 Order Book Metrics ===")
-                metrics = order_book['metrics']
-                print(f"Bid/Ask Ratio: {metrics['bid_ask_ratio']:.2f}")
-                print(f"Spread: ${metrics['spread']:.4f} ({(metrics['spread']/order_book['current_price']*100):.3f}%)")
-                print(f"Market Depth Score: {metrics['depth_score']:.2f}")
+                # Add Volatility Regime Analysis Section
+                print("\n====== 📊 Volatility Regime Analysis 📊 ======")
+                vol_regime = analysis.get('volatility_regime', {})
+                if vol_regime:
+                    print(f"Current Regime: {vol_regime['regime']}")
+                    print(f"Confidence: {vol_regime['confidence']*100:.1f}%")
+                    print(f"\nDescription: {vol_regime['description']}")
+                    
+                    print("\nKey Metrics:")
+                    metrics = vol_regime.get('metrics', {})
+                    print(f"• Current Volatility: {metrics.get('current_volatility', 0)*100:.1f}%")
+                    print(f"• Long-term Volatility: {metrics.get('long_term_volatility', 0)*100:.1f}%")
+                    print(f"• Volatility of Volatility: {metrics.get('volatility_of_volatility', 0)*100:.1f}%")
+                    print(f"• Volatility Trend: {metrics.get('volatility_trend', 'Unknown')}")
+                    print(f"• Volatility Percentile: {metrics.get('volatility_percentile', 0)*100:.1f}%")
+                    
+                    print("\nTrading Implications:")
+                    for implication in vol_regime.get('implications', []):
+                        print(f"• {implication}")
+
+                # Add Liquidity Depth Analysis Section
+                print("\n====== 📊 Liquidity Depth Analysis 📊 ======")
+                liquidity_analysis = analysis.get('liquidity_analysis', {})
                 
-                print("\n=== 💪 Market Pressure ===")
-                print(f"Buy Pressure: {metrics['buy_pressure']:.2f}")
-                print(f"Sell Pressure: {metrics['sell_pressure']:.2f}")
-                print(f"Pressure Ratio: {metrics['pressure_ratio']:.2f}")
-                print(f"Imbalance Score: {metrics['imbalance_score']:.2f}")
+                if not liquidity_analysis:
+                    print("❌ No liquidity analysis data available")
+                elif liquidity_analysis.get('status') == 'success':
+                    print(f"Liquidity Score: {liquidity_analysis['liquidity_score']:.1f}%")
+                    print("\nMetrics:")
+                    metrics = liquidity_analysis.get('metrics', {})
+                    for metric, value in metrics.items():
+                        if isinstance(value, (int, float)):
+                            print(f"• {metric.replace('_', ' ').title()}: {value:.1f}%")
+                        else:
+                            print(f"• {metric.replace('_', ' ').title()}: {value}")
+                            
+                    print("\nVolume Profile:")
+                    for profile in liquidity_analysis.get('volume_profile', []):
+                        print(f"• Price Level: ${profile.get('price_level', 0):.4f}, "
+                              f"Volume: {profile.get('volume', 0)}, "
+                              f"Percentage: {profile.get('percentage', 0):.1f}%")
+                              
+                    print("\nLiquidity Clusters:")
+                    for cluster in liquidity_analysis.get('liquidity_clusters', []):
+                        price_range = cluster.get('price_range', (0, 0))
+                        print(f"• Price Range: ${price_range[0]:.4f} to ${price_range[1]:.4f}, "
+                              f"Total Volume: {cluster.get('total_volume', 0)}, "
+                              f"Strength: {cluster.get('strength', 0):.1f}%")
+                              
+                    print("\nLiquidity Gaps:")
+                    for gap in liquidity_analysis.get('liquidity_gaps', []):
+                        print(f"• Start Price: ${gap.get('start_price', 0):.4f}, "
+                              f"End Price: ${gap.get('end_price', 0):.4f}, "
+                              f"Size: {gap.get('size', 0):.1f}%")
+                              
+                    print("\nMarket Depth:")
+                    market_depth = liquidity_analysis.get('market_depth', {})
+                    print(f"• Buy Side Volume: {market_depth.get('buy_side_volume', 0)}")
+                    print(f"• Sell Side Volume: {market_depth.get('sell_side_volume', 0)}")
+                    print(f"• Imbalance Ratio: {market_depth.get('imbalance_ratio', 0):.2f} "
+                          f"({market_depth.get('interpretation', 'Unknown')})")
+                          
+                elif liquidity_analysis.get('status') == 'insufficient_data':
+                    print("⚠️ Insufficient data to analyze liquidity depth")
+                else:
+                    error_msg = liquidity_analysis.get('error', 'Unknown error occurred')
+                    print(f"❌ Error analyzing liquidity depth: {error_msg}")
+
+                # Enhanced Probability Analysis Section
+                print("\n====== 📊 Detailed Move Analysis 📊 ======")
+                prob = analysis['probability_analysis']
+                print(f"\n🎯 Overall Success Probability: {prob['total_probability']:.1f}%")
+                print(f"📊 Confidence Level: {prob['confidence_level']}")
                 
-                print("\n=== 🎯 Significant Price Levels ===")
-                print("\nSupport Levels:")
-                for level in order_book['significant_levels']['support']:
-                    print(f"• ${level['price']:.4f} (Strength: {level['strength']:.2f}x, Volume: {level['volume']:.2f})")
+                print("\n📈 Move Quality:")
+                move_quality = prob['move_quality']
+                print(f"• ⚡ Expected Speed: {move_quality['expected_speed']}")
+                print(f"• 📊 Expected Volatility: {move_quality['expected_volatility']}")
+                print(f"• 🎯 Continuation Probability: {move_quality['continuation_probability']}")
+                print(f"• ⚠️ Reversal Risk: {move_quality['reversal_risk']}")
                 
-                print("\nResistance Levels:")
-                for level in order_book['significant_levels']['resistance']:
-                    print(f"• ${level['price']:.4f} (Strength: {level['strength']:.2f}x, Volume: {level['volume']:.2f})")
+                print("\n📈 Move Characteristics:")
+                chars = prob['move_characteristics']
                 
-                print("\n=== 📈 Order Book Analysis ===")
-                analysis = order_book['analysis']
-                print(f"Market Pressure: {analysis['market_pressure']}")
-                print(f"Depth Quality: {analysis['depth_quality']}")
-                print(f"Spread Quality: {analysis['spread_quality']}")
-                print(f"Imbalance: {analysis['imbalance_interpretation']}")
+                print("\n📈 Trend Quality:")
+                trend = chars['trend_quality']
+                print(f"• 🎯 Strength: {trend['strength']}")
+                print(f"• 🎯 Duration: {trend['duration']}")
+                print(f"• 🎯 Momentum: {trend['momentum']}")
                 
-                # Add visual representation of order book depth
-                print("\n=== 📊 Order Book Depth Visualization ===")
-                max_bar_length = 50
-                max_volume = max(max(order_book['visualization']['bid_volumes']), 
-                               max(order_book['visualization']['ask_volumes']))
+                print("\n📈 Momentum Analysis:")
+                momentum = chars['momentum']
+                print(f"• 🎯 Condition: {momentum['condition']}")
+                print(f"• 🎯 Strength: {momentum['strength']:.2f}")
+                print(f"• 🎯 Divergence: {momentum['divergence']}")
                 
-                print("\nAsks (Sell Orders):")
-                for i in range(len(order_book['visualization']['ask_levels'])-1, -1, -1):
-                    price = order_book['visualization']['ask_levels'][i]
-                    volume = order_book['visualization']['ask_volumes'][i]
-                    bar_length = int((volume / max_volume) * max_bar_length)
-                    print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                print("\n📈 Volume Quality:")
+                volume = chars['volume_quality']
+                print(f"• 🎯 Trend: {volume['trend']}")
+                print(f" 🎯 Strength: {volume['strength']}")
+                print(f"• 🎯 Consistency: {volume['consistency']}")
+                print(f"• 🎯 Price Alignment: {volume['price_alignment']}")
                 
-                print("\nBids (Buy Orders):")
-                for i in range(len(order_book['visualization']['bid_levels'])):
-                    price = order_book['visualization']['bid_levels'][i]
-                    volume = order_book['visualization']['bid_volumes'][i]
-                    bar_length = int((volume / max_volume) * max_bar_length)
-                    print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                print("\n📈 Pattern Analysis:")
+                pattern = chars['pattern_analysis']
+                print(f"• 🎯 Type: {pattern['type']}, • 🎯 Reliability: {pattern['reliability']:.2f}, • 🎯 Completion: {pattern['completion']:.1f}%")
                 
-            elif order_book['status'] == 'insufficient_data':
-                print("⚠️ Insufficient data for order book analysis")
-            else:
-                print(f"❌ Error analyzing order book: {order_book.get('error', 'Unknown error')}")
+                print("\n📉 Failure Points:")
+                failure = prob['failure_points']
+                if failure['immediate_stop']:
+                    print(f"• 🛑 Immediate Stop: ${failure['immediate_stop']:.4f}")
+                if failure['trend_reversal_point']:
+                    print(f"• 🎯 Trend Reversal: ${failure['trend_reversal_point']:.4f}")
+                if failure['momentum_failure_level']:
+                    print(f"• 🎯 Momentum Failure: ${failure['momentum_failure_level']:.4f}")
+                
+                print("\n📈 Contributing Factors: " + ", ".join([f"• {factor}: {value:.1f}%" for factor, value in prob['factors']]))
+
+                # Add Divergence Analysis Section
+                print("\n====== 📊 Divergence Analysis 📊 ======")
+                divergences = analysis.get('divergence_analysis', {})
+                
+                if 'error' in divergences:
+                    print(f"❌ Error analyzing divergences: {divergences['error']}")
+                else:
+                    summary = divergences.get('summary', {})
+                    print(f"Total Divergences Found: {summary.get('total_divergences', 0)}")
+                    print(f"Primary Bias: {summary.get('primary_bias', 'None')}")
+                    print(f"Confidence: {summary.get('highest_confidence', 0)*100:.1f}%")
+                    
+                    if divergences.get('divergences'):
+                        print("\nDetailed Divergences:")
+                        for div in divergences['divergences']:
+                            print(f"\n🔍 {div['type']} ({div['indicator']})")
+                            print(f"├─ Strength: {div['strength']:.4f}")
+                            print(f"├─ Confidence: {div['confidence']*100:.1f}%")
+                            print(f"├─ Timeframe: {div.get('timeframe', 'Current')}")
+                            
+                            analysis = div.get('analysis', {})
+                            print(f"├─ Price Change: {analysis.get('price_change_percent', 0):.1f}%")
+                            print(f"├─ Significance: {analysis.get('significance', 'Unknown')}")
+                            print(f"├─ Suggested Action: {analysis.get('suggested_action', 'None')}")
+                            if 'stop_loss' in analysis:
+                                print(f"└─ Suggested Stop Loss: ${analysis['stop_loss']:.4f}")
+                    else:
+                        print("\nNo significant divergences detected in current market conditions.")
+
+                # Add Alerts Section to the output
+                print("\n====== 🔔 Market Alerts 🔔 ======")
+                alerts = analysis.get('alerts', {})
+                
+                if alerts.get('triggered_alerts'):
+                    print("\n🚨 Triggered Alerts:")
+                    for alert in alerts['triggered_alerts']:
+                        print(f"• [{alert['priority']}] {alert['type']}: {alert['message']}")
+                        print(f"  Time: {alert['timestamp']}")
+                
+                if alerts.get('auto_alerts'):
+                    print("\n📢 Automatic Alerts:")
+                    for alert in alerts['auto_alerts']:
+                        print(f"• [{alert['priority']}] {alert['type']}: {alert['message']}")
+                        print(f"  Time: {alert['timestamp']}")
+                
+                summary = alerts.get('alert_summary', {})
+                print("\n📊 Alert Summary:")
+                print(f"• Active Alerts: {summary.get('active_alerts', 0)}")
+                print(f"• Triggered Alerts: {summary.get('triggered_alerts', 0)}")
+                
+                print("\nAlert Distribution by Priority:")
+                for priority, count in summary.get('alerts_by_priority', {}).items():
+                    print(f"• {priority}: {count}")
+                
+                print("\nAlert Distribution by Type:")
+                for alert_type, count in summary.get('alerts_by_type', {}).items():
+                    print(f"• {alert_type}: {count}")
+
+                # Add Order Book Analysis Section
+                print("\n====== 📚 Order Book Analysis 📚 ======")
+                if order_book['status'] == 'success':
+                    print("\n=== 📊 Order Book Metrics ===")
+                    metrics = order_book['metrics']
+                    print(f"Bid/Ask Ratio: {metrics['bid_ask_ratio']:.2f}")
+                    print(f"Spread: ${metrics['spread']:.4f} ({(metrics['spread']/order_book['current_price']*100):.3f}%)")
+                    print(f"Market Depth Score: {metrics['depth_score']:.2f}")
+                    
+                    print("\n=== 💪 Market Pressure ===")
+                    print(f"Buy Pressure: {metrics['buy_pressure']:.2f}")
+                    print(f"Sell Pressure: {metrics['sell_pressure']:.2f}")
+                    print(f"Pressure Ratio: {metrics['pressure_ratio']:.2f}")
+                    print(f"Imbalance Score: {metrics['imbalance_score']:.2f}")
+                    
+                    print("\n=== 🎯 Significant Price Levels ===")
+                    print("\nSupport Levels:")
+                    for level in order_book['significant_levels']['support']:
+                        print(f"• ${level['price']:.4f} (Strength: {level['strength']:.2f}x, Volume: {level['volume']:.2f})")
+                    
+                    print("\nResistance Levels:")
+                    for level in order_book['significant_levels']['resistance']:
+                        print(f"• ${level['price']:.4f} (Strength: {level['strength']:.2f}x, Volume: {level['volume']:.2f})")
+                    
+                    print("\n=== 📈 Order Book Analysis ===")
+                    analysis = order_book['analysis']
+                    print(f"Market Pressure: {analysis['market_pressure']}")
+                    print(f"Depth Quality: {analysis['depth_quality']}")
+                    print(f"Spread Quality: {analysis['spread_quality']}")
+                    print(f"Imbalance: {analysis['imbalance_interpretation']}")
+                    
+                    # Add visual representation of order book depth
+                    print("\n=== 📊 Order Book Depth Visualization ===")
+                    max_bar_length = 50
+                    max_volume = max(max(order_book['visualization']['bid_volumes']), 
+                                   max(order_book['visualization']['ask_volumes']))
+                    
+                    print("\nAsks (Sell Orders):")
+                    for i in range(len(order_book['visualization']['ask_levels'])-1, -1, -1):
+                        price = order_book['visualization']['ask_levels'][i]
+                        volume = order_book['visualization']['ask_volumes'][i]
+                        bar_length = int((volume / max_volume) * max_bar_length)
+                        print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                    
+                    print("\nBids (Buy Orders):")
+                    for i in range(len(order_book['visualization']['bid_levels'])):
+                        price = order_book['visualization']['bid_levels'][i]
+                        volume = order_book['visualization']['bid_volumes'][i]
+                        bar_length = int((volume / max_volume) * max_bar_length)
+                        print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                    
+                elif order_book['status'] == 'insufficient_data':
+                    print("⚠️ Insufficient data for order book analysis")
+                else:
+                    print(f"❌ Error analyzing order book: {order_book.get('error', 'Unknown error')}")
 
         except KeyboardInterrupt:
             print("\n\n⛔ Analysis stopped by user")
