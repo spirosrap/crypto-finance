@@ -1552,7 +1552,7 @@ class MarketAnalyzer:
     def _determine_signal_type(self, signal_strength: float) -> SignalType:
         """
         Determine signal type based on signal strength.
-        More sensitive thresholds for more frequent signals.
+        More balanced thresholds for consistent signals.
         
         Args:
             signal_strength: Float value between -10 and 10
@@ -1560,19 +1560,19 @@ class MarketAnalyzer:
         Returns:
             SignalType: The determined signal type
         """
-        if signal_strength >= 4:  # Reduced from 7
+        if signal_strength >= 3.5:  # Reduced from 4
             return SignalType.STRONG_BUY
-        elif signal_strength >= 1.5:  # Reduced from 3
+        elif signal_strength >= 1.2:  # Reduced from 1.5
             return SignalType.BUY
-        elif signal_strength <= -4:  # Changed from -7
+        elif signal_strength <= -3.5:  # Changed from -4
             return SignalType.STRONG_SELL
-        elif signal_strength <= -1.5:  # Changed from -3
+        elif signal_strength <= -1.2:  # Changed from -1.5
             return SignalType.SELL
         else:
             # Check if there's a slight bias even in the "neutral" zone
-            if signal_strength > 0.5:  # Slight bullish bias
+            if signal_strength > 0.3:  # Reduced from 0.5 for more sensitivity
                 return SignalType.BUY
-            elif signal_strength < -0.5:  # Slight bearish bias
+            elif signal_strength < -0.3:  # Changed from -0.5 for more sensitivity
                 return SignalType.SELL
             return SignalType.HOLD
 
@@ -1652,10 +1652,10 @@ class MarketAnalyzer:
 
             # Market Condition Adjustment
             condition_multipliers = {
-                "Bull Market": 1.3,
-                "Bear Market": 0.7,
-                "Bullish": 1.2,
-                "Bearish": 0.8,
+                "Bull Market": 1.2,
+                "Bear Market": 0.8,
+                "Bullish": 1.1,
+                "Bearish": 0.9,
                 "Neutral": 1.0
             }
             

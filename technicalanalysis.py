@@ -639,22 +639,40 @@ class TechnicalAnalysis:
         signal_strength = 0
 
         weights = self.set_product_weights()
+        # Adjust weights for bear markets - maintain some signal strength while being conservative
+        if market_conditions in ["Bear Market", "Bearish"]:
+            weights['rsi'] = 1.5
+            weights['macd'] = 1.5
+            weights['bollinger'] = 1.0
+            weights['ma_crossover'] = 1.0            
+            weights['stochastic'] = 0.5
+            weights['trend'] = 0.5
+            weights['volume_profile'] = 1.0
+            weights['short_term_trend'] = 0.5
+            weights['long_term_trend'] = 1.0
+            weights['volume'] = 1.0            
+            weights['ichimoku'] = 0.5
+            weights['fibonacci'] = 0.5
+            weights['ml_model'] = 0.5
+            weights['bitcoin_prediction'] = 0.5
+
         # Adjust weights for bear markets
-        if market_conditions in [ "Bear Market", "Bearish"]:
-            weights['rsi'] = 1
-            weights['macd'] = 1 
-            weights['bollinger'] = 1
-            weights['ma_crossover'] = 1            
-            weights['stochastic'] = 0 #1
-            weights['trend'] = 0 #1
-            weights['volume_profile'] = 1
-            weights['short_term_trend'] = 0 #1
-            weights['long_term_trend'] = 1
-            weights['volume'] = 1            
-            weights['ichimoku'] = 0
-            weights['fibonacci'] = 0
-            weights['ml_model'] = 0
-            weights['bitcoin_prediction'] = 0
+        # if market_conditions in [ "Bear Market", "Bearish"]:
+        #     weights['rsi'] = 1
+        #     weights['macd'] = 1 
+        #     weights['bollinger'] = 1
+        #     weights['ma_crossover'] = 1            
+        #     weights['stochastic'] = 0 #1
+        #     weights['trend'] = 0 #1
+        #     weights['volume_profile'] = 1
+        #     weights['short_term_trend'] = 0 #1
+        #     weights['long_term_trend'] = 1
+        #     weights['volume'] = 1            
+        #     weights['ichimoku'] = 0
+        #     weights['fibonacci'] = 0
+        #     weights['ml_model'] = 0
+        #     weights['bitcoin_prediction'] = 0
+
 
         signal_strength += weights['rsi'] * self.evaluate_rsi_signal(rsi, volatility_std)
         signal_strength += weights['macd'] * self.evaluate_macd_signal(macd, signal, histogram)
@@ -931,8 +949,34 @@ class TechnicalAnalysis:
             # Calculate weighted signal
             signal_strength = self._calculate_weighted_signal(indicators, market_condition)
             
-            # Calculate confidence level (0-1)
-            confidence = min(abs(signal_strength) / 10, 1.0)
+            # Calculate base confidence from signal strength
+            base_confidence = min(abs(signal_strength) / 5.0, 1.0)
+            
+            # Adjust confidence based on market conditions
+            condition_multipliers = {
+                "Bull Market": 1.2,
+                "Bear Market": 0.9,
+                "Bullish": 1.1,
+                "Bearish": 0.9,
+                "Neutral": 1.0
+            }
+            confidence_multiplier = condition_multipliers.get(market_condition, 1.0)
+            
+            # Calculate final confidence
+            confidence = base_confidence * confidence_multiplier
+            
+            # Ensure minimum confidence unless truly neutral
+            if confidence < 0.1 and abs(signal_strength) > 0.1:
+                confidence = 0.1
+            
+            # Add trend confirmation bonus
+            if len(self.signal_history) >= self.trend_confirmation_period:
+                recent_signals = [s['strength'] for s in self.signal_history]
+                
+                # Check if all recent signals are in the same direction
+                if all(s > 0 for s in recent_signals) or all(s < 0 for s in recent_signals):
+                    # Trend is confirmed - strengthen signal
+                    confidence = min(confidence * 1.2, 1.0)
             
             # Determine signal type
             signal_type = self._determine_signal_type(signal_strength)
@@ -946,9 +990,10 @@ class TechnicalAnalysis:
             
         except Exception as e:
             self.logger.error(f"Error generating combined signal: {str(e)}")
+            # Return a low confidence neutral signal instead of zero confidence
             return SignalResult(
                 signal_type=SignalType.HOLD,
-                confidence=0.0,
+                confidence=0.1,
                 indicators={},
                 market_condition=MarketCondition.NEUTRAL
             )
@@ -957,24 +1002,62 @@ class TechnicalAnalysis:
     def _calculate_all_indicators(self, candles: List[Dict]) -> Dict[str, float]:
         """Calculate all technical indicators."""
         try:
+            # Get current price for normalization
+            current_price = float(candles[-1]['close'])
+            
+            # Calculate RSI
             rsi = self.compute_rsi(self.product_id, candles)
+            if np.isnan(rsi):
+                rsi = 50.0  # Neutral value if calculation fails
+            
+            # Calculate MACD
             macd, signal, histogram = self.compute_macd(self.product_id, candles)
+            if np.isnan(macd) or np.isnan(signal) or np.isnan(histogram):
+                macd, signal, histogram = 0.0, 0.0, 0.0
+            
+            # Calculate Bollinger signal
             bollinger_signal = self.evaluate_bollinger_signal(candles)
-            adx_signal = self.evaluate_adx_signal(candles)
+            
+            # Calculate ADX and trend
+            adx, trend_direction = self.get_trend_strength(candles)
+            adx_signal = 1.0 if trend_direction == "Uptrend" and adx > 25 else \
+                        -1.0 if trend_direction == "Downtrend" and adx > 25 else 0.0
+            
+            # Calculate MA crossover
             ma_signal = self.evaluate_ma_crossover_signal(candles)
             
-            return {
-                'rsi': rsi,
-                'macd': macd,
-                'macd_signal': signal,
-                'macd_histogram': histogram,
-                'bollinger': bollinger_signal,
-                'adx': adx_signal,
-                'ma_crossover': ma_signal
+            # Create indicators dictionary with all values
+            indicators = {
+                'rsi': float(rsi),
+                'macd': float(macd),
+                'macd_signal': float(signal),
+                'macd_histogram': float(histogram),
+                'bollinger': float(bollinger_signal),
+                'adx': float(adx_signal),
+                'ma_crossover': float(ma_signal),
+                'current_price': current_price,
+                'trend_direction': trend_direction
             }
+            
+            # Log indicator values for debugging
+            self.logger.debug(f"Calculated indicators: {indicators}")
+            
+            return indicators
+            
         except Exception as e:
             self.logger.error(f"Error calculating indicators: {str(e)}")
-            return {}
+            # Return neutral values instead of empty dict
+            return {
+                'rsi': 50.0,
+                'macd': 0.0,
+                'macd_signal': 0.0,
+                'macd_histogram': 0.0,
+                'bollinger': 0.0,
+                'adx': 0.0,
+                'ma_crossover': 0.0,
+                'current_price': float(candles[-1]['close']) if candles else 0.0,
+                'trend_direction': "Unknown"
+            }
 
     @contextmanager
     def performance_monitor(self, operation_name: str):
@@ -1174,7 +1257,7 @@ class TechnicalAnalysis:
     def _calculate_weighted_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
         """Calculate weighted signal with stability checks."""
         try:
-            # Calculate base signal (existing code)
+            # Calculate base signal
             signal_strength = self._calculate_base_signal(indicators, market_condition)
             
             # Get current time
@@ -1187,10 +1270,10 @@ class TechnicalAnalysis:
                 
                 # If not enough time has passed, bias towards previous signal
                 if time_since_last_signal < (self.min_signal_duration * self.get_candle_duration()):
-                    # Bias towards previous signal
+                    # Bias towards previous signal but don't completely negate the new signal
                     if (signal_strength > 0 and self.last_signal < 0) or (signal_strength < 0 and self.last_signal > 0):
-                        # Potential signal flip - require stronger confirmation
-                        signal_strength *= 0.5  # Reduce strength of new opposing signal
+                        # Average with previous signal instead of reducing by half
+                        signal_strength = (signal_strength + self.last_signal) / 2
                         
             # Add to signal history
             self.signal_history.append({
@@ -1209,19 +1292,28 @@ class TechnicalAnalysis:
                 if all(s > 0 for s in recent_signals) or all(s < 0 for s in recent_signals):
                     # Trend is confirmed - strengthen signal
                     signal_strength *= 1.2
-                else:
-                    # Mixed signals - reduce strength
-                    signal_strength *= 0.8
+                elif any(s > 0 for s in recent_signals) and any(s < 0 for s in recent_signals):
+                    # Mixed signals - reduce strength less aggressively
+                    signal_strength *= 0.9
             
             # Update last signal tracking
             self.last_signal = signal_strength
             self.last_signal_time = current_time
             
+            # Ensure signal strength is not zero unless truly neutral
+            if abs(signal_strength) < 0.1:
+                # Check if there's any directional bias
+                if any(s['strength'] > 0 for s in self.signal_history[-3:]):
+                    signal_strength = 0.2
+                elif any(s['strength'] < 0 for s in self.signal_history[-3:]):
+                    signal_strength = -0.2
+            
             return signal_strength
             
         except Exception as e:
             self.logger.error(f"Error calculating weighted signal: {str(e)}")
-            return 0.0
+            # Return a small non-zero value instead of 0
+            return 0.1
 
     def get_candle_duration(self) -> int:
         """Get candle duration in seconds."""
@@ -1238,18 +1330,85 @@ class TechnicalAnalysis:
         return durations.get(self.candle_interval, 3600)
 
     def _calculate_base_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
-        """Calculate the base signal without stability checks."""
-        # Move the original signal calculation logic here
-        weights = self.set_product_weights()
-        signal_strength = 0.0
-        
-        # ... (existing indicator calculations) ...
-        
-        return signal_strength
+        """Calculate the base signal from technical indicators."""
+        try:
+            signal_strength = 0.0
+            indicator_count = 0
+            
+            # RSI Signal (-1 to 1)
+            if 'rsi' in indicators:
+                rsi = indicators['rsi']
+                if rsi > 70:
+                    signal_strength -= 1.0
+                elif rsi < 30:
+                    signal_strength += 1.0
+                else:
+                    signal_strength += (rsi - 50) / 20  # Normalized between -1 and 1
+                indicator_count += 1
+
+            # MACD Signal (-1 to 1)
+            if all(k in indicators for k in ['macd', 'macd_signal', 'macd_histogram']):
+                macd = indicators['macd']
+                signal = indicators['macd_signal']
+                histogram = indicators['macd_histogram']
+                
+                # Normalize histogram to -1 to 1 range
+                if abs(macd) > 0:
+                    macd_strength = histogram / (abs(macd) + 0.00001)
+                    macd_strength = max(min(macd_strength, 1), -1)
+                    signal_strength += macd_strength
+                    indicator_count += 1
+
+            # Bollinger Bands Signal (-1 to 1)
+            if 'bollinger' in indicators:
+                signal_strength += indicators['bollinger']
+                indicator_count += 1
+
+            # ADX Signal (-1 to 1)
+            if 'adx' in indicators:
+                signal_strength += indicators['adx']
+                indicator_count += 1
+
+            # Moving Average Crossover Signal (-1 to 1)
+            if 'ma_crossover' in indicators:
+                signal_strength += indicators['ma_crossover']
+                indicator_count += 1
+
+            # Average the signals if we have any
+            if indicator_count > 0:
+                signal_strength = signal_strength / indicator_count
+            
+            # Apply market condition multiplier
+            condition_multipliers = {
+                "Bull Market": 1.2,
+                "Bear Market": 0.8,
+                "Bullish": 1.1,
+                "Bearish": 0.9,
+                "Neutral": 1.0
+            }
+            multiplier = condition_multipliers.get(market_condition, 1.0)
+            signal_strength *= multiplier
+
+            # Scale to final range (-10 to 10)
+            signal_strength *= 5.0  # Scale from -1:1 to -5:5
+            
+            # Add minimum signal strength if there's a clear direction
+            if 0 < signal_strength < 0.2:
+                signal_strength = 0.2
+            elif -0.2 < signal_strength < 0:
+                signal_strength = -0.2
+
+            self.logger.debug(f"Base signal strength calculated: {signal_strength}")
+            return signal_strength
+
+        except Exception as e:
+            self.logger.error(f"Error calculating base signal: {str(e)}")
+            return 0.1  # Return small non-zero value instead of 0
 
     def _determine_signal_type(self, signal_strength: float) -> SignalType:
         """
         Determine signal type based on signal strength.
+        More balanced thresholds for consistent signals.
         
         Args:
             signal_strength: Float value between -10 and 10
@@ -1257,15 +1416,21 @@ class TechnicalAnalysis:
         Returns:
             SignalType: The determined signal type
         """
-        if signal_strength >= 7:
+        # Use more sensitive thresholds
+        if signal_strength >= 3.0:  # Reduced from 7
             return SignalType.STRONG_BUY
-        elif signal_strength >= 3:
+        elif signal_strength >= 1.0:  # Reduced from 3
             return SignalType.BUY
-        elif signal_strength <= -7:
+        elif signal_strength <= -3.0:  # Changed from -7
             return SignalType.STRONG_SELL
-        elif signal_strength <= -3:
+        elif signal_strength <= -1.0:  # Changed from -3
             return SignalType.SELL
         else:
+            # More sensitive to slight biases
+            if signal_strength > 0.2:  # Reduced from 0.5
+                return SignalType.BUY
+            elif signal_strength < -0.2:  # Changed from -0.5
+                return SignalType.SELL
             return SignalType.HOLD
 
     def detect_consolidation(self, candles: List[Dict], window: int = 20, threshold: float = 0.02) -> Dict[str, Union[bool, str]]:
