@@ -3146,6 +3146,170 @@ class MarketAnalyzer:
             self.logger.error(f"Error calculating pattern completion: {str(e)}")
             return 0.0
 
+    def visualize_order_book(self) -> Dict:
+        """
+        Create a detailed visualization and analysis of the order book.
+        Returns a dictionary containing order book metrics and visualization data.
+        """
+        try:
+            if not self._current_candles or len(self._current_candles) < 20:
+                return {
+                    'status': 'insufficient_data',
+                    'visualization': {},
+                    'metrics': {}
+                }
+            
+            # Get current price and volume data
+            current_price = float(self._current_candles[-1]['close'])
+            volumes = np.array([c['volume'] for c in self._current_candles])
+            highs = np.array([c['high'] for c in self._current_candles])
+            lows = np.array([c['low'] for c in self._current_candles])
+            
+            # Calculate actual spread from recent high/low data
+            recent_spread = np.mean([h - l for h, l in zip(highs[-5:], lows[-5:])])
+            
+            # Calculate price levels with a more realistic spread
+            price_range = current_price * 0.01  # 1% range
+            spread_adjustment = max(recent_spread, current_price * 0.0001)  # At least 0.01% spread
+            
+            # Adjust bid and ask levels to account for spread
+            bid_levels = np.linspace(current_price - price_range, current_price - spread_adjustment/2, 20)
+            ask_levels = np.linspace(current_price + spread_adjustment/2, current_price + price_range, 20)
+            
+            # Calculate cumulative volume at each level
+            bid_volumes = []
+            ask_volumes = []
+            
+            for level in bid_levels:
+                mask = (np.array([c['low'] for c in self._current_candles]) >= level * 0.9995) & \
+                       (np.array([c['low'] for c in self._current_candles]) <= level * 1.0005)
+                bid_volumes.append(np.sum(volumes[mask]))
+            
+            for level in ask_levels:
+                mask = (np.array([c['high'] for c in self._current_candles]) >= level * 0.9995) & \
+                       (np.array([c['high'] for c in self._current_candles]) <= level * 1.0005)
+                ask_volumes.append(np.sum(volumes[mask]))
+            
+            # Rest of the code remains the same...
+            # Calculate cumulative volumes
+            cum_bid_volumes = np.cumsum(bid_volumes)
+            cum_ask_volumes = np.cumsum(ask_volumes)
+            
+            # Calculate volume thresholds more dynamically
+            bid_volume_mean = np.mean(bid_volumes)
+            ask_volume_mean = np.mean(ask_volumes)
+            bid_volume_std = np.std(bid_volumes)
+            ask_volume_std = np.std(ask_volumes)
+            
+            # Lower threshold for significant levels (now 1.2 standard deviations above mean)
+            bid_threshold = bid_volume_mean + (1.2 * bid_volume_std)
+            ask_threshold = ask_volume_mean + (1.2 * ask_volume_std)
+            
+            # Identify significant levels with more sensitivity
+            significant_bids = []
+            significant_asks = []
+            
+            # Find local maxima in bid volumes
+            for i in range(1, len(bid_volumes)-1):
+                if bid_volumes[i] > bid_volumes[i-1] and bid_volumes[i] > bid_volumes[i+1] and bid_volumes[i] > bid_threshold:
+                    significant_bids.append({
+                        'price': bid_levels[i],
+                        'volume': bid_volumes[i],
+                        'cumulative_volume': cum_bid_volumes[i],
+                        'strength': (bid_volumes[i] - bid_volume_mean) / bid_volume_std
+                    })
+            
+            # Find local maxima in ask volumes
+            for i in range(1, len(ask_volumes)-1):
+                if ask_volumes[i] > ask_volumes[i-1] and ask_volumes[i] > ask_volumes[i+1] and ask_volumes[i] > ask_threshold:
+                    significant_asks.append({
+                        'price': ask_levels[i],
+                        'volume': ask_volumes[i],
+                        'cumulative_volume': cum_ask_volumes[i],
+                        'strength': (ask_volumes[i] - ask_volume_mean) / ask_volume_std
+                    })
+            
+            # Ensure at least some levels are identified
+            if not significant_bids:
+                max_bid_idx = np.argmax(bid_volumes)
+                significant_bids.append({
+                    'price': bid_levels[max_bid_idx],
+                    'volume': bid_volumes[max_bid_idx],
+                    'cumulative_volume': cum_bid_volumes[max_bid_idx],
+                    'strength': (bid_volumes[max_bid_idx] - bid_volume_mean) / bid_volume_std
+                })
+            
+            if not significant_asks:
+                max_ask_idx = np.argmax(ask_volumes)
+                significant_asks.append({
+                    'price': ask_levels[max_ask_idx],
+                    'volume': ask_volumes[max_ask_idx],
+                    'cumulative_volume': cum_ask_volumes[max_ask_idx],
+                    'strength': (ask_volumes[max_ask_idx] - ask_volume_mean) / ask_volume_std
+                })
+            
+            # Calculate order book metrics
+            bid_ask_ratio = np.sum(bid_volumes) / np.sum(ask_volumes) if np.sum(ask_volumes) > 0 else 0
+            spread = min(ask_levels) - max(bid_levels)  # Fixed spread calculation
+            depth_score = (np.sum(cum_bid_volumes) + np.sum(cum_ask_volumes)) / (len(bid_levels) + len(ask_levels))
+            
+            # Calculate market pressure
+            buy_pressure = np.sum(bid_volumes[-5:])
+            sell_pressure = np.sum(ask_volumes[:5])
+            pressure_ratio = buy_pressure / sell_pressure if sell_pressure > 0 else float('inf')
+            
+            # Sort significant levels by strength
+            significant_bids.sort(key=lambda x: x['strength'], reverse=True)
+            significant_asks.sort(key=lambda x: x['strength'], reverse=True)
+            
+            # Calculate order book imbalance score (-1 to 1)
+            imbalance_score = (bid_ask_ratio - 1) / (bid_ask_ratio + 1)
+            
+            return {
+                'status': 'success',
+                'current_price': current_price,
+                'visualization': {
+                    'bid_levels': bid_levels.tolist(),
+                    'ask_levels': ask_levels.tolist(),
+                    'bid_volumes': bid_volumes,
+                    'ask_volumes': ask_volumes,
+                    'cumulative_bid_volumes': cum_bid_volumes.tolist(),
+                    'cumulative_ask_volumes': cum_ask_volumes.tolist()
+                },
+                'metrics': {
+                    'bid_ask_ratio': bid_ask_ratio,
+                    'spread': spread,
+                    'depth_score': depth_score,
+                    'buy_pressure': buy_pressure,
+                    'sell_pressure': sell_pressure,
+                    'pressure_ratio': pressure_ratio,
+                    'imbalance_score': imbalance_score
+                },
+                'significant_levels': {
+                    'support': significant_bids,
+                    'resistance': significant_asks
+                },
+                'analysis': {
+                    'market_pressure': 'Buy' if pressure_ratio > 1.2 else 'Sell' if pressure_ratio < 0.8 else 'Neutral',
+                    'depth_quality': 'High' if depth_score > np.mean(volumes) else 'Low',
+                    'spread_quality': 'Tight' if spread < current_price * 0.001 else 'Wide',
+                    'imbalance_interpretation': 'Heavy Buy' if imbalance_score > 0.3 else
+                                             'Heavy Sell' if imbalance_score < -0.3 else
+                                             'Moderate Buy' if imbalance_score > 0.1 else
+                                             'Moderate Sell' if imbalance_score < -0.1 else
+                                             'Balanced'
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error visualizing order book: {str(e)}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'visualization': {},
+                'metrics': {}
+            }
+
 class AlertType(Enum):
     PRICE = "Price Alert"
     TECHNICAL = "Technical Alert"
@@ -3536,6 +3700,9 @@ def main():
         try:
             # Single analysis run
             analysis = analyzer.get_market_signal()
+            
+            # Get order book visualization
+            order_book = analyzer.visualize_order_book()
             
             # Enhanced formatted output
             print("\n====== 📊 Comprehensive Market Analysis Report 📊 ======")
@@ -4041,6 +4208,62 @@ def main():
             print("\nAlert Distribution by Type:")
             for alert_type, count in summary.get('alerts_by_type', {}).items():
                 print(f"• {alert_type}: {count}")
+
+            # Add Order Book Analysis Section
+            print("\n====== 📚 Order Book Analysis 📚 ======")
+            if order_book['status'] == 'success':
+                print("\n=== 📊 Order Book Metrics ===")
+                metrics = order_book['metrics']
+                print(f"Bid/Ask Ratio: {metrics['bid_ask_ratio']:.2f}")
+                print(f"Spread: ${metrics['spread']:.4f} ({(metrics['spread']/order_book['current_price']*100):.3f}%)")
+                print(f"Market Depth Score: {metrics['depth_score']:.2f}")
+                
+                print("\n=== 💪 Market Pressure ===")
+                print(f"Buy Pressure: {metrics['buy_pressure']:.2f}")
+                print(f"Sell Pressure: {metrics['sell_pressure']:.2f}")
+                print(f"Pressure Ratio: {metrics['pressure_ratio']:.2f}")
+                print(f"Imbalance Score: {metrics['imbalance_score']:.2f}")
+                
+                print("\n=== 🎯 Significant Price Levels ===")
+                print("\nSupport Levels:")
+                for level in order_book['significant_levels']['support']:
+                    print(f"• ${level['price']:.4f} (Strength: {level['strength']:.2f}x, Volume: {level['volume']:.2f})")
+                
+                print("\nResistance Levels:")
+                for level in order_book['significant_levels']['resistance']:
+                    print(f"• ${level['price']:.4f} (Strength: {level['strength']:.2f}x, Volume: {level['volume']:.2f})")
+                
+                print("\n=== 📈 Order Book Analysis ===")
+                analysis = order_book['analysis']
+                print(f"Market Pressure: {analysis['market_pressure']}")
+                print(f"Depth Quality: {analysis['depth_quality']}")
+                print(f"Spread Quality: {analysis['spread_quality']}")
+                print(f"Imbalance: {analysis['imbalance_interpretation']}")
+                
+                # Add visual representation of order book depth
+                print("\n=== 📊 Order Book Depth Visualization ===")
+                max_bar_length = 50
+                max_volume = max(max(order_book['visualization']['bid_volumes']), 
+                               max(order_book['visualization']['ask_volumes']))
+                
+                print("\nAsks (Sell Orders):")
+                for i in range(len(order_book['visualization']['ask_levels'])-1, -1, -1):
+                    price = order_book['visualization']['ask_levels'][i]
+                    volume = order_book['visualization']['ask_volumes'][i]
+                    bar_length = int((volume / max_volume) * max_bar_length)
+                    print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                
+                print("\nBids (Buy Orders):")
+                for i in range(len(order_book['visualization']['bid_levels'])):
+                    price = order_book['visualization']['bid_levels'][i]
+                    volume = order_book['visualization']['bid_volumes'][i]
+                    bar_length = int((volume / max_volume) * max_bar_length)
+                    print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                
+            elif order_book['status'] == 'insufficient_data':
+                print("⚠️ Insufficient data for order book analysis")
+            else:
+                print(f"❌ Error analyzing order book: {order_book.get('error', 'Unknown error')}")
 
         except KeyboardInterrupt:
             print("\n\n⛔ Analysis stopped by user")
