@@ -620,8 +620,12 @@ class MarketAnalyzer:
             price_momentum = (prices[-1] - prices[-20]) / prices[-20] if len(prices) >= 20 else 0
             volume_trend = (volumes[-5:].mean() - volumes[-10:-5].mean()) / volumes[-10:-5].mean() if len(volumes) >= 10 else 0
             
-            # Get market condition from technical analysis
-            market_condition = self.technical_analysis.get_market_condition()
+            # Determine market condition based on price action and indicators
+            market_condition = 'Neutral'
+            if prices[-1] > sma20 > sma50 and price_momentum > 0:
+                market_condition = 'Bull Market'
+            elif prices[-1] < sma20 < sma50 and price_momentum < 0:
+                market_condition = 'Bear Market'
             
             # Align phase detection with market condition
             phase = 'Unknown'

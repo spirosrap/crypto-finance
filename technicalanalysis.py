@@ -1664,6 +1664,45 @@ class TechnicalAnalysis:
                 'price_change': 0.0
             }
 
+    def get_market_condition(self) -> str:
+        """
+        Determines the overall market condition based on multiple technical indicators.
+        
+        Returns:
+            str: Market condition ('Bull Market', 'Bear Market', 'Neutral', 'Bullish', or 'Bearish')
+        """
+        try:
+            if not self.candles or len(self.candles) < 50:
+                return 'Neutral'
+            
+            prices = np.array([c['close'] for c in self.candles])
+            
+            # Calculate key moving averages
+            sma20 = np.mean(prices[-20:])
+            sma50 = np.mean(prices[-50:])
+            
+            # Calculate momentum
+            momentum = (prices[-1] - prices[-20]) / prices[-20] if len(prices) >= 20 else 0
+            
+            # Get RSI for additional confirmation
+            rsi = self.compute_rsi(self.product_id, self.candles)
+            
+            # Determine market condition
+            if prices[-1] > sma20 > sma50 and momentum > 0 and rsi > 60:
+                return 'Bull Market'
+            elif prices[-1] > sma20 and momentum > 0 and rsi > 50:
+                return 'Bullish'
+            elif prices[-1] < sma20 < sma50 and momentum < 0 and rsi < 40:
+                return 'Bear Market'
+            elif prices[-1] < sma20 and momentum < 0 and rsi < 50:
+                return 'Bearish'
+            else:
+                return 'Neutral'
+                
+        except Exception as e:
+            self.logger.error(f"Error in get_market_condition: {str(e)}")
+            return 'Neutral'
+
 # ... (any additional classes or functions)
 
 def cache_result(ttl_seconds: int = 300):
