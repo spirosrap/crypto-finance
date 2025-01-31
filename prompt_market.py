@@ -96,7 +96,7 @@ def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use
 def validate_inputs(product_id: str, granularity: str) -> bool:
     """Validate product ID and granularity parameters."""
     valid_products = ['BTC-USDC', 'ETH-USDC', "DOGE-USDC"]  # Add more as needed
-    valid_granularities = ['ONE_MINUTE', 'FIVE_MINUTES', 'ONE_HOUR', 'ONE_DAY']
+    valid_granularities = ['ONE_MINUTE', 'FIVE_MINUTES', 'FIFTEEN_MINUTE','ONE_HOUR', 'ONE_DAY']
     
     if product_id not in valid_products:
         logging.error(f"Invalid product ID: {product_id}")

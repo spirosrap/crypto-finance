@@ -3624,7 +3624,7 @@ def parse_arguments():
         '--granularity',
         type=str,
         choices=VALID_GRANULARITIES,
-        default='FIFTEEN_MINUTE',
+        default='ONE_HOUR',
         help='Candle interval granularity'
     )
     
