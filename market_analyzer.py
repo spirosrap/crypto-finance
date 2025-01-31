@@ -2884,7 +2884,63 @@ class MarketAnalyzer:
             Dict containing detected patterns and their confidence levels
         """
         try:
-            df = pd.DataFrame(self._format_candles(candles))
+            # First check if we have any candle data
+            if not candles:
+                self.logger.warning("No candle data provided to detect_manipulation_patterns")
+                return {
+                    'pump_and_dump': False,
+                    'wash_trading': False,
+                    'spoofing': False,
+                    'confidence': 0.0,
+                    'details': [],
+                    'market_condition': 'Normal',
+                    'error': 'No candle data provided'
+                }
+
+            # Log incoming data for debugging
+            self.logger.debug(f"Received {len(candles)} candles")
+            if candles:
+                self.logger.debug(f"First candle keys: {candles[0].keys()}")
+
+            formatted_candles = self._format_candles(candles)
+            if not formatted_candles:
+                self.logger.warning("Candle formatting resulted in empty data")
+                return {
+                    'pump_and_dump': False,
+                    'wash_trading': False,
+                    'spoofing': False,
+                    'confidence': 0.0,
+                    'details': [],
+                    'market_condition': 'Normal',
+                    'error': 'Candle formatting failed'
+                }
+
+            df = pd.DataFrame(formatted_candles)
+            
+            if len(df) == 0:
+                self.logger.warning("DataFrame is empty after formatting")
+                return {
+                    'pump_and_dump': False,
+                    'wash_trading': False,
+                    'spoofing': False,
+                    'confidence': 0.0,
+                    'details': [],
+                    'market_condition': 'Normal',
+                    'error': 'Empty DataFrame'
+                }
+            
+            if 'volume' not in df.columns:
+                self.logger.warning(f"Volume data not available in candles. Available columns: {df.columns.tolist()}")
+                return {
+                    'pump_and_dump': False,
+                    'wash_trading': False,
+                    'spoofing': False,
+                    'confidence': 0.0,
+                    'details': [],
+                    'market_condition': 'Normal',
+                    'error': 'Missing volume data'
+                }
+                
             patterns = {
                 'pump_and_dump': False,
                 'wash_trading': False,
@@ -2935,7 +2991,15 @@ class MarketAnalyzer:
             
         except Exception as e:
             self.logger.error(f"Error in detect_manipulation_patterns: {str(e)}")
-            return self._generate_error_response()
+            return {
+                'pump_and_dump': False,
+                'wash_trading': False,
+                'spoofing': False,
+                'confidence': 0.0,
+                'details': [],
+                'market_condition': 'Normal',
+                'error': str(e)
+            }
 
     def _is_head_and_shoulders(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
         """Detect head and shoulders pattern."""
