@@ -152,8 +152,10 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     SYSTEM_PROMPT = (
         "Reply only with \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>\" or "
         "\"SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. "
-        "Probability of success: <PROBABILITY>. Suggest HOLD only when there's a strong probability for reversal. Report R/R ratio."
+        "Probability of success: <PROBABILITY>. R/R ratio: <R/R_RATIO>."
     )
+
+    #Removed: Suggest HOLD only when there's a strong probability for reversal.
     
     try:
         # Simplified model selection
@@ -229,7 +231,7 @@ def format_output(recommendation: str, analysis_result: Dict, reasoning: Optiona
 
     if reasoning:
         print(f"\n{COLORS['yellow']}====== 🧠 Reasoning ======{COLORS['end']}")
-        print(' '.join(reasoning.split()[:120]) + '...')  # Add ellipsis for truncation
+        print(' '.join(reasoning.split()[:80]) + '...')  # Add ellipsis for truncation
 
     if 'data' in analysis_result:
         try:
