@@ -594,8 +594,20 @@ class MarketAnalyzer:
         """Analyze market cycles and identify current phase."""
         try:
             if not self._current_candles or len(self._current_candles) < 50:
-                return {'phase': 'Unknown', 'confidence': 0.0}
-                
+                return {
+                    'status': 'insufficient_data',
+                    'phase': 'Unknown',
+                    'confidence': 0.0,
+                    'metrics': {
+                        'price_trend': 'Unknown',
+                        'momentum': 0,
+                        'volume_trend': 0,
+                        'market_condition': 'Unknown'
+                    },
+                    'cycle_history': []
+                }
+            
+            # Extract price and volume data
             prices = np.array([c['close'] for c in self._current_candles])
             volumes = np.array([c['volume'] for c in self._current_candles])
             
@@ -604,29 +616,39 @@ class MarketAnalyzer:
             sma50 = np.mean(prices[-50:])
             vol_sma20 = np.mean(volumes[-20:])
             
-            # Calculate momentum and volatility
-            momentum = self.calculate_momentum_score(self._current_candles)
-            volatility = np.std(np.diff(np.log(prices[-20:])))
+            # Calculate momentum and volume trend
+            price_momentum = (prices[-1] - prices[-20]) / prices[-20] if len(prices) >= 20 else 0
+            volume_trend = (volumes[-5:].mean() - volumes[-10:-5].mean()) / volumes[-10:-5].mean() if len(volumes) >= 10 else 0
             
-            # Identify cycle phase
+            # Get market condition from technical analysis
+            market_condition = self.technical_analysis.get_market_condition()
+            
+            # Align phase detection with market condition
             phase = 'Unknown'
             confidence = 0.0
             
-            if prices[-1] > sma20 > sma50:  # Uptrend
-                if volumes[-1] > vol_sma20 and momentum['total_score'] > 50:
+            if market_condition in ['Bull Market', 'Bullish']:
+                if prices[-1] > sma20 > sma50 and volume_trend > 0:
                     phase = 'Markup'
-                    confidence = min((momentum['total_score'] / 100) * (volumes[-1] / vol_sma20), 1.0)
+                    confidence = 0.8
                 else:
                     phase = 'Accumulation'
                     confidence = 0.7
-            else:  # Downtrend
-                if volumes[-1] > vol_sma20 and momentum['total_score'] < -50:
+            elif market_condition in ['Bear Market', 'Bearish']:
+                if prices[-1] < sma20 < sma50 and volume_trend < 0:
                     phase = 'Markdown'
-                    confidence = min(abs(momentum['total_score'] / 100) * (volumes[-1] / vol_sma20), 1.0)
+                    confidence = 0.8
                 else:
                     phase = 'Distribution'
                     confidence = 0.7
-            
+            else:  # Neutral market
+                # Determine if we're in accumulation or distribution based on price action
+                if prices[-1] > sma50:
+                    phase = 'Accumulation' if volume_trend > 0 else 'Distribution'
+                else:
+                    phase = 'Distribution' if volume_trend < 0 else 'Accumulation'
+                confidence = 0.6
+
             # Update cycle tracking
             current_time = datetime.now(UTC)
             if self.cycle_phases[phase.lower()]['start'] is None:
@@ -642,22 +664,42 @@ class MarketAnalyzer:
                         'end': current_time,
                         'duration': (current_time - self.cycle_phases[p]['start']).total_seconds() / 3600  # hours
                     })
-            
+
+            # Calculate additional metrics
+            metrics = {
+                'price_trend': 'Bullish' if prices[-1] > sma20 else 'Bearish',
+                'momentum': price_momentum,
+                'volume_trend': volume_trend,
+                'market_condition': market_condition,
+                'sma20': sma20,
+                'sma50': sma50,
+                'current_price': prices[-1]
+            }
+
             return {
+                'status': 'success',
                 'phase': phase,
                 'confidence': confidence,
-                'metrics': {
-                    'price_trend': 'Bullish' if prices[-1] > sma20 else 'Bearish',
-                    'volume_trend': 'Increasing' if volumes[-1] > vol_sma20 else 'Decreasing',
-                    'momentum': momentum['interpretation'],
-                    'volatility': volatility
-                },
+                'metrics': metrics,
+                'market_condition': market_condition,
                 'cycle_history': self.market_cycles[-5:]  # Last 5 cycle transitions
             }
             
         except Exception as e:
             self.logger.error(f"Error analyzing market cycles: {str(e)}")
-            return {'phase': 'Unknown', 'confidence': 0.0}
+            return {
+                'status': 'error',
+                'phase': 'Unknown',
+                'confidence': 0.0,
+                'metrics': {
+                    'price_trend': 'Unknown',
+                    'momentum': 0,
+                    'volume_trend': 0,
+                    'market_condition': 'Unknown'
+                },
+                'market_condition': 'Unknown',
+                'cycle_history': []
+            }
 
     def analyze_order_flow(self) -> Dict:
         """Analyze order flow patterns and market microstructure."""
