@@ -26,7 +26,8 @@ MODEL_CONFIG = {
     'grok': 'grok-2-latest',
     'reasoner': 'deepseek-reasoner',
     'deepseek': 'deepseek-chat',
-    'default': 'gpt-4o'
+    'default': 'gpt-4o-mini',
+    'o1-mini': 'o1-mini'
 }
 
 # Add color constants at the top
@@ -141,7 +142,7 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
     if client is None:
         raise ValueError("API client not properly initialized")
@@ -166,18 +167,43 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             model = MODEL_CONFIG['reasoner']
         elif use_deepseek:
             model = MODEL_CONFIG['deepseek']
+        elif use_o1_mini:
+            model = MODEL_CONFIG['o1-mini']
             
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
+        # For models that don't support system messages, combine with user message
+        messages = []
+        user_content = f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."
+        
+        if model in [MODEL_CONFIG['o1-mini']]:  # Use the model config value instead of hardcoded string
+            messages = [
+                {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{user_content}"}
+            ]
+        else:
+            messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
-            ],
-            temperature=0.1,
-            max_tokens=300,
-            presence_penalty=0.1,
-            frequency_penalty=0.1
-        )
+                {"role": "user", "content": user_content}
+            ]
+            
+        # Set up parameters based on model
+        if model in [MODEL_CONFIG['o1-mini']]:  # Use the model config value
+            # o1-mini only supports messages and max_completion_tokens
+            params = {
+                "model": model,
+                "messages": messages,
+                "max_completion_tokens": 300
+            }
+        else:
+            # Full parameter set for other models
+            params = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.1,
+                "max_tokens": 300,
+                "presence_penalty": 0.1,
+                "frequency_penalty": 0.1
+            }
+            
+        response = client.chat.completions.create(**params)
         if not response.choices:
             logging.error("API response contained no choices")
             return None, None
@@ -293,10 +319,11 @@ def main():
     parser.add_argument('--use_deepseek', action='store_true', help='Use DeepSeek Chat API instead of OpenAI')
     parser.add_argument('--use_reasoner', action='store_true', help='Use DeepSeek Reasoner API (includes reasoning steps)')
     parser.add_argument('--use_grok', action='store_true', help='Use X AI Grok API')
+    parser.add_argument('--use_o1_mini', action='store_true', help='Use O1 Mini model')
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, or --use_grok.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, or --use_o1_mini.")
         exit(1)
 
     try:
@@ -328,7 +355,7 @@ def main():
 
         # Get trading recommendation
         recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
-                                                            args.use_deepseek, args.use_reasoner, args.use_grok)
+                                                            args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
