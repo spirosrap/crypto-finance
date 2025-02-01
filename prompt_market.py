@@ -153,7 +153,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     SYSTEM_PROMPT = (
         "Reply only with \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>\" or "
         "\"SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. "
-        "Probability of success: <PROBABILITY>. R/R ratio: <R/R_RATIO>."
+        "Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>."
     )
 
     #Removed: Suggest HOLD only when there's a strong probability for reversal.
