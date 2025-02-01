@@ -186,23 +186,10 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                 {"role": "user", "content": user_content}
             ]
             
-        # Set up parameters based on model
-        if model in [MODEL_CONFIG['o1-mini']]:  # Use the model config value
-            # o1-mini only supports messages and max_completion_tokens
-            params = {
-                "model": model,
-                "messages": messages
-            }
-        else:
-            # Full parameter set for other models
-            params = {
-                "model": model,
-                "messages": messages,
-                "temperature": 0.1,
-                "max_tokens": 300,
-                "presence_penalty": 0.1,
-                "frequency_penalty": 0.1
-            }
+        params = {
+            "model": model,
+            "messages": messages
+        }
             
         response = client.chat.completions.create(**params)
         if not response.choices:
