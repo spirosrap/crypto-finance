@@ -27,7 +27,8 @@ MODEL_CONFIG = {
     'reasoner': 'deepseek-reasoner',
     'deepseek': 'deepseek-chat',
     'default': 'gpt-4o-mini',
-    'o1-mini': 'o1-mini'
+    'o1-mini': 'o1-mini',
+    'gpt4o': 'gpt-4o'
 }
 
 # Add color constants at the top
@@ -142,7 +143,7 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_gpt4o: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
     if client is None:
         raise ValueError("API client not properly initialized")
@@ -153,10 +154,11 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     SYSTEM_PROMPT = (
         "Reply only with \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>\" or "
         "\"SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. "
-        "Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>."
+        "Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>.\" "
+        "Suggest HOLD only when there's a strong probability for reversal. "
+        "Compute R/R ratio as: R/R = (|Entry Price - Target Price|) / (|Entry Price - Stop Loss Price|), "
+        "ensuring a correct risk-to-reward calculation for both buy and sell signals."
     )
-
-    #Removed: Suggest HOLD only when there's a strong probability for reversal.
     
     try:
         # Simplified model selection
@@ -169,6 +171,8 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             model = MODEL_CONFIG['deepseek']
         elif use_o1_mini:
             model = MODEL_CONFIG['o1-mini']
+        elif use_gpt4o:
+            model = MODEL_CONFIG['gpt4o']
             
         logging.info(f"Using model: {model} from provider: {provider}")
         
@@ -207,7 +211,8 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 
         # Validate recommendation format
         if not (("BUY AT" in recommendation and "SELL AT" in recommendation) or 
-                ("SELL AT" in recommendation and "BUY BACK AT" in recommendation)):
+                ("SELL AT" in recommendation and "BUY BACK AT" in recommendation) or
+                ("HOLD" in recommendation)):
             logging.error(f"Invalid recommendation format: {recommendation}")
             return None, None
         return recommendation, reasoning
@@ -307,10 +312,11 @@ def main():
     parser.add_argument('--use_reasoner', action='store_true', help='Use DeepSeek Reasoner API (includes reasoning steps)')
     parser.add_argument('--use_grok', action='store_true', help='Use X AI Grok API')
     parser.add_argument('--use_o1_mini', action='store_true', help='Use O1 Mini model')
+    parser.add_argument('--use_gpt4o', action='store_true', help='Use GPT-4O model')
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, or --use_o1_mini.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_gpt4o]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, or --use_gpt4o.")
         exit(1)
 
     try:
@@ -342,7 +348,8 @@ def main():
 
         # Get trading recommendation
         recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
-                                                            args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini)
+                                                            args.use_deepseek, args.use_reasoner, args.use_grok, 
+                                                            args.use_o1_mini, args.use_gpt4o)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
