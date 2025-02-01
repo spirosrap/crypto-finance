@@ -170,6 +170,8 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         elif use_o1_mini:
             model = MODEL_CONFIG['o1-mini']
             
+        logging.info(f"Using model: {model} from provider: {provider}")
+        
         # For models that don't support system messages, combine with user message
         messages = []
         user_content = f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."
