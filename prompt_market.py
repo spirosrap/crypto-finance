@@ -189,8 +189,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             # o1-mini only supports messages and max_completion_tokens
             params = {
                 "model": model,
-                "messages": messages,
-                "max_completion_tokens": 300
+                "messages": messages
             }
         else:
             # Full parameter set for other models
@@ -262,8 +261,7 @@ def format_output(recommendation: str, analysis_result: Dict, reasoning: Optiona
     if 'data' in analysis_result:
         try:
             # Parse the market analysis data
-            analysis_data = json.loads(analysis_result['data'])
-            
+            analysis_data = analysis_result['data']
             # Print market alerts if available
             if 'alerts' in analysis_data:
                 print("\n====== 🔔 Market Alerts ======")
