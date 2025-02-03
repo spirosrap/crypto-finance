@@ -55,6 +55,18 @@ class PatternType(Enum):
     CUP_HANDLE = "Cup and Handle"
     ROUNDING_BOTTOM = "Rounding Bottom"
     ROUNDING_TOP = "Rounding Top"
+    ASCENDING_TRIANGLE = "Ascending Triangle"
+    DESCENDING_TRIANGLE = "Descending Triangle"
+    SYMMETRICAL_TRIANGLE = "Symmetrical Triangle"
+    RISING_WEDGE = "Rising Wedge"
+    FALLING_WEDGE = "Falling Wedge"
+    TRIPLE_TOP = "Triple Top"
+    TRIPLE_BOTTOM = "Triple Bottom"
+    DIAMOND_TOP = "Diamond Top"
+    DIAMOND_BOTTOM = "Diamond Bottom"
+    BROADENING_TOP = "Broadening Top"
+    BROADENING_BOTTOM = "Broadening Bottom"
+    RECTANGLE = "Rectangle"
     NONE = "None"
 
 class MarketRegime(Enum):
@@ -1698,79 +1710,106 @@ class MarketAnalyzer:
                 'invalidation_level': None
             }
             
-            # Head and Shoulders Detection
-            if self._is_head_and_shoulders(highs, lows):
+            # Check for all patterns in order of reliability/priority
+            if self._is_triple_top(highs):
+                patterns['type'] = PatternType.TRIPLE_TOP
+                patterns['confidence'] = 0.85
+                patterns['target'] = min(lows[-20:])
+                patterns['stop_loss'] = max(highs[-20:]) + (max(highs[-20:]) - min(lows[-20:])) * 0.1
+                
+            elif self._is_triple_bottom(lows):
+                patterns['type'] = PatternType.TRIPLE_BOTTOM
+                patterns['confidence'] = 0.85
+                patterns['target'] = max(highs[-20:])
+                patterns['stop_loss'] = min(lows[-20:]) - (max(highs[-20:]) - min(lows[-20:])) * 0.1
+                
+            elif self._is_head_and_shoulders(highs, lows):
                 patterns['type'] = PatternType.HEAD_SHOULDERS
                 patterns['confidence'] = 0.8
-                # Target is typically the distance from head to neckline projected downward
                 head_height = max(highs[-20:]) - min(lows[-20:])
                 patterns['target'] = min(lows[-20:]) - head_height
                 patterns['stop_loss'] = max(highs[-20:]) + (head_height * 0.1)
                 
-            # Inverse Head and Shoulders Detection
             elif self._is_inverse_head_and_shoulders(highs, lows):
                 patterns['type'] = PatternType.INV_HEAD_SHOULDERS
                 patterns['confidence'] = 0.8
-                # Target is typically the distance from head to neckline projected upward
                 head_depth = max(highs[-20:]) - min(lows[-20:])
                 patterns['target'] = max(highs[-20:]) + head_depth
                 patterns['stop_loss'] = min(lows[-20:]) - (head_depth * 0.1)
                 
-            # Triangle Detection
-            elif self._is_triangle(highs, lows):
-                patterns['type'] = PatternType.TRIANGLE
+            elif self._is_ascending_triangle(highs, lows):
+                patterns['type'] = PatternType.ASCENDING_TRIANGLE
                 patterns['confidence'] = 0.75
                 height = max(highs[-20:]) - min(lows[-20:])
-                if highs[-1] > highs[-2]:  # Ascending triangle
+                patterns['target'] = max(highs[-20:]) + height
+                patterns['stop_loss'] = min(lows[-10:])
+                
+            elif self._is_descending_triangle(highs, lows):
+                patterns['type'] = PatternType.DESCENDING_TRIANGLE
+                patterns['confidence'] = 0.75
+                height = max(highs[-20:]) - min(lows[-20:])
+                patterns['target'] = min(lows[-20:]) - height
+                patterns['stop_loss'] = max(highs[-10:])
+                
+            elif self._is_symmetrical_triangle(highs, lows):
+                patterns['type'] = PatternType.SYMMETRICAL_TRIANGLE
+                patterns['confidence'] = 0.7
+                height = max(highs[-20:]) - min(lows[-20:])
+                if prices[-1] > prices[-5]:  # Bullish bias
                     patterns['target'] = max(highs[-20:]) + height
-                else:  # Descending or symmetrical triangle
+                else:  # Bearish bias
                     patterns['target'] = min(lows[-20:]) - height
-                patterns['stop_loss'] = lows[-1] - (height * 0.1)
+                patterns['stop_loss'] = prices[-1] - (height * 0.1)
                 
-            # Channel Detection
-            elif self._is_channel(highs, lows):
-                patterns['type'] = PatternType.CHANNEL
+            elif self._is_rising_wedge(highs, lows):
+                patterns['type'] = PatternType.RISING_WEDGE
                 patterns['confidence'] = 0.7
-                channel_height = np.mean(highs[-10:]) - np.mean(lows[-10:])
-                if prices[-1] > prices[-5]:  # Ascending channel
-                    patterns['target'] = prices[-1] + channel_height
-                else:  # Descending channel
-                    patterns['target'] = prices[-1] - channel_height
-                patterns['stop_loss'] = prices[-1] - (channel_height * 0.5)
+                height = max(highs[-20:]) - min(lows[-20:])
+                patterns['target'] = min(lows[-20:]) - height
+                patterns['stop_loss'] = max(highs[-5:])
                 
-            # Flag/Pennant Detection
-            elif self._is_flag_or_pennant(prices, volumes):
-                is_flag = abs(np.corrcoef(range(len(prices[-10:])), prices[-10:])[0, 1]) > 0.8
-                patterns['type'] = PatternType.FLAG if is_flag else PatternType.PENNANT
+            elif self._is_falling_wedge(highs, lows):
+                patterns['type'] = PatternType.FALLING_WEDGE
                 patterns['confidence'] = 0.7
-                trend_height = abs(prices[-1] - prices[-10])
-                if prices[-10] < prices[-1]:  # Bullish flag/pennant
-                    patterns['target'] = prices[-1] + trend_height
-                else:  # Bearish flag/pennant
-                    patterns['target'] = prices[-1] - trend_height
-                patterns['stop_loss'] = prices[-10]
+                height = max(highs[-20:]) - min(lows[-20:])
+                patterns['target'] = max(highs[-20:]) + height
+                patterns['stop_loss'] = min(lows[-5:])
                 
-            # Cup and Handle Detection
-            elif self._is_cup_and_handle(prices, volumes):
-                patterns['type'] = PatternType.CUP_HANDLE
-                patterns['confidence'] = 0.8
-                cup_depth = max(prices[-30:]) - min(prices[-30:])
-                patterns['target'] = max(prices[-30:]) + cup_depth
-                patterns['stop_loss'] = min(prices[-10:])
-                
-            # Rounding Bottom/Top Detection
-            elif self._is_rounding_pattern(prices, volumes):
-                is_bottom = prices[-1] > np.mean(prices[-20:])
-                patterns['type'] = PatternType.ROUNDING_BOTTOM if is_bottom else PatternType.ROUNDING_TOP
-                patterns['confidence'] = 0.7
-                pattern_height = max(prices[-20:]) - min(prices[-20:])
-                if is_bottom:
-                    patterns['target'] = prices[-1] + pattern_height
+            elif self._is_diamond(highs, lows):
+                is_top = prices[-1] < np.mean(prices[-5:])
+                patterns['type'] = PatternType.DIAMOND_TOP if is_top else PatternType.DIAMOND_BOTTOM
+                patterns['confidence'] = 0.75
+                height = max(highs[-20:]) - min(lows[-20:])
+                if is_top:
+                    patterns['target'] = min(lows[-20:]) - height
+                    patterns['stop_loss'] = max(highs[-5:])
                 else:
-                    patterns['target'] = prices[-1] - pattern_height
-                patterns['stop_loss'] = min(prices[-20:]) if is_bottom else max(prices[-20:])
+                    patterns['target'] = max(highs[-20:]) + height
+                    patterns['stop_loss'] = min(lows[-5:])
                 
-            # Double Top/Bottom Detection (existing code)
+            elif self._is_broadening(highs, lows):
+                is_top = prices[-1] < np.mean(prices[-5:])
+                patterns['type'] = PatternType.BROADENING_TOP if is_top else PatternType.BROADENING_BOTTOM
+                patterns['confidence'] = 0.65
+                height = max(highs[-20:]) - min(lows[-20:])
+                if is_top:
+                    patterns['target'] = min(lows[-20:]) - height
+                    patterns['stop_loss'] = max(highs[-5:])
+                else:
+                    patterns['target'] = max(highs[-20:]) + height
+                    patterns['stop_loss'] = min(lows[-5:])
+                
+            elif self._is_rectangle(highs, lows):
+                patterns['type'] = PatternType.RECTANGLE
+                patterns['confidence'] = 0.6
+                height = max(highs[-20:]) - min(lows[-20:])
+                if prices[-1] > np.mean(prices[-5:]):  # Bullish bias
+                    patterns['target'] = max(highs[-20:]) + height
+                    patterns['stop_loss'] = min(lows[-10:])
+                else:  # Bearish bias
+                    patterns['target'] = min(lows[-20:]) - height
+                    patterns['stop_loss'] = max(highs[-10:])
+                
             elif self._is_double_top(highs):
                 patterns['type'] = PatternType.DOUBLE_TOP
                 patterns['confidence'] = 0.8
@@ -1783,6 +1822,45 @@ class MarketAnalyzer:
                 patterns['target'] = max(highs[-30:])
                 patterns['stop_loss'] = min(lows[-30:]) - (max(highs[-30:]) - min(lows[-30:])) * 0.1
                 
+            elif self._is_channel(highs, lows):
+                patterns['type'] = PatternType.CHANNEL
+                patterns['confidence'] = 0.7
+                channel_height = np.mean(highs[-10:]) - np.mean(lows[-10:])
+                if prices[-1] > prices[-5]:  # Ascending channel
+                    patterns['target'] = prices[-1] + channel_height
+                else:  # Descending channel
+                    patterns['target'] = prices[-1] - channel_height
+                patterns['stop_loss'] = prices[-1] - (channel_height * 0.5)
+                
+            elif self._is_flag_or_pennant(prices, volumes):
+                is_flag = abs(np.corrcoef(range(len(prices[-10:])), prices[-10:])[0, 1]) > 0.8
+                patterns['type'] = PatternType.FLAG if is_flag else PatternType.PENNANT
+                patterns['confidence'] = 0.7
+                trend_height = abs(prices[-1] - prices[-10])
+                if prices[-10] < prices[-1]:  # Bullish flag/pennant
+                    patterns['target'] = prices[-1] + trend_height
+                else:  # Bearish flag/pennant
+                    patterns['target'] = prices[-1] - trend_height
+                patterns['stop_loss'] = prices[-10]
+                
+            elif self._is_cup_and_handle(prices, volumes):
+                patterns['type'] = PatternType.CUP_HANDLE
+                patterns['confidence'] = 0.8
+                cup_depth = max(prices[-30:]) - min(prices[-30:])
+                patterns['target'] = max(prices[-30:]) + cup_depth
+                patterns['stop_loss'] = min(prices[-10:])
+                
+            elif self._is_rounding_pattern(prices, volumes):
+                is_bottom = prices[-1] > np.mean(prices[-20:])
+                patterns['type'] = PatternType.ROUNDING_BOTTOM if is_bottom else PatternType.ROUNDING_TOP
+                patterns['confidence'] = 0.7
+                pattern_height = max(prices[-20:]) - min(prices[-20:])
+                if is_bottom:
+                    patterns['target'] = prices[-1] + pattern_height
+                else:
+                    patterns['target'] = prices[-1] - pattern_height
+                patterns['stop_loss'] = min(prices[-20:]) if is_bottom else max(prices[-20:])
+            
             # Calculate pattern completion percentage
             if patterns['type'] != PatternType.NONE:
                 patterns['completion_percentage'] = self._calculate_pattern_completion(
@@ -1793,8 +1871,7 @@ class MarketAnalyzer:
                     volumes
                 )
                 
-            # Add pattern to memory
-            if patterns['type'] != PatternType.NONE:
+                # Add pattern to memory
                 self.pattern_memory.append({
                     'timestamp': datetime.now(UTC),
                     'pattern': patterns
@@ -3119,6 +3196,285 @@ class MarketAnalyzer:
             self.logger.error(f"Error detecting rounding pattern: {str(e)}")
             return False
 
+    def _is_ascending_triangle(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect ascending triangle pattern."""
+        try:
+            if len(highs) < 10:
+                return False
+                
+            # Find peaks and troughs
+            peaks = self._find_peaks(highs)
+            troughs = self._find_troughs(lows)
+            
+            if len(peaks) < 2 or len(troughs) < 2:
+                return False
+                
+            # Check for flat resistance (horizontal top)
+            resistance_line = highs[peaks]
+            resistance_slope = np.polyfit(range(len(resistance_line)), resistance_line, 1)[0]
+            
+            # Check for rising support (ascending bottom)
+            support_line = lows[troughs]
+            support_slope = np.polyfit(range(len(support_line)), support_line, 1)[0]
+            
+            # Ascending triangle has flat resistance and rising support
+            return abs(resistance_slope) < threshold and support_slope > threshold
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting ascending triangle: {str(e)}")
+            return False
+
+    def _is_descending_triangle(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect descending triangle pattern."""
+        try:
+            if len(highs) < 10:
+                return False
+                
+            # Find peaks and troughs
+            peaks = self._find_peaks(highs)
+            troughs = self._find_troughs(lows)
+            
+            if len(peaks) < 2 or len(troughs) < 2:
+                return False
+                
+            # Check for descending resistance
+            resistance_line = highs[peaks]
+            resistance_slope = np.polyfit(range(len(resistance_line)), resistance_line, 1)[0]
+            
+            # Check for flat support
+            support_line = lows[troughs]
+            support_slope = np.polyfit(range(len(support_line)), support_line, 1)[0]
+            
+            # Descending triangle has descending resistance and flat support
+            return resistance_slope < -threshold and abs(support_slope) < threshold
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting descending triangle: {str(e)}")
+            return False
+
+    def _is_symmetrical_triangle(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect symmetrical triangle pattern."""
+        try:
+            if len(highs) < 10:
+                return False
+                
+            # Find peaks and troughs
+            peaks = self._find_peaks(highs)
+            troughs = self._find_troughs(lows)
+            
+            if len(peaks) < 2 or len(troughs) < 2:
+                return False
+                
+            # Calculate slopes of resistance and support
+            resistance_line = highs[peaks]
+            support_line = lows[troughs]
+            
+            resistance_slope = np.polyfit(range(len(resistance_line)), resistance_line, 1)[0]
+            support_slope = np.polyfit(range(len(support_line)), support_line, 1)[0]
+            
+            # Symmetrical triangle has roughly equal but opposite slopes
+            return (resistance_slope < -threshold and 
+                   support_slope > threshold and 
+                   abs(abs(resistance_slope) - abs(support_slope)) < threshold)
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting symmetrical triangle: {str(e)}")
+            return False
+
+    def _is_rising_wedge(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect rising wedge pattern."""
+        try:
+            if len(highs) < 10:
+                return False
+                
+            # Find peaks and troughs
+            peaks = self._find_peaks(highs)
+            troughs = self._find_troughs(lows)
+            
+            if len(peaks) < 2 or len(troughs) < 2:
+                return False
+                
+            # Calculate slopes
+            resistance_line = highs[peaks]
+            support_line = lows[troughs]
+            
+            resistance_slope = np.polyfit(range(len(resistance_line)), resistance_line, 1)[0]
+            support_slope = np.polyfit(range(len(support_line)), support_line, 1)[0]
+            
+            # Rising wedge has both lines rising, with support rising faster
+            return (resistance_slope > threshold and 
+                   support_slope > threshold and 
+                   support_slope > resistance_slope)
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting rising wedge: {str(e)}")
+            return False
+
+    def _is_falling_wedge(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect falling wedge pattern."""
+        try:
+            if len(highs) < 10:
+                return False
+                
+            # Find peaks and troughs
+            peaks = self._find_peaks(highs)
+            troughs = self._find_troughs(lows)
+            
+            if len(peaks) < 2 or len(troughs) < 2:
+                return False
+                
+            # Calculate slopes
+            resistance_line = highs[peaks]
+            support_line = lows[troughs]
+            
+            resistance_slope = np.polyfit(range(len(resistance_line)), resistance_line, 1)[0]
+            support_slope = np.polyfit(range(len(support_line)), support_line, 1)[0]
+            
+            # Falling wedge has both lines falling, with resistance falling faster
+            return (resistance_slope < -threshold and 
+                   support_slope < -threshold and 
+                   resistance_slope < support_slope)
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting falling wedge: {str(e)}")
+            return False
+
+    def _is_triple_top(self, highs: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect triple top pattern."""
+        try:
+            peaks = self._find_peaks(highs)
+            if len(peaks) < 3:
+                return False
+                
+            # Get last three peaks
+            last_peaks = peaks[-3:]
+            peak_prices = highs[last_peaks]
+            
+            # Check if all peaks are at similar levels
+            max_diff = np.max(peak_prices) - np.min(peak_prices)
+            avg_price = np.mean(peak_prices)
+            
+            return max_diff / avg_price < threshold
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting triple top: {str(e)}")
+            return False
+
+    def _is_triple_bottom(self, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect triple bottom pattern."""
+        try:
+            troughs = self._find_troughs(lows)
+            if len(troughs) < 3:
+                return False
+                
+            # Get last three troughs
+            last_troughs = troughs[-3:]
+            trough_prices = lows[last_troughs]
+            
+            # Check if all troughs are at similar levels
+            max_diff = np.max(trough_prices) - np.min(trough_prices)
+            avg_price = np.mean(trough_prices)
+            
+            return max_diff / avg_price < threshold
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting triple bottom: {str(e)}")
+            return False
+
+    def _is_diamond(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect diamond top/bottom pattern."""
+        try:
+            if len(highs) < 20:
+                return False
+                
+            # Split the data into two halves
+            mid_point = len(highs) // 2
+            
+            # First half should show broadening pattern
+            first_half_peaks = self._find_peaks(highs[:mid_point])
+            first_half_troughs = self._find_troughs(lows[:mid_point])
+            
+            # Second half should show narrowing pattern
+            second_half_peaks = self._find_peaks(highs[mid_point:])
+            second_half_troughs = self._find_troughs(lows[mid_point:])
+            
+            if (len(first_half_peaks) < 2 or len(first_half_troughs) < 2 or
+                len(second_half_peaks) < 2 or len(second_half_troughs) < 2):
+                return False
+                
+            # Calculate slopes for both halves
+            first_resistance = np.polyfit(first_half_peaks, highs[first_half_peaks], 1)[0]
+            first_support = np.polyfit(first_half_troughs, lows[first_half_troughs], 1)[0]
+            
+            second_resistance = np.polyfit(second_half_peaks, highs[mid_point:][second_half_peaks], 1)[0]
+            second_support = np.polyfit(second_half_troughs, lows[mid_point:][second_half_troughs], 1)[0]
+            
+            # First half should diverge, second half should converge
+            return (abs(first_resistance) > threshold and 
+                   abs(first_support) > threshold and 
+                   abs(second_resistance) > threshold and 
+                   abs(second_support) > threshold and 
+                   first_resistance > 0 and first_support < 0 and 
+                   second_resistance < 0 and second_support > 0)
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting diamond pattern: {str(e)}")
+            return False
+
+    def _is_broadening(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect broadening pattern (expanding triangle)."""
+        try:
+            if len(highs) < 10:
+                return False
+                
+            # Find peaks and troughs
+            peaks = self._find_peaks(highs)
+            troughs = self._find_troughs(lows)
+            
+            if len(peaks) < 2 or len(troughs) < 2:
+                return False
+                
+            # Calculate slopes
+            resistance_line = highs[peaks]
+            support_line = lows[troughs]
+            
+            resistance_slope = np.polyfit(range(len(resistance_line)), resistance_line, 1)[0]
+            support_slope = np.polyfit(range(len(support_line)), support_line, 1)[0]
+            
+            # Broadening pattern has diverging trend lines
+            return resistance_slope > threshold and support_slope < -threshold
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting broadening pattern: {str(e)}")
+            return False
+
+    def _is_rectangle(self, highs: np.ndarray, lows: np.ndarray, threshold: float = 0.02) -> bool:
+        """Detect rectangle pattern (trading range)."""
+        try:
+            if len(highs) < 10:
+                return False
+                
+            # Find peaks and troughs
+            peaks = self._find_peaks(highs)
+            troughs = self._find_troughs(lows)
+            
+            if len(peaks) < 2 or len(troughs) < 2:
+                return False
+                
+            # Calculate slopes
+            resistance_line = highs[peaks]
+            support_line = lows[troughs]
+            
+            resistance_slope = np.polyfit(range(len(resistance_line)), resistance_line, 1)[0]
+            support_slope = np.polyfit(range(len(support_line)), support_line, 1)[0]
+            
+            # Rectangle has horizontal support and resistance
+            return abs(resistance_slope) < threshold and abs(support_slope) < threshold
+            
+        except Exception as e:
+            self.logger.error(f"Error detecting rectangle pattern: {str(e)}")
+            return False
+
     def _calculate_pattern_completion(self, pattern_type: PatternType, prices: np.ndarray, 
                                     highs: np.ndarray, lows: np.ndarray, volumes: np.ndarray) -> float:
         """Calculate the completion percentage of a pattern."""
@@ -3128,19 +3484,114 @@ class MarketAnalyzer:
                 neckline = np.mean(lows[-5:])
                 return min(100, max(0, abs(prices[-1] - neckline) / (max(highs) - min(lows)) * 100))
                 
-            elif pattern_type in [PatternType.TRIANGLE, PatternType.FLAG, PatternType.PENNANT]:
-                # Calculate distance to apex
-                apex_distance = len(prices) - np.argmax(highs)
-                return min(100, max(0, (1 - apex_distance / len(prices)) * 100))
+            elif pattern_type in [PatternType.TRIPLE_TOP, PatternType.TRIPLE_BOTTOM]:
+                # Calculate completion based on distance from the third peak/trough
+                if pattern_type == PatternType.TRIPLE_TOP:
+                    peaks = self._find_peaks(highs)
+                    if len(peaks) >= 3:
+                        last_peak = highs[peaks[-1]]
+                        neckline = min(lows[peaks[-3]:])
+                        return min(100, max(0, (last_peak - prices[-1]) / (last_peak - neckline) * 100))
+                else:  # Triple Bottom
+                    troughs = self._find_troughs(lows)
+                    if len(troughs) >= 3:
+                        last_trough = lows[troughs[-1]]
+                        neckline = max(highs[troughs[-3]:])
+                        return min(100, max(0, (prices[-1] - last_trough) / (neckline - last_trough) * 100))
+                
+            elif pattern_type in [PatternType.ASCENDING_TRIANGLE, PatternType.DESCENDING_TRIANGLE, 
+                                PatternType.SYMMETRICAL_TRIANGLE]:
+                # Calculate completion based on distance to apex
+                peaks = self._find_peaks(highs[-20:])
+                troughs = self._find_troughs(lows[-20:])
+                if len(peaks) >= 2 and len(troughs) >= 2:
+                    resistance_line = np.polyfit(peaks, highs[peaks], 1)
+                    support_line = np.polyfit(troughs, lows[troughs], 1)
+                    # Find intersection point (apex)
+                    x_intersect = (support_line[1] - resistance_line[1]) / (resistance_line[0] - support_line[0])
+                    current_x = len(prices) - 1
+                    return min(100, max(0, (current_x / x_intersect) * 100))
+                
+            elif pattern_type in [PatternType.RISING_WEDGE, PatternType.FALLING_WEDGE]:
+                # Similar to triangle completion but with different slope requirements
+                peaks = self._find_peaks(highs[-20:])
+                troughs = self._find_troughs(lows[-20:])
+                if len(peaks) >= 2 and len(troughs) >= 2:
+                    resistance_line = np.polyfit(peaks, highs[peaks], 1)
+                    support_line = np.polyfit(troughs, lows[troughs], 1)
+                    x_intersect = (support_line[1] - resistance_line[1]) / (resistance_line[0] - support_line[0])
+                    current_x = len(prices) - 1
+                    return min(100, max(0, (current_x / x_intersect) * 100))
+                
+            elif pattern_type in [PatternType.DIAMOND_TOP, PatternType.DIAMOND_BOTTOM]:
+                # Calculate completion based on formation of both broadening and narrowing parts
+                mid_point = len(prices) // 2
+                first_half_completion = self._is_broadening(highs[:mid_point], lows[:mid_point])
+                second_half_completion = self._is_triangle(highs[mid_point:], lows[mid_point:])
+                if first_half_completion and second_half_completion:
+                    return min(100, max(0, ((len(prices) - mid_point) / (mid_point / 2)) * 100))
+                
+            elif pattern_type in [PatternType.BROADENING_TOP, PatternType.BROADENING_BOTTOM]:
+                # Calculate completion based on divergence of trend lines
+                peaks = self._find_peaks(highs[-20:])
+                troughs = self._find_troughs(lows[-20:])
+                if len(peaks) >= 2 and len(troughs) >= 2:
+                    pattern_width = abs(highs[peaks[-1]] - lows[troughs[-1]])
+                    initial_width = abs(highs[peaks[0]] - lows[troughs[0]])
+                    if initial_width > 0:
+                        return min(100, max(0, (pattern_width / initial_width) * 100))
+                
+            elif pattern_type == PatternType.RECTANGLE:
+                # Calculate completion based on number of touches of support/resistance
+                peaks = self._find_peaks(highs[-20:])
+                troughs = self._find_troughs(lows[-20:])
+                total_touches = len(peaks) + len(troughs)
+                return min(100, max(0, (total_touches / 6) * 100))  # Assume 6 touches is complete
+                
+            elif pattern_type in [PatternType.FLAG, PatternType.PENNANT]:
+                # Calculate completion based on retracement and time
+                trend_start = prices[-20]
+                trend_end = prices[-10]
+                current_price = prices[-1]
+                time_factor = min(1.0, (len(prices) - 10) / 10)  # Time-based factor
+                if abs(trend_end - trend_start) > 0:
+                    retracement = abs(current_price - trend_end) / abs(trend_end - trend_start)
+                    return min(100, max(0, (retracement * time_factor) * 100))
                 
             elif pattern_type == PatternType.CUP_HANDLE:
-                # Calculate handle completion
-                handle_range = max(prices[-10:]) - min(prices[-10:])
-                cup_range = max(prices[-30:]) - min(prices[-30:])
-                return min(100, max(0, (1 - handle_range / cup_range) * 100))
+                # Calculate completion based on cup formation and handle retracement
+                if len(prices) >= 30:
+                    cup_high = max(prices[-30:-10])
+                    cup_low = min(prices[-30:-10])
+                    handle_high = max(prices[-10:])
+                    handle_retrace = (cup_high - handle_high) / (cup_high - cup_low) if (cup_high - cup_low) > 0 else 0
+                    if 0.3 <= handle_retrace <= 0.7:  # Ideal handle retracement
+                        return min(100, max(0, (1 - handle_retrace) * 100))
                 
-            else:
-                return 50.0  # Default completion percentage
+            elif pattern_type in [PatternType.ROUNDING_BOTTOM, PatternType.ROUNDING_TOP]:
+                # Calculate completion based on fit to quadratic curve
+                x = np.arange(len(prices[-20:]))
+                fit = np.polyfit(x, prices[-20:], 2)
+                r_squared = 1 - (np.sum((np.polyval(fit, x) - prices[-20:]) ** 2) / 
+                               np.sum((prices[-20:] - np.mean(prices[-20:])) ** 2))
+                return min(100, max(0, r_squared * 100))
+                
+            elif pattern_type in [PatternType.DOUBLE_TOP, PatternType.DOUBLE_BOTTOM]:
+                # Calculate completion based on distance from the second peak/trough
+                if pattern_type == PatternType.DOUBLE_TOP:
+                    peaks = self._find_peaks(highs)
+                    if len(peaks) >= 2:
+                        last_peak = highs[peaks[-1]]
+                        neckline = min(lows[peaks[-2]:])
+                        return min(100, max(0, (last_peak - prices[-1]) / (last_peak - neckline) * 100))
+                else:  # Double Bottom
+                    troughs = self._find_troughs(lows)
+                    if len(troughs) >= 2:
+                        last_trough = lows[troughs[-1]]
+                        neckline = max(highs[troughs[-2]:])
+                        return min(100, max(0, (prices[-1] - last_trough) / (neckline - last_trough) * 100))
+                
+            return 50.0  # Default completion percentage
                 
         except Exception as e:
             self.logger.error(f"Error calculating pattern completion: {str(e)}")
@@ -3827,7 +4278,7 @@ def main():
                 print(f"\n{name.title()}:")
                 print(f"• Current: {threshold['current']:.4f}")
                 print(f"• Base: {threshold['base']:.4f}")
-                print(f"• Adjustment: {threshold['adjustment']:.2f}x")
+                print(f"• Adjustment: {threshold['current'] / threshold['base']:.2f}x")
 
             print("\n" + "="*50)
 

@@ -154,7 +154,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     SYSTEM_PROMPT = (
         "Reply only with: \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>.\" or "
         "\"SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>.\""
-        "Instruction 1: Reply only with \"HOLD Probability of reversal: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. Pattern Detected: <PATTERN>.\" when there's a strong probability for reversal."
+        "Instruction 1: Only if when there's a >85% probability for reversal reply with \"HOLD Probability of reversal: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. Pattern Detected: <PATTERN>.\""
         "Instruction 2: Compute R/R ratio as: R/R = (|Entry Price - Target Price|) / (|Entry Price - Stop Loss Price|), "
         "ensuring a correct risk-to-reward calculation for both buy and sell signals."
         "Instruction 3: Signal confidence should be between Strong, Moderate, Weak"
