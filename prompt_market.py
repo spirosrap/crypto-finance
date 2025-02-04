@@ -1,5 +1,5 @@
 from openai import OpenAI
-from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY
+from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY
 import subprocess
 import os
 import argparse
@@ -28,7 +28,8 @@ MODEL_CONFIG = {
     'deepseek': 'deepseek-chat',
     'default': 'gpt-4o-mini',
     'o1-mini': 'o1-mini',
-    'gpt4o': 'gpt-4o'
+    'gpt4o': 'gpt-4o',
+    'deepseek-r1': 'deepseek/deepseek-r1'  # Add DeepSeek R1 model
 }
 
 # Add color constants at the top
@@ -41,9 +42,24 @@ COLORS = {
     'end': '\033[0m'
 }
 
-def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False):
+def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False):
     global client
     try:
+        if use_deepseek_r1:
+            if not OPENROUTER_API_KEY:
+                logging.error("OpenRouter API key is not set in the configuration")
+                print(f"{COLORS['red']}Error: OpenRouter API key is not set. Please add it to your configuration.{COLORS['end']}")
+                return False
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=OPENROUTER_API_KEY,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/cursor-ai",
+                    "X-Title": "Cursor AI Trading Bot"
+                }
+            )
+            return True
+            
         provider = 'X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI')
         api_key = XAI_KEY if use_grok else (DEEPSEEK_KEY if (use_deepseek or use_reasoner) else OPENAI_KEY)
         
@@ -75,9 +91,12 @@ def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, us
         logging.error(f"Failed to initialize API client: {str(e)}")
         return False
 
-def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False) -> bool:
+def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False) -> bool:
     """Validate that the API key is set and well-formed."""
-    if use_grok:
+    if use_deepseek_r1:
+        api_key = OPENROUTER_API_KEY
+        provider = 'OpenRouter'
+    elif use_grok:
         api_key = XAI_KEY
         provider = 'X AI'
     elif use_deepseek or use_reasoner:
@@ -143,13 +162,13 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_gpt4o: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
     if client is None:
         raise ValueError("API client not properly initialized")
 
     # Define provider at the start of the function
-    provider = 'X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI')
+    provider = 'OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))
 
     SYSTEM_PROMPT = (
         "Reply only with: \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>.\" or "
@@ -175,6 +194,8 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             model = MODEL_CONFIG['o1-mini']
         elif use_gpt4o:
             model = MODEL_CONFIG['gpt4o']
+        elif use_deepseek_r1:
+            model = MODEL_CONFIG['deepseek-r1']
             
         logging.info(f"Using model: {model} from provider: {provider}")
         
@@ -315,21 +336,22 @@ def main():
     parser.add_argument('--use_grok', action='store_true', help='Use X AI Grok API')
     parser.add_argument('--use_o1_mini', action='store_true', help='Use O1 Mini model')
     parser.add_argument('--use_gpt4o', action='store_true', help='Use GPT-4O model')
+    parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_gpt4o]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, or --use_gpt4o.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_gpt4o, args.use_deepseek_r1]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_gpt4o, or --use_deepseek_r1.")
         exit(1)
 
     try:
         # Validate API key first
-        if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok):
-            provider = 'X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI')
+        if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1):
+            provider = 'OpenRouter' if args.use_deepseek_r1 else ('X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI'))
             print(f"{COLORS['red']}Error: Invalid or missing {provider} API key. Please check your configuration.{COLORS['end']}")
             exit(1)
 
         # Initialize the client
-        if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok):
+        if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1):
             exit(1)  # Error message already printed in initialize_client
 
         # Add input validation
@@ -351,7 +373,7 @@ def main():
         # Get trading recommendation
         recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
                                                             args.use_deepseek, args.use_reasoner, args.use_grok, 
-                                                            args.use_o1_mini, args.use_gpt4o)
+                                                            args.use_o1_mini, args.use_gpt4o, args.use_deepseek_r1)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
