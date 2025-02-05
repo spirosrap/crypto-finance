@@ -28,6 +28,7 @@ MODEL_CONFIG = {
     'deepseek': 'deepseek-chat',
     'default': 'gpt-4o-mini',
     'o1-mini': 'o1-mini',
+    'o3-mini': 'o3-mini',  # Add O3 Mini model
     'gpt4o': 'gpt-4o',
     'deepseek-r1': 'deepseek/deepseek-r1'  # Add DeepSeek R1 model
 }
@@ -162,7 +163,7 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
     if client is None:
         raise ValueError("API client not properly initialized")
@@ -192,6 +193,8 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             model = MODEL_CONFIG['deepseek']
         elif use_o1_mini:
             model = MODEL_CONFIG['o1-mini']
+        elif use_o3_mini:
+            model = MODEL_CONFIG['o3-mini']
         elif use_gpt4o:
             model = MODEL_CONFIG['gpt4o']
         elif use_deepseek_r1:
@@ -203,7 +206,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         messages = []
         user_content = f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."
         
-        if model in [MODEL_CONFIG['o1-mini']]:  # Use the model config value instead of hardcoded string
+        if model in [MODEL_CONFIG['o1-mini'], MODEL_CONFIG['o3-mini']]:  # Add o3-mini to the list of models that need combined messages
             messages = [
                 {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{user_content}"}
             ]
@@ -335,12 +338,13 @@ def main():
     parser.add_argument('--use_reasoner', action='store_true', help='Use DeepSeek Reasoner API (includes reasoning steps)')
     parser.add_argument('--use_grok', action='store_true', help='Use X AI Grok API')
     parser.add_argument('--use_o1_mini', action='store_true', help='Use O1 Mini model')
+    parser.add_argument('--use_o3_mini', action='store_true', help='Use O3 Mini model')
     parser.add_argument('--use_gpt4o', action='store_true', help='Use GPT-4O model')
     parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_gpt4o, args.use_deepseek_r1]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_gpt4o, or --use_deepseek_r1.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_o3_mini, --use_gpt4o, or --use_deepseek_r1.")
         exit(1)
 
     try:
@@ -373,7 +377,7 @@ def main():
         # Get trading recommendation
         recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
                                                             args.use_deepseek, args.use_reasoner, args.use_grok, 
-                                                            args.use_o1_mini, args.use_gpt4o, args.use_deepseek_r1)
+                                                            args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
