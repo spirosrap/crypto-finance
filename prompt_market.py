@@ -5,6 +5,7 @@ import os
 import argparse
 import json
 import time
+import requests
 from typing import Dict, Optional
 from datetime import datetime
 import logging
@@ -30,8 +31,12 @@ MODEL_CONFIG = {
     'o1-mini': 'o1-mini',
     'o3-mini': 'o3-mini',  # Add O3 Mini model
     'gpt4o': 'gpt-4o',
-    'deepseek-r1': 'deepseek/deepseek-r1'  # Add DeepSeek R1 model
+    'deepseek-r1': 'deepseek/deepseek-r1',  # Add DeepSeek R1 model
+    'ollama': 'deepseek-r1:7b'  # Add Ollama model
 }
+
+# Add Ollama API configuration
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
 
 # Add color constants at the top
 COLORS = {
@@ -43,9 +48,13 @@ COLORS = {
     'end': '\033[0m'
 }
 
-def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False):
+def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False):
     global client
     try:
+        if use_ollama:
+            # For Ollama, we don't need to initialize a client
+            return True
+            
         if use_deepseek_r1:
             if not OPENROUTER_API_KEY:
                 logging.error("OpenRouter API key is not set in the configuration")
@@ -149,6 +158,38 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         logging.error(f"Unexpected error in market analysis: {str(e)}")
         return {'success': False, 'error': f"Unexpected error: {str(e)}"}
 
+def get_ollama_response(prompt: str, model: str = "deepseek-r1:7b") -> Optional[str]:
+    """Get response from Ollama API."""
+    try:
+        data = {
+            "model": model,
+            "prompt": prompt,
+            "stream": True
+        }
+        
+        response = requests.post(OLLAMA_API_URL, json=data, stream=True)
+        response.raise_for_status()
+        
+        full_response = ""
+        for line in response.iter_lines():
+            if line:
+                try:
+                    parsed_data = json.loads(line.decode("utf-8"))
+                    full_response += parsed_data.get("response", "")
+                except json.JSONDecodeError as json_err:
+                    logging.error(f"Error parsing Ollama JSON response: {json_err}")
+                    continue
+        
+        return full_response.strip()
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error making Ollama API request: {str(e)}")
+        print(f"{COLORS['red']}Error: Could not connect to Ollama API. Is Ollama running locally?{COLORS['end']}")
+        return None
+    except Exception as e:
+        logging.error(f"Unexpected error in Ollama API call: {str(e)}")
+        return None
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -163,13 +204,13 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
-    if client is None:
+    if not use_ollama and client is None:
         raise ValueError("API client not properly initialized")
 
     # Define provider at the start of the function
-    provider = 'OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))
+    provider = 'Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI')))
 
     SYSTEM_PROMPT = (
         "Reply only with: \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>.\" or "
@@ -179,10 +220,15 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         "Instruction 2: Signal confidence should be between Strong, Moderate, Weak"
     )
     
-    # "Instruction 3: Only if when there's a >85% probability for reversal reply with \"HOLD Probability of reversal: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. Pattern Detected: <PATTERN>.\""
-    # "Instruction 4: Create another modified suggestion for stop and target for 20x leverage."
-    
     try:
+        if use_ollama:
+            # Format prompt for Ollama
+            full_prompt = f"{SYSTEM_PROMPT}\n\nHere's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."
+            recommendation = get_ollama_response(full_prompt, MODEL_CONFIG['ollama'])
+            if recommendation is None:
+                raise Exception("Failed to get response from Ollama API")
+            return recommendation, None
+            
         # Simplified model selection
         model = MODEL_CONFIG['default']
         if use_grok:
@@ -341,10 +387,11 @@ def main():
     parser.add_argument('--use_o3_mini', action='store_true', help='Use O3 Mini model')
     parser.add_argument('--use_gpt4o', action='store_true', help='Use GPT-4O model')
     parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
+    parser.add_argument('--use_ollama', action='store_true', help='Use Ollama model')
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_o3_mini, --use_gpt4o, or --use_deepseek_r1.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_o3_mini, --use_gpt4o, --use_deepseek_r1, or --use_ollama.")
         exit(1)
 
     try:
@@ -355,7 +402,7 @@ def main():
             exit(1)
 
         # Initialize the client
-        if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1):
+        if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1, args.use_ollama):
             exit(1)  # Error message already printed in initialize_client
 
         # Add input validation
@@ -377,7 +424,7 @@ def main():
         # Get trading recommendation
         recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
                                                             args.use_deepseek, args.use_reasoner, args.use_grok, 
-                                                            args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1)
+                                                            args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
