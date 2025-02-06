@@ -60,3 +60,4 @@ signals/signals_DOGE-USDC_20241121.json
 advanced_market_analyzer_BTC-USDC.log
 market_analyzer.log
 prompt_market.log
+.webui_secret_key
