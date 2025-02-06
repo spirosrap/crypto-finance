@@ -7,4 +7,11 @@ payload = {
 }
 response = requests.post(url, json=payload)
 
-print(response.json()["response"])
+try:
+    # Attempt to parse the response as JSON
+    response_data = response.json()
+    print(response_data["response"])
+except requests.exceptions.JSONDecodeError as e:
+    # Handle JSON decoding errors
+    print("Failed to decode JSON response:", e)
+    print("Response content:", response.text)
