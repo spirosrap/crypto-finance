@@ -133,7 +133,7 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
     try:
         with open(os.devnull, 'w') as devnull:
             result = subprocess.check_output(
-                ['python', 'market_analyzer.py', '--product_id', product_id, '--granularity', granularity],
+                ['python', 'market_analyzer.py', '--product_id', product_id, '--granularity', granularity, '--console_logging', 'false'],
                 text=True,
                 stderr=devnull,
                 timeout=300  # 5 minute timeout
