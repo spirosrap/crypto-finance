@@ -4061,6 +4061,14 @@ def parse_arguments():
         help='List all available granularities'
     )
     
+    parser.add_argument(
+        '--console_logging',
+        type=str,
+        choices=['true', 'false'],
+        default='true',
+        help='Enable/disable console output (default: true)'
+    )
+    
     return parser.parse_args()
 
 def list_options():
@@ -4128,14 +4136,20 @@ def run_continuous_monitoring(analyzer: MarketAnalyzer, interval: int):
         logging.error(f"Error in continuous monitoring: {str(e)}", exc_info=True)
 
 def main():
-    # Configure logging with more detail
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-
     args = parse_arguments()
     
+    # Configure logging handlers based on console_logging argument
+    handlers = [logging.FileHandler('market_analyzer.log')]
+    if args.console_logging.lower() == 'true':
+        handlers.append(logging.StreamHandler())
+    
+    # Configure logging with more detail and selected handlers
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
+
     if args.list_products or args.list_granularities:
         list_options()
         return
