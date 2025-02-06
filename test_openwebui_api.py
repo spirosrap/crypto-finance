@@ -8,9 +8,16 @@ payload = {
 response = requests.post(url, json=payload)
 
 try:
-    # Attempt to parse the response as JSON
-    response_data = response.json()
-    print(response_data["response"])
+    # Split the response text into individual JSON objects
+    response_lines = response.text.strip().split('\n')
+    
+    # Concatenate the "response" fields from each JSON object
+    full_response = ""
+    for line in response_lines:
+        json_obj = requests.models.complexjson.loads(line)
+        full_response += json_obj["response"]
+    
+    print(full_response)
 except requests.exceptions.JSONDecodeError as e:
     # Handle JSON decoding errors
     print("Failed to decode JSON response:", e)
