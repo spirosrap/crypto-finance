@@ -1,24 +1,25 @@
 import requests
+import json  # Import the json module for safe parsing
 
 url = "http://localhost:11434/api/generate"
-payload = {
+data = {
     "model": "deepseek-r1:1.5b",
-    "prompt": "Tell me a joke.",
+    "prompt": "Tell me a joke about a rat in a maze.",
+    "stream": True  # Ensure streaming output
 }
-response = requests.post(url, json=payload)
 
-try:
-    # Split the response text into individual JSON objects
-    response_lines = response.text.strip().split('\n')
-    
-    # Concatenate the "response" fields from each JSON object
-    full_response = ""
-    for line in response_lines:
-        json_obj = requests.models.complexjson.loads(line)
-        full_response += json_obj["response"]
-    
-    print(full_response)
-except requests.exceptions.JSONDecodeError as e:
-    # Handle JSON decoding errors
-    print("Failed to decode JSON response:", e)
-    print("Response content:", response.text)
+response = requests.post(url, json=data, stream=True)
+
+# Process streaming output
+full_response = ""
+for line in response.iter_lines():
+    if line:
+        json_data = line.decode("utf-8")
+        try:
+            # Use json.loads instead of eval for safe parsing
+            parsed_data = json.loads(json_data)
+            full_response += parsed_data.get("response", "")
+        except json.JSONDecodeError:
+            pass  # Skip malformed lines
+
+print(full_response)  # Full concatenated response
