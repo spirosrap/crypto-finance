@@ -1,5 +1,5 @@
 from openai import OpenAI
-from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY
+from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, HYPERBOLIC_KEY
 import subprocess
 import os
 import argparse
@@ -32,11 +32,15 @@ MODEL_CONFIG = {
     'o3-mini': 'o3-mini',  # Add O3 Mini model
     'gpt4o': 'gpt-4o',
     'deepseek-r1': 'deepseek/deepseek-r1',  # Add DeepSeek R1 model
-    'ollama': 'deepseek-r1:7b'  # Add Ollama model
+    'ollama': 'deepseek-r1:7b',  # Add Ollama model
+    'hyperbolic': 'deepseek-ai/DeepSeek-R1'  # Add Hyperbolic model
 }
 
 # Add Ollama API configuration
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
+
+# Add Hyperbolic API configuration
+HYPERBOLIC_API_URL = "https://api.hyperbolic.xyz/v1/chat/completions"
 
 # Add color constants at the top
 COLORS = {
@@ -101,9 +105,12 @@ def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, us
         logging.error(f"Failed to initialize API client: {str(e)}")
         return False
 
-def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False) -> bool:
+def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_hyperbolic: bool = False) -> bool:
     """Validate that the API key is set and well-formed."""
-    if use_deepseek_r1:
+    if use_hyperbolic:
+        api_key = HYPERBOLIC_KEY
+        provider = 'Hyperbolic'
+    elif use_deepseek_r1:
         api_key = OPENROUTER_API_KEY
         provider = 'OpenRouter'
     elif use_grok:
@@ -190,6 +197,39 @@ def get_ollama_response(prompt: str, model: str = "deepseek-r1:7b") -> Optional[
         logging.error(f"Unexpected error in Ollama API call: {str(e)}")
         return None
 
+def get_hyperbolic_response(messages: list, model: str = "deepseek-ai/DeepSeek-R1") -> Optional[str]:
+    """Get response from Hyperbolic API."""
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {HYPERBOLIC_KEY}"
+        }
+        
+        data = {
+            "messages": messages,
+            "model": model,
+            "max_tokens": 508,
+            "temperature": 0.1,
+            "top_p": 0.9
+        }
+        
+        response = requests.post(HYPERBOLIC_API_URL, headers=headers, json=data)
+        response.raise_for_status()
+        
+        result = response.json()
+        if 'choices' in result and len(result['choices']) > 0:
+            return result['choices'][0]['message']['content']
+        
+        return None
+        
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error making Hyperbolic API request: {str(e)}")
+        print(f"{COLORS['red']}Error: Could not connect to Hyperbolic API.{COLORS['end']}")
+        return None
+    except Exception as e:
+        logging.error(f"Unexpected error in Hyperbolic API call: {str(e)}")
+        return None
+
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
@@ -204,13 +244,13 @@ def get_ollama_response(prompt: str, model: str = "deepseek-r1:7b") -> Optional[
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False, use_hyperbolic: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
-    if not use_ollama and client is None:
+    if not (use_ollama or use_hyperbolic) and client is None:
         raise ValueError("API client not properly initialized")
 
     # Define provider at the start of the function
-    provider = 'Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI')))
+    provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
 
     SYSTEM_PROMPT = (
         "Reply only with: \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>.\" or "
@@ -221,6 +261,17 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     )
     
     try:
+        if use_hyperbolic:
+            # Format messages for Hyperbolic
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
+            ]
+            recommendation = get_hyperbolic_response(messages, MODEL_CONFIG['hyperbolic'])
+            if recommendation is None:
+                raise Exception("Failed to get response from Hyperbolic API")
+            return recommendation, None
+            
         if use_ollama:
             # Format prompt for Ollama
             full_prompt = f"{SYSTEM_PROMPT}\n\nHere's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."
@@ -366,7 +417,9 @@ def validate_configuration() -> bool:
     required_env_vars = {
         'OPENAI_KEY': OPENAI_KEY,
         'DEEPSEEK_KEY': DEEPSEEK_KEY,
-        'XAI_KEY': XAI_KEY
+        'XAI_KEY': XAI_KEY,
+        'OPENROUTER_API_KEY': OPENROUTER_API_KEY,
+        'HYPERBOLIC_KEY': HYPERBOLIC_KEY
     }
     
     for name, value in required_env_vars.items():
@@ -388,15 +441,16 @@ def main():
     parser.add_argument('--use_gpt4o', action='store_true', help='Use GPT-4O model')
     parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
     parser.add_argument('--use_ollama', action='store_true', help='Use Ollama model')
+    parser.add_argument('--use_hyperbolic', action='store_true', help='Use Hyperbolic API')
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_o3_mini, --use_gpt4o, --use_deepseek_r1, or --use_ollama.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_o3_mini, --use_gpt4o, --use_deepseek_r1, --use_ollama, or --use_hyperbolic.")
         exit(1)
 
     try:
         # Validate API key first
-        if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1):
+        if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1, args.use_hyperbolic):
             provider = 'OpenRouter' if args.use_deepseek_r1 else ('X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI'))
             print(f"{COLORS['red']}Error: Invalid or missing {provider} API key. Please check your configuration.{COLORS['end']}")
             exit(1)
@@ -424,7 +478,8 @@ def main():
         # Get trading recommendation
         recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
                                                             args.use_deepseek, args.use_reasoner, args.use_grok, 
-                                                            args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama)
+                                                            args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, 
+                                                            args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
