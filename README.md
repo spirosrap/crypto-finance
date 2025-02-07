@@ -81,16 +81,61 @@ pip install TA-Lib
    pip install -r requirements.txt
    ```
 
-3. Create a `config.py` file in the root directory of the project with your API keys:
-   ```python
-   API_KEY = "your_coinbase_api_key"
-   API_SECRET = "your_coinbase_api_secret"
-   NEWS_API_KEY = "your_news_api_key"
-   ```
+3. Create a `config.py` file in the root directory of the project with your API keys.
 
-   Replace `your_coinbase_api_key`, `your_coinbase_api_secret`, and `your_news_api_key` with your actual API keys from Coinbase and NewsAPI respectively.
+## API Keys Configuration
 
-   Note: Keep your `config.py` file secure and never share it publicly or commit it to version control.
+The bot requires several API keys for full functionality. Create a `config.py` file in the root directory with the following structure:
+
+```python
+# Coinbase API credentials
+API_KEY = "your_coinbase_api_key"
+API_SECRET = "your_coinbase_api_secret"
+
+# News API for sentiment analysis
+NEWS_API_KEY = "your_news_api_key"
+
+# Twitter API credentials (optional - for social sentiment analysis)
+BEARER_TOKEN = "your_twitter_bearer_token"
+CONSUMER_KEY = "your_twitter_consumer_key"
+CONSUMER_SECRET = "your_twitter_consumer_secret"
+ACCESS_TOKEN = "your_twitter_access_token"
+ACCESS_TOKEN_SECRET = "your_twitter_access_token_secret"
+
+# AI Model API Keys (optional - for enhanced analysis)
+OPENAI_KEY = "your_openai_api_key"
+DEEPSEEK_KEY = "your_deepseek_api_key"
+OPENROUTER_API_KEY = "your_openrouter_api_key"
+XAI_KEY = "your_xai_api_key"
+HYPERBOLIC_KEY = "your_hyperbolic_api_key"
+```
+
+### Required API Keys
+- **Coinbase API**: Required for trading functionality
+  - Get your API credentials from [Coinbase Advanced Trade](https://www.coinbase.com/settings/api)
+  - Set `API_KEY` and `API_SECRET`
+
+### Optional API Keys
+- **News API**: For news sentiment analysis
+  - Get your API key from [NewsAPI](https://newsapi.org/)
+  - Set `NEWS_API_KEY`
+
+- **Twitter API**: For social sentiment analysis
+  - Get your credentials from [Twitter Developer Portal](https://developer.twitter.com/)
+  - Set all Twitter-related keys
+
+- **AI Model Keys**: For enhanced market analysis
+  - OpenAI: Get from [OpenAI Platform](https://platform.openai.com/)
+  - DeepSeek: Get from DeepSeek's platform
+  - OpenRouter: Get from OpenRouter's platform
+  - XAI: Get from XAI's platform
+  - Hyperbolic: Get from Hyperbolic's platform
+
+### Security Notes
+- Never commit your `config.py` file to version control
+- Keep your API keys secure and rotate them periodically
+- Use environment variables in production environments
+- Consider using a `.env` file for local development
 
 ## Usage
 
@@ -231,6 +276,10 @@ This Bitcoin Trading Bot is for educational and research purposes only. It is no
    API_SECRET = "your_coinbase_api_secret"
    NEWS_API_KEY = "your_news_api_key"  # Optional for sentiment analysis
    ```
+
+   Replace `your_coinbase_api_key`, `your_coinbase_api_secret`, and `your_news_api_key` with your actual API keys from Coinbase and NewsAPI respectively.
+
+   Note: Keep your `config.py` file secure and never share it publicly or commit it to version control.
 
 4. **Run basic simulation:**
    ```bash
