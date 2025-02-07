@@ -208,9 +208,9 @@ def get_hyperbolic_response(messages: list, model: str = "deepseek-ai/DeepSeek-R
         data = {
             "messages": messages,
             "model": model,
-            "max_tokens": 508,
-            "temperature": 0.1,
-            "top_p": 0.9
+            # "max_tokens": 508,
+            # "temperature": 0.1,
+            # "top_p": 0.9
         }
         
         response = requests.post(HYPERBOLIC_API_URL, headers=headers, json=data)
