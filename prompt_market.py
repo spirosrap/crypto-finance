@@ -134,7 +134,7 @@ def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use
 def validate_inputs(product_id: str, granularity: str) -> bool:
     """Validate product ID and granularity parameters."""
     valid_products = ['BTC-USDC', 'ETH-USDC', "DOGE-USDC"]  # Add more as needed
-    valid_granularities = ['ONE_MINUTE', 'FIVE_MINUTE', "FIFTEEN_MINUTE", 'ONE_HOUR', 'ONE_DAY']
+    valid_granularities = ['ONE_MINUTE', 'FIVE_MINUTE', "FIFTEEN_MINUTE", 'ONE_HOUR', 'TWO_HOUR', 'SIX_HOUR', 'ONE_DAY']
     
     if product_id not in valid_products:
         logging.error(f"Invalid product ID: {product_id}")
@@ -431,7 +431,7 @@ def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Analyze market data and get AI trading recommendations')
     parser.add_argument('--product_id', type=str, default='BTC-USDC', help='Trading pair to analyze (e.g., BTC-USDC, ETH-USDC)')
-    parser.add_argument('--granularity', type=str, default='ONE_HOUR', help='Time granularity for analysis (e.g., ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ONE_HOUR, ONE_DAY)')
+    parser.add_argument('--granularity', type=str, default='ONE_HOUR', help='Time granularity for analysis (e.g., ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ONE_HOUR, TWO_HOUR, SIX_HOUR, ONE_DAY)')
     parser.add_argument('--use_deepseek', action='store_true', help='Use DeepSeek Chat API instead of OpenAI')
     parser.add_argument('--use_reasoner', action='store_true', help='Use DeepSeek Reasoner API (includes reasoning steps)')
     parser.add_argument('--use_grok', action='store_true', help='Use X AI Grok API')
