@@ -253,10 +253,10 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
 
     SYSTEM_PROMPT = (
-        "Reply only with: \"BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>.\" or "
-        "\"SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>.\""
-        "Instruction 1: Use Code to calculate the R/R ratio."
-        "Instruction 2: Signal confidence should be between Strong, Moderate, Weak"
+        "Reply only with: BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>. or "
+        "SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>."
+        "Instruction 1: Use code to calculate the R/R ratio."
+        "Instruction 2: Signal confidence should be between Very Strong, Strong, Moderate, Weak, Very Weak"
     )
     
     try:
