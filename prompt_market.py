@@ -1,5 +1,4 @@
 from openai import OpenAI
-from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, HYPERBOLIC_KEY
 import subprocess
 import os
 import argparse
@@ -11,6 +10,20 @@ from datetime import datetime
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import openai
+
+# Use environment variables or config.py
+try:
+    from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, HYPERBOLIC_KEY
+except ImportError:
+    OPENAI_KEY = os.getenv('OPENAI_KEY')
+    DEEPSEEK_KEY = os.getenv('DEEPSEEK_KEY')
+    XAI_KEY = os.getenv('XAI_KEY')
+    OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+    HYPERBOLIC_KEY = os.getenv('HYPERBOLIC_KEY')
+
+if not (OPENAI_KEY and DEEPSEEK_KEY and XAI_KEY and OPENROUTER_API_KEY and HYPERBOLIC_KEY):
+    print("Error: Missing one or more required API keys. Please set OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, and HYPERBOLIC_KEY in your config or environment variables.")
+
 
 # Configure logging
 logging.basicConfig(
