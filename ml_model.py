@@ -28,7 +28,7 @@ GRANULARITY_SETTINGS = {
     'TEN_MINUTE': {'training_days': 75, 'feature_window': 250},
     'FIFTEEN_MINUTE': {'training_days': 90, 'feature_window': 300},
     'THIRTY_MINUTE': {'training_days': 180, 'feature_window': 400},
-    'ONE_HOUR': {'training_days': 365*4, 'feature_window': 500}, #feature window was 50.
+    'ONE_HOUR': {'training_days': 365*4, 'feature_window': 500},
     'SIX_HOUR': {'training_days': 730, 'feature_window': 1000},
     'ONE_DAY': {'training_days': 2000, 'feature_window': 2000},
 }
