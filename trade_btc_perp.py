@@ -111,16 +111,13 @@ def main():
         trades = cb_service.client.get_market_trades(product_id="BTC-PERP-INTX", limit=1)
         current_price = float(trades['trades'][0]['price'])
         
-        # Calculate size in BTC based on current price
-        # Try with $1000 order size
-        usd_order_size = 100  # Increased to $100
-        size = round(usd_order_size / current_price, 4)  # Round to 4 decimal places
-
-
+        # Calculate size in BTC based on current price and desired USD size
+        size = round(args.size / current_price, 4)  # Convert USD size to BTC amount
+        
         result = cb_service.place_market_order_with_targets(
             product_id="BTC-PERP-INTX",
             side=args.side,
-            size=size,  # Pass USD size directly
+            size=size,  # This will now be the correct BTC amount based on desired USD size
             take_profit_price=args.tp,
             stop_loss_price=args.sl,
             leverage=str(args.leverage)
