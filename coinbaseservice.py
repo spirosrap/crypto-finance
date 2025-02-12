@@ -26,11 +26,11 @@ class CoinbaseService:
             portfolio_type (str): Type of portfolio to query ("DEFAULT" or "PERPETUALS")
             
         Returns:
-            Tuple[float, float]: (fiat_balance, crypto_balance)
+            Tuple[float, float]: (fiat_balance, crypto_balance) for spot positions
+                                or (usd_balance, perp_position_size) for perpetuals
         """
         try:
             ports = portfolios.get_portfolios(self.client)["portfolios"]
-            
             # Log available portfolio types for debugging
             available_types = [p["type"] for p in ports]
             self.logger.debug(f"Available portfolio types: {available_types}")
@@ -39,21 +39,34 @@ class CoinbaseService:
                 if p["type"] == portfolio_type:
                     uuid = p["uuid"]
                     breakdown = portfolios.get_portfolio_breakdown(self.client, portfolio_uuid=uuid)
-                    spot = breakdown["breakdown"]["spot_positions"]
+                    if portfolio_type == "DEFAULT":
+                        spot = breakdown["breakdown"]["spot_positions"]
+                        
+                        # Initialize balances
+                        fiat_balance = 0.0
+                        crypto_balance = 0.0
+                        
+                        for position in spot:
+                            if position["asset"] == "BTC":
+                                fiat_balance = float(position["total_balance_fiat"])
+                                crypto_balance = float(position["total_balance_crypto"])
+                                break
+                        
+                        self.logger.info(f"Retrieved {portfolio_type} portfolio - "
+                                       f"Fiat: {fiat_balance}, Crypto: {crypto_balance}")
+                        return fiat_balance, crypto_balance
                     
-                    # Initialize balances
-                    fiat_balance = 0.0
-                    crypto_balance = 0.0
-                    
-                    for position in spot:
-                        if position["asset"] == "BTC":
-                            fiat_balance = float(position["total_balance_fiat"])
-                            crypto_balance = float(position["total_balance_crypto"])
-                            break
-                    
-                    self.logger.info(f"Retrieved {portfolio_type} portfolio - "
-                                   f"Fiat: {fiat_balance}, Crypto: {crypto_balance}")
-                    return fiat_balance, crypto_balance
+                    elif portfolio_type == "INTX":
+                        perps = breakdown["breakdown"]["portfolio_balances"]
+                        
+                        # Initialize perpetual values
+                        usd_balance = float(perps["total_balance"]["value"])
+                        perp_position_size = 0.0
+                        
+                        
+                        self.logger.info(f"Retrieved {portfolio_type} portfolio - "
+                                       f"USD Balance: {usd_balance}, Position Size: {perp_position_size}")
+                        return usd_balance, perp_position_size
             
             self.logger.warning(f"Portfolio type {portfolio_type} not found")
             return 0.0, 0.0

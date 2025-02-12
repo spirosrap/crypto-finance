@@ -8,7 +8,7 @@ import timeout_decorator  # You may need to: pip install timeout-decorator
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from coinbaseservice import CoinbaseService
-from config import API_KEY, API_SECRET
+from config import API_KEY_PERPS, API_SECRET_PERPS  
 
 class TestCoinbaseService(unittest.TestCase):
     def setUp(self):
@@ -18,7 +18,7 @@ class TestCoinbaseService(unittest.TestCase):
             level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
-        self.coinbase_service = CoinbaseService(API_KEY, API_SECRET)
+        self.coinbase_service = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
 
     @timeout_decorator.timeout(30)  # Set 30 second timeout
     def test_get_trading_pairs(self):
@@ -32,7 +32,7 @@ class TestCoinbaseService(unittest.TestCase):
             print("Finished requesting trading pairs")
             
             # Print raw pairs for debugging
-            print("\nRetrieved pairs:", pairs)
+            # print("\nRetrieved pairs:", pairs)
             
             # Basic validation
             self.assertIsNotNone(pairs, "Trading pairs response is None")
@@ -74,7 +74,7 @@ class TestCoinbaseService(unittest.TestCase):
             print("\nStarting portfolio info test...")
             
             # Test both portfolio types
-            portfolio_types = ["DEFAULT", "PERPETUALS"]
+            portfolio_types = ["DEFAULT", "INTX"]
             
             for portfolio_type in portfolio_types:
                 print(f"\nTesting {portfolio_type} portfolio:")
