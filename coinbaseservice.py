@@ -467,7 +467,7 @@ class CoinbaseService:
             portfolio_uuid = None
             
             self.logger.info("Available portfolios:")
-            for p in ports['portfolios']:  # Access as dictionary
+            for p in ports['portfolios']:
                 self.logger.info(f"Portfolio type: {p['type']}, UUID: {p['uuid']}")
                 if p['type'] == "INTX":
                     portfolio_uuid = p['uuid']
@@ -478,67 +478,68 @@ class CoinbaseService:
             
             self.logger.info(f"Using portfolio UUID: {portfolio_uuid}")
             
-            # Use list_orders with OPEN status and portfolio UUID
+            # Get open orders
             open_orders = self.client.list_orders(
                 order_status="OPEN",
                 product_id=product_id,
-                portfolio_uuid=portfolio_uuid  # Use UUID instead of portfolio_id
+                portfolio_uuid=portfolio_uuid
             )
             
-            # Debug logging to see what we got back
+            if not isinstance(open_orders, dict):
+                open_orders = vars(open_orders)
+            
             self.logger.info(f"Raw response: {open_orders}")
             
-            if hasattr(open_orders, 'orders'):
-                for order in open_orders.orders:
-                    self.logger.info(f"Order found: ID={getattr(order, 'order_id', 'N/A')}, "
-                                   f"Status={getattr(order, 'status', 'N/A')}, "
-                                   f"Product={getattr(order, 'product_id', 'N/A')}")
-            
-            if not open_orders or not hasattr(open_orders, 'orders'):
+            if 'orders' not in open_orders or not open_orders['orders']:
                 self.logger.info("No open orders found")
                 return
             
-            # Log the number of orders found
-            order_count = len(open_orders.orders) if hasattr(open_orders, 'orders') else 0
-            self.logger.info(f"Found {order_count} open orders")
+            # Extract order IDs and cancel each order individually
+            for order in open_orders['orders']:
+                order_id = order.get('order_id')
+                if order_id:
+                    try:
+                        # First try to cancel any bracket orders
+                        if order.get('order_type') == 'BRACKET':
+                            self.logger.info(f"Cancelling bracket order {order_id}")
+                            # Cancel the bracket order and any attached orders
+                            if order.get('attached_order_id'):
+                                self.logger.info(f"Cancelling attached order {order['attached_order_id']}")
+                                self.client.cancel_orders(order_ids=[order['attached_order_id']])
+                            if order.get('originating_order_id'):
+                                self.logger.info(f"Cancelling originating order {order['originating_order_id']}")
+                                self.client.cancel_orders(order_ids=[order['originating_order_id']])
+                        
+                        # Cancel the main order
+                        self.logger.info(f"Cancelling order {order_id}")
+                        result = self.client.cancel_orders(order_ids=[order_id])
+                        self.logger.info(f"Cancel result for order {order_id}: {result}")
+                        
+                        # Wait briefly to ensure the cancel is processed
+                        time.sleep(0.5)
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error cancelling order {order_id}: {str(e)}")
+                        continue
             
-            if order_count == 0:
-                return
+            # Verify all orders are cancelled
+            time.sleep(1)  # Wait for cancellations to process
+            verify_orders = self.client.list_orders(
+                order_status="OPEN",
+                product_id=product_id,
+                portfolio_uuid=portfolio_uuid
+            )
             
-            # Extract order IDs from open orders
-            order_ids = [
-                order.order_id 
-                for order in open_orders.orders 
-                if hasattr(order, 'order_id')
-            ]
-            
-            if not order_ids:
-                self.logger.info("No active orders to cancel")
-                return
-            
-            self.logger.info(f"Attempting to cancel {len(order_ids)} orders")
-            
-            # Process orders in batches of 100 (Coinbase API limit)
-            batch_size = 100
-            total_cancelled = 0
-            
-            for i in range(0, len(order_ids), batch_size):
-                batch = order_ids[i:i + batch_size]
-                try:
-                    response = self.client.cancel_orders(order_ids=batch)
-                    
-                    # Count successful cancellations
-                    if hasattr(response, 'results'):
-                        # Handle response.results being a list of CancelOrderObject
-                        successful = sum(1 for r in response.results if hasattr(r, 'success') and r.success)
-                        total_cancelled += successful
-                        self.logger.info(f"Successfully cancelled {successful} orders from batch")
-                    
-                except Exception as e:
-                    self.logger.error(f"Error cancelling batch: {str(e)}")
-                    continue
-            
-            self.logger.info(f"Cancelled total of {total_cancelled} orders for {product_id or 'all products'}")
+            if not isinstance(verify_orders, dict):
+                verify_orders = vars(verify_orders)
+                
+            remaining_orders = verify_orders.get('orders', [])
+            if remaining_orders:
+                self.logger.warning(f"Some orders remain uncancelled: {len(remaining_orders)} orders")
+                for order in remaining_orders:
+                    self.logger.warning(f"Uncancelled order: {order.get('order_id')} - {order.get('order_type')}")
+            else:
+                self.logger.info("All orders successfully cancelled")
             
         except Exception as e:
             self.logger.error(f"Error cancelling orders: {str(e)}")
@@ -547,6 +548,7 @@ class CoinbaseService:
     def close_all_positions(self, product_id: str = None):
         """
         Close all open positions for a given product_id or all products if none specified.
+        First cancels all open orders, then closes positions.
         
         Args:
             product_id (str, optional): The trading pair to close positions for
@@ -569,51 +571,90 @@ class CoinbaseService:
                 self.logger.error("Could not find INTX portfolio")
                 return
             
+            # First cancel all open orders
+            self.logger.info("Cancelling all open orders first...")
+            self.cancel_all_orders(product_id)
+            
             # Get portfolio positions
             self.logger.info(f"Getting breakdown for portfolio {portfolio_uuid}...")
             portfolio = self.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
             
             self.logger.info("Got portfolio breakdown")
+            self.logger.debug(f"Portfolio response: {portfolio}")  # Debug log to see structure
             
-            # Access the perp_positions from the response
-            if not hasattr(portfolio, 'breakdown'):
+            # Handle both object and dictionary response types
+            breakdown = portfolio.get('breakdown') if isinstance(portfolio, dict) else getattr(portfolio, 'breakdown', None)
+            if not breakdown:
                 self.logger.error("No breakdown in portfolio response")
                 return
             
-            if not hasattr(portfolio.breakdown, 'perp_positions'):
-                self.logger.error("No perp_positions in portfolio breakdown")
+            # Get positions from the correct path in the response
+            positions = []
+            if isinstance(breakdown, dict):
+                positions = breakdown.get('perp_positions', [])
+            else:
+                positions = getattr(breakdown, 'perp_positions', [])
+            
+            if not positions:
+                self.logger.info("No perpetual positions found")
                 return
             
-            positions = portfolio.breakdown.perp_positions
             self.logger.info(f"Found {len(positions)} perpetual positions")
             
             for position in positions:
-                self.logger.info(f"Processing position: {position}")
+                # Handle both object and dictionary position types
+                if isinstance(position, dict):
+                    position_symbol = position.get('symbol')
+                    position_size = float(position.get('net_size', '0'))
+                else:
+                    position_symbol = getattr(position, 'symbol', None)
+                    position_size = float(getattr(position, 'net_size', '0'))
                 
-                # Get symbol instead of product_id for perpetual futures
-                position_symbol = getattr(position, 'symbol', None)
+                self.logger.info(f"Processing position: Symbol={position_symbol}, Size={position_size}")
+                
                 if product_id and position_symbol != product_id:
                     self.logger.info(f"Skipping position for {position_symbol}")
                     continue
                 
-                position_size = float(getattr(position, 'net_size', '0'))
-                self.logger.info(f"Position size: {position_size}")
-                
-                if position_size != 0:
-                    side = "BUY" if getattr(position, 'position_side', '') == 'FUTURES_POSITION_SIDE_SHORT' else "SELL"
-                    size = abs(position_size)
+                if abs(position_size) > 0:
+                    try:
+                        # Generate a unique client_order_id
+                        client_order_id = f"close_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+                        
+                        # Use the close_position endpoint directly
+                        result = self.client.close_position(
+                            client_order_id=client_order_id,
+                            product_id=position_symbol,
+                            size=str(abs(position_size))  # Use absolute value of position size
+                        )
+                        
+                        self.logger.info(f"Close position result: {result}")
+                        
+                        # Verify the position is closed
+                        time.sleep(1)  # Wait briefly for the order to process
+                        updated_portfolio = self.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+                        
+                        # Handle both object and dictionary response types for verification
+                        updated_breakdown = updated_portfolio.get('breakdown') if isinstance(updated_portfolio, dict) else getattr(updated_portfolio, 'breakdown', None)
+                        if updated_breakdown:
+                            updated_positions = []
+                            if isinstance(updated_breakdown, dict):
+                                updated_positions = [p for p in updated_breakdown.get('perp_positions', [])
+                                                  if p.get('symbol') == position_symbol]
+                            else:
+                                updated_positions = [p for p in getattr(updated_breakdown, 'perp_positions', [])
+                                                  if getattr(p, 'symbol', None) == position_symbol]
+                            
+                            if updated_positions:
+                                updated_size = float(updated_positions[0].get('net_size', '0') if isinstance(updated_positions[0], dict)
+                                                  else getattr(updated_positions[0], 'net_size', '0'))
+                                if abs(updated_size) > 0:
+                                    self.logger.warning(f"Position may not be fully closed. Remaining size: {updated_size}")
+                                else:
+                                    self.logger.info(f"Successfully closed position for {position_symbol}")
                     
-                    self.logger.info(f"Closing {side} position of size {size} for {position_symbol}")
-                    
-                    # Place market order to close position
-                    result = self.place_order(
-                        product_id=position_symbol,
-                        side=side,
-                        size=size,
-                        order_type="MARKET"
-                    )
-                    
-                    self.logger.info(f"Close position result: {result}")
+                    except Exception as e:
+                        self.logger.error(f"Error closing position for {position_symbol}: {str(e)}")
                 else:
                     self.logger.info(f"Position size is 0, skipping")
                 
