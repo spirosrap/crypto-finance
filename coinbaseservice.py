@@ -273,3 +273,196 @@ class CoinbaseService:
         except Exception as e:
             self.logger.error(f"Error getting trading pairs: {str(e)}")
             return []
+
+    def place_market_order_with_targets(self, product_id: str, side: str, size: float, 
+                                      take_profit_price: float, stop_loss_price: float,
+                                      leverage: str = None) -> dict:
+        """
+        Place a market order with take profit and stop loss targets.
+        """
+        try:
+            # First preview the market order
+            preview = self.client.preview_market_order(
+                product_id=product_id,
+                side=side.upper(),
+                base_size=str(size),
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            self.logger.info(f"Order preview response: {preview}")
+            
+            # Check preview response
+            if hasattr(preview, 'error_response'):
+                self.logger.error(f"Order preview failed: {preview.error_response}")
+                return {"error": preview.error_response}
+                
+            # Generate a unique client_order_id
+            client_order_id = f"market_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            # Place the initial market order
+            market_order = self.client.market_order(
+                client_order_id=client_order_id,
+                product_id=product_id,
+                side=side.upper(),
+                base_size=str(size),
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            if hasattr(market_order, 'error_response'):
+                self.logger.error(f"Failed to place market order: {market_order.error_response}")
+                return {"error": market_order.error_response}
+            
+            self.logger.info(f"Market order placed: {market_order}")
+            
+            # Wait for the market order to fill
+            time.sleep(2)
+            
+            # Get the order details from the response
+            # Debug the response type and structure
+            self.logger.info(f"Market order type: {type(market_order)}")
+            
+            # Convert response to dictionary if needed
+            market_order_dict = vars(market_order)
+            self.logger.info(f"Market order dict: {market_order_dict}")
+            
+            # Extract order ID from success_response
+            if (hasattr(market_order, 'success_response') and 
+                isinstance(market_order.success_response, dict) and 
+                'order_id' in market_order.success_response):
+                order_id = market_order.success_response['order_id']
+                self.logger.info(f"Found order ID: {order_id}")
+            else:
+                self.logger.error(f"Could not find order ID in response: {market_order}")
+                return {"error": "Could not find order ID", "market_order": str(market_order)}
+            
+            # Get the order status
+            order_status = self.client.get_order(order_id=order_id)
+            self.logger.info(f"Order status response: {order_status}")
+            
+            # Check if order is filled
+            if hasattr(order_status, 'order') and hasattr(order_status.order, 'status') and order_status.order.status == 'FILLED':
+                self.logger.info("Market order is filled")
+                # Get the fill price
+                entry_price = float(order_status.order['average_filled_price'])
+                self.logger.info(f"Entry price: {entry_price}")
+            else:
+                self.logger.error(f"Market order not filled: {order_status}")
+                return {"error": "Market order not filled", "market_order": str(market_order)}
+            
+            # Place take profit limit order
+            tp_client_order_id = f"tp_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            tp_side = "BUY" if side.upper() == "SELL" else "SELL"  # Opposite of entry order
+            
+            # Calculate and round prices based on entry price
+            if side.upper() == "SELL":
+                # For a short position:
+                # - Take profit should be BELOW entry price
+                # - Stop loss should be ABOVE entry price
+                take_profit_price = round(entry_price * 0.99, 1)  # 1% below entry
+                stop_loss_price = round(entry_price * 1.01, 1)   # 1% above entry
+            else:
+                # For a long position:
+                # - Take profit should be ABOVE entry price
+                # - Stop loss should be BELOW entry price
+                take_profit_price = round(entry_price * 1.01, 1)  # 1% above entry
+                stop_loss_price = round(entry_price * 0.99, 1)   # 1% below entry
+            
+            self.logger.info(f"Entry price: {entry_price}")
+            self.logger.info(f"Take profit price: {take_profit_price}")
+            self.logger.info(f"Stop loss price: {stop_loss_price}")
+            
+            # Place take profit order
+            self.logger.info(f"Placing take profit order: side={tp_side}, price={take_profit_price}")
+            take_profit_order = self.client.limit_order_gtc(
+                client_order_id=tp_client_order_id,
+                product_id=product_id,
+                side=tp_side,
+                base_size=str(size),
+                limit_price=str(take_profit_price),
+                post_only=False,
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            if hasattr(take_profit_order, 'error_response'):
+                self.logger.error(f"Failed to place take profit order: {take_profit_order.error_response}")
+                return {
+                    "error": "Failed to place take profit order",
+                    "market_order": str(market_order),
+                    "tp_error": take_profit_order.error_response
+                }
+            
+            self.logger.info(f"Take profit order placed: {take_profit_order}")
+            
+            # Place stop loss order
+            sl_client_order_id = f"sl_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            # For a SELL position:
+            # - Stop loss should be ABOVE entry (stop when price rises)
+            # - Direction should be STOP_DIRECTION_STOP_UP
+            # - Side should be BUY to close the position
+            #
+            # For a BUY position:
+            # - Stop loss should be BELOW entry (stop when price falls)
+            # - Direction should be STOP_DIRECTION_STOP_DOWN
+            # - Side should be SELL to close the position
+            
+            sl_side = "BUY" if side.upper() == "SELL" else "SELL"  # Opposite of entry order
+            stop_direction = "STOP_DIRECTION_STOP_DOWN" if side.upper() == "BUY" else "STOP_DIRECTION_STOP_UP"
+            
+            self.logger.info(f"Placing stop loss order: side={sl_side}, price={stop_loss_price}, direction={stop_direction}")
+            stop_loss_order = self.client.stop_limit_order_gtc(
+                client_order_id=sl_client_order_id,
+                product_id=product_id,
+                side=sl_side,
+                base_size=str(size),
+                limit_price=str(stop_loss_price),
+                stop_price=str(stop_loss_price),
+                stop_direction=stop_direction,
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            if hasattr(stop_loss_order, 'error_response'):
+                self.logger.error(f"Failed to place stop loss order: {stop_loss_order.error_response}")
+                return {
+                    "error": "Failed to place stop loss order",
+                    "market_order": str(market_order),
+                    "take_profit_order": str(take_profit_order),
+                    "sl_error": stop_loss_order.error_response
+                }
+            
+            self.logger.info(f"Stop loss order placed: {stop_loss_order}")
+            
+            # Return all order details
+            return {
+                "market_order": str(market_order),
+                "take_profit_order": str(take_profit_order),
+                "stop_loss_order": str(stop_loss_order),
+                "status": "success",
+                "order_id": order_id,
+                "tp_price": take_profit_price,
+                "sl_price": stop_loss_price
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error placing market order with targets: {str(e)}")
+            return {"error": str(e)}
+
+    def cancel_all_orders(self, product_id: str = None):
+        """
+        Cancel all open orders for a given product_id or all products if none specified.
+        
+        Args:
+            product_id (str, optional): The trading pair to cancel orders for
+        """
+        try:
+            if product_id:
+                self.client.cancel_orders(product_ids=[product_id])
+            else:
+                self.client.cancel_orders()
+            self.logger.info(f"Cancelled all orders for {product_id or 'all products'}")
+        except Exception as e:
+            self.logger.error(f"Error cancelling orders: {str(e)}")
