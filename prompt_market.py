@@ -262,6 +262,9 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     if not (use_ollama or use_hyperbolic) and client is None:
         raise ValueError("API client not properly initialized")
 
+    # Add timeout parameter for API calls
+    TIMEOUT = 30  # 30 seconds timeout
+
     # Define provider at the start of the function
     provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
 
@@ -275,7 +278,6 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     
     try:
         if use_hyperbolic:
-            # Format messages for Hyperbolic
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
@@ -328,7 +330,8 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             
         params = {
             "model": model,
-            "messages": messages
+            "messages": messages,
+            "timeout": TIMEOUT
         }
             
         response = client.chat.completions.create(**params)
@@ -352,6 +355,11 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             logging.error(f"Invalid recommendation format: {recommendation}")
             return None, None
         return recommendation, reasoning
+    except TimeoutError:
+        error_msg = f"{COLORS['red']}Error: Request timed out after {TIMEOUT} seconds.{COLORS['end']}"
+        print(error_msg)
+        logging.error("API request timed out")
+        raise
     except openai.RateLimitError:
         error_msg = f"{COLORS['red']}Error: {provider} API rate limit exceeded. Please wait a few minutes and try again.{COLORS['end']}"
         print(error_msg)
@@ -441,6 +449,32 @@ def validate_configuration() -> bool:
             return False
     return True
 
+def validate_model_availability(model: str, provider: str) -> bool:
+    """Validate that the selected model is available from the provider."""
+    try:
+        if provider == 'Ollama':
+            # Check if Ollama server is running
+            response = requests.get("http://localhost:11434/api/version", timeout=5)
+            return response.status_code == 200
+        elif provider == 'Hyperbolic':
+            # Verify Hyperbolic API connectivity
+            headers = {"Authorization": f"Bearer {HYPERBOLIC_KEY}"}
+            response = requests.get("https://api.hyperbolic.xyz/v1/models", headers=headers, timeout=5)
+            available_models = response.json().get('data', [])
+            return any(m['id'] == model for m in available_models)
+        elif provider == 'OpenRouter':
+            # Verify OpenRouter model availability
+            headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}
+            response = requests.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=5)
+            available_models = response.json()
+            return model in [m['id'] for m in available_models]
+        
+        return True  # Default to True for other providers
+        
+    except Exception as e:
+        logging.warning(f"Could not validate model availability for {provider}: {str(e)}")
+        return True  # Default to True if check fails
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Analyze market data and get AI trading recommendations')
@@ -480,6 +514,24 @@ def main():
         # Add configuration validation
         if not validate_configuration():
             print("Missing required configuration parameters")
+            exit(1)
+
+        # Validate model availability
+        model = MODEL_CONFIG.get('default')
+        provider = 'OpenAI'
+        
+        if args.use_hyperbolic:
+            model = MODEL_CONFIG['hyperbolic']
+            provider = 'Hyperbolic'
+        elif args.use_ollama:
+            model = MODEL_CONFIG['ollama']
+            provider = 'Ollama'
+        elif args.use_deepseek_r1:
+            model = MODEL_CONFIG['deepseek-R1']
+            provider = 'OpenRouter'
+        
+        if not validate_model_availability(model, provider):
+            print(f"{COLORS['red']}Error: Model {model} is not available from {provider}.{COLORS['end']}")
             exit(1)
 
         # Run market analysis
