@@ -485,8 +485,12 @@ class CoinbaseService:
                 portfolio_uuid=portfolio_uuid
             )
             
+            # Convert response to dictionary if needed
             if not isinstance(open_orders, dict):
-                open_orders = vars(open_orders)
+                if hasattr(open_orders, '__dict__'):
+                    open_orders = vars(open_orders)
+                else:
+                    open_orders = {'orders': []}
             
             self.logger.info(f"Raw response: {open_orders}")
             
@@ -496,19 +500,30 @@ class CoinbaseService:
             
             # Extract order IDs and cancel each order individually
             for order in open_orders['orders']:
-                order_id = order.get('order_id')
+                # Handle both dictionary and object types
+                if isinstance(order, dict):
+                    order_id = order.get('order_id')
+                    order_type = order.get('order_type')
+                    attached_order_id = order.get('attached_order_id')
+                    originating_order_id = order.get('originating_order_id')
+                else:
+                    order_id = getattr(order, 'order_id', None)
+                    order_type = getattr(order, 'order_type', None)
+                    attached_order_id = getattr(order, 'attached_order_id', None)
+                    originating_order_id = getattr(order, 'originating_order_id', None)
+                
                 if order_id:
                     try:
                         # First try to cancel any bracket orders
-                        if order.get('order_type') == 'BRACKET':
+                        if order_type == 'BRACKET':
                             self.logger.info(f"Cancelling bracket order {order_id}")
                             # Cancel the bracket order and any attached orders
-                            if order.get('attached_order_id'):
-                                self.logger.info(f"Cancelling attached order {order['attached_order_id']}")
-                                self.client.cancel_orders(order_ids=[order['attached_order_id']])
-                            if order.get('originating_order_id'):
-                                self.logger.info(f"Cancelling originating order {order['originating_order_id']}")
-                                self.client.cancel_orders(order_ids=[order['originating_order_id']])
+                            if attached_order_id:
+                                self.logger.info(f"Cancelling attached order {attached_order_id}")
+                                self.client.cancel_orders(order_ids=[attached_order_id])
+                            if originating_order_id:
+                                self.logger.info(f"Cancelling originating order {originating_order_id}")
+                                self.client.cancel_orders(order_ids=[originating_order_id])
                         
                         # Cancel the main order
                         self.logger.info(f"Cancelling order {order_id}")
@@ -530,14 +545,21 @@ class CoinbaseService:
                 portfolio_uuid=portfolio_uuid
             )
             
+            # Convert verification response to dictionary if needed
             if not isinstance(verify_orders, dict):
-                verify_orders = vars(verify_orders)
-                
+                if hasattr(verify_orders, '__dict__'):
+                    verify_orders = vars(verify_orders)
+                else:
+                    verify_orders = {'orders': []}
+            
             remaining_orders = verify_orders.get('orders', [])
             if remaining_orders:
                 self.logger.warning(f"Some orders remain uncancelled: {len(remaining_orders)} orders")
                 for order in remaining_orders:
-                    self.logger.warning(f"Uncancelled order: {order.get('order_id')} - {order.get('order_type')}")
+                    if isinstance(order, dict):
+                        self.logger.warning(f"Uncancelled order: {order.get('order_id')} - {order.get('order_type')}")
+                    else:
+                        self.logger.warning(f"Uncancelled order: {getattr(order, 'order_id', None)} - {getattr(order, 'order_type', None)}")
             else:
                 self.logger.info("All orders successfully cancelled")
             
@@ -548,52 +570,72 @@ class CoinbaseService:
     def close_all_positions(self, product_id: str = None):
         """
         Close all open positions for a given product_id or all products if none specified.
-        First cancels all open orders, then closes positions.
-        
-        Args:
-            product_id (str, optional): The trading pair to close positions for
         """
         try:
+            # First cancel all open orders
+            self.logger.info("Cancelling all open orders first...")
+            self.cancel_all_orders(product_id)
+            
+            # Wait briefly for orders to be cancelled
+            time.sleep(2)
+            
             self.logger.info("Fetching open positions...")
             
-            # First get the INTX portfolio UUID
-            self.logger.info("Getting portfolios...")
+            # Get the INTX portfolio UUID
             ports = self.client.get_portfolios()
             portfolio_uuid = None
             
             for p in ports['portfolios']:
                 if p['type'] == "INTX":
                     portfolio_uuid = p['uuid']
-                    self.logger.info(f"Found INTX portfolio with UUID: {portfolio_uuid}")
                     break
             
             if not portfolio_uuid:
                 self.logger.error("Could not find INTX portfolio")
                 return
             
-            # First cancel all open orders
-            self.logger.info("Cancelling all open orders first...")
-            self.cancel_all_orders(product_id)
-            
             # Get portfolio positions
-            self.logger.info(f"Getting breakdown for portfolio {portfolio_uuid}...")
             portfolio = self.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+            self.logger.debug(f"Portfolio response: {portfolio}")
             
-            self.logger.info("Got portfolio breakdown")
-            self.logger.debug(f"Portfolio response: {portfolio}")  # Debug log to see structure
+            # Initialize positions as empty list
+            positions = []
             
-            # Handle both object and dictionary response types
-            breakdown = portfolio.get('breakdown') if isinstance(portfolio, dict) else getattr(portfolio, 'breakdown', None)
-            if not breakdown:
-                self.logger.error("No breakdown in portfolio response")
+            # Convert portfolio to dictionary if needed
+            if not isinstance(portfolio, dict):
+                if hasattr(portfolio, '__dict__'):
+                    portfolio = vars(portfolio)
+                else:
+                    self.logger.error("Invalid portfolio response format")
+                    return
+            
+            # Handle breakdown object
+            breakdown = portfolio.get('breakdown')
+            if breakdown is None:
+                self.logger.error("No breakdown found in portfolio")
                 return
             
-            # Get positions from the correct path in the response
-            positions = []
-            if isinstance(breakdown, dict):
-                positions = breakdown.get('perp_positions', [])
+            if not isinstance(breakdown, dict):
+                if hasattr(breakdown, '__dict__'):
+                    breakdown = vars(breakdown)
+                    positions = breakdown.get('perp_positions', [])
+                elif hasattr(breakdown, 'perp_positions'):
+                    positions = breakdown.perp_positions
+                else:
+                    self.logger.error("Invalid breakdown format")
+                    return
             else:
-                positions = getattr(breakdown, 'perp_positions', [])
+                positions = breakdown.get('perp_positions', [])
+            
+            # Convert positions to list if it's not already
+            if not isinstance(positions, list):
+                if hasattr(positions, '__iter__'):
+                    positions = list(positions)
+                else:
+                    self.logger.error("Invalid positions format")
+                    return
+            
+            self.logger.info(f"Found positions: {positions}")
             
             if not positions:
                 self.logger.info("No perpetual positions found")
@@ -602,62 +644,84 @@ class CoinbaseService:
             self.logger.info(f"Found {len(positions)} perpetual positions")
             
             for position in positions:
-                # Handle both object and dictionary position types
+                # Handle both dictionary and object types
                 if isinstance(position, dict):
                     position_symbol = position.get('symbol')
                     position_size = float(position.get('net_size', '0'))
+                    position_side = position.get('position_side', '')
+                    leverage = position.get('leverage', '1')
                 else:
                     position_symbol = getattr(position, 'symbol', None)
                     position_size = float(getattr(position, 'net_size', '0'))
+                    position_side = getattr(position, 'position_side', '')
+                    leverage = getattr(position, 'leverage', '1')
                 
-                self.logger.info(f"Processing position: Symbol={position_symbol}, Size={position_size}")
-                
-                if product_id and position_symbol != product_id:
-                    self.logger.info(f"Skipping position for {position_symbol}")
+                if not position_symbol:
                     continue
-                
+                    
+                if product_id and position_symbol != product_id:
+                    continue
+                    
                 if abs(position_size) > 0:
                     try:
                         # Generate a unique client_order_id
                         client_order_id = f"close_{uuid.uuid4().hex[:16]}_{int(time.time())}"
                         
-                        # Use the close_position endpoint directly
-                        result = self.client.close_position(
+                        # Determine side based on position side
+                        # If SHORT position, we need to BUY to close
+                        # If LONG position, we need to SELL to close
+                        side = "BUY" if position_side == "FUTURES_POSITION_SIDE_SHORT" else "SELL"
+                        
+                        self.logger.info(f"Closing {position_side} position for {position_symbol}: {position_size} using {side} order")
+                        
+                        # Create order configuration
+                        order_config = {
+                            "market_market_ioc": {
+                                "base_size": str(abs(position_size))
+                            }
+                        }
+                        
+                        # Place the market order
+                        result = self.client.create_order(
                             client_order_id=client_order_id,
                             product_id=position_symbol,
-                            size=str(abs(position_size))  # Use absolute value of position size
+                            side=side,
+                            order_configuration=order_config,
+                            leverage=leverage,
+                            margin_type="CROSS"  # Add margin type for leveraged trades
                         )
                         
                         self.logger.info(f"Close position result: {result}")
                         
-                        # Verify the position is closed
-                        time.sleep(1)  # Wait briefly for the order to process
-                        updated_portfolio = self.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+                        if isinstance(result, dict) and not result.get('success', True):
+                            error_response = result.get('error_response', {})
+                            self.logger.error(f"Failed to close position: {error_response}")
+                            if 'PREVIEW_INSUFFICIENT_FUNDS' in str(error_response):
+                                self.logger.info("Attempting to reduce position size slightly...")
+                                # Try again with 99% of the position size
+                                reduced_size = abs(position_size) * 0.99
+                                order_config["market_market_ioc"]["base_size"] = str(reduced_size)
+                                
+                                result = self.client.create_order(
+                                    client_order_id=f"{client_order_id}_reduced",
+                                    product_id=position_symbol,
+                                    side=side,
+                                    order_configuration=order_config,
+                                    leverage=leverage,
+                                    margin_type="CROSS"
+                                )
+                                self.logger.info(f"Reduced size close position result: {result}")
                         
-                        # Handle both object and dictionary response types for verification
-                        updated_breakdown = updated_portfolio.get('breakdown') if isinstance(updated_portfolio, dict) else getattr(updated_portfolio, 'breakdown', None)
-                        if updated_breakdown:
-                            updated_positions = []
-                            if isinstance(updated_breakdown, dict):
-                                updated_positions = [p for p in updated_breakdown.get('perp_positions', [])
-                                                  if p.get('symbol') == position_symbol]
-                            else:
-                                updated_positions = [p for p in getattr(updated_breakdown, 'perp_positions', [])
-                                                  if getattr(p, 'symbol', None) == position_symbol]
-                            
-                            if updated_positions:
-                                updated_size = float(updated_positions[0].get('net_size', '0') if isinstance(updated_positions[0], dict)
-                                                  else getattr(updated_positions[0], 'net_size', '0'))
-                                if abs(updated_size) > 0:
-                                    self.logger.warning(f"Position may not be fully closed. Remaining size: {updated_size}")
-                                else:
-                                    self.logger.info(f"Successfully closed position for {position_symbol}")
-                    
+                        # Wait for the order to process
+                        time.sleep(1)
+                        
                     except Exception as e:
                         self.logger.error(f"Error closing position for {position_symbol}: {str(e)}")
-                else:
-                    self.logger.info(f"Position size is 0, skipping")
-                
+                        self.logger.exception("Full error details:")
+                        continue
+                    
+            self.logger.info("Finished closing positions")
+            
         except Exception as e:
             self.logger.error(f"Error closing positions: {str(e)}")
             self.logger.exception("Full error details:")
