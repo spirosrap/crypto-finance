@@ -413,10 +413,24 @@ class CoinbaseService:
             product_id (str, optional): The trading pair to cancel orders for
         """
         try:
-            if product_id:
-                self.client.cancel_orders(product_ids=[product_id])
+            # First get all open orders
+            open_orders = self.client.get_orders(
+                filter="OPEN",
+                product_id=product_id
+            )
+            
+            if hasattr(open_orders, 'orders') and open_orders.orders:
+                # Extract order IDs
+                order_ids = [order.order_id for order in open_orders.orders]
+                
+                # Cancel orders by their IDs
+                if order_ids:
+                    self.client.cancel_orders(order_ids=order_ids)
+                    self.logger.info(f"Cancelled {len(order_ids)} orders for {product_id or 'all products'}")
+                else:
+                    self.logger.info("No open orders to cancel")
             else:
-                self.client.cancel_orders()
-            self.logger.info(f"Cancelled all orders for {product_id or 'all products'}")
+                self.logger.info("No open orders found")
+            
         except Exception as e:
             self.logger.error(f"Error cancelling orders: {str(e)}")
