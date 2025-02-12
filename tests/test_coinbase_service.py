@@ -67,6 +67,39 @@ class TestCoinbaseService(unittest.TestCase):
             print(f"Traceback: {traceback.format_exc()}")
             self.fail(f"Getting trading pairs failed with error: {str(e)}")
 
+    @timeout_decorator.timeout(30)  # Set 30 second timeout
+    def test_get_portfolio_info(self):
+        """Test getting portfolio information."""
+        try:
+            print("\nStarting portfolio info test...")
+            
+            # Get portfolio info
+            print("Requesting portfolio info from Coinbase...")
+            fiat_balance, crypto_balance = self.coinbase_service.get_portfolio_info()
+            print("Finished requesting portfolio info")
+            
+            # Print results for debugging
+            print(f"\nPortfolio Information:")
+            print(f"Fiat Balance: {fiat_balance}")
+            print(f"Crypto Balance (BTC): {crypto_balance}")
+            
+            # Basic validation
+            self.assertIsInstance(fiat_balance, float, "Fiat balance should be a float")
+            self.assertIsInstance(crypto_balance, float, "Crypto balance should be a float")
+            self.assertGreaterEqual(fiat_balance, 0.0, "Fiat balance should not be negative")
+            self.assertGreaterEqual(crypto_balance, 0.0, "Crypto balance should not be negative")
+            
+            print("\n✓ Successfully retrieved portfolio information")
+            
+        except timeout_decorator.TimeoutError:
+            self.fail("Test timed out after 30 seconds - the API request may be hanging")
+        except Exception as e:
+            print(f"Error details: {str(e)}")
+            print(f"Error type: {type(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            self.fail(f"Getting portfolio info failed with error: {str(e)}")
+
 def main():
     # Configure the test runner
     suite = unittest.TestLoader().loadTestsFromTestCase(TestCoinbaseService)
