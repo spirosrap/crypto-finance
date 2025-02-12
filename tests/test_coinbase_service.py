@@ -67,30 +67,39 @@ class TestCoinbaseService(unittest.TestCase):
             print(f"Traceback: {traceback.format_exc()}")
             self.fail(f"Getting trading pairs failed with error: {str(e)}")
 
-    @timeout_decorator.timeout(30)  # Set 30 second timeout
+    @timeout_decorator.timeout(30)
     def test_get_portfolio_info(self):
-        """Test getting portfolio information."""
+        """Test getting portfolio information for both DEFAULT and PERPETUALS portfolios."""
         try:
             print("\nStarting portfolio info test...")
             
-            # Get portfolio info
-            print("Requesting portfolio info from Coinbase...")
-            fiat_balance, crypto_balance = self.coinbase_service.get_portfolio_info()
-            print("Finished requesting portfolio info")
+            # Test both portfolio types
+            portfolio_types = ["DEFAULT", "PERPETUALS"]
             
-            # Print results for debugging
-            print(f"\nPortfolio Information:")
-            print(f"Fiat Balance: {fiat_balance}")
-            print(f"Crypto Balance (BTC): {crypto_balance}")
-            
-            # Basic validation
-            self.assertIsInstance(fiat_balance, float, "Fiat balance should be a float")
-            self.assertIsInstance(crypto_balance, float, "Crypto balance should be a float")
-            self.assertGreaterEqual(fiat_balance, 0.0, "Fiat balance should not be negative")
-            self.assertGreaterEqual(crypto_balance, 0.0, "Crypto balance should not be negative")
-            
-            print("\n✓ Successfully retrieved portfolio information")
-            
+            for portfolio_type in portfolio_types:
+                print(f"\nTesting {portfolio_type} portfolio:")
+                print(f"Requesting {portfolio_type} portfolio info from Coinbase...")
+                
+                fiat_balance, crypto_balance = self.coinbase_service.get_portfolio_info(portfolio_type)
+                print("Finished requesting portfolio info")
+                
+                # Print results for debugging
+                print(f"\n{portfolio_type} Portfolio Information:")
+                print(f"Fiat Balance: {fiat_balance}")
+                print(f"Crypto Balance (BTC): {crypto_balance}")
+                
+                # Basic validation
+                self.assertIsInstance(fiat_balance, float, 
+                                    f"{portfolio_type} fiat balance should be a float")
+                self.assertIsInstance(crypto_balance, float, 
+                                    f"{portfolio_type} crypto balance should be a float")
+                self.assertGreaterEqual(fiat_balance, 0.0, 
+                                      f"{portfolio_type} fiat balance should not be negative")
+                self.assertGreaterEqual(crypto_balance, 0.0, 
+                                      f"{portfolio_type} crypto balance should not be negative")
+                
+                print(f"\n✓ Successfully retrieved {portfolio_type} portfolio information")
+                
         except timeout_decorator.TimeoutError:
             self.fail("Test timed out after 30 seconds - the API request may be hanging")
         except Exception as e:
