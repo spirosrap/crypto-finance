@@ -351,27 +351,39 @@ class CoinbaseService:
             
             self.logger.info(f"Market order placed: {market_order}")
             
-            # Wait briefly for market order to fill
-            time.sleep(2)
+            # Extract order ID - Updated this section
+            order_id = None
+            if (isinstance(market_order, dict) and 
+                'success_response' in market_order and 
+                'order_id' in market_order['success_response']):
+                order_id = market_order['success_response']['order_id']
+            elif hasattr(market_order, 'success_response'):
+                success_response = getattr(market_order, 'success_response')
+                if isinstance(success_response, dict) and 'order_id' in success_response:
+                    order_id = success_response['order_id']
             
-            # Get the order details and verify it's filled
-            if (hasattr(market_order, 'success_response') and 
-                isinstance(market_order.success_response, dict) and 
-                'order_id' in market_order.success_response):
-                order_id = market_order.success_response['order_id']
-                self.logger.info(f"Found order ID: {order_id}")
-            else:
+            if not order_id:
                 self.logger.error(f"Could not find order ID in response: {market_order}")
                 return {"error": "Could not find order ID", "market_order": str(market_order)}
+            
+            self.logger.info(f"Extracted order ID: {order_id}")
+            
+            # Wait briefly for market order to fill
+            time.sleep(2)
             
             # Get the order status
             order_status = self.client.get_order(order_id=order_id)
             self.logger.info(f"Order status response: {order_status}")
             
-            # Check if order is filled
-            if not (hasattr(order_status, 'order') and 
-                    hasattr(order_status.order, 'status') and 
-                    order_status.order.status == 'FILLED'):
+            # Check if order is filled - Updated this section
+            is_filled = False
+            if isinstance(order_status, dict) and 'order' in order_status:
+                is_filled = order_status['order'].get('status') == 'FILLED'
+            elif hasattr(order_status, 'order'):
+                order = getattr(order_status, 'order')
+                is_filled = getattr(order, 'status', None) == 'FILLED'
+            
+            if not is_filled:
                 self.logger.error(f"Market order not filled: {order_status}")
                 return {"error": "Market order not filled", "market_order": str(market_order)}
 
