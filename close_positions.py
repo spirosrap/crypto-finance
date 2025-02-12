@@ -18,8 +18,12 @@ def main():
         # Initialize CoinbaseService with your API credentials
         coinbase = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
         
-        # Close all positions (or specify a product_id to close specific position)
-        logger.info("Closing all positions...")
+        # First cancel all open orders
+        logger.info("Cancelling all open orders first...")
+        coinbase.cancel_all_orders()
+        
+        # Then close all positions
+        logger.info("Now closing all positions...")
         coinbase.close_all_positions()
         logger.info("Position closing complete")
         
