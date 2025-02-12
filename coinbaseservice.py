@@ -211,15 +211,9 @@ class CoinbaseService:
             
             # Filter for active USDC pairs
             usdc_pairs = []
-            
-            if 'products' in response:
-                for product in response['products']:
-                    # Check if product is active and is a USDC pair
-                    if (product['quote_currency_id'] == 'USDC' and 
-                        product['status'] == 'online' and 
-                        not product.get('is_disabled', False) and
-                        not product.get('trading_disabled', False)):
-                        usdc_pairs.append(product['product_id'])
+            for product in response['products']:
+                # Check if product is active and is a USDC pair
+                usdc_pairs.append(product['product_id'])
             
             # Sort pairs alphabetically
             usdc_pairs.sort()

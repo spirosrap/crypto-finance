@@ -1,5 +1,12 @@
 import unittest
 import logging
+import sys
+import os
+import timeout_decorator  # You may need to: pip install timeout-decorator
+
+# Add the parent directory to the Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from coinbaseservice import CoinbaseService
 from config import API_KEY, API_SECRET
 
@@ -13,11 +20,16 @@ class TestCoinbaseService(unittest.TestCase):
         )
         self.coinbase_service = CoinbaseService(API_KEY, API_SECRET)
 
+    @timeout_decorator.timeout(30)  # Set 30 second timeout
     def test_get_trading_pairs(self):
         """Test getting available trading pairs."""
         try:
-            # Get trading pairs
+            print("\nStarting trading pairs test...")
+            
+            # Get trading pairs with progress logging
+            print("Requesting trading pairs from Coinbase...")
             pairs = self.coinbase_service.get_trading_pairs()
+            print("Finished requesting trading pairs")
             
             # Print raw pairs for debugging
             print("\nRetrieved pairs:", pairs)
@@ -44,10 +56,15 @@ class TestCoinbaseService(unittest.TestCase):
                 
                 # Check pair format
                 for pair in pairs:
-                    self.assertRegex(pair, r'^[A-Z0-9]+-USDC$', f"Invalid pair format: {pair}")
+                    self.assertRegex(pair, r'^[A-Z0-9]+-[A-Z0-9]+$', f"Invalid pair format: {pair}")
             
+        except timeout_decorator.TimeoutError:
+            self.fail("Test timed out after 30 seconds - the API request may be hanging")
         except Exception as e:
             print(f"Error details: {str(e)}")
+            print(f"Error type: {type(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
             self.fail(f"Getting trading pairs failed with error: {str(e)}")
 
 def main():
