@@ -6,6 +6,7 @@ import uuid
 import logging
 from typing import Tuple, List
 from historicaldata import HistoricalData
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 class CoinbaseService:
     def __init__(self, api_key, api_secret):
@@ -86,38 +87,72 @@ class CoinbaseService:
                 }
         return prices
 
-    def place_order(self, product_id, side, size, order_type="MARKET", price=None, time_in_force="IOC"):
+    def place_order(self, product_id: str, side: str, size: float, order_type: str = "MARKET", price: float = None, time_in_force: str = "IOC"):
+        """
+        Place an order with the specified parameters.
+        
+        Args:
+            product_id (str): The trading pair
+            side (str): "BUY" or "SELL"
+            size (float): The amount to trade
+            order_type (str): "MARKET" or "LIMIT"
+            price (float, optional): Required for LIMIT orders
+            time_in_force (str): Time in force policy (default "IOC")
+        """
         try:
             # Generate a unique client_order_id
             client_order_id = f"order_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
-            order_params = {
-                "client_order_id": client_order_id,
-                "product_id": product_id,
-                "side": side.upper(),
-                "order_configuration": {
-                    order_type.lower(): {
-                        "quote_size" if side.upper() == "BUY" else "base_size": str(size)
+            # Check if this is a perpetual product
+            is_perpetual = "-PERP-" in product_id
+            
+            if is_perpetual:
+                # For perpetual futures, use create_market_order_perp
+                if order_type.upper() == "MARKET":
+                    order_config = {
+                        "market_market_ioc": {
+                            "base_size": str(size)
+                        }
+                    }
+                    
+                    self.logger.info(f"Placing perpetual {side} market order for {size} {product_id}")
+                    market_order = self.client.create_order(
+                        client_order_id=client_order_id,
+                        product_id=product_id,
+                        side=side.upper(),
+                        order_configuration=order_config
+                    )
+                    self.logger.info(f"Perpetual market order response: {market_order}")
+                    return market_order
+                    
+                else:
+                    raise ValueError("Only MARKET orders supported for perpetual futures currently")
+            else:
+                # Original order logic for spot trading
+                order_params = {
+                    "client_order_id": client_order_id,
+                    "product_id": product_id,
+                    "side": side.upper(),
+                    "order_configuration": {
+                        order_type.lower(): {
+                            "quote_size" if side.upper() == "BUY" else "base_size": str(size)
+                        }
                     }
                 }
-            }
 
-            if order_type.upper() == "LIMIT":
-                if price is None:
-                    raise ValueError("Price must be specified for LIMIT orders")
-                order_params["order_configuration"]["limit"]["limit_price"] = str(price)
-                order_params["order_configuration"]["limit"]["post_only"] = False
-                order_params["order_configuration"]["limit"]["time_in_force"] = time_in_force
+                if order_type.upper() == "LIMIT":
+                    if price is None:
+                        raise ValueError("Price must be specified for LIMIT orders")
+                    order_params["order_configuration"]["limit"]["limit_price"] = str(price)
+                    order_params["order_configuration"]["limit"]["post_only"] = False
+                    order_params["order_configuration"]["limit"]["time_in_force"] = time_in_force
 
-            if order_type.upper() == "MARKET":
-                order_func = orders.market_order
-            elif order_type.upper() == "LIMIT":
-                order_func = orders.limit_order_gtc if time_in_force == "GTC" else orders.limit_order_ioc
-
-            order = order_func(self.client, **order_params)
-            return order
+                # Place the order
+                self.logger.info(f"Placing order with params: {order_params}")
+                return self.client.create_order(**order_params)
+                
         except Exception as e:
-            print(f"Error placing order: {e}")
+            self.logger.error(f"Error placing order: {str(e)}")
             return None
 
     def place_bracket_order(self, product_id, side, size, entry_price, take_profit_price, stop_loss_price):
@@ -413,24 +448,163 @@ class CoinbaseService:
             product_id (str, optional): The trading pair to cancel orders for
         """
         try:
-            # First get all open orders
-            open_orders = self.client.get_orders(
-                filter="OPEN",
-                product_id=product_id
+            self.logger.info("Fetching open orders...")
+            
+            # First get the INTX portfolio UUID
+            ports = self.client.get_portfolios()
+            portfolio_uuid = None
+            
+            self.logger.info("Available portfolios:")
+            for p in ports['portfolios']:  # Access as dictionary
+                self.logger.info(f"Portfolio type: {p['type']}, UUID: {p['uuid']}")
+                if p['type'] == "INTX":
+                    portfolio_uuid = p['uuid']
+            
+            if not portfolio_uuid:
+                self.logger.error("Could not find INTX portfolio")
+                return
+            
+            self.logger.info(f"Using portfolio UUID: {portfolio_uuid}")
+            
+            # Use list_orders with OPEN status and portfolio UUID
+            open_orders = self.client.list_orders(
+                order_status="OPEN",
+                product_id=product_id,
+                portfolio_uuid=portfolio_uuid  # Use UUID instead of portfolio_id
             )
             
-            if hasattr(open_orders, 'orders') and open_orders.orders:
-                # Extract order IDs
-                order_ids = [order.order_id for order in open_orders.orders]
-                
-                # Cancel orders by their IDs
-                if order_ids:
-                    self.client.cancel_orders(order_ids=order_ids)
-                    self.logger.info(f"Cancelled {len(order_ids)} orders for {product_id or 'all products'}")
-                else:
-                    self.logger.info("No open orders to cancel")
-            else:
+            # Debug logging to see what we got back
+            self.logger.info(f"Raw response: {open_orders}")
+            
+            if hasattr(open_orders, 'orders'):
+                for order in open_orders.orders:
+                    self.logger.info(f"Order found: ID={getattr(order, 'order_id', 'N/A')}, "
+                                   f"Status={getattr(order, 'status', 'N/A')}, "
+                                   f"Product={getattr(order, 'product_id', 'N/A')}")
+            
+            if not open_orders or not hasattr(open_orders, 'orders'):
                 self.logger.info("No open orders found")
+                return
+            
+            # Log the number of orders found
+            order_count = len(open_orders.orders) if hasattr(open_orders, 'orders') else 0
+            self.logger.info(f"Found {order_count} open orders")
+            
+            if order_count == 0:
+                return
+            
+            # Extract order IDs from open orders
+            order_ids = [
+                order.order_id 
+                for order in open_orders.orders 
+                if hasattr(order, 'order_id')
+            ]
+            
+            if not order_ids:
+                self.logger.info("No active orders to cancel")
+                return
+            
+            self.logger.info(f"Attempting to cancel {len(order_ids)} orders")
+            
+            # Process orders in batches of 100 (Coinbase API limit)
+            batch_size = 100
+            total_cancelled = 0
+            
+            for i in range(0, len(order_ids), batch_size):
+                batch = order_ids[i:i + batch_size]
+                try:
+                    response = self.client.cancel_orders(order_ids=batch)
+                    
+                    # Count successful cancellations
+                    if hasattr(response, 'results'):
+                        # Handle response.results being a list of CancelOrderObject
+                        successful = sum(1 for r in response.results if hasattr(r, 'success') and r.success)
+                        total_cancelled += successful
+                        self.logger.info(f"Successfully cancelled {successful} orders from batch")
+                    
+                except Exception as e:
+                    self.logger.error(f"Error cancelling batch: {str(e)}")
+                    continue
+            
+            self.logger.info(f"Cancelled total of {total_cancelled} orders for {product_id or 'all products'}")
             
         except Exception as e:
             self.logger.error(f"Error cancelling orders: {str(e)}")
+            self.logger.exception("Full error details:")
+
+    def close_all_positions(self, product_id: str = None):
+        """
+        Close all open positions for a given product_id or all products if none specified.
+        
+        Args:
+            product_id (str, optional): The trading pair to close positions for
+        """
+        try:
+            self.logger.info("Fetching open positions...")
+            
+            # First get the INTX portfolio UUID
+            self.logger.info("Getting portfolios...")
+            ports = self.client.get_portfolios()
+            portfolio_uuid = None
+            
+            for p in ports['portfolios']:
+                if p['type'] == "INTX":
+                    portfolio_uuid = p['uuid']
+                    self.logger.info(f"Found INTX portfolio with UUID: {portfolio_uuid}")
+                    break
+            
+            if not portfolio_uuid:
+                self.logger.error("Could not find INTX portfolio")
+                return
+            
+            # Get portfolio positions
+            self.logger.info(f"Getting breakdown for portfolio {portfolio_uuid}...")
+            portfolio = self.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+            
+            self.logger.info("Got portfolio breakdown")
+            
+            # Access the perp_positions from the response
+            if not hasattr(portfolio, 'breakdown'):
+                self.logger.error("No breakdown in portfolio response")
+                return
+            
+            if not hasattr(portfolio.breakdown, 'perp_positions'):
+                self.logger.error("No perp_positions in portfolio breakdown")
+                return
+            
+            positions = portfolio.breakdown.perp_positions
+            self.logger.info(f"Found {len(positions)} perpetual positions")
+            
+            for position in positions:
+                self.logger.info(f"Processing position: {position}")
+                
+                # Get symbol instead of product_id for perpetual futures
+                position_symbol = getattr(position, 'symbol', None)
+                if product_id and position_symbol != product_id:
+                    self.logger.info(f"Skipping position for {position_symbol}")
+                    continue
+                
+                position_size = float(getattr(position, 'net_size', '0'))
+                self.logger.info(f"Position size: {position_size}")
+                
+                if position_size != 0:
+                    side = "BUY" if getattr(position, 'position_side', '') == 'FUTURES_POSITION_SIDE_SHORT' else "SELL"
+                    size = abs(position_size)
+                    
+                    self.logger.info(f"Closing {side} position of size {size} for {position_symbol}")
+                    
+                    # Place market order to close position
+                    result = self.place_order(
+                        product_id=position_symbol,
+                        side=side,
+                        size=size,
+                        order_type="MARKET"
+                    )
+                    
+                    self.logger.info(f"Close position result: {result}")
+                else:
+                    self.logger.info(f"Position size is 0, skipping")
+                
+        except Exception as e:
+            self.logger.error(f"Error closing positions: {str(e)}")
+            self.logger.exception("Full error details:")
