@@ -1,3 +1,9 @@
+import os
+import sys
+# Add this at the very top of the file to adjust Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 import pandas as pd
 import numpy as np
 from bitcoinpredictionmodel import BitcoinPredictionModel

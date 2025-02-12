@@ -1,3 +1,8 @@
+import sys
+import os
+# Add this at the very top of the file to adjust Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from historicaldata import HistoricalData
 from coinbaseservice import CoinbaseService
 from config import API_KEY, API_SECRET
