@@ -967,3 +967,77 @@ recommendations = analysis['trade_recommendations']
 ### Warning
 
 The Advanced Market Analyzer provides sophisticated analysis but should not be used as the sole basis for trading decisions. Always combine with proper risk management and consider market conditions before trading.
+
+## Trading Scripts
+
+### trade_btc_perp.py
+A command-line tool for placing leveraged BTC-PERP-INTX trades on Coinbase with take profit and stop loss orders.
+
+**Features:**
+- Place leveraged market orders with take profit and stop loss
+- Position size validation based on available margin
+- Order confirmation with detailed summary
+- Automatic size conversion from USD to BTC
+- Leverage range from 1x to 20x
+
+**Usage:**
+```bash
+python trade_btc_perp.py --side [BUY/SELL] --size [USD_AMOUNT] --leverage [1-20] --tp [PRICE] --sl [PRICE] [--no-confirm]
+```
+
+**Arguments:**
+- `--side`: Trade direction (BUY or SELL)
+- `--size`: Position size in USD
+- `--leverage`: Leverage amount (between 1-20x)
+- `--tp`: Take profit price in USD
+- `--sl`: Stop loss price in USD
+- `--no-confirm`: Optional flag to skip order confirmation
+
+**Example:**
+```bash
+python trade_btc_perp.py --side BUY --size 1000 --leverage 5 --tp 45000 --sl 43000
+```
+
+### cancel_orders.py
+A utility script to cancel all open orders on your Coinbase account.
+
+**Features:**
+- Cancels all open orders across all products
+- Logging of cancellation process
+- Error handling and reporting
+
+**Usage:**
+```bash
+python cancel_orders.py
+```
+
+### close_positions.py
+A utility script to close all open positions on your Coinbase account.
+
+**Features:**
+- Cancels all open orders first
+- Closes all open positions
+- Sequential execution to ensure proper order
+- Detailed logging of the process
+
+**Usage:**
+```bash
+python close_positions.py
+```
+
+**Process Flow:**
+1. Cancels all open orders to prevent conflicts
+2. Retrieves all open positions
+3. Closes each position with market orders
+4. Logs the entire process
+
+**Note:** All trading scripts require valid Coinbase API credentials to be set in `config.py`. Exercise caution when using these scripts as they can affect your real trading positions and orders.
+
+### Risk Warning
+
+These trading scripts execute real trades on your Coinbase account. Please ensure you:
+- Understand the risks of leveraged trading
+- Double-check all parameters before confirming trades
+- Have sufficient funds for the intended positions
+- Test with small amounts first
+- Monitor your positions after execution
