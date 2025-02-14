@@ -37,8 +37,12 @@ def check_sufficient_funds(cb_service, size_usd: float, leverage: float) -> bool
         logger.error(f"Error checking funds: {e}")
         return False
 
-def validate_params(side: str, size_usd: float, leverage: float, tp_price: float, sl_price: float):
+def validate_params(product_id: str, side: str, size_usd: float, leverage: float, tp_price: float, sl_price: float):
     """Validate input parameters."""
+    valid_products = ['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX']
+    if product_id not in valid_products:
+        raise ValueError(f"Invalid product. Must be one of: {', '.join(valid_products)}")
+
     if side not in ['BUY', 'SELL']:
         raise ValueError("Side must be either 'BUY' or 'SELL'")
     
@@ -63,7 +67,10 @@ def validate_params(side: str, size_usd: float, leverage: float, tp_price: float
             raise ValueError("For SELL orders, take profit price must be lower than stop loss price")
 
 def main():
-    parser = argparse.ArgumentParser(description='Place a leveraged market order for BTC-PERP-INTX')
+    parser = argparse.ArgumentParser(description='Place a leveraged market order for perpetual futures')
+    parser.add_argument('--product', type=str, default='BTC-PERP-INTX',
+                      choices=['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX'],
+                      help='Trading product (default: BTC-PERP-INTX)')
     parser.add_argument('--side', type=str, required=True, choices=['BUY', 'SELL'],
                       help='Trade direction (BUY/SELL)')
     parser.add_argument('--size', type=float, required=True,
@@ -81,7 +88,7 @@ def main():
 
     try:
         # Validate parameters
-        validate_params(args.side, args.size, args.leverage, args.tp, args.sl)
+        validate_params(args.product, args.side, args.size, args.leverage, args.tp, args.sl)
         
         # Initialize CoinbaseService
         cb_service = setup_coinbase()
@@ -92,7 +99,7 @@ def main():
         
         # Show order summary
         print("\n=== Order Summary ===")
-        print(f"Product: BTC-PERP-INTX")
+        print(f"Product: {args.product}")
         print(f"Side: {args.side}")
         print(f"Position Size: ${args.size}")
         print(f"Leverage: {args.leverage}x")
@@ -108,16 +115,16 @@ def main():
                 return
         
         # Place the order
-        trades = cb_service.client.get_market_trades(product_id="BTC-PERP-INTX", limit=1)
+        trades = cb_service.client.get_market_trades(product_id=args.product, limit=1)
         current_price = float(trades['trades'][0]['price'])
         
-        # Calculate size in BTC based on current price and desired USD size
-        size = round(args.size / current_price, 4)  # Convert USD size to BTC amount
+        # Calculate size in base currency based on current price and desired USD size
+        size = round(args.size / current_price, 4)
         
         result = cb_service.place_market_order_with_targets(
-            product_id="BTC-PERP-INTX",
+            product_id=args.product,
             side=args.side,
-            size=size,  # This will now be the correct BTC amount based on desired USD size
+            size=size,
             take_profit_price=args.tp,
             stop_loss_price=args.sl,
             leverage=str(args.leverage)
