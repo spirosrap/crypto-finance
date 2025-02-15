@@ -382,7 +382,7 @@ The Market Analyzer is a sophisticated tool for analyzing cryptocurrency markets
 - LINK-USDC
 - DOT-USDC
 - UNI-USDC
-
+- SHIB-USDC
 ### Available Granularities
 
 - ONE_MINUTE

@@ -40,7 +40,8 @@ VALID_PRODUCTS = [
     "LINK-USDC",
     "DOT-USDC",
     "UNI-USDC",
-    "SUI-USDC"
+    "SUI-USDC",
+    "SHIB-USDC"
 ]
 
 class PatternType(Enum):

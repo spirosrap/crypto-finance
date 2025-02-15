@@ -29,7 +29,8 @@ VALID_PRODUCTS = [
     "MATIC-USDC",
     "LINK-USDC",
     "DOT-USDC",
-    "UNI-USDC"
+    "UNI-USDC",
+    "SHIB-USDC"
 ]
 
 def parse_arguments():
