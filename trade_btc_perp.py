@@ -37,7 +37,7 @@ def check_sufficient_funds(cb_service, size_usd: float, leverage: float) -> bool
         logger.error(f"Error checking funds: {e}")
         return False
 
-def validate_params(product_id: str, side: str, size_usd: float, leverage: float, tp_price: float, sl_price: float):
+def validate_params(product_id: str, side: str, size_usd: float, leverage: float, tp_price: float, sl_price: float, cb_service):
     """Validate input parameters."""
     valid_products = ['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX']
     if product_id not in valid_products:
@@ -58,13 +58,32 @@ def validate_params(product_id: str, side: str, size_usd: float, leverage: float
     if sl_price <= 0:
         raise ValueError("Stop loss price must be positive")
     
-    # Validate TP and SL based on side
+    # Get current price
+    trades = cb_service.client.get_market_trades(product_id=product_id, limit=1)
+    current_price = float(trades['trades'][0]['price'])
+    
+    # Define maximum allowed price deviation (as percentage)
+    max_deviation = 0.80  # 80% deviation
+    
+    # Calculate price bounds
+    upper_bound = current_price * (1 + max_deviation)
+    lower_bound = current_price * (1 - max_deviation)
+    
+    # Validate TP and SL based on side and price bounds
     if side == 'BUY':
         if tp_price <= sl_price:
             raise ValueError("For BUY orders, take profit price must be higher than stop loss price")
+        if tp_price > upper_bound:
+            raise ValueError(f"Take profit price (${tp_price}) is too high. Maximum allowed is ${upper_bound:.2f} (50% above current price ${current_price:.2f})")
+        if sl_price < lower_bound:
+            raise ValueError(f"Stop loss price (${sl_price}) is too low. Minimum allowed is ${lower_bound:.2f} (50% below current price ${current_price:.2f})")
     else:  # SELL
         if tp_price >= sl_price:
             raise ValueError("For SELL orders, take profit price must be lower than stop loss price")
+        if tp_price < lower_bound:
+            raise ValueError(f"Take profit price (${tp_price}) is too low. Minimum allowed is ${lower_bound:.2f} (50% below current price ${current_price:.2f})")
+        if sl_price > upper_bound:
+            raise ValueError(f"Stop loss price (${sl_price}) is too high. Maximum allowed is ${upper_bound:.2f} (50% above current price ${current_price:.2f})")
 
 def main():
     parser = argparse.ArgumentParser(description='Place a leveraged market order for perpetual futures')
@@ -87,11 +106,11 @@ def main():
     args = parser.parse_args()
 
     try:
-        # Validate parameters
-        validate_params(args.product, args.side, args.size, args.leverage, args.tp, args.sl)
-        
         # Initialize CoinbaseService
         cb_service = setup_coinbase()
+        
+        # Validate parameters (updated to include cb_service)
+        validate_params(args.product, args.side, args.size, args.leverage, args.tp, args.sl, cb_service)
         
         # Check for sufficient funds
         if not check_sufficient_funds(cb_service, args.size, args.leverage):
