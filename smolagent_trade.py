@@ -1,7 +1,6 @@
 import os
-from smolagents import CodeAgent, DuckDuckGoSearchTool, HfApiModel, OpenAIServerModel
-from market_analyzer import MarketAnalyzer
-from config import DEEPSEEK_KEY
+import subprocess
+from smolagents import CodeAgent, DuckDuckGoSearchTool, OpenAIServerModel
 import argparse
 
 # Retrieve API token from environment variables
@@ -30,47 +29,35 @@ model = OpenAIServerModel(
 #     api_key=DEEPSEEK_KEY, # Switch to the API key for the server you're targeting.
 # )
 
-# Initialize the market analyzer
-def run_analysis(product_id='BTC-USDC', candle_interval='ONE_HOUR'):
-    # Initialize the market analyzer
-    analyzer = MarketAnalyzer(product_id=product_id, candle_interval=candle_interval)
+def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR'):
+    # Run market_analyzer.py as a subprocess
+    with open(os.devnull, 'w') as devnull:
+        try:
+            result = subprocess.check_output(
+                ['python', 'market_analyzer.py', '--product_id', product_id, '--granularity', granularity, '--console_logging', 'false'],
+                text=True,
+                stderr=devnull,
+                timeout=300  # 5 minute timeout
+            )
+        except subprocess.TimeoutExpired:
+            print("Analysis timed out after 5 minutes")
+            return
+        except subprocess.CalledProcessError as e:
+            print(f"Error running market analysis: {e}")
+            return
 
-    # Get market analysis
-    analysis = analyzer.get_market_signal()
-
-    # Create prompt using analysis results
+    # Create prompt using the subprocess output
     prompt = f"""
-    Current Price: ${analysis['current_price']:.4f}
-    Signal: {analysis['signal']}
-    Position: {analysis['position']}
-    Confidence: {analysis['confidence']*100:.1f}%
-    Market Condition: {analysis['market_condition']}
+    {result}
 
-    Technical Indicators:
-    - RSI: {analysis['indicators']['rsi']:.2f}
-    - MACD: {analysis['indicators']['macd']:.4f}
-    - ADX: {analysis['indicators']['adx']:.2f}
-    - Trend Direction: {analysis['indicators']['trend_direction']}
-
-    Volume Analysis:
-    - Volume Change: {analysis['volume_analysis']['change']:.1f}%
-    - Volume Trend: {analysis['volume_analysis']['trend']}
-    - Volume Strength: {analysis['volume_analysis']['strength']}
-
-    Risk Metrics:
-    - Dynamic Risk: {analysis['risk_metrics']['dynamic_risk']*100:.1f}%
-
-    Trading Recommendation:
-    {analysis['recommendation']}
-
-    Based on this analysis and any other information you find online, suggest a SHORT or LONG position for {product_id} and a price target/Stop Loss with probability of success (0-100%) and report the 
-    risk/reward ratio.
+    Based on this analysis and using any other information you find online for sentiment analysis or news, suggest a SHORT or LONG position for {product_id} and a price target/Stop Loss with probability of success (0-100%) and report the 
+    risk/reward ratio and signa confidence level. Also report volume confirmation signal level and general sentiment level of the market.
     """
 
     # Initialize the agent
     agent = CodeAgent(tools=[DuckDuckGoSearchTool()], model=model)
 
-    # Run the agent with the enhanced prompt
+    # Run the agent with the prompt
     agent.run(prompt)
 
 if __name__ == "__main__":
@@ -82,4 +69,4 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    run_analysis(product_id=args.product_id, candle_interval=args.granularity)
+    run_analysis(product_id=args.product_id, granularity=args.granularity)
