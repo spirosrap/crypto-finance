@@ -50,12 +50,13 @@ def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR'):
     prompt = f"""
     {result}
 
-    Based on this analysis and using any other information you find online for sentiment analysis or news, suggest a SHORT or LONG position for {product_id} and a price target/Stop Loss with probability of success (0-100%) and report the 
-    risk/reward ratio and signa confidence level. Also report volume confirmation signal level and general sentiment level of the market.
+    Based on this analysis and using any other information you find online for sentiment analysis or news, suggest a SHORT or LONG position for {product_id} 
+    and a price target/Stop Loss with probability of success (0-100%) and report the risk/reward ratio and signal confidence level. 
+    Also report volume confirmation signal level and general sentiment level of the market. Calculate and report the actual loss/gain in USD with 20x leverage and 100$ initial margin.
     """
 
     # Initialize the agent
-    agent = CodeAgent(tools=[DuckDuckGoSearchTool()], model=model)
+    agent = CodeAgent(tools=[DuckDuckGoSearchTool()], model=model, max_steps=10)
 
     # Run the agent with the prompt
     agent.run(prompt)
