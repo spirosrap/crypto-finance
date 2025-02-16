@@ -15,7 +15,6 @@ import argparse
 
 model = OpenAIServerModel(
     model_id="gpt-4o",
-    api_base="https://api.openai.com/v1",
     api_key=os.environ["OPENAI_API_KEY"],
     # custom_role_conversions={
     #     "system": "user",  # Convert system to user

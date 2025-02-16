@@ -528,10 +528,10 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         # Calculate potential profit percentage
         profit_pct = abs((target_price - entry_price) / entry_price * 100)
         
-        # Calculate potential profit/loss in USD
-        position_value = size_usd * leverage  # Total position value
-        profit_usd = position_value * (profit_pct / 100)
-        loss_usd = position_value * (stop_loss_pct / 100)
+        # Calculate potential profit/loss in USD based on initial margin
+        margin = size_usd  # Initial margin amount
+        profit_usd = margin * (profit_pct / 100)
+        loss_usd = margin * (stop_loss_pct / 100)
         
         # Round prices to integers for BTC trades in the command
         cmd_target_price = int(target_price) if product_id == 'BTC-USDC' else target_price
@@ -553,8 +553,9 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         print(f"\n{COLORS['cyan']}Executing trade with parameters:{COLORS['end']}")
         print(f"Product: {perp_product}")
         print(f"Side: {side}")
-        print(f"Size: ${size_usd}")
+        print(f"Initial Margin: ${size_usd}")
         print(f"Leverage: {leverage}x")
+        print(f"Position Size: ${size_usd * leverage}")
         print(f"Entry Price: ${entry_price:.2f}")
         print(f"Take Profit: ${target_price:.2f} ({profit_pct:.2f}% / ${profit_usd:.2f})")
         print(f"Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}% / ${loss_usd:.2f})")
