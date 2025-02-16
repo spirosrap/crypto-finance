@@ -269,12 +269,13 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
 
     SYSTEM_PROMPT = (
-        "Reply only with: BUY AT <PRICE> and SELL AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>. Volume Strength: <VOLUME_STRENGTH>. or "
-        "SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>. Volume Confirmation: <VOLUME_CONFIRMATION>."
-        "Instruction 1: Use code to calculate the R/R ratio."
-        "Instruction 2: Signal confidence should be between Very Strong, Strong, Moderate, Weak, Very Weak"
-        "Instruction 3: Volume confirmation should be between Very High, High, Moderate, Low, Very Low"
-    )
+        "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
+        "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"} "
+        "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"}. "
+        "Instruction 1: Use code to calculate the R/R ratio. "
+        "Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
+        "Instruction 3: Volume strength should be one of: 'Very High', 'High', 'Moderate', 'Low', 'Very Low'."
+    )    
     
     try:
         if use_hyperbolic:
@@ -475,6 +476,117 @@ def validate_model_availability(model: str, provider: str) -> bool:
         logging.warning(f"Could not validate model availability for {provider}: {str(e)}")
         return True  # Default to True if check fails
 
+def execute_trade(recommendation: str, product_id: str) -> None:
+    """Execute trade based on recommendation if probability > 30% and sets stop loss from recommendation"""
+    try:
+        # Parse the JSON recommendation
+        rec_dict = json.loads(recommendation.replace("'", '"'))  # Convert single quotes to double quotes
+        
+        # Extract probability (now a float without % symbol)
+        prob = float(rec_dict['PROBABILITY'])
+        
+        if prob <= 73:
+            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 73%{COLORS['end']}")
+            return
+            
+        # Determine trade direction and prices
+        if 'SELL AT' in rec_dict:
+            side = 'SELL'
+            entry_price = float(rec_dict['SELL AT'])
+            target_price = float(rec_dict['BUY BACK AT'])
+            stop_loss = float(rec_dict['STOP LOSS'])
+        elif 'BUY AT' in rec_dict:
+            side = 'BUY'
+            entry_price = float(rec_dict['BUY AT'])
+            target_price = float(rec_dict['SELL AT'])
+            stop_loss = float(rec_dict['STOP LOSS'])
+        else:
+            print(f"{COLORS['red']}Invalid recommendation format{COLORS['end']}")
+            return
+            
+        # Prepare trade parameters
+        size_usd = 2000  # 100$ margin with 20x leverage
+        leverage = 20   # Using 20x leverage
+        
+        # Map product_id to perpetual format
+        perp_product_map = {
+            'BTC-USDC': 'BTC-PERP-INTX',
+            'ETH-USDC': 'ETH-PERP-INTX',
+            'DOGE-USDC': 'DOGE-PERP-INTX',
+            'SOL-USDC': 'SOL-PERP-INTX',
+            'SHIB-USDC': '1000SHIB-PERP-INTX'
+        }
+        
+        perp_product = perp_product_map.get(product_id)
+        if not perp_product:
+            print(f"{COLORS['red']}Unsupported product for perpetual trading: {product_id}{COLORS['end']}")
+            return
+            
+        # Calculate stop loss percentage
+        stop_loss_pct = abs((stop_loss - entry_price) / entry_price * 100)
+        
+        # Calculate potential profit percentage
+        profit_pct = abs((target_price - entry_price) / entry_price * 100)
+        
+        # Round prices to integers for BTC trades in the command
+        cmd_target_price = int(target_price) if product_id == 'BTC-USDC' else target_price
+        cmd_stop_loss = int(stop_loss) if product_id == 'BTC-USDC' else stop_loss
+        
+        # Execute trade using subprocess
+        cmd = [
+            'python', 'trade_btc_perp.py',
+            '--product', perp_product,
+            '--side', side,
+            '--size', str(size_usd),
+            '--leverage', str(leverage),
+            '--tp', str(cmd_target_price),
+            '--sl', str(cmd_stop_loss),
+            '--no-confirm'
+        ]
+        
+        # Print trade details with additional information
+        print(f"\n{COLORS['cyan']}Executing trade with parameters:{COLORS['end']}")
+        print(f"Product: {perp_product}")
+        print(f"Side: {side}")
+        print(f"Size: ${size_usd}")
+        print(f"Leverage: {leverage}x")
+        print(f"Entry Price: ${entry_price:.2f}")
+        print(f"Take Profit: ${target_price:.2f} ({profit_pct:.2f}%)")
+        print(f"Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}%)")
+        print(f"Probability: {prob:.1f}%")
+        print(f"Signal Confidence: {rec_dict['CONFIDENCE']}")
+        print(f"R/R Ratio: {rec_dict['R/R_RATIO']:.3f}")
+        print(f"Volume Strength: {rec_dict['VOLUME_STRENGTH']}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print(f"{COLORS['green']}Trade executed successfully!{COLORS['end']}")
+            if result.stdout.strip():
+                print(result.stdout)
+        else:
+            print(f"{COLORS['red']}Error executing trade:{COLORS['end']}")
+            if result.stderr.strip():
+                print(f"{COLORS['red']}{result.stderr.strip()}{COLORS['end']}")
+            if result.stdout.strip():  # Sometimes error details are in stdout
+                print(f"{COLORS['red']}{result.stdout.strip()}{COLORS['end']}")
+            
+    except json.JSONDecodeError as e:
+        print(f"{COLORS['red']}Error parsing recommendation JSON: {str(e)}{COLORS['end']}")
+        logging.error(f"JSON parse error in execute_trade: {str(e)}\nRecommendation: {recommendation}")
+    except Exception as e:
+        error_details = str(e)
+        print(f"{COLORS['red']}Error processing trade: {error_details}{COLORS['end']}")
+        logging.error(f"Error in execute_trade: {error_details}")
+        
+        # Log additional context if available
+        if hasattr(e, 'cmd'):
+            logging.error(f"Failed command: {' '.join(e.cmd)}")
+        if hasattr(e, 'output'):
+            logging.error(f"Command output: {e.output}")
+        if hasattr(e, 'stderr'):
+            logging.error(f"Command stderr: {e.stderr}")
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Analyze market data and get AI trading recommendations')
@@ -489,6 +601,7 @@ def main():
     parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
     parser.add_argument('--use_ollama', action='store_true', help='Use Ollama model')
     parser.add_argument('--use_hyperbolic', action='store_true', help='Use Hyperbolic API')
+    parser.add_argument('--execute_trades', action='store_true', help='Execute trades automatically when probability > 75%')
     args = parser.parse_args()
 
     if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
@@ -551,6 +664,13 @@ def main():
 
         # Format and display the output
         format_output(recommendation, analysis_result, reasoning)
+
+        # Execute trade only if --execute_trades flag is provided
+        if recommendation and args.execute_trades:
+            execute_trade(recommendation, args.product_id)
+        elif recommendation and not args.execute_trades:
+            print(f"\n{COLORS['yellow']}Trade not executed: --execute_trades flag not provided{COLORS['end']}")
+            print(f"{COLORS['yellow']}To execute trades automatically, run with --execute_trades flag{COLORS['end']}")
 
     except KeyboardInterrupt:
         print(f"\n{COLORS['yellow']}Operation cancelled by user.{COLORS['end']}")
