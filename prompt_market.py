@@ -528,6 +528,11 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         # Calculate potential profit percentage
         profit_pct = abs((target_price - entry_price) / entry_price * 100)
         
+        # Calculate potential profit/loss in USD
+        position_value = size_usd * leverage  # Total position value
+        profit_usd = position_value * (profit_pct / 100)
+        loss_usd = position_value * (stop_loss_pct / 100)
+        
         # Round prices to integers for BTC trades in the command
         cmd_target_price = int(target_price) if product_id == 'BTC-USDC' else target_price
         cmd_stop_loss = int(stop_loss) if product_id == 'BTC-USDC' else stop_loss
@@ -551,8 +556,8 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         print(f"Size: ${size_usd}")
         print(f"Leverage: {leverage}x")
         print(f"Entry Price: ${entry_price:.2f}")
-        print(f"Take Profit: ${target_price:.2f} ({profit_pct:.2f}%)")
-        print(f"Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}%)")
+        print(f"Take Profit: ${target_price:.2f} ({profit_pct:.2f}% / ${profit_usd:.2f})")
+        print(f"Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}% / ${loss_usd:.2f})")
         print(f"Probability: {prob:.1f}%")
         print(f"Signal Confidence: {rec_dict['CONFIDENCE']}")
         print(f"R/R Ratio: {rec_dict['R/R_RATIO']:.3f}")
@@ -601,7 +606,7 @@ def main():
     parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
     parser.add_argument('--use_ollama', action='store_true', help='Use Ollama model')
     parser.add_argument('--use_hyperbolic', action='store_true', help='Use Hyperbolic API')
-    parser.add_argument('--execute_trades', action='store_true', help='Execute trades automatically when probability > 75%')
+    parser.add_argument('--execute_trades', action='store_true', help='Execute trades automatically when probability > 73%')
     args = parser.parse_args()
 
     if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
@@ -668,9 +673,9 @@ def main():
         # Execute trade only if --execute_trades flag is provided
         if recommendation and args.execute_trades:
             execute_trade(recommendation, args.product_id)
-        elif recommendation and not args.execute_trades:
-            print(f"\n{COLORS['yellow']}Trade not executed: --execute_trades flag not provided{COLORS['end']}")
-            print(f"{COLORS['yellow']}To execute trades automatically, run with --execute_trades flag{COLORS['end']}")
+        # elif recommendation and not args.execute_trades:
+        #     print(f"\n{COLORS['yellow']}Trade not executed: --execute_trades flag not provided{COLORS['end']}")
+        #     print(f"{COLORS['yellow']}To execute trades automatically, run with --execute_trades flag{COLORS['end']}")
 
     except KeyboardInterrupt:
         print(f"\n{COLORS['yellow']}Operation cancelled by user.{COLORS['end']}")
