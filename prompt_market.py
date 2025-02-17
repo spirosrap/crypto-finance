@@ -486,8 +486,8 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         prob = float(rec_dict['PROBABILITY'])
         
         # Check probability threshold
-        if prob <= 73:
-            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 73%{COLORS['end']}")
+        if prob <= 69:
+            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 69%{COLORS['end']}")
             return
             
         # Check R/R ratio threshold
@@ -614,7 +614,7 @@ def main():
     parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
     parser.add_argument('--use_ollama', action='store_true', help='Use Ollama model')
     parser.add_argument('--use_hyperbolic', action='store_true', help='Use Hyperbolic API')
-    parser.add_argument('--execute_trades', action='store_true', help='Execute trades automatically when probability > 73%')
+    parser.add_argument('--execute_trades', action='store_true', help='Execute trades automatically when probability > 69%')
     args = parser.parse_args()
 
     if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
