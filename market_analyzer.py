@@ -4710,27 +4710,47 @@ def main():
                 # Add visual representation of order book depth
                 print("\n=== 📊 Order Book Depth Visualization ===")
                 max_bar_length = 50
-                max_volume = max(max(order_book['visualization']['bid_volumes']), 
-                               max(order_book['visualization']['ask_volumes']))
+                max_volume = max(
+                    max(order_book['visualization']['ask_volumes'], default=0),
+                    max(order_book['visualization']['bid_volumes'], default=0)
+                )
+                
+                # Add safety check for max_volume
+                if max_volume <= 0:
+                    print("⚠️ No valid volume data available for visualization")
+                    return
+                
+                max_bar_length = 50  # Adjust bar length as needed
                 
                 print("\nAsks (Sell Orders):")
                 for i in range(len(order_book['visualization']['ask_levels'])-1, -1, -1):
-                    price = order_book['visualization']['ask_levels'][i]
-                    volume = order_book['visualization']['ask_volumes'][i]
-                    bar_length = int((volume / max_volume) * max_bar_length)
-                    print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                    try:
+                        price = order_book['visualization']['ask_levels'][i]
+                        volume = order_book['visualization']['ask_volumes'][i]
+                        
+                        # Skip invalid data points
+                        if not (isinstance(volume, (int, float)) and volume >= 0):
+                            continue
+                            
+                        bar_length = int((volume / max_volume) * max_bar_length)
+                        print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                    except (TypeError, ValueError, ZeroDivisionError) as e:
+                        continue
                 
                 print("\nBids (Buy Orders):")
                 for i in range(len(order_book['visualization']['bid_levels'])):
-                    price = order_book['visualization']['bid_levels'][i]
-                    volume = order_book['visualization']['bid_volumes'][i]
-                    bar_length = int((volume / max_volume) * max_bar_length)
-                    print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
-                
-            elif order_book['status'] == 'insufficient_data':
-                print("⚠️ Insufficient data for order book analysis")
-            else:
-                print(f"❌ Error analyzing order book: {order_book.get('error', 'Unknown error')}")
+                    try:
+                        price = order_book['visualization']['bid_levels'][i]
+                        volume = order_book['visualization']['bid_volumes'][i]
+                        
+                        # Skip invalid data points
+                        if not (isinstance(volume, (int, float)) and volume >= 0):
+                            continue
+                            
+                        bar_length = int((volume / max_volume) * max_bar_length)
+                        print(f"${price:.4f} | {'█' * bar_length}{' ' * (max_bar_length - bar_length)} | {volume:.2f}")
+                    except (TypeError, ValueError, ZeroDivisionError) as e:
+                        continue
 
         except KeyboardInterrupt:
             print("\n\n⛔ Analysis stopped by user")
