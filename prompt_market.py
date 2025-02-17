@@ -485,8 +485,15 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         # Extract probability (now a float without % symbol)
         prob = float(rec_dict['PROBABILITY'])
         
+        # Check probability threshold
         if prob <= 73:
             print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 73%{COLORS['end']}")
+            return
+            
+        # Check R/R ratio threshold
+        rr_ratio = float(rec_dict['R/R_RATIO'])
+        if rr_ratio < 0.2:
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.2{COLORS['end']}")
             return
             
         # Determine trade direction and prices
