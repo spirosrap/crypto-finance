@@ -2,6 +2,7 @@ import os
 import subprocess
 from smolagents import CodeAgent, DuckDuckGoSearchTool, OpenAIServerModel
 import argparse
+from config import DEEPSEEK_KEY
 
 # Retrieve API token from environment variables
 #hf_api_key = os.getenv("HUGGINGFACE_API_KEY")
@@ -23,10 +24,12 @@ model = OpenAIServerModel(
 )
 
 # model = OpenAIServerModel(
-#     model_id="deepseek-reasoner",
+#     model_id="deepseek-chat", # deepseek-reasoner
 #     api_base="https://api.deepseek.com", # Leave this blank to query OpenAI servers.
 #     api_key=DEEPSEEK_KEY, # Switch to the API key for the server you're targeting.
 # )
+
+
 
 def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR'):
     # Run market_analyzer.py as a subprocess
