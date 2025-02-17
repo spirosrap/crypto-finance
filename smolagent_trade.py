@@ -54,7 +54,7 @@ def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR'):
 
     Based on this analysis and using any other information you find online for sentiment analysis or news, suggest a SHORT or LONG position for {product_id} 
     and a price target/Stop Loss with probability of success (0-100%) and report the risk/reward ratio and signal confidence level. 
-    Also report volume confirmation signal level and general sentiment level of the market. Calculate and report the actual loss/gain in USD with 20x leverage and 100$ initial margin.
+    Also report volume confirmation signal level and general sentiment level of the market. Use python to calculate and report the loss and profit in USD with 20x leverage and 100$ initial margin (total 2000).
     """
 
     # Initialize the agent
