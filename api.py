@@ -3,6 +3,7 @@ from base import CryptoTrader
 from config import API_KEY, API_SECRET
 from datetime import datetime, timedelta, timezone
 import traceback
+import logging
 
 app = Flask(__name__)
 trader = CryptoTrader(API_KEY, API_SECRET)
