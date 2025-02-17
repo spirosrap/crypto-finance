@@ -402,8 +402,8 @@ class BitcoinPredictionModel:
             self.scaler_y = model_data['scaler_y']
             self.selected_features = model_data['selected_features']
             model_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(self.model_file))
-            if model_age > timedelta(days=7):  # Retrain weekly
-                self.logger.info(f"{self.product_id} prediction model is over a week old. Retraining...")
+            if model_age > timedelta(days=10):  # Retrain every 10 days
+                self.logger.info(f"{self.product_id} prediction model is over 10 days old. Retraining...")
                 self.train()
             else:
                 self.logger.info(f"{self.product_id} prediction model loaded from {self.model_file}")

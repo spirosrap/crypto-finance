@@ -430,8 +430,8 @@ class MLSignal:
         try:
             self.ml_model = joblib.load(self.model_file)
             model_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(self.model_file))
-            if model_age > timedelta(days=7):  # Retrain weekly
-                self.logger.info(f"Model for {self.product_id} with granularity {self.granularity} is over a week old. Retraining...")
+            if model_age > timedelta(days=10):  # Retrain every 10 days
+                self.logger.info(f"Model for {self.product_id} with granularity {self.granularity} is over 10 days old. Retraining...")
                 self.train_model()
             else:
                 self.logger.info(f"ML model for {self.product_id} with granularity {self.granularity} loaded from {self.model_file}")
