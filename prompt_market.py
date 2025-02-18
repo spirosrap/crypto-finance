@@ -271,7 +271,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     SYSTEM_PROMPT = (
         "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
         "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"} "
-        "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"}. "
+        "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"}. "
         "Instruction 1: Use code to calculate the R/R ratio. "
         "Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
         "Instruction 3: Volume strength should be one of: 'Very High', 'High', 'Moderate', 'Low', 'Very Low'."
@@ -350,7 +350,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             recommendation = response.choices[0].message.content
 
         # Validate recommendation format
-        if not (("BUY AT" in recommendation and "SELL AT" in recommendation) or 
+        if not (("BUY AT" in recommendation and "SELL BACK AT" in recommendation) or 
                 ("SELL AT" in recommendation and "BUY BACK AT" in recommendation) or
                 ("HOLD" in recommendation)):
             logging.error(f"Invalid recommendation format: {recommendation}")
@@ -486,8 +486,8 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         prob = float(rec_dict['PROBABILITY'])
         
         # Check probability threshold
-        if prob <= 69:
-            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 69%{COLORS['end']}")
+        if prob <= 60:
+            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
             return
             
         # Check R/R ratio threshold
@@ -505,7 +505,7 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         elif 'BUY AT' in rec_dict:
             side = 'BUY'
             entry_price = float(rec_dict['BUY AT'])
-            target_price = float(rec_dict['SELL AT'])
+            target_price = float(rec_dict['SELL BACK AT'])
             stop_loss = float(rec_dict['STOP LOSS'])
         else:
             print(f"{COLORS['red']}Invalid recommendation format{COLORS['end']}")
@@ -614,7 +614,7 @@ def main():
     parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
     parser.add_argument('--use_ollama', action='store_true', help='Use Ollama model')
     parser.add_argument('--use_hyperbolic', action='store_true', help='Use Hyperbolic API')
-    parser.add_argument('--execute_trades', action='store_true', help='Execute trades automatically when probability > 69%')
+    parser.add_argument('--execute_trades', action='store_true', help='Execute trades automatically when probability > 60%')
     args = parser.parse_args()
 
     if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:

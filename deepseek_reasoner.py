@@ -25,7 +25,7 @@ class DeepSeekReasoner:
         
         # Get initial trading recommendation
         initial_messages = [
-            {"role": "system", "content": "Reply only with \"BUY AT <PRICE> and SELL AT <PRICE>\" or \"SELL AT <PRICE> and BUY BACK AT <PRICE>\""},
+            {"role": "system", "content": "Reply only with \"BUY AT <PRICE> and SELL BACK AT <PRICE>\" or \"SELL AT <PRICE> and BUY BACK AT <PRICE>\""},
             {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
         ]
         
@@ -91,7 +91,7 @@ class DeepSeekReasoner:
         """Clear conversation history and reinitialize with market analysis."""
         # Get initial trading recommendation again
         initial_messages = [
-            {"role": "system", "content": "Reply only with \"BUY AT <PRICE> and SELL AT <PRICE>\" or \"SELL AT <PRICE> and BUY BACK AT <PRICE>\""},
+            {"role": "system", "content": "Reply only with \"BUY AT <PRICE> and SELL BACK AT <PRICE>\" or \"SELL AT <PRICE> and BUY BACK AT <PRICE>\""},
             {"role": "user", "content": f"Here's the latest market analysis for {self.product_id}:\n{self.market_analysis}\nBased on this analysis, provide a trading recommendation."}
         ]
         
