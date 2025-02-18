@@ -516,15 +516,22 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         leverage = 20   # Using 20x leverage        
         size_usd = margin * leverage  # 100$ margin with 20x leverage
 
-        # Validate stop loss is not more than $2.5 (actual loss)
-        stop_loss_distance = abs(entry_price - stop_loss)
-        max_loss = 2.5
-        loss = max_loss*leverage
-        if stop_loss_distance > loss:
-            # Adjust stop loss to be at most $40.00 away from entry price
-            stop_loss = entry_price + loss if side == 'BUY' else entry_price - loss
-            print(f"{COLORS['yellow']}Stop loss adjusted to be at most ${loss:.2f} from entry price{COLORS['end']}")
-                    
+        # Calculate stop loss percentage
+        stop_loss_pct = abs((stop_loss - entry_price) / entry_price * 100)
+        
+        # Calculate potential profit percentage
+        profit_pct = abs((target_price - entry_price) / entry_price * 100)
+        
+        # Adjust stop loss if it would result in larger loss than potential gain
+        if stop_loss_pct > profit_pct:
+            # Calculate new stop loss price that matches the profit distance
+            if side == 'BUY':
+                stop_loss = entry_price * (1 - profit_pct/100)  # For long positions
+            else:
+                stop_loss = entry_price * (1 + profit_pct/100)  # For short positions
+            print(f"{COLORS['yellow']}Stop loss adjusted to match take profit distance (${stop_loss:.2f}){COLORS['end']}")
+            stop_loss_pct = profit_pct  # Update the percentage since we adjusted it
+
         # Map product_id to perpetual format
         perp_product_map = {
             'BTC-USDC': 'BTC-PERP-INTX',
@@ -538,13 +545,7 @@ def execute_trade(recommendation: str, product_id: str) -> None:
         if not perp_product:
             print(f"{COLORS['red']}Unsupported product for perpetual trading: {product_id}{COLORS['end']}")
             return
-            
-        # Calculate stop loss percentage
-        stop_loss_pct = abs((stop_loss - entry_price) / entry_price * 100)
-        
-        # Calculate potential profit percentage
-        profit_pct = abs((target_price - entry_price) / entry_price * 100)
-        
+
         # Calculate potential profit/loss in USD based on initial margin
         margin = size_usd  # Initial margin amount
         profit_usd = margin * (profit_pct / 100)
