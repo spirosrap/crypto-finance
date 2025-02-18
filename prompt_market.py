@@ -512,9 +512,19 @@ def execute_trade(recommendation: str, product_id: str) -> None:
             return
             
         # Prepare trade parameters
-        size_usd = 2000  # 100$ margin with 20x leverage
-        leverage = 20   # Using 20x leverage
-        
+        margin = 100
+        leverage = 20   # Using 20x leverage        
+        size_usd = margin * leverage  # 100$ margin with 20x leverage
+
+        # Validate stop loss is not more than $2.5 (actual loss)
+        stop_loss_distance = abs(entry_price - stop_loss)
+        max_loss = 2.5
+        loss = max_loss*leverage
+        if stop_loss_distance > loss:
+            # Adjust stop loss to be at most $40.00 away from entry price
+            stop_loss = entry_price + loss if side == 'BUY' else entry_price - loss
+            print(f"{COLORS['yellow']}Stop loss adjusted to be at most ${loss:.2f} from entry price{COLORS['end']}")
+                    
         # Map product_id to perpetual format
         perp_product_map = {
             'BTC-USDC': 'BTC-PERP-INTX',
