@@ -64,6 +64,13 @@ def main():
                 position_side = position['position_side']
                 leverage = position['leverage']
                 
+                # For long positions, we need to invert the P&L sign
+                if position_side == "LONG":
+                    unrealized_pnl = -unrealized_pnl
+                
+                # Log raw P&L value for debugging
+                logger.debug(f"Raw unrealized P&L value after adjustment: {unrealized_pnl}")
+                
                 total_pnl += unrealized_pnl
                 
                 logger.info(f"""
