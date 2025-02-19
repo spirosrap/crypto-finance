@@ -610,21 +610,56 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
 
 def main():
     # Set up argument parser
-    parser = argparse.ArgumentParser(description='Analyze market data and get AI trading recommendations')
-    parser.add_argument('--product_id', type=str, default='BTC-USDC', help='Trading pair to analyze (e.g., BTC-USDC, ETH-USDC, SOL-USDC)')
-    parser.add_argument('--granularity', type=str, default='ONE_HOUR', help='Time granularity for analysis (e.g., ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ONE_HOUR, TWO_HOUR, SIX_HOUR, ONE_DAY)')
-    parser.add_argument('--margin', type=float, default=100, help='Initial margin amount in USD (default: 100)')
-    parser.add_argument('--leverage', type=int, default=20, help='Leverage multiplier (default: 20)')
-    parser.add_argument('--use_deepseek', action='store_true', help='Use DeepSeek Chat API instead of OpenAI')
-    parser.add_argument('--use_reasoner', action='store_true', help='Use DeepSeek Reasoner API (includes reasoning steps)')
-    parser.add_argument('--use_grok', action='store_true', help='Use X AI Grok API')
-    parser.add_argument('--use_o1_mini', action='store_true', help='Use O1 Mini model')
-    parser.add_argument('--use_o3_mini', action='store_true', help='Use O3 Mini model')
-    parser.add_argument('--use_gpt4o', action='store_true', help='Use GPT-4O model')
-    parser.add_argument('--use_deepseek_r1', action='store_true', help='Use DeepSeek R1 model from OpenRouter')
-    parser.add_argument('--use_ollama', action='store_true', help='Use Ollama model')
-    parser.add_argument('--use_hyperbolic', action='store_true', help='Use Hyperbolic API')
-    parser.add_argument('--execute_trades', action='store_true', help='Execute trades automatically when probability > 60%')
+    parser = argparse.ArgumentParser(
+        description='''
+        AI-Powered Crypto Market Analyzer and Trading Recommendation System
+
+        This tool analyzes cryptocurrency market data using various AI models and provides trading recommendations.
+        It supports multiple AI providers including OpenAI, DeepSeek, X AI (Grok), and others.
+        The analysis includes technical indicators, market sentiment, and risk metrics.
+
+        Example usage:
+          python prompt_market.py --product_id BTC-USDC --granularity ONE_HOUR
+          python prompt_market.py --use_deepseek --margin 200 --leverage 10
+          python prompt_market.py --use_grok --execute_trades
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    # Trading parameters
+    trading_group = parser.add_argument_group('Trading Parameters')
+    trading_group.add_argument('--product_id', type=str, default='BTC-USDC',
+                        help='Trading pair to analyze (e.g., BTC-USDC, ETH-USDC, SOL-USDC, DOGE-USDC, SHIB-USDC)')
+    trading_group.add_argument('--granularity', type=str, default='ONE_HOUR',
+                        help='Time granularity for analysis (ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ONE_HOUR, TWO_HOUR, SIX_HOUR, ONE_DAY)')
+    trading_group.add_argument('--margin', type=float, default=100,
+                        help='Initial margin amount in USD for trading (default: 100)')
+    trading_group.add_argument('--leverage', type=int, default=20,
+                        help='Leverage multiplier for trading (default: 20, range: 1-20)')
+    trading_group.add_argument('--execute_trades', action='store_true',
+                        help='Execute trades automatically when probability exceeds 60%% and other conditions are met')
+
+    # AI Model Selection
+    model_group = parser.add_argument_group('AI Model Selection (choose one)')
+    model_group.add_argument('--use_deepseek', action='store_true',
+                        help='Use DeepSeek Chat API for market analysis')
+    model_group.add_argument('--use_reasoner', action='store_true',
+                        help='Use DeepSeek Reasoner API (includes detailed reasoning steps)')
+    model_group.add_argument('--use_grok', action='store_true',
+                        help='Use X AI Grok API for analysis')
+    model_group.add_argument('--use_o1_mini', action='store_true',
+                        help='Use o1 Mini model for faster, lighter analysis')
+    model_group.add_argument('--use_o3_mini', action='store_true',
+                        help='Use o3 Mini model for enhanced performance')
+    model_group.add_argument('--use_gpt4o', action='store_true',
+                        help='Use GPT-4o model for advanced analysis')
+    model_group.add_argument('--use_deepseek_r1', action='store_true',
+                        help='Use DeepSeek R1 model via OpenRouter API')
+    model_group.add_argument('--use_ollama', action='store_true',
+                        help='Use local Ollama model for offline analysis')
+    model_group.add_argument('--use_hyperbolic', action='store_true',
+                        help='Use Hyperbolic API for market analysis')
+
     args = parser.parse_args()
 
     if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
@@ -663,7 +698,7 @@ def main():
             model = MODEL_CONFIG['ollama']
             provider = 'Ollama'
         elif args.use_deepseek_r1:
-            model = MODEL_CONFIG['deepseek-R1']
+            model = MODEL_CONFIG['deepseek-r1']
             provider = 'OpenRouter'
         
         if not validate_model_availability(model, provider):
