@@ -452,6 +452,165 @@ class CoinbaseService:
             self.logger.error(f"Error placing market order with targets: {str(e)}")
             return {"error": str(e)}
 
+    def place_limit_order_with_targets(self, product_id: str, side: str, size: float, 
+                                     entry_price: float, take_profit_price: float, 
+                                     stop_loss_price: float, leverage: str = None) -> dict:
+        """
+        Place a limit order followed by a bracket order for take profit and stop loss.
+        
+        Args:
+            product_id (str): The trading pair (e.g., 'BTC-USD')
+            side (str): Order side ('BUY' or 'SELL')
+            size (float): Size of the order in base currency
+            entry_price (float): Limit price for the entry order
+            take_profit_price (float): Price to take profit
+            stop_loss_price (float): Price to stop loss
+            leverage (str, optional): Leverage value for margin trading
+            
+        Returns:
+            dict: Order details including entry order and bracket order information
+        """
+        try:
+            # First preview the limit order
+            preview = self.client.preview_limit_order_gtc(
+                product_id=product_id,
+                side=side.upper(),
+                base_size=str(size),
+                limit_price=str(entry_price),
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            self.logger.info(f"Order preview response: {preview}")
+            
+            # Check preview response
+            if hasattr(preview, 'error_response'):
+                self.logger.error(f"Order preview failed: {preview.error_response}")
+                return {"error": preview.error_response}
+                
+            # Generate a unique client_order_id
+            client_order_id = f"limit_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            # Place the initial limit order
+            limit_order = self.client.limit_order_gtc(
+                client_order_id=client_order_id,
+                product_id=product_id,
+                side=side.upper(),
+                base_size=str(size),
+                limit_price=str(entry_price),
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            if hasattr(limit_order, 'error_response'):
+                self.logger.error(f"Failed to place limit order: {limit_order.error_response}")
+                return {"error": limit_order.error_response}
+            
+            self.logger.info(f"Limit order placed: {limit_order}")
+            
+            # Extract order ID
+            order_id = None
+            if (isinstance(limit_order, dict) and 
+                'success_response' in limit_order and 
+                'order_id' in limit_order['success_response']):
+                order_id = limit_order['success_response']['order_id']
+            elif hasattr(limit_order, 'success_response'):
+                success_response = getattr(limit_order, 'success_response')
+                if isinstance(success_response, dict) and 'order_id' in success_response:
+                    order_id = success_response['order_id']
+            
+            if not order_id:
+                self.logger.error(f"Could not find order ID in response: {limit_order}")
+                return {"error": "Could not find order ID", "limit_order": str(limit_order)}
+            
+            self.logger.info(f"Extracted order ID: {order_id}")
+            
+            # Wait briefly for limit order to fill
+            time.sleep(2)
+            
+            # Get the order status
+            order_status = self.client.get_order(order_id=order_id)
+            self.logger.info(f"Order status response: {order_status}")
+            
+            # Check if order is filled
+            is_filled = False
+            if isinstance(order_status, dict) and 'order' in order_status:
+                is_filled = order_status['order'].get('status') == 'FILLED'
+            elif hasattr(order_status, 'order'):
+                order = getattr(order_status, 'order')
+                is_filled = getattr(order, 'status', None) == 'FILLED'
+            
+            if not is_filled:
+                self.logger.info(f"Limit order not filled yet: {order_status}")
+                # For limit orders, we'll still place the bracket order since it will only trigger after fill
+            
+            # Generate client_order_id for bracket order
+            bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            # Set end time to 30 days from now for GTD orders
+            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+            
+            # Place bracket order - use opposite side of limit order
+            bracket_side = "SELL" if side.upper() == "BUY" else "BUY"
+            
+            # Place the bracket order
+            try:
+                if bracket_side == "SELL":
+                    bracket_order = self.client.trigger_bracket_order_gtd_sell(
+                        client_order_id=bracket_client_order_id,
+                        product_id=product_id,
+                        base_size=str(size),
+                        limit_price=str(take_profit_price),
+                        stop_trigger_price=str(stop_loss_price),
+                        end_time=end_time,
+                        leverage=leverage,
+                        margin_type="CROSS" if leverage else None
+                    )
+                else:
+                    bracket_order = self.client.trigger_bracket_order_gtd_buy(
+                        client_order_id=bracket_client_order_id,
+                        product_id=product_id,
+                        base_size=str(size),
+                        limit_price=str(take_profit_price),
+                        stop_trigger_price=str(stop_loss_price),
+                        end_time=end_time,
+                        leverage=leverage,
+                        margin_type="CROSS" if leverage else None
+                    )
+                    
+                if hasattr(bracket_order, 'error_response'):
+                    self.logger.error(f"Failed to place bracket order: {bracket_order.error_response}")
+                    return {
+                        "error": "Failed to place bracket order",
+                        "limit_order": str(limit_order),
+                        "bracket_error": bracket_order.error_response
+                    }
+                    
+                self.logger.info(f"Bracket order placed: {bracket_order}")
+                
+                # Return all order details
+                return {
+                    "limit_order": str(limit_order),
+                    "bracket_order": str(bracket_order),
+                    "status": "success",
+                    "order_id": order_id,
+                    "entry_price": entry_price,
+                    "tp_price": take_profit_price,
+                    "sl_price": stop_loss_price,
+                    "is_filled": is_filled
+                }
+                
+            except Exception as e:
+                self.logger.error(f"Error placing bracket order: {str(e)}")
+                return {
+                    "error": f"Failed to place bracket order: {str(e)}",
+                    "limit_order": str(limit_order)
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error placing limit order with targets: {str(e)}")
+            return {"error": str(e)}
+
     def cancel_all_orders(self, product_id: str = None):
         """
         Cancel all open orders for a given product_id or all products if none specified.
