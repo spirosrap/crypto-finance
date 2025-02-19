@@ -478,7 +478,7 @@ def validate_model_availability(model: str, provider: str) -> bool:
         logging.warning(f"Could not validate model availability for {provider}: {str(e)}")
         return True  # Default to True if check fails
 
-def execute_trade(recommendation: str, product_id: str, margin: float = 100, leverage: int = 20) -> None:
+def execute_trade(recommendation: str, product_id: str, margin: float = 100, leverage: int = 20, use_limit_order: bool = False) -> None:
     """Execute trade based on recommendation if probability > 30% and sets stop loss from recommendation"""
     try:
         # Parse the JSON recommendation
@@ -524,11 +524,27 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             # Calculate price deviation percentage
             price_deviation = abs((entry_price - current_price) / current_price * 100)
             
-            # If price deviation is more than 0.2%, don't execute the trade
-            MAX_PRICE_DEVIATION = 0.2  # 0.2%
-            if price_deviation > MAX_PRICE_DEVIATION:
-                print(f"{COLORS['yellow']}Trade not executed: Entry price ${entry_price:.2f} deviates too much from current price ${current_price:.2f} ({price_deviation:.2f}% > {MAX_PRICE_DEVIATION}%){COLORS['end']}")
-                return
+            # Determine whether to use market or limit order based on price conditions
+            should_use_market = False
+            MAX_PRICE_DEVIATION = 0.2  # 0.2% maximum deviation for market orders
+            
+            if use_limit_order:
+                if side == 'SELL' and entry_price < current_price:
+                    print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is below current price (${current_price:.2f}){COLORS['end']}")
+                    should_use_market = True
+                elif side == 'BUY' and entry_price > current_price:
+                    print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is above current price (${current_price:.2f}){COLORS['end']}")
+                    should_use_market = True
+                    
+                if should_use_market and price_deviation > MAX_PRICE_DEVIATION:
+                    print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds maximum allowed ({MAX_PRICE_DEVIATION}%){COLORS['end']}")
+                    return
+            else:
+                should_use_market = True
+                if price_deviation > MAX_PRICE_DEVIATION:
+                    print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds maximum allowed ({MAX_PRICE_DEVIATION}%){COLORS['end']}")
+                    return
+                
         except Exception as e:
             print(f"{COLORS['red']}Error getting current price: {str(e)}{COLORS['end']}")
             return
@@ -573,6 +589,7 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         # Round prices to integers for BTC trades in the command
         cmd_target_price = int(target_price) if product_id == 'BTC-USDC' else target_price
         cmd_stop_loss = int(stop_loss) if product_id == 'BTC-USDC' else stop_loss
+        cmd_entry_price = int(entry_price) if product_id == 'BTC-USDC' else entry_price
         
         # Execute trade using subprocess
         cmd = [
@@ -582,9 +599,15 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             '--size', str(size_usd),
             '--leverage', str(leverage),
             '--tp', str(cmd_target_price),
-            '--sl', str(cmd_stop_loss),
-            '--no-confirm'
+            '--sl', str(cmd_stop_loss)
         ]
+        
+        # Add limit price only if using limit order and conditions are met
+        if use_limit_order and not should_use_market:
+            cmd.extend(['--limit', str(cmd_entry_price)])
+        
+        # Add no-confirm flag
+        cmd.append('--no-confirm')
         
         # Print trade details with additional information
         print(f"\n{COLORS['cyan']}Executing trade with parameters:{COLORS['end']}")
@@ -602,6 +625,7 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         print(f"Signal Confidence: {rec_dict['CONFIDENCE']}")
         print(f"R/R Ratio: {rec_dict['R/R_RATIO']:.3f}")
         print(f"Volume Strength: {rec_dict['VOLUME_STRENGTH']}")
+        print(f"Order Type: {'Limit' if (use_limit_order and not should_use_market) else 'Market'}")
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
@@ -662,6 +686,8 @@ def main():
                         help='Leverage multiplier for trading (default: 20, range: 1-20)')
     trading_group.add_argument('--execute_trades', action='store_true',
                         help='Execute trades automatically when probability exceeds 60%% and other conditions are met')
+    trading_group.add_argument('--limit_order', action='store_true',
+                        help='Use limit orders instead of market orders, using the SELL_AT or BUY_AT price from the recommendation')
 
     # AI Model Selection
     model_group = parser.add_argument_group('AI Model Selection (choose one)')
@@ -749,7 +775,7 @@ def main():
 
         # Execute trade only if --execute_trades flag is provided
         if recommendation and args.execute_trades:
-            execute_trade(recommendation, args.product_id, args.margin, args.leverage)
+            execute_trade(recommendation, args.product_id, args.margin, args.leverage, args.limit_order)
         # elif recommendation and not args.execute_trades:
         #     print(f"\n{COLORS['yellow']}Trade not executed: --execute_trades flag not provided{COLORS['end']}")
         #     print(f"{COLORS['yellow']}To execute trades automatically, run with --execute_trades flag{COLORS['end']}")
