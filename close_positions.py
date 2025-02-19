@@ -1,4 +1,5 @@
 import logging
+import time
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
 
@@ -53,7 +54,7 @@ def main():
         # Print details about closed positions
         logger.info("Position closing complete. Position details:")
         total_pnl = 0
-        
+        time.sleep(1)
         for position in positions:
             try:
                 # Access the nested dictionary structure
@@ -64,12 +65,8 @@ def main():
                 position_side = position['position_side']
                 leverage = position['leverage']
                 
-                # For long positions, we need to invert the P&L sign
-                if position_side == "LONG":
-                    unrealized_pnl = -unrealized_pnl
-                
                 # Log raw P&L value for debugging
-                logger.debug(f"Raw unrealized P&L value after adjustment: {unrealized_pnl}")
+                logger.debug(f"Raw unrealized P&L value: {unrealized_pnl}")
                 
                 total_pnl += unrealized_pnl
                 
