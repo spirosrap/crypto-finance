@@ -274,7 +274,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"}. "
         "Instruction 1: Use code to calculate the R/R ratio. "
         "Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
-        "Instruction 3: Volume strength should be one of: 'Very High', 'High', 'Moderate', 'Low', 'Very Low'."
+        "Instruction 3: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'."
     )    
     
     try:
