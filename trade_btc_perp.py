@@ -146,26 +146,61 @@ def main():
     parser.add_argument('--product', type=str, default='BTC-PERP-INTX',
                       choices=['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX"],
                       help='Trading product (default: BTC-PERP-INTX)')
-    parser.add_argument('--side', type=str, required=True, choices=['BUY', 'SELL'],
+    parser.add_argument('--side', type=str, choices=['BUY', 'SELL'],
                       help='Trade direction (BUY/SELL)')
-    parser.add_argument('--size', type=float, required=True,
+    parser.add_argument('--size', type=float,
                       help='Position size in USD')
-    parser.add_argument('--leverage', type=float, required=True,
+    parser.add_argument('--leverage', type=float,
                       help='Leverage (1-20)')
-    parser.add_argument('--tp', type=float, required=True,
+    parser.add_argument('--tp', type=float,
                       help='Take profit price in USD')
-    parser.add_argument('--sl', type=float, required=True,
+    parser.add_argument('--sl', type=float,
                       help='Stop loss price in USD')
     parser.add_argument('--limit', type=float,
                       help='Limit price in USD (if not provided, a market order will be placed)')
     parser.add_argument('--no-confirm', action='store_true',
                       help='Skip order confirmation')
+    # New arguments for placing bracket orders after fill
+    parser.add_argument('--place-bracket', action='store_true',
+                      help='Place bracket orders for an already filled limit order')
+    parser.add_argument('--order-id', type=str,
+                      help='Order ID of the filled limit order')
 
     args = parser.parse_args()
 
     try:
         # Initialize CoinbaseService
         cb_service = setup_coinbase()
+        
+        # Handle placing bracket orders after fill
+        if args.place_bracket:
+            if not all([args.order_id, args.product, args.size, args.tp, args.sl]):
+                raise ValueError("For placing bracket orders, --order-id, --product, --size, --tp, and --sl are required")
+            
+            result = cb_service.place_bracket_after_fill(
+                product_id=args.product,
+                order_id=args.order_id,
+                size=args.size,
+                take_profit_price=args.tp,
+                stop_loss_price=args.sl,
+                leverage=str(args.leverage) if args.leverage else None
+            )
+            
+            if "error" in result:
+                if result.get("status") == "pending_fill":
+                    print("\nLimit order not filled yet. Please try again once the order is filled.")
+                    return
+                print(f"\nError placing bracket orders: {result['error']}")
+                return
+                
+            print("\nBracket orders placed successfully!")
+            print(f"Take Profit Price: ${result['tp_price']}")
+            print(f"Stop Loss Price: ${result['sl_price']}")
+            return
+        
+        # Regular order placement flow
+        if not all([args.side, args.size, args.leverage, args.tp, args.sl]):
+            raise ValueError("For new orders, --side, --size, --leverage, --tp, and --sl are required")
         
         # Validate parameters
         validate_params(args.product, args.side, args.size, args.leverage, args.tp, args.sl, args.limit, cb_service)
@@ -226,6 +261,19 @@ def main():
                 stop_loss_price=args.sl,
                 leverage=str(args.leverage)
             )
+            
+            if "error" in result:
+                print(f"\nError placing limit order: {result['error']}")
+                return
+                
+            print("\nLimit order placed successfully!")
+            print(f"Order ID: {result['order_id']}")
+            print(f"Entry Price: ${result['entry_price']}")
+            print(f"Status: {result['status']}")
+            print(f"\n{result['message']}")
+            print("\nTo place take profit and stop loss orders after fill, run:")
+            print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {args.tp} --sl {args.sl} --leverage {args.leverage}")
+            
         else:
             result = cb_service.place_market_order_with_targets(
                 product_id=args.product,
@@ -235,19 +283,17 @@ def main():
                 stop_loss_price=args.sl,
                 leverage=str(args.leverage)
             )
-        
-        if "error" in result:
-            print(f"\nError placing order: {result['error']}")
-            if isinstance(result['error'], dict):
-                print(f"Error details: {result['error'].get('message', 'No message')}")
-                print(f"Preview failure reason: {result['error'].get('preview_failure_reason', 'Unknown')}")
-        else:
-            print("\nOrder placed successfully!")
-            print(f"Order ID: {result['order_id']}")
-            if args.limit:
-                print(f"Entry Price: ${result['entry_price']}")
-            print(f"Take Profit Price: ${result['tp_price']}")
-            print(f"Stop Loss Price: ${result['sl_price']}")
+            
+            if "error" in result:
+                print(f"\nError placing order: {result['error']}")
+                if isinstance(result['error'], dict):
+                    print(f"Error details: {result['error'].get('message', 'No message')}")
+                    print(f"Preview failure reason: {result['error'].get('preview_failure_reason', 'Unknown')}")
+            else:
+                print("\nOrder placed successfully!")
+                print(f"Order ID: {result['order_id']}")
+                print(f"Take Profit Price: ${result['tp_price']}")
+                print(f"Stop Loss Price: ${result['sl_price']}")
             
     except Exception as e:
         logger.error(f"An error occurred: {e}")

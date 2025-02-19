@@ -456,7 +456,7 @@ class CoinbaseService:
                                      entry_price: float, take_profit_price: float, 
                                      stop_loss_price: float, leverage: str = None) -> dict:
         """
-        Place a limit order followed by a bracket order for take profit and stop loss.
+        Place a limit order first, then monitor for fill before placing take profit and stop loss orders.
         
         Args:
             product_id (str): The trading pair (e.g., 'BTC-USD')
@@ -468,7 +468,7 @@ class CoinbaseService:
             leverage (str, optional): Leverage value for margin trading
             
         Returns:
-            dict: Order details including entry order and bracket order information
+            dict: Order details including entry order information
         """
         try:
             # First preview the limit order
@@ -525,10 +525,40 @@ class CoinbaseService:
             
             self.logger.info(f"Extracted order ID: {order_id}")
             
-            # Wait briefly for limit order to fill
-            time.sleep(2)
+            # Return the limit order details immediately
+            return {
+                "limit_order": str(limit_order),
+                "status": "pending_fill",
+                "order_id": order_id,
+                "entry_price": entry_price,
+                "tp_price": take_profit_price,
+                "sl_price": stop_loss_price,
+                "message": "Limit order placed. Once filled, you can place take profit and stop loss orders using place_bracket_after_fill method."
+            }
+                
+        except Exception as e:
+            self.logger.error(f"Error placing limit order with targets: {str(e)}")
+            return {"error": str(e)}
+
+    def place_bracket_after_fill(self, product_id: str, order_id: str, size: float,
+                               take_profit_price: float, stop_loss_price: float,
+                               leverage: str = None) -> dict:
+        """
+        Place bracket orders (take profit and stop loss) after a limit order has been filled.
+        
+        Args:
+            product_id (str): The trading pair
+            order_id (str): The original limit order ID
+            size (float): Size of the position
+            take_profit_price (float): Price to take profit
+            stop_loss_price (float): Price to stop loss
+            leverage (str, optional): Leverage value for margin trading
             
-            # Get the order status
+        Returns:
+            dict: Bracket order details
+        """
+        try:
+            # Check if the original order is filled
             order_status = self.client.get_order(order_id=order_id)
             self.logger.info(f"Order status response: {order_status}")
             
@@ -536,13 +566,18 @@ class CoinbaseService:
             is_filled = False
             if isinstance(order_status, dict) and 'order' in order_status:
                 is_filled = order_status['order'].get('status') == 'FILLED'
+                side = order_status['order'].get('side')
             elif hasattr(order_status, 'order'):
                 order = getattr(order_status, 'order')
                 is_filled = getattr(order, 'status', None) == 'FILLED'
+                side = getattr(order, 'side', None)
             
             if not is_filled:
-                self.logger.info(f"Limit order not filled yet: {order_status}")
-                # For limit orders, we'll still place the bracket order since it will only trigger after fill
+                return {
+                    "error": "Original limit order not filled yet",
+                    "status": "pending_fill",
+                    "order_id": order_id
+                }
             
             # Generate client_order_id for bracket order
             bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
@@ -550,8 +585,8 @@ class CoinbaseService:
             # Set end time to 30 days from now for GTD orders
             end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
             
-            # Place bracket order - use opposite side of limit order
-            bracket_side = "SELL" if side.upper() == "BUY" else "BUY"
+            # Place bracket order - use opposite side of the filled limit order
+            bracket_side = "SELL" if side == "BUY" else "BUY"
             
             # Place the bracket order
             try:
@@ -582,33 +617,25 @@ class CoinbaseService:
                     self.logger.error(f"Failed to place bracket order: {bracket_order.error_response}")
                     return {
                         "error": "Failed to place bracket order",
-                        "limit_order": str(limit_order),
                         "bracket_error": bracket_order.error_response
                     }
                     
                 self.logger.info(f"Bracket order placed: {bracket_order}")
                 
-                # Return all order details
+                # Return bracket order details
                 return {
-                    "limit_order": str(limit_order),
                     "bracket_order": str(bracket_order),
                     "status": "success",
-                    "order_id": order_id,
-                    "entry_price": entry_price,
                     "tp_price": take_profit_price,
-                    "sl_price": stop_loss_price,
-                    "is_filled": is_filled
+                    "sl_price": stop_loss_price
                 }
                 
             except Exception as e:
                 self.logger.error(f"Error placing bracket order: {str(e)}")
-                return {
-                    "error": f"Failed to place bracket order: {str(e)}",
-                    "limit_order": str(limit_order)
-                }
+                return {"error": f"Failed to place bracket order: {str(e)}"}
                 
         except Exception as e:
-            self.logger.error(f"Error placing limit order with targets: {str(e)}")
+            self.logger.error(f"Error checking order status: {str(e)}")
             return {"error": str(e)}
 
     def cancel_all_orders(self, product_id: str = None):
