@@ -476,7 +476,7 @@ def validate_model_availability(model: str, provider: str) -> bool:
         logging.warning(f"Could not validate model availability for {provider}: {str(e)}")
         return True  # Default to True if check fails
 
-def execute_trade(recommendation: str, product_id: str) -> None:
+def execute_trade(recommendation: str, product_id: str, margin: float = 100, leverage: int = 20) -> None:
     """Execute trade based on recommendation if probability > 30% and sets stop loss from recommendation"""
     try:
         # Parse the JSON recommendation
@@ -511,10 +511,8 @@ def execute_trade(recommendation: str, product_id: str) -> None:
             print(f"{COLORS['red']}Invalid recommendation format{COLORS['end']}")
             return
             
-        # Prepare trade parameters
-        margin = 100
-        leverage = 20   # Using 20x leverage        
-        size_usd = margin * leverage  # 100$ margin with 20x leverage
+        # Calculate position size using margin and leverage
+        size_usd = margin * leverage
 
         # Calculate stop loss percentage
         stop_loss_pct = abs((stop_loss - entry_price) / entry_price * 100)
@@ -547,9 +545,8 @@ def execute_trade(recommendation: str, product_id: str) -> None:
             return
 
         # Calculate potential profit/loss in USD based on initial margin
-        margin = size_usd  # Initial margin amount
-        profit_usd = margin * (profit_pct / 100)
-        loss_usd = margin * (stop_loss_pct / 100)
+        profit_usd = size_usd * (profit_pct / 100)
+        loss_usd = size_usd * (stop_loss_pct / 100)
         
         # Round prices to integers for BTC trades in the command
         cmd_target_price = int(target_price) if product_id == 'BTC-USDC' else target_price
@@ -616,6 +613,8 @@ def main():
     parser = argparse.ArgumentParser(description='Analyze market data and get AI trading recommendations')
     parser.add_argument('--product_id', type=str, default='BTC-USDC', help='Trading pair to analyze (e.g., BTC-USDC, ETH-USDC, SOL-USDC)')
     parser.add_argument('--granularity', type=str, default='ONE_HOUR', help='Time granularity for analysis (e.g., ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ONE_HOUR, TWO_HOUR, SIX_HOUR, ONE_DAY)')
+    parser.add_argument('--margin', type=float, default=100, help='Initial margin amount in USD (default: 100)')
+    parser.add_argument('--leverage', type=int, default=20, help='Leverage multiplier (default: 20)')
     parser.add_argument('--use_deepseek', action='store_true', help='Use DeepSeek Chat API instead of OpenAI')
     parser.add_argument('--use_reasoner', action='store_true', help='Use DeepSeek Reasoner API (includes reasoning steps)')
     parser.add_argument('--use_grok', action='store_true', help='Use X AI Grok API')
@@ -691,7 +690,7 @@ def main():
 
         # Execute trade only if --execute_trades flag is provided
         if recommendation and args.execute_trades:
-            execute_trade(recommendation, args.product_id)
+            execute_trade(recommendation, args.product_id, args.margin, args.leverage)
         # elif recommendation and not args.execute_trades:
         #     print(f"\n{COLORS['yellow']}Trade not executed: --execute_trades flag not provided{COLORS['end']}")
         #     print(f"{COLORS['yellow']}To execute trades automatically, run with --execute_trades flag{COLORS['end']}")
