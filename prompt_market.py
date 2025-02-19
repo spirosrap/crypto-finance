@@ -10,10 +10,10 @@ from datetime import datetime
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import openai
-
+from coinbaseservice import CoinbaseService
 # Use environment variables or config.py
 try:
-    from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, HYPERBOLIC_KEY
+    from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, HYPERBOLIC_KEY, API_KEY_PERPS, API_SECRET_PERPS
 except ImportError:
     OPENAI_KEY = os.getenv('OPENAI_KEY')
     DEEPSEEK_KEY = os.getenv('DEEPSEEK_KEY')
@@ -21,8 +21,8 @@ except ImportError:
     OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
     HYPERBOLIC_KEY = os.getenv('HYPERBOLIC_KEY')
 
-if not (OPENAI_KEY and DEEPSEEK_KEY and XAI_KEY and OPENROUTER_API_KEY and HYPERBOLIC_KEY):
-    print("Error: Missing one or more required API keys. Please set OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, and HYPERBOLIC_KEY in your config or environment variables.")
+if not (OPENAI_KEY and DEEPSEEK_KEY and XAI_KEY and OPENROUTER_API_KEY and HYPERBOLIC_KEY and API_KEY_PERPS and API_SECRET_PERPS):
+    print("Error: Missing one or more required API keys. Please set OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, API_KEY_PERPS, and API_SECRET_PERPS and HYPERBOLIC_KEY in your config or environment variables.")
 
 
 # Configure logging
@@ -441,7 +441,9 @@ def validate_configuration() -> bool:
         'DEEPSEEK_KEY': DEEPSEEK_KEY,
         'XAI_KEY': XAI_KEY,
         'OPENROUTER_API_KEY': OPENROUTER_API_KEY,
-        'HYPERBOLIC_KEY': HYPERBOLIC_KEY
+        'HYPERBOLIC_KEY': HYPERBOLIC_KEY,
+        'API_KEY_PERPS': API_KEY_PERPS,
+        'API_SECRET_PERPS': API_SECRET_PERPS
     }
     
     for name, value in required_env_vars.items():
@@ -510,6 +512,26 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         else:
             print(f"{COLORS['red']}Invalid recommendation format{COLORS['end']}")
             return
+
+        try:
+            # Initialize CoinbaseService with API keys
+            cb_service = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+            
+            # Get current price from market trades (most accurate real-time price)
+            trades = cb_service.client.get_market_trades(product_id=product_id, limit=1)
+            current_price = float(trades['trades'][0]['price'])
+            
+            # Calculate price deviation percentage
+            price_deviation = abs((entry_price - current_price) / current_price * 100)
+            
+            # If price deviation is more than 0.2%, don't execute the trade
+            MAX_PRICE_DEVIATION = 0.2  # 0.2%
+            if price_deviation > MAX_PRICE_DEVIATION:
+                print(f"{COLORS['yellow']}Trade not executed: Entry price ${entry_price:.2f} deviates too much from current price ${current_price:.2f} ({price_deviation:.2f}% > {MAX_PRICE_DEVIATION}%){COLORS['end']}")
+                return
+        except Exception as e:
+            print(f"{COLORS['red']}Error getting current price: {str(e)}{COLORS['end']}")
+            return
             
         # Calculate position size using margin and leverage
         size_usd = margin * leverage
@@ -572,6 +594,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         print(f"Leverage: {leverage}x")
         print(f"Position Size: ${size_usd}")
         print(f"Entry Price: ${entry_price:.2f}")
+        print(f"Current Price: ${current_price:.2f}")
+        print(f"Price Deviation: {price_deviation:.2f}%")
         print(f"Take Profit: ${target_price:.2f} ({profit_pct:.2f}% / ${profit_usd:.2f})")
         print(f"Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}% / ${loss_usd:.2f})")
         print(f"Probability: {prob:.1f}%")
