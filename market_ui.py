@@ -3,6 +3,9 @@ import subprocess
 import threading
 import queue
 from datetime import datetime
+import json
+import requests
+import time
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -18,11 +21,20 @@ class MarketAnalyzerUI:
         # Queue for communication between threads
         self.queue = queue.Queue()
         
+        # Initialize price tracking
+        self.current_price = "-.--"
+        self.last_price_update = None
+        self.price_update_thread = None
+        self.stop_price_updates = False
+        
         # Create main container with padding
         self.create_gui()
         
         # Start queue processing
         self.process_queue()
+        
+        # Start price updates
+        self.start_price_updates()
 
     def create_gui(self):
         # Create left sidebar for controls
@@ -39,6 +51,27 @@ class MarketAnalyzerUI:
         products = ["BTC-USDC", "ETH-USDC", "DOGE-USDC", "SOL-USDC", "SHIB-USDC"]
         product_menu = ctk.CTkOptionMenu(sidebar, values=products, variable=self.product_var)
         product_menu.pack(pady=(0,20))
+        
+        # Add price display after product selection
+        self.price_frame = ctk.CTkFrame(sidebar)
+        self.price_frame.pack(pady=(0,20), padx=10, fill="x")
+        
+        ctk.CTkLabel(self.price_frame, text="Current Price:", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(5,0))
+        
+        self.price_label = ctk.CTkLabel(
+            self.price_frame,
+            text="-.--",
+            font=ctk.CTkFont(size=20, weight="bold")
+        )
+        self.price_label.pack(pady=(0,5))
+        
+        self.price_time_label = ctk.CTkLabel(
+            self.price_frame,
+            text="Last update: Never",
+            font=ctk.CTkFont(size=10)
+        )
+        self.price_time_label.pack(pady=(0,5))
         
         # Model selection
         ctk.CTkLabel(sidebar, text="Select Model:").pack(pady=(0,5))
@@ -323,6 +356,54 @@ class MarketAnalyzerUI:
             self.queue.put(("status", "Error occurred"))
             self.queue.put(("enable_close_button", None))
 
+    def start_price_updates(self):
+        """Start the price update thread"""
+        self.stop_price_updates = False
+        self.price_update_thread = threading.Thread(target=self._price_update_loop)
+        self.price_update_thread.daemon = True
+        self.price_update_thread.start()
+
+    def stop_price_updates(self):
+        """Stop the price update thread"""
+        self.stop_price_updates = True
+        if self.price_update_thread:
+            self.price_update_thread.join()
+
+    def _price_update_loop(self):
+        """Background loop to update price"""
+        while not self.stop_price_updates:
+            try:
+                # Get current product from dropdown
+                product = self.product_var.get()
+                
+                # Fetch price from Coinbase API
+                response = requests.get(f"https://api.coinbase.com/v2/prices/{product}/spot")
+                data = response.json()
+                
+                if 'data' in data and 'amount' in data['data']:
+                    price = float(data['data']['amount'])
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    
+                    # Format price with appropriate decimals
+                    if price < 1:
+                        formatted_price = f"${price:.6f}"
+                    elif price < 100:
+                        formatted_price = f"${price:.4f}"
+                    else:
+                        formatted_price = f"${price:,.2f}"
+                    
+                    # Update via queue to ensure thread safety
+                    self.queue.put(("update_price", {
+                        'price': formatted_price,
+                        'time': f"Last update: {timestamp}"
+                    }))
+                
+            except Exception as e:
+                print(f"Error updating price: {e}")
+            
+            # Wait 1 second before next update
+            time.sleep(1)
+
     def process_queue(self):
         """Process messages from the queue"""
         try:
@@ -340,6 +421,9 @@ class MarketAnalyzerUI:
                     self.clear_btn.configure(state="normal")
                 elif action == "enable_close_button":
                     self.close_positions_btn.configure(state="normal")
+                elif action == "update_price":
+                    self.price_label.configure(text=data['price'])
+                    self.price_time_label.configure(text=data['time'])
                 
         except queue.Empty:
             pass
@@ -348,7 +432,11 @@ class MarketAnalyzerUI:
             self.root.after(100, self.process_queue)
 
     def run(self):
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            # Ensure price updates are stopped when the app closes
+            self.stop_price_updates = True
 
 if __name__ == "__main__":
     app = MarketAnalyzerUI()
