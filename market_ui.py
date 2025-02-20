@@ -213,7 +213,7 @@ class MarketAnalyzerUI:
         self.output_text = ctk.CTkTextbox(
             main_content,
             wrap="word",
-            font=ctk.CTkFont(family="Courier", size=14)
+            font=ctk.CTkFont(family="Courier", size=16)
         )
         self.output_text.pack(fill="both", expand=True, padx=10, pady=10)
 
