@@ -137,6 +137,17 @@ class MarketAnalyzerUI:
         )
         self.one_hour_btn.pack(pady=5, padx=20, fill="x")
         
+        # Close Positions button
+        self.close_positions_btn = ctk.CTkButton(
+            sidebar,
+            text="Close All Positions",
+            command=self.close_positions,
+            fg_color="#b22222",  # Dark red color
+            hover_color="#8b0000",  # Darker red on hover
+            height=40  # Make it the same height as analysis buttons
+        )
+        self.close_positions_btn.pack(pady=(20,10), padx=20, fill="x")
+        
         # Clear button at bottom of sidebar
         self.clear_btn = ctk.CTkButton(
             sidebar, 
@@ -146,7 +157,7 @@ class MarketAnalyzerUI:
             border_width=2,
             text_color=("gray10", "#DCE4EE")
         )
-        self.clear_btn.pack(pady=(20,0), padx=20, fill="x")
+        self.clear_btn.pack(pady=(0,20), padx=20, fill="x")
         
         # Status indicator
         self.status_var = ctk.StringVar(value="Ready")
@@ -264,6 +275,54 @@ class MarketAnalyzerUI:
             self.queue.put(("status", "Error occurred"))
             self.queue.put(("enable_buttons", None))
 
+    def close_positions(self):
+        """Close all open positions"""
+        self.status_var.set("Closing positions...")
+        self.close_positions_btn.configure(state="disabled")
+        
+        # Create and start thread
+        thread = threading.Thread(target=self._close_positions_thread)
+        thread.daemon = True
+        thread.start()
+        
+    def _close_positions_thread(self):
+        """Thread function to close positions"""
+        try:
+            # Run close_positions.py
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            header = f"\n{'='*80}\n{timestamp} - Closing all open positions\n{'='*80}\n"
+            self.queue.put(("append", header))
+            
+            process = subprocess.Popen(
+                ["python", "close_positions.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Read output in real-time
+            while True:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    self.queue.put(("append", output))
+            
+            # Get any remaining output
+            stdout, stderr = process.communicate()
+            if stdout:
+                self.queue.put(("append", stdout))
+            if stderr:
+                self.queue.put(("append", f"\nErrors:\n{stderr}"))
+            
+            self.queue.put(("status", "Ready"))
+            self.queue.put(("enable_close_button", None))
+            
+        except Exception as e:
+            self.queue.put(("append", f"\nError: {str(e)}\n"))
+            self.queue.put(("status", "Error occurred"))
+            self.queue.put(("enable_close_button", None))
+
     def process_queue(self):
         """Process messages from the queue"""
         try:
@@ -279,6 +338,8 @@ class MarketAnalyzerUI:
                     self.five_min_btn.configure(state="normal")
                     self.one_hour_btn.configure(state="normal")
                     self.clear_btn.configure(state="normal")
+                elif action == "enable_close_button":
+                    self.close_positions_btn.configure(state="normal")
                 
         except queue.Empty:
             pass
