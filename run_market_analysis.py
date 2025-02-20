@@ -11,8 +11,7 @@ def run_market_analysis(product_id="BTC-USDC", granularity="ONE_HOUR"):
     ]
 
     # Additional text to append
-    append_text = """====  \n \n Reply only with: BUY AT <PRICE> and SELL BACK AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>. Volume Strength: <VOLUME_STRENGTH>. or SELL AT <PRICE> and BUY BACK AT <PRICE> with STOP LOSS at <PRICE>. Probability of success: <PROBABILITY>. Signal Confidence: <CONFIDENCE>. R/R: <R/R_RATIO>. Volume Confirmation: <VOLUME_CONFIRMATION>. Instruction 1: Use code to calculate the R/R ratio. Instruction 2: Signal confidence should be between Very Strong, Strong, Moderate, Weak, Very Weak. Instruction 3: Volume confirmation should be between Very High, High, Moderate, Low, Very Low."""
-
+    append_text = """====  \n \n "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"} or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"}. Instruction 1: Use code to calculate the R/R ratio. Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. Instruction 3: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'."""
     try:
         # Run market analyzer and redirect output to file
         with open("market_analysis.txt", "w") as f:
