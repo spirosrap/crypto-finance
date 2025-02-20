@@ -526,23 +526,25 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             
             # Determine whether to use market or limit order based on price conditions
             should_use_market = False
-            MAX_PRICE_DEVIATION = 0.2  # 0.2% maximum deviation for market orders
+            PRICE_THRESHOLD = 0.2  # 0.2% threshold for market orders
             
             if use_limit_order:
-                if side == 'SELL' and entry_price < current_price:
-                    print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is below current price (${current_price:.2f}){COLORS['end']}")
-                    should_use_market = True
-                elif side == 'BUY' and entry_price > current_price:
-                    print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is above current price (${current_price:.2f}){COLORS['end']}")
-                    should_use_market = True
+                if side == 'SELL':
+                    if entry_price < current_price or (entry_price > current_price and price_deviation <= PRICE_THRESHOLD):
+                        print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is below or close to current price (${current_price:.2f}){COLORS['end']}")
+                        should_use_market = True
+                elif side == 'BUY':
+                    if entry_price > current_price or (entry_price < current_price and price_deviation <= PRICE_THRESHOLD):
+                        print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is above or close to current price (${current_price:.2f}){COLORS['end']}")
+                        should_use_market = True
                     
-                if should_use_market and price_deviation > MAX_PRICE_DEVIATION:
-                    print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds maximum allowed ({MAX_PRICE_DEVIATION}%){COLORS['end']}")
+                if should_use_market and price_deviation > PRICE_THRESHOLD:
+                    print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds threshold ({PRICE_THRESHOLD}%){COLORS['end']}")
                     return
             else:
                 should_use_market = True
-                if price_deviation > MAX_PRICE_DEVIATION:
-                    print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds maximum allowed ({MAX_PRICE_DEVIATION}%){COLORS['end']}")
+                if price_deviation > PRICE_THRESHOLD:
+                    print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds threshold ({PRICE_THRESHOLD}%){COLORS['end']}")
                     return
                 
         except Exception as e:
