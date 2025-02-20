@@ -19,3 +19,4 @@ tenacity
 tweepy
 flask
 timeout-decorator
+customtkinter
