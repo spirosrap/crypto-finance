@@ -488,8 +488,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         prob = float(rec_dict['PROBABILITY'])
         
         # Check probability threshold
-        if prob <= 60:
-            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
+        if prob <= 69:
+            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 69%{COLORS['end']}")
             return
             
         # Check R/R ratio threshold
@@ -685,7 +685,7 @@ def main():
     trading_group.add_argument('--leverage', type=int, default=20,
                         help='Leverage multiplier for trading (default: 20, range: 1-20)')
     trading_group.add_argument('--execute_trades', action='store_true',
-                        help='Execute trades automatically when probability exceeds 60%% and other conditions are met')
+                        help='Execute trades automatically when probability exceeds 69%% and other conditions are met')
     trading_group.add_argument('--limit_order', action='store_true',
                         help='Use limit orders instead of market orders, using the SELL_AT or BUY_AT price from the recommendation')
 

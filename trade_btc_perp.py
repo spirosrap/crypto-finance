@@ -243,13 +243,6 @@ def main():
         else:
             print("Order Type: Market")
         
-        # Check for confirmation unless --no-confirm is specified
-        if not args.no_confirm:
-            confirm = input("\nConfirm order? (yes/no): ").lower()
-            if confirm != 'yes':
-                print("Order cancelled.")
-                return
-        
         # Place the order based on order type
         if args.limit:
             result = cb_service.place_limit_order_with_targets(
@@ -270,9 +263,37 @@ def main():
             print(f"Order ID: {result['order_id']}")
             print(f"Entry Price: ${result['entry_price']}")
             print(f"Status: {result['status']}")
-            print(f"\n{result['message']}")
-            print("\nTo place take profit and stop loss orders after fill, run:")
-            print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {args.tp} --sl {args.sl} --leverage {args.leverage}")
+            
+            # Ask if user wants to monitor for fill
+            if not args.no_confirm:
+                monitor = input("\nWould you like to monitor the order until filled? (yes/no): ").lower()
+                if monitor != 'yes':
+                    print(f"\n{result['message']}")
+                    print("\nTo place take profit and stop loss orders after fill, run:")
+                    print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {args.tp} --sl {args.sl} --leverage {args.leverage}")
+                    return
+            
+            print("\nMonitoring limit order for fill...")
+            monitor_result = cb_service.monitor_limit_order_and_place_bracket(
+                product_id=args.product,
+                order_id=result['order_id'],
+                size=size,
+                take_profit_price=args.tp,
+                stop_loss_price=args.sl,
+                leverage=str(args.leverage)
+            )
+            
+            if monitor_result['status'] == 'success':
+                print(f"\n{monitor_result['message']}")
+                print(f"Take Profit Price: ${monitor_result['tp_price']}")
+                print(f"Stop Loss Price: ${monitor_result['sl_price']}")
+            else:
+                print(f"\n{monitor_result['message']}")
+                if monitor_result['status'] == 'timeout':
+                    print("\nTo place take profit and stop loss orders after fill, run:")
+                    print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {args.tp} --sl {args.sl} --leverage {args.leverage}")
+                elif monitor_result['status'] == 'error':
+                    print(f"Error: {monitor_result.get('error', 'Unknown error')}")
             
         else:
             result = cb_service.place_market_order_with_targets(

@@ -911,3 +911,129 @@ class CoinbaseService:
         except Exception as e:
             self.logger.error(f"Error closing positions: {str(e)}")
             self.logger.exception("Full error details:")
+
+    def monitor_limit_order_and_place_bracket(self, product_id: str, order_id: str, size: float,
+                                          take_profit_price: float, stop_loss_price: float,
+                                          leverage: str = None, max_wait_time: int = 3600) -> dict:
+        """
+        Monitor a limit order until it's filled, then place bracket orders.
+        
+        Args:
+            product_id (str): The trading pair
+            order_id (str): The original limit order ID
+            size (float): Size of the position
+            take_profit_price (float): Price to take profit
+            stop_loss_price (float): Price to stop loss
+            leverage (str, optional): Leverage value for margin trading
+            max_wait_time (int): Maximum time to wait for fill in seconds (default 1 hour)
+            
+        Returns:
+            dict: Order status and bracket order details if filled
+        """
+        start_time = time.time()
+        check_interval = 5  # Check every 5 seconds
+        
+        self.logger.info(f"Starting to monitor limit order {order_id}")
+        
+        while time.time() - start_time < max_wait_time:
+            try:
+                # Check order status
+                order_status = self.client.get_order(order_id=order_id)
+                
+                # Extract status and side
+                status = None
+                side = None
+                
+                if isinstance(order_status, dict) and 'order' in order_status:
+                    status = order_status['order'].get('status')
+                    side = order_status['order'].get('side')
+                elif hasattr(order_status, 'order'):
+                    order = getattr(order_status, 'order')
+                    status = getattr(order, 'status', None)
+                    side = getattr(order, 'side', None)
+                
+                self.logger.info(f"Order status: {status}")
+                
+                if status == 'FILLED':
+                    self.logger.info("Limit order filled! Placing bracket orders...")
+                    
+                    # Generate client_order_id for bracket order
+                    bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+                    
+                    # Set end time to 30 days from now for GTD orders
+                    end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+                    
+                    # Place bracket order - use opposite side of the filled limit order
+                    bracket_side = "SELL" if side == "BUY" else "BUY"
+                    
+                    try:
+                        if bracket_side == "SELL":
+                            bracket_order = self.client.trigger_bracket_order_gtd_sell(
+                                client_order_id=bracket_client_order_id,
+                                product_id=product_id,
+                                base_size=str(size),
+                                limit_price=str(take_profit_price),
+                                stop_trigger_price=str(stop_loss_price),
+                                end_time=end_time,
+                                leverage=leverage,
+                                margin_type="CROSS" if leverage else None
+                            )
+                        else:
+                            bracket_order = self.client.trigger_bracket_order_gtd_buy(
+                                client_order_id=bracket_client_order_id,
+                                product_id=product_id,
+                                base_size=str(size),
+                                limit_price=str(take_profit_price),
+                                stop_trigger_price=str(stop_loss_price),
+                                end_time=end_time,
+                                leverage=leverage,
+                                margin_type="CROSS" if leverage else None
+                            )
+                            
+                        if hasattr(bracket_order, 'error_response'):
+                            self.logger.error(f"Failed to place bracket order: {bracket_order.error_response}")
+                            return {
+                                "status": "error",
+                                "message": "Limit order filled but failed to place bracket orders",
+                                "error": bracket_order.error_response
+                            }
+                            
+                        self.logger.info(f"Bracket order placed successfully: {bracket_order}")
+                        
+                        return {
+                            "status": "success",
+                            "message": "Limit order filled and bracket orders placed",
+                            "bracket_order": str(bracket_order),
+                            "tp_price": take_profit_price,
+                            "sl_price": stop_loss_price
+                        }
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error placing bracket order: {str(e)}")
+                        return {
+                            "status": "error",
+                            "message": "Limit order filled but failed to place bracket orders",
+                            "error": str(e)
+                        }
+                
+                elif status == 'CANCELLED' or status == 'EXPIRED' or status == 'FAILED':
+                    return {
+                        "status": "cancelled",
+                        "message": f"Limit order {status.lower()} before fill"
+                    }
+                
+                # Wait before next check
+                time.sleep(check_interval)
+                
+            except Exception as e:
+                self.logger.error(f"Error monitoring order: {str(e)}")
+                return {
+                    "status": "error",
+                    "message": "Error monitoring limit order",
+                    "error": str(e)
+                }
+        
+        return {
+            "status": "timeout",
+            "message": f"Limit order not filled within {max_wait_time} seconds"
+        }
