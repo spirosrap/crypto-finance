@@ -253,6 +253,9 @@ class MarketAnalyzerUI:
     def _run_analysis_thread(self, granularity):
         """Thread function to run the analysis"""
         try:
+            # Store current price update thread state
+            was_updating = self.price_update_thread is not None and self.price_update_thread.is_alive()
+            
             # Construct command
             model_flag = f"--use_{self.model_var.get()}"
             cmd = [
@@ -307,10 +310,18 @@ class MarketAnalyzerUI:
             self.queue.put(("status", "Ready"))
             self.queue.put(("enable_buttons", None))
             
+            # Restart price updates if they were running before
+            if was_updating and (self.price_update_thread is None or not self.price_update_thread.is_alive()):
+                self.start_price_updates()
+            
         except Exception as e:
             self.queue.put(("append", f"\nError: {str(e)}\n"))
             self.queue.put(("status", "Error occurred"))
             self.queue.put(("enable_buttons", None))
+            
+            # Restart price updates in case of error too
+            if was_updating and (self.price_update_thread is None or not self.price_update_thread.is_alive()):
+                self.start_price_updates()
 
     def close_positions(self):
         """Close all open positions"""
@@ -367,7 +378,7 @@ class MarketAnalyzerUI:
         self.price_update_thread.daemon = True
         self.price_update_thread.start()
 
-    def stop_price_updates(self):
+    def stop_price_update_thread(self):
         """Stop the price update thread"""
         self.stop_price_updates = True
         if self.price_update_thread:
@@ -446,7 +457,7 @@ class MarketAnalyzerUI:
             self.root.mainloop()
         finally:
             # Ensure price updates are stopped when the app closes
-            self.stop_price_updates = True
+            self.stop_price_update_thread()
 
 if __name__ == "__main__":
     app = MarketAnalyzerUI()
