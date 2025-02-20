@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import requests
 import time
+import re
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -26,6 +27,9 @@ class MarketAnalyzerUI:
         self.last_price_update = None
         self.price_update_thread = None
         self.stop_price_updates = False
+        
+        # ANSI escape sequence pattern
+        self.ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         
         # Create main container with padding
         self.create_gui()
@@ -209,7 +213,7 @@ class MarketAnalyzerUI:
         self.output_text = ctk.CTkTextbox(
             main_content,
             wrap="word",
-            font=ctk.CTkFont(family="Courier", size=12)
+            font=ctk.CTkFont(family="Courier", size=14)
         )
         self.output_text.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -404,6 +408,10 @@ class MarketAnalyzerUI:
             # Wait 1 second before next update
             time.sleep(1)
 
+    def _strip_ansi_codes(self, text):
+        """Remove ANSI escape sequences from text"""
+        return self.ansi_escape.sub('', text)
+
     def process_queue(self):
         """Process messages from the queue"""
         try:
@@ -411,7 +419,9 @@ class MarketAnalyzerUI:
                 action, data = self.queue.get_nowait()
                 
                 if action == "append":
-                    self.output_text.insert("end", data)
+                    # Strip ANSI codes before displaying
+                    clean_text = self._strip_ansi_codes(data)
+                    self.output_text.insert("end", clean_text)
                     self.output_text.see("end")
                 elif action == "status":
                     self.status_var.set(data)
