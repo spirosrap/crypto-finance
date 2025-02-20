@@ -27,6 +27,16 @@ class MarketAnalyzerUI:
         self.last_price_update = None
         self.price_update_thread = None
         self.stop_price_updates = False
+        self.price_update_errors = 0  # Track consecutive errors
+        self.max_price_update_errors = 3  # Maximum consecutive errors before restarting
+        
+        # Create a session for connection pooling
+        self.session = requests.Session()
+        self.session.mount('https://', requests.adapters.HTTPAdapter(
+            max_retries=3,
+            pool_connections=10,
+            pool_maxsize=10
+        ))
         
         # ANSI escape sequence pattern
         self.ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
@@ -374,6 +384,7 @@ class MarketAnalyzerUI:
     def start_price_updates(self):
         """Start the price update thread"""
         self.stop_price_updates = False
+        self.price_update_errors = 0  # Reset error counter
         self.price_update_thread = threading.Thread(target=self._price_update_loop)
         self.price_update_thread.daemon = True
         self.price_update_thread.start()
@@ -386,13 +397,20 @@ class MarketAnalyzerUI:
 
     def _price_update_loop(self):
         """Background loop to update price"""
+        retry_delay = 1  # Initial retry delay in seconds
+        max_retry_delay = 30  # Maximum retry delay
+        
         while not self.stop_price_updates:
             try:
                 # Get current product from dropdown
                 product = self.product_var.get()
                 
-                # Fetch price from Coinbase API
-                response = requests.get(f"https://api.coinbase.com/v2/prices/{product}/spot")
+                # Fetch price from Coinbase API with connection pooling
+                response = self.session.get(
+                    f"https://api.coinbase.com/v2/prices/{product}/spot",
+                    timeout=(5, 15)  # (connect timeout, read timeout)
+                )
+                response.raise_for_status()  # Raise exception for bad status codes
                 data = response.json()
                 
                 if 'data' in data and 'amount' in data['data']:
@@ -412,12 +430,56 @@ class MarketAnalyzerUI:
                         'price': formatted_price,
                         'time': f"Last update: {timestamp}"
                     }))
+                    
+                    # Reset error counter and retry delay on successful update
+                    self.price_update_errors = 0
+                    retry_delay = 1
+                    
+                else:
+                    self.price_update_errors += 1
+                    self.queue.put(("append", f"\nWarning: Invalid price data received for {product}"))
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
                 
+            except requests.exceptions.RequestException as e:
+                self.price_update_errors += 1
+                self.queue.put(("append", f"\nWarning: Network error updating price: {str(e)}"))
+                retry_delay = min(retry_delay * 2, max_retry_delay)
+                self.queue.put(("append", f"\nRetrying in {retry_delay} seconds..."))
             except Exception as e:
-                print(f"Error updating price: {e}")
+                self.price_update_errors += 1
+                self.queue.put(("append", f"\nWarning: Error updating price: {str(e)}"))
+                retry_delay = min(retry_delay * 2, max_retry_delay)
             
-            # Wait 1 second before next update
-            time.sleep(1)
+            # Check if we need to restart due to too many errors
+            if self.price_update_errors >= self.max_price_update_errors:
+                self.queue.put(("append", "\nRestarting price updates due to multiple errors..."))
+                # Schedule a restart of price updates in the main thread
+                self.root.after(0, self.restart_price_updates)
+                break
+            
+            # Wait before next update, using the current retry delay
+            time.sleep(retry_delay)
+
+    def restart_price_updates(self):
+        """Safely restart the price update thread"""
+        try:
+            # Stop existing thread if running
+            if self.price_update_thread and self.price_update_thread.is_alive():
+                self.stop_price_updates = True
+                self.price_update_thread.join(timeout=2)
+            
+            # Reset error counter and flags
+            self.price_update_errors = 0
+            self.stop_price_updates = False
+            
+            # Start new thread
+            self.price_update_thread = threading.Thread(target=self._price_update_loop)
+            self.price_update_thread.daemon = True
+            self.price_update_thread.start()
+            
+            self.queue.put(("append", "\nPrice updates successfully restarted"))
+        except Exception as e:
+            self.queue.put(("append", f"\nError restarting price updates: {str(e)}"))
 
     def _strip_ansi_codes(self, text):
         """Remove ANSI escape sequences from text"""
@@ -456,8 +518,9 @@ class MarketAnalyzerUI:
         try:
             self.root.mainloop()
         finally:
-            # Ensure price updates are stopped when the app closes
+            # Ensure price updates are stopped and session is closed when the app closes
             self.stop_price_update_thread()
+            self.session.close()
 
 if __name__ == "__main__":
     app = MarketAnalyzerUI()
