@@ -30,6 +30,9 @@ class MarketAnalyzerUI:
         self.price_update_errors = 0  # Track consecutive errors
         self.max_price_update_errors = 3  # Maximum consecutive errors before restarting
         
+        # Add current process tracking
+        self.current_process = None
+        
         # Create a session for connection pooling
         self.session = requests.Session()
         self.session.mount('https://', requests.adapters.HTTPAdapter(
@@ -206,6 +209,17 @@ class MarketAnalyzerUI:
         )
         self.clear_btn.pack(pady=(0,20), padx=20, fill="x")
         
+        # Add Cancel button between Clear and Status
+        self.cancel_btn = ctk.CTkButton(
+            sidebar, 
+            text="Cancel Operation", 
+            command=self.cancel_operation,
+            fg_color="#FF4B4B",  # Red color
+            hover_color="#CC3C3C",  # Darker red on hover
+            state="disabled"  # Initially disabled
+        )
+        self.cancel_btn.pack(pady=(0,10), padx=20, fill="x")
+        
         # Status indicator
         self.status_var = ctk.StringVar(value="Ready")
         self.status_label = ctk.CTkLabel(
@@ -302,6 +316,12 @@ class MarketAnalyzerUI:
                 text=True
             )
             
+            # Store the process
+            self.current_process = process
+            
+            # Enable cancel button
+            self.queue.put(("enable_cancel", None))
+            
             # Read output in real-time
             while True:
                 output = process.stdout.readline()
@@ -319,6 +339,10 @@ class MarketAnalyzerUI:
             
             self.queue.put(("status", "Ready"))
             self.queue.put(("enable_buttons", None))
+            self.queue.put(("disable_cancel", None))
+            
+            # Clear current process
+            self.current_process = None
             
             # Restart price updates if they were running before
             if was_updating and (self.price_update_thread is None or not self.price_update_thread.is_alive()):
@@ -328,6 +352,10 @@ class MarketAnalyzerUI:
             self.queue.put(("append", f"\nError: {str(e)}\n"))
             self.queue.put(("status", "Error occurred"))
             self.queue.put(("enable_buttons", None))
+            self.queue.put(("disable_cancel", None))
+            
+            # Clear current process
+            self.current_process = None
             
             # Restart price updates in case of error too
             if was_updating and (self.price_update_thread is None or not self.price_update_thread.is_alive()):
@@ -358,6 +386,12 @@ class MarketAnalyzerUI:
                 text=True
             )
             
+            # Store the process
+            self.current_process = process
+            
+            # Enable cancel button
+            self.queue.put(("enable_cancel", None))
+            
             # Read output in real-time
             while True:
                 output = process.stdout.readline()
@@ -375,11 +409,19 @@ class MarketAnalyzerUI:
             
             self.queue.put(("status", "Ready"))
             self.queue.put(("enable_close_button", None))
+            self.queue.put(("disable_cancel", None))
+            
+            # Clear current process
+            self.current_process = None
             
         except Exception as e:
             self.queue.put(("append", f"\nError: {str(e)}\n"))
             self.queue.put(("status", "Error occurred"))
             self.queue.put(("enable_close_button", None))
+            self.queue.put(("disable_cancel", None))
+            
+            # Clear current process
+            self.current_process = None
 
     def start_price_updates(self):
         """Start the price update thread"""
@@ -507,12 +549,29 @@ class MarketAnalyzerUI:
                 elif action == "update_price":
                     self.price_label.configure(text=data['price'])
                     self.price_time_label.configure(text=data['time'])
+                elif action == "enable_cancel":
+                    self.cancel_btn.configure(state="normal")
+                elif action == "disable_cancel":
+                    self.cancel_btn.configure(state="disabled")
                 
         except queue.Empty:
             pass
         finally:
             # Schedule next queue check
             self.root.after(100, self.process_queue)
+
+    def cancel_operation(self):
+        """Cancel the current running operation"""
+        if self.current_process and self.current_process.poll() is None:
+            # Process is still running, terminate it
+            self.current_process.terminate()
+            self.queue.put(("append", "\nOperation cancelled by user.\n"))
+            self.queue.put(("status", "Operation cancelled"))
+            
+            # Re-enable buttons
+            self.queue.put(("enable_buttons", None))
+            self.queue.put(("enable_close_button", None))
+            self.cancel_btn.configure(state="disabled")
 
     def run(self):
         try:
