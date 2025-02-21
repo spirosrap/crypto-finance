@@ -141,6 +141,35 @@ def validate_params(product_id: str, side: str, size_usd: float, leverage: float
             if limit_price <= tp_price:
                 raise ValueError(f"For SELL limit orders, limit price (${limit_price}) should be above take profit (${tp_price})")
 
+def get_min_base_size(product_id: str) -> float:
+    """Get minimum base size for the given product."""
+    min_sizes = {
+        'BTC-PERP-INTX': 0.0001,  # 0.0001 BTC
+        'ETH-PERP-INTX': 0.001,   # 0.001 ETH
+        'DOGE-PERP-INTX': 100,    # 100 DOGE
+        'SOL-PERP-INTX': 0.1,     # 0.1 SOL
+        'XRP-PERP-INTX': 10,      # 10 XRP
+        '1000SHIB-PERP-INTX': 100 # 100 units of 1000SHIB
+    }
+    return min_sizes.get(product_id, 0.0001)
+
+def calculate_base_size(product_id: str, size_usd: float, current_price: float) -> float:
+    """Calculate the base size respecting minimum size requirements."""
+    min_base_size = get_min_base_size(product_id)
+    calculated_size = size_usd / current_price
+    
+    # Round to appropriate decimal places based on min size
+    if min_base_size >= 1:
+        # For assets like DOGE, round to whole numbers
+        base_size = max(round(calculated_size), min_base_size)
+    else:
+        # For assets like BTC, maintain precision
+        decimal_places = len(str(min_base_size).split('.')[-1])
+        base_size = max(round(calculated_size, decimal_places), min_base_size)
+    
+    logger.info(f"Calculated base size: {base_size} (min: {min_base_size})")
+    return base_size
+
 def main():
     parser = argparse.ArgumentParser(description='Place a leveraged market or limit order for perpetual futures')
     parser.add_argument('--product', type=str, default='BTC-PERP-INTX',
@@ -209,10 +238,10 @@ def main():
         if not check_sufficient_funds(cb_service, args.size, args.leverage):
             raise ValueError("Insufficient funds for this trade")
         
-        # Get current price and calculate size in base currency
+        # Replace the current size calculation with the new one
         trades = cb_service.client.get_market_trades(product_id=args.product, limit=1)
         current_price = float(trades['trades'][0]['price'])
-        size = round(args.size / current_price, 4)
+        size = calculate_base_size(args.product, args.size, current_price)
         
         # Preview the order
         is_valid, error_msg = preview_order(
