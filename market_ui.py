@@ -131,6 +131,51 @@ class MarketAnalyzerUI:
         ctk.CTkLabel(trading_frame, text="Trading Options", 
                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
         
+        # Quick Market Order Buttons
+        market_buttons_frame = ctk.CTkFrame(trading_frame)
+        market_buttons_frame.pack(fill="x", pady=5)
+        
+        self.long_btn = ctk.CTkButton(
+            market_buttons_frame,
+            text="LONG",
+            command=lambda: self.place_quick_market_order("BUY"),
+            fg_color="#228B22",  # Forest Green
+            hover_color="#006400",  # Dark Green
+            width=90,
+            height=32
+        )
+        self.long_btn.pack(side="left", padx=2, expand=True)
+        
+        self.short_btn = ctk.CTkButton(
+            market_buttons_frame,
+            text="SHORT",
+            command=lambda: self.place_quick_market_order("SELL"),
+            fg_color="#B22222",  # Fire Brick
+            hover_color="#8B0000",  # Dark Red
+            width=90,
+            height=32
+        )
+        self.short_btn.pack(side="right", padx=2, expand=True)
+        
+        # TP/SL Percentage slider
+        tp_sl_frame = ctk.CTkFrame(trading_frame)
+        tp_sl_frame.pack(fill="x", pady=5)
+        
+        ctk.CTkLabel(tp_sl_frame, text="TP/SL %:").pack(side="left", padx=5)
+        self.tp_sl_var = ctk.DoubleVar(value=0.2)
+        self.tp_sl_label = ctk.CTkLabel(tp_sl_frame, text="0.2%")
+        self.tp_sl_label.pack(side="right", padx=5)
+        
+        self.tp_sl_slider = ctk.CTkSlider(
+            trading_frame,
+            from_=0.1,
+            to=1.0,
+            number_of_steps=18,  # 0.05% increments
+            variable=self.tp_sl_var,
+            command=self.update_tp_sl_label
+        )
+        self.tp_sl_slider.pack(pady=(0,5), padx=10, fill="x")
+        
         # Execute trades checkbox
         self.execute_trades_var = ctk.BooleanVar(value=False)
         self.execute_trades_cb = ctk.CTkCheckBox(
@@ -265,12 +310,19 @@ class MarketAnalyzerUI:
         """Update the leverage label when slider moves"""
         self.leverage_label.configure(text=f"{int(value)}x")
 
+    def update_tp_sl_label(self, value):
+        """Update the TP/SL percentage label when slider moves"""
+        self.tp_sl_label.configure(text=f"{value:.1f}%")
+
     def toggle_trading_options(self):
         """Enable/disable trading options based on execute trades checkbox"""
         state = "normal" if self.execute_trades_var.get() else "disabled"
         self.margin_entry.configure(state=state)
         self.leverage_slider.configure(state=state)
         self.limit_order_cb.configure(state=state)
+        self.long_btn.configure(state=state)
+        self.short_btn.configure(state=state)
+        self.tp_sl_slider.configure(state=state)
 
     def clear_output(self):
         """Clear the output text area"""
@@ -592,6 +644,159 @@ class MarketAnalyzerUI:
             self.queue.put(("enable_buttons", None))
             self.queue.put(("enable_close_button", None))
             self.cancel_btn.configure(state="disabled")
+
+    def place_quick_market_order(self, side: str):
+        """Place a quick market order with configurable TP/SL percentage"""
+        try:
+            # Get current price
+            product = self.product_var.get()
+            perp_product_map = {
+                'BTC-USDC': 'BTC-PERP-INTX',
+                'ETH-USDC': 'ETH-PERP-INTX',
+                'DOGE-USDC': 'DOGE-PERP-INTX',
+                'SOL-USDC': 'SOL-PERP-INTX',
+                'SHIB-USDC': '1000SHIB-PERP-INTX'
+            }
+            
+            # Define price precision for each product
+            price_precision_map = {
+                'BTC-PERP-INTX': 1,      # $1 precision for BTC
+                'ETH-PERP-INTX': 0.1,    # $0.1 precision for ETH
+                'DOGE-PERP-INTX': 0.0001, # $0.0001 precision for DOGE
+                'SOL-PERP-INTX': 0.01,   # $0.01 precision for SOL
+                '1000SHIB-PERP-INTX': 0.000001  # $0.000001 precision for SHIB
+            }
+            
+            perp_product = perp_product_map.get(product)
+            if not perp_product:
+                self.queue.put(("append", f"\nError: Unsupported product for perpetual trading: {product}"))
+                return
+                
+            # Get price precision for the product
+            price_precision = price_precision_map.get(perp_product)
+            if not price_precision:
+                self.queue.put(("append", f"\nError: Unknown price precision for product: {perp_product}"))
+                return
+                
+            # Get margin and leverage from UI
+            try:
+                margin = float(self.margin_var.get())
+                leverage = self.leverage_var.get()
+                tp_sl_pct = self.tp_sl_var.get() / 100  # Convert percentage to decimal
+            except ValueError:
+                self.queue.put(("append", "\nError: Invalid margin value"))
+                return
+                
+            # Calculate position size
+            size_usd = margin * leverage
+            
+            # Get current price for TP/SL calculation
+            response = self.session.get(
+                f"https://api.coinbase.com/v2/prices/{product}/spot",
+                timeout=(5, 15)
+            )
+            response.raise_for_status()
+            current_price = float(response.json()['data']['amount'])
+            
+            # Helper function to round to precision
+            def round_to_precision(value, precision):
+                return round(value / precision) * precision
+            
+            # Calculate TP/SL prices using the configured percentage and round to appropriate precision
+            if side == "BUY":
+                tp_price = round_to_precision(current_price * (1 + tp_sl_pct), price_precision)
+                sl_price = round_to_precision(current_price * (1 - tp_sl_pct), price_precision)
+            else:  # SELL
+                tp_price = round_to_precision(current_price * (1 - tp_sl_pct), price_precision)
+                sl_price = round_to_precision(current_price * (1 + tp_sl_pct), price_precision)
+            
+            # Construct and run command
+            cmd = [
+                'python', 'trade_btc_perp.py',
+                '--product', perp_product,
+                '--side', side,
+                '--size', str(size_usd),
+                '--leverage', str(leverage),
+                '--tp', str(tp_price),
+                '--sl', str(sl_price),
+                '--no-confirm'
+            ]
+            
+            # Log the order details
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            header = f"\n{'='*80}\n{timestamp} - Placing {side} Market Order\n"
+            header += f"Product: {perp_product}\n"
+            header += f"Size: ${size_usd} (Margin: ${margin}, Leverage: {leverage}x)\n"
+            header += f"Entry: ~${current_price:.2f}\n"
+            header += f"Take Profit: ${tp_price:.6f} ({'+' if side == 'BUY' else '-'}{tp_sl_pct*100:.1f}%)\n"
+            header += f"Stop Loss: ${sl_price:.6f} ({'-' if side == 'BUY' else '+'}{tp_sl_pct*100:.1f}%)\n"
+            header += f"{'='*80}\n"
+            self.queue.put(("append", header))
+            
+            # Disable buttons during execution
+            self.long_btn.configure(state="disabled")
+            self.short_btn.configure(state="disabled")
+            
+            # Create and start thread
+            thread = threading.Thread(
+                target=self._run_market_order_thread,
+                args=(cmd,)
+            )
+            thread.daemon = True
+            thread.start()
+            
+        except Exception as e:
+            self.queue.put(("append", f"\nError placing market order: {str(e)}"))
+            self.long_btn.configure(state="normal")
+            self.short_btn.configure(state="normal")
+
+    def _run_market_order_thread(self, cmd):
+        """Thread function to run the market order command"""
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Store the process
+            self.current_process = process
+            
+            # Enable cancel button
+            self.queue.put(("enable_cancel", None))
+            
+            # Read output in real-time
+            while True:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    self.queue.put(("append", output))
+            
+            # Get any remaining output
+            stdout, stderr = process.communicate()
+            if stdout:
+                self.queue.put(("append", stdout))
+            if stderr:
+                self.queue.put(("append", f"\nErrors:\n{stderr}"))
+            
+            # Re-enable buttons
+            self.long_btn.configure(state="normal")
+            self.short_btn.configure(state="normal")
+            self.queue.put(("disable_cancel", None))
+            
+            # Clear current process
+            self.current_process = None
+            
+        except Exception as e:
+            self.queue.put(("append", f"\nError executing market order: {str(e)}"))
+            self.long_btn.configure(state="normal")
+            self.short_btn.configure(state="normal")
+            self.queue.put(("disable_cancel", None))
+            
+            # Clear current process
+            self.current_process = None
 
     def run(self):
         try:

@@ -22,6 +22,9 @@ def main():
         # First cancel all open orders
         logger.info("Cancelling all open orders first...")
         coinbase.cancel_all_orders()
+        # Close all positions
+        logger.info("Now closing all positions...")
+        closed_positions = coinbase.close_all_positions()
         
         # Get position details before closing
         logger.info("Getting position details...")
@@ -46,15 +49,11 @@ def main():
         if hasattr(portfolio, 'breakdown'):
             if hasattr(portfolio.breakdown, 'perp_positions'):
                 positions = portfolio.breakdown.perp_positions
-        
-        # Close all positions
-        logger.info("Now closing all positions...")
-        closed_positions = coinbase.close_all_positions()
-        
+               
         # Print details about closed positions
         logger.info("Position closing complete. Position details:")
         total_pnl = 0
-        time.sleep(1)
+ 
         for position in positions:
             try:
                 # Access the nested dictionary structure
