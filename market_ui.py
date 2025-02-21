@@ -17,8 +17,8 @@ class MarketAnalyzerUI:
         # Create main window
         self.root = ctk.CTk()
         self.root.title("Crypto Market Analyzer")
-        self.root.geometry("800x600")  # Smaller default size
-        self.root.minsize(600, 400)    # Set minimum window size
+        self.root.geometry("1400x930")  # Larger default size (width x height)
+        self.root.minsize(1400, 930)    # Larger minimum window size
         
         # Queue for communication between threads
         self.queue = queue.Queue()
@@ -59,13 +59,13 @@ class MarketAnalyzerUI:
         main_container = ctk.CTkFrame(self.root)
         main_container.pack(fill="both", expand=True)
         
-        # Create scrollable sidebar container
-        sidebar_container = ctk.CTkScrollableFrame(
+        # Create sidebar container
+        sidebar_container = ctk.CTkFrame(
             main_container,
             width=200,  # Reduced width
-            height=600
         )
         sidebar_container.pack(side="left", fill="y", padx=5, pady=5)
+        sidebar_container.pack_propagate(False)  # Prevent the frame from shrinking
         
         # Title in sidebar
         title = ctk.CTkLabel(
