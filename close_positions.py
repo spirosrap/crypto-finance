@@ -22,12 +22,13 @@ def main():
         # First cancel all open orders
         logger.info("Cancelling all open orders first...")
         coinbase.cancel_all_orders()
-        # Close all positions
-        logger.info("Now closing all positions...")
-        closed_positions = coinbase.close_all_positions()
         
-        # Get position details before closing
-        logger.info("Getting position details...")
+        # Close all positions with a short timeout for faster execution
+        logger.info("Now closing all positions...")
+        closed_positions = coinbase.close_all_positions(timeout=15)  # Use 15 second timeout for faster execution
+        
+        # Get position details after closing
+        logger.info("Getting final position details...")
         
         # Get the INTX portfolio UUID
         ports = coinbase.client.get_portfolios()
@@ -50,8 +51,8 @@ def main():
             if hasattr(portfolio.breakdown, 'perp_positions'):
                 positions = portfolio.breakdown.perp_positions
                
-        # Print details about closed positions
-        logger.info("Position closing complete. Position details:")
+        # Print details about remaining positions
+        logger.info("Final position details:")
         total_pnl = 0
  
         for position in positions:

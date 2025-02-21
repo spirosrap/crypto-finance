@@ -7,6 +7,7 @@ import logging
 from typing import Tuple, List
 from historicaldata import HistoricalData
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import wait
 
 class CoinbaseService:
     def __init__(self, api_key, api_secret):
@@ -753,17 +754,19 @@ class CoinbaseService:
             self.logger.error(f"Error cancelling orders: {str(e)}")
             self.logger.exception("Full error details:")
 
-    def close_all_positions(self, product_id: str = None):
+    def close_all_positions(self, product_id: str = None, timeout: int = 30):
         """
         Close all open positions for a given product_id or all products if none specified.
+        Uses parallel execution and aggressive retry logic for faster closing.
+        
+        Args:
+            product_id (str, optional): The trading pair to close positions for
+            timeout (int, optional): Maximum time in seconds to wait for all positions to close
         """
         try:
-            # First cancel all open orders
+            # First cancel all open orders - don't wait between cancellations
             self.logger.info("Cancelling all open orders first...")
             self.cancel_all_orders(product_id)
-            
-            # Wait briefly for orders to be cancelled
-            time.sleep(2)
             
             self.logger.info("Fetching open positions...")
             
@@ -782,7 +785,6 @@ class CoinbaseService:
             
             # Get portfolio positions
             portfolio = self.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
-            self.logger.debug(f"Portfolio response: {portfolio}")
             
             # Initialize positions as empty list
             positions = []
@@ -821,15 +823,14 @@ class CoinbaseService:
                     self.logger.error("Invalid positions format")
                     return
             
-            self.logger.info(f"Found positions: {positions}")
-            
             if not positions:
                 self.logger.info("No perpetual positions found")
                 return
             
-            self.logger.info(f"Found {len(positions)} perpetual positions")
+            self.logger.info(f"Found {len(positions)} perpetual positions to close")
             
-            for position in positions:
+            def close_single_position(position):
+                """Helper function to close a single position with retries"""
                 # Handle both dictionary and object types
                 if isinstance(position, dict):
                     position_symbol = position.get('symbol')
@@ -842,71 +843,75 @@ class CoinbaseService:
                     position_side = getattr(position, 'position_side', '')
                     leverage = getattr(position, 'leverage', '1')
                 
-                if not position_symbol:
-                    continue
+                if not position_symbol or abs(position_size) <= 0:
+                    return
                     
                 if product_id and position_symbol != product_id:
-                    continue
-                    
-                if abs(position_size) > 0:
+                    return
+                
+                # Try closing with different size percentages if needed
+                size_percentages = [1.0, 0.99, 0.98, 0.95]  # Try 100%, 99%, 98%, 95% of position
+                
+                for size_pct in size_percentages:
                     try:
-                        # Generate a unique client_order_id
                         client_order_id = f"close_{uuid.uuid4().hex[:16]}_{int(time.time())}"
-                        
-                        # Determine side based on position side
-                        # If SHORT position, we need to BUY to close
-                        # If LONG position, we need to SELL to close
                         side = "BUY" if position_side == "FUTURES_POSITION_SIDE_SHORT" else "SELL"
+                        close_size = abs(position_size) * size_pct
                         
-                        self.logger.info(f"Closing {position_side} position for {position_symbol}: {position_size} using {side} order")
+                        self.logger.info(f"Attempting to close {position_side} position for {position_symbol}: {close_size} ({size_pct*100}%) using {side} order")
                         
-                        # Create order configuration
                         order_config = {
                             "market_market_ioc": {
-                                "base_size": str(abs(position_size))
+                                "base_size": str(close_size)
                             }
                         }
                         
-                        # Place the market order
                         result = self.client.create_order(
                             client_order_id=client_order_id,
                             product_id=position_symbol,
                             side=side,
                             order_configuration=order_config,
                             leverage=leverage,
-                            margin_type="CROSS"  # Add margin type for leveraged trades
+                            margin_type="CROSS"
                         )
                         
-                        self.logger.info(f"Close position result: {result}")
+                        if isinstance(result, dict) and result.get('success', True):
+                            self.logger.info(f"Successfully closed position for {position_symbol} with {size_pct*100}% size")
+                            return True
                         
-                        if isinstance(result, dict) and not result.get('success', True):
-                            error_response = result.get('error_response', {})
-                            self.logger.error(f"Failed to close position: {error_response}")
-                            if 'PREVIEW_INSUFFICIENT_FUNDS' in str(error_response):
-                                self.logger.info("Attempting to reduce position size slightly...")
-                                # Try again with 99% of the position size
-                                reduced_size = abs(position_size) * 0.99
-                                order_config["market_market_ioc"]["base_size"] = str(reduced_size)
-                                
-                                result = self.client.create_order(
-                                    client_order_id=f"{client_order_id}_reduced",
-                                    product_id=position_symbol,
-                                    side=side,
-                                    order_configuration=order_config,
-                                    leverage=leverage,
-                                    margin_type="CROSS"
-                                )
-                                self.logger.info(f"Reduced size close position result: {result}")
+                        error_response = result.get('error_response', {}) if isinstance(result, dict) else str(result)
+                        self.logger.warning(f"Failed to close position with {size_pct*100}% size: {error_response}")
                         
-                        # Wait for the order to process
-                        time.sleep(1)
-                        
+                        # If error is not related to insufficient funds, break the loop
+                        if 'PREVIEW_INSUFFICIENT_FUNDS' not in str(error_response):
+                            break
+                            
                     except Exception as e:
-                        self.logger.error(f"Error closing position for {position_symbol}: {str(e)}")
-                        self.logger.exception("Full error details:")
+                        self.logger.error(f"Error closing position for {position_symbol} with {size_pct*100}% size: {str(e)}")
                         continue
-                    
-            self.logger.info("Finished closing positions")
+                
+                return False
+            
+            # Use ThreadPoolExecutor for parallel execution
+            start_time = time.time()
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                # Submit all positions for closing
+                future_to_position = {executor.submit(close_single_position, pos): pos for pos in positions}
+                
+                # Wait for all positions to close or timeout
+                remaining_time = max(0, timeout - (time.time() - start_time))
+                done, not_done = wait(future_to_position.keys(), timeout=remaining_time)
+                
+                # Cancel any remaining futures
+                for future in not_done:
+                    future.cancel()
+                
+                # Log results
+                success_count = sum(1 for future in done if future.result())
+                self.logger.info(f"Successfully closed {success_count} out of {len(positions)} positions")
+                
+                if not_done:
+                    self.logger.warning(f"{len(not_done)} positions did not close within the timeout period")
             
         except Exception as e:
             self.logger.error(f"Error closing positions: {str(e)}")
