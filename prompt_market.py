@@ -498,9 +498,9 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.2{COLORS['end']}")
             return
         
-        if rr_ratio > 10:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 10{COLORS['end']}")
-            return
+        # if rr_ratio > 10:
+        #     print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 10{COLORS['end']}")
+        #     return
             
         # Determine trade direction and prices
         if 'SELL AT' in rec_dict:
@@ -564,15 +564,26 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         # Calculate potential profit percentage
         profit_pct = abs((target_price - entry_price) / entry_price * 100)
         
-        # Adjust stop loss if it would result in larger loss than potential gain
+        # Validate stop loss direction based on trade direction
+        if side == 'SELL':
+            if stop_loss <= entry_price:
+                print(f"{COLORS['red']}Invalid stop loss for SELL order: Stop loss (${stop_loss:.2f}) must be above entry price (${entry_price:.2f}){COLORS['end']}")
+                return
+            if target_price >= entry_price:
+                print(f"{COLORS['red']}Invalid take profit for SELL order: Take profit (${target_price:.2f}) must be below entry price (${entry_price:.2f}){COLORS['end']}")
+                return
+        else:  # BUY
+            if stop_loss >= entry_price:
+                print(f"{COLORS['red']}Invalid stop loss for BUY order: Stop loss (${stop_loss:.2f}) must be below entry price (${entry_price:.2f}){COLORS['end']}")
+                return
+            if target_price <= entry_price:
+                print(f"{COLORS['red']}Invalid take profit for BUY order: Take profit (${target_price:.2f}) must be above entry price (${entry_price:.2f}){COLORS['end']}")
+                return
+
+        # Validate risk-reward ratio
         if stop_loss_pct > profit_pct:
-            # Calculate new stop loss price that matches the profit distance
-            if side == 'BUY':
-                stop_loss = entry_price * (1 - profit_pct/100)  # For long positions
-            else:
-                stop_loss = entry_price * (1 + profit_pct/100)  # For short positions
-            print(f"{COLORS['yellow']}Stop loss adjusted to match take profit distance (${stop_loss:.2f}){COLORS['end']}")
-            stop_loss_pct = profit_pct  # Update the percentage since we adjusted it
+            print(f"{COLORS['red']}Invalid risk-reward: Stop loss distance ({stop_loss_pct:.2f}%) is larger than take profit distance ({profit_pct:.2f}%){COLORS['end']}")
+            return
 
         # Map product_id to perpetual format
         perp_product_map = {
