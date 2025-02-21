@@ -5,10 +5,17 @@ from config import API_KEY_PERPS, API_SECRET_PERPS
 import argparse
 import time
 
-# Set up logging
+# Set up logging with more detailed format
 logging.basicConfig(level=logging.INFO,
-                   format='%(asctime)s - %(levelname)s - %(message)s')
+                   format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Add file handler for persistent logging
+log_file = 'trade_btc_perp.log'
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
+logger.addHandler(file_handler)
 
 def setup_coinbase():
     """Initialize CoinbaseService with API credentials."""
@@ -206,6 +213,9 @@ def main():
             if not all([args.order_id, args.product, args.size, args.tp, args.sl]):
                 raise ValueError("For placing bracket orders, --order-id, --product, --size, --tp, and --sl are required")
             
+            logger.info(f"Attempting to place bracket order for {args.product}")
+            logger.info(f"Parameters: size={args.size}, tp={args.tp}, sl={args.sl}, leverage={args.leverage}")
+            
             result = cb_service.place_bracket_after_fill(
                 product_id=args.product,
                 order_id=args.order_id,
@@ -217,11 +227,17 @@ def main():
             
             if "error" in result:
                 if result.get("status") == "pending_fill":
+                    logger.warning("Limit order not filled yet")
                     print("\nLimit order not filled yet. Please try again once the order is filled.")
                     return
+                logger.error(f"Failed to place bracket orders. Full error: {result}")
                 print(f"\nError placing bracket orders: {result['error']}")
+                if 'bracket_error' in result:
+                    logger.error(f"Bracket error details: {result['bracket_error']}")
+                    print(f"Error details: {result['bracket_error']}")
                 return
                 
+            logger.info("Bracket orders placed successfully")
             print("\nBracket orders placed successfully!")
             print(f"Take Profit Price: ${result['tp_price']}")
             print(f"Stop Loss Price: ${result['sl_price']}")
