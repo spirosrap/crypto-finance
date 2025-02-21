@@ -63,3 +63,4 @@ prompt_market.log
 .webui_secret_key
 market_analysis.txt
 market_analyzer.log.1
+trade_btc_perp.log
