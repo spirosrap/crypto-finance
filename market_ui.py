@@ -17,7 +17,8 @@ class MarketAnalyzerUI:
         # Create main window
         self.root = ctk.CTk()
         self.root.title("Crypto Market Analyzer")
-        self.root.geometry("1000x800")
+        self.root.geometry("800x600")  # Smaller default size
+        self.root.minsize(600, 400)    # Set minimum window size
         
         # Queue for communication between threads
         self.queue = queue.Queue()
@@ -54,24 +55,36 @@ class MarketAnalyzerUI:
         self.start_price_updates()
 
     def create_gui(self):
-        # Create left sidebar for controls
-        sidebar = ctk.CTkFrame(self.root, width=250)
-        sidebar.pack(side="left", fill="y", padx=10, pady=10)
+        # Create main container that fills the window
+        main_container = ctk.CTkFrame(self.root)
+        main_container.pack(fill="both", expand=True)
+        
+        # Create scrollable sidebar container
+        sidebar_container = ctk.CTkScrollableFrame(
+            main_container,
+            width=200,  # Reduced width
+            height=600
+        )
+        sidebar_container.pack(side="left", fill="y", padx=5, pady=5)
         
         # Title in sidebar
-        title = ctk.CTkLabel(sidebar, text="Market Analysis", font=ctk.CTkFont(size=20, weight="bold"))
-        title.pack(pady=(20,30))
+        title = ctk.CTkLabel(
+            sidebar_container,
+            text="Market Analysis",
+            font=ctk.CTkFont(size=18, weight="bold")  # Slightly smaller font
+        )
+        title.pack(pady=(10,15))  # Reduced padding
         
         # Product selection
-        ctk.CTkLabel(sidebar, text="Select Product:").pack(pady=(0,5))
+        ctk.CTkLabel(sidebar_container, text="Select Product:").pack(pady=(0,2))
         self.product_var = ctk.StringVar(value="BTC-USDC")
         products = ["BTC-USDC", "ETH-USDC", "DOGE-USDC", "SOL-USDC", "SHIB-USDC"]
-        product_menu = ctk.CTkOptionMenu(sidebar, values=products, variable=self.product_var)
-        product_menu.pack(pady=(0,20))
+        product_menu = ctk.CTkOptionMenu(sidebar_container, values=products, variable=self.product_var)
+        product_menu.pack(pady=(0,10))  # Reduced padding
         
-        # Add price display after product selection
-        self.price_frame = ctk.CTkFrame(sidebar)
-        self.price_frame.pack(pady=(0,20), padx=10, fill="x")
+        # Price display frame
+        self.price_frame = ctk.CTkFrame(sidebar_container)
+        self.price_frame.pack(pady=(0,10), padx=5, fill="x")  # Reduced padding
         
         ctk.CTkLabel(self.price_frame, text="Current Price:", 
                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(5,0))
@@ -90,8 +103,8 @@ class MarketAnalyzerUI:
         )
         self.price_time_label.pack(pady=(0,5))
         
-        # Model selection
-        ctk.CTkLabel(sidebar, text="Select Model:").pack(pady=(0,5))
+        # Model selection with reduced padding
+        ctk.CTkLabel(sidebar_container, text="Select Model:").pack(pady=(0,2))
         self.model_var = ctk.StringVar(value="o1_mini")
         models = [
             ("O1 Mini", "o1_mini"),
@@ -101,19 +114,19 @@ class MarketAnalyzerUI:
             ("GPT-4o", "gpt4o")
         ]
         
-        # Create model radio buttons
+        # Create model radio buttons with reduced padding
         for text, value in models:
             radio = ctk.CTkRadioButton(
-                sidebar, 
+                sidebar_container, 
                 text=text, 
                 value=value, 
                 variable=self.model_var
             )
-            radio.pack(pady=5)
+            radio.pack(pady=2)  # Reduced padding
             
         # Trading Options Section
-        trading_frame = ctk.CTkFrame(sidebar)
-        trading_frame.pack(pady=20, padx=10, fill="x")
+        trading_frame = ctk.CTkFrame(sidebar_container)
+        trading_frame.pack(pady=10, padx=5, fill="x")  # Reduced padding
         
         ctk.CTkLabel(trading_frame, text="Trading Options", 
                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
@@ -168,78 +181,85 @@ class MarketAnalyzerUI:
         self.toggle_trading_options()
             
         # Granularity section
-        ctk.CTkLabel(sidebar, text="Time Frame:", font=ctk.CTkFont(weight="bold")).pack(pady=(20,10))
+        ctk.CTkLabel(sidebar_container, text="Time Frame:", font=ctk.CTkFont(weight="bold")).pack(pady=(20,10))
         
-        # Analysis buttons
+        # Analysis buttons with reduced height and padding
         self.five_min_btn = ctk.CTkButton(
-            sidebar, 
+            sidebar_container, 
             text="5 MINUTE", 
             command=lambda: self.run_analysis("FIVE_MINUTE"),
-            height=40
+            height=32  # Reduced height
         )
-        self.five_min_btn.pack(pady=5, padx=20, fill="x")
+        self.five_min_btn.pack(pady=3, padx=10, fill="x")
         
         self.one_hour_btn = ctk.CTkButton(
-            sidebar, 
+            sidebar_container, 
             text="1 HOUR", 
             command=lambda: self.run_analysis("ONE_HOUR"),
-            height=40
+            height=32  # Reduced height
         )
-        self.one_hour_btn.pack(pady=5, padx=20, fill="x")
+        self.one_hour_btn.pack(pady=3, padx=10, fill="x")
         
         # Close Positions button
         self.close_positions_btn = ctk.CTkButton(
-            sidebar,
+            sidebar_container,
             text="Close All Positions",
             command=self.close_positions,
-            fg_color="#b22222",  # Dark red color
-            hover_color="#8b0000",  # Darker red on hover
-            height=40  # Make it the same height as analysis buttons
+            fg_color="#b22222",
+            hover_color="#8b0000",
+            height=32  # Reduced height
         )
-        self.close_positions_btn.pack(pady=(20,10), padx=20, fill="x")
+        self.close_positions_btn.pack(pady=(10,5), padx=10, fill="x")
         
-        # Clear button at bottom of sidebar
+        # Control buttons at bottom
+        button_frame = ctk.CTkFrame(sidebar_container)
+        button_frame.pack(fill="x", pady=5, padx=5)
+        
+        # Clear and Cancel buttons side by side
         self.clear_btn = ctk.CTkButton(
-            sidebar, 
-            text="Clear Output", 
+            button_frame, 
+            text="Clear", 
             command=self.clear_output,
             fg_color="transparent",
             border_width=2,
-            text_color=("gray10", "#DCE4EE")
+            text_color=("gray10", "#DCE4EE"),
+            width=90,
+            height=32
         )
-        self.clear_btn.pack(pady=(0,20), padx=20, fill="x")
+        self.clear_btn.pack(side="left", padx=2)
         
-        # Add Cancel button between Clear and Status
         self.cancel_btn = ctk.CTkButton(
-            sidebar, 
-            text="Cancel Operation", 
+            button_frame, 
+            text="Cancel", 
             command=self.cancel_operation,
-            fg_color="#FF4B4B",  # Red color
-            hover_color="#CC3C3C",  # Darker red on hover
-            state="disabled"  # Initially disabled
+            fg_color="#FF4B4B",
+            hover_color="#CC3C3C",
+            state="disabled",
+            width=90,
+            height=32
         )
-        self.cancel_btn.pack(pady=(0,10), padx=20, fill="x")
+        self.cancel_btn.pack(side="right", padx=2)
         
         # Status indicator
         self.status_var = ctk.StringVar(value="Ready")
         self.status_label = ctk.CTkLabel(
-            sidebar, 
+            sidebar_container, 
             textvariable=self.status_var,
-            font=ctk.CTkFont(size=12)
+            font=ctk.CTkFont(size=11)
         )
-        self.status_label.pack(pady=(20,0))
+        self.status_label.pack(pady=(5,0))
         
-        # Create main content area
-        main_content = ctk.CTkFrame(self.root)
-        main_content.pack(side="right", fill="both", expand=True, padx=10, pady=10)
+        # Create main content area with output text
+        main_content = ctk.CTkFrame(main_container)
+        main_content.pack(side="right", fill="both", expand=True, padx=5, pady=5)
         
-        # Output text area with custom styling
+        # Output text area
         self.output_text = ctk.CTkTextbox(
             main_content,
             wrap="word",
-            font=ctk.CTkFont(family="Courier", size=16)
+            font=ctk.CTkFont(family="Courier", size=14)  # Slightly smaller font
         )
-        self.output_text.pack(fill="both", expand=True, padx=10, pady=10)
+        self.output_text.pack(fill="both", expand=True, padx=5, pady=5)
 
     def update_leverage_label(self, value):
         """Update the leverage label when slider moves"""
