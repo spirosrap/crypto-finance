@@ -45,6 +45,11 @@ class MarketAnalyzerUI:
         # ANSI escape sequence pattern
         self.ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         
+        # Add auto-trading variables
+        self.auto_trading = False
+        self.auto_trading_thread = None
+        self.last_trade_time = None
+        
         # Create main container with padding
         self.create_gui()
         
@@ -130,6 +135,17 @@ class MarketAnalyzerUI:
         
         ctk.CTkLabel(trading_frame, text="Trading Options", 
                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
+        
+        # Add Auto-Trading Button
+        self.auto_trade_btn = ctk.CTkButton(
+            trading_frame,
+            text="Start Auto-Trading",
+            command=self.toggle_auto_trading,
+            fg_color="#4B0082",  # Indigo
+            hover_color="#301934",  # Dark Purple
+            height=32
+        )
+        self.auto_trade_btn.pack(pady=(0, 5), padx=10, fill="x")
         
         # Quick Market Order Buttons
         market_buttons_frame = ctk.CTkFrame(trading_frame)
@@ -798,10 +814,114 @@ class MarketAnalyzerUI:
             # Clear current process
             self.current_process = None
 
+    def toggle_auto_trading(self):
+        """Toggle auto-trading on/off"""
+        if not self.auto_trading:
+            # Start auto-trading
+            self.auto_trading = True
+            self.auto_trade_btn.configure(
+                text="Stop Auto-Trading",
+                fg_color="#B22222"  # Fire Brick Red
+            )
+            self.queue.put(("append", "\nAuto-trading started. Analyzing 1-hour timeframe every 20 minutes...\n"))
+            
+            # Start the auto-trading thread
+            self.auto_trading_thread = threading.Thread(target=self._auto_trading_loop)
+            self.auto_trading_thread.daemon = True
+            self.auto_trading_thread.start()
+        else:
+            # Stop auto-trading
+            self.auto_trading = False
+            self.auto_trade_btn.configure(
+                text="Start Auto-Trading",
+                fg_color="#4B0082"  # Back to Indigo
+            )
+            self.queue.put(("append", "\nAuto-trading stopped.\n"))
+            
+            if self.auto_trading_thread:
+                self.auto_trading_thread.join(timeout=1)
+                self.auto_trading_thread = None
+
+    def _auto_trading_loop(self):
+        """Background loop for auto-trading"""
+        while self.auto_trading:
+            try:
+                # Run 1-hour analysis
+                self.queue.put(("append", "\nRunning automated 1-hour timeframe analysis...\n"))
+                
+                # Create and run the analysis process
+                cmd = [
+                    "python",
+                    "prompt_market.py",
+                    "--product_id",
+                    self.product_var.get(),
+                    f"--use_{self.model_var.get()}",
+                    "--granularity",
+                    "ONE_HOUR",
+                    "--execute_trades",
+                    "--margin",
+                    self.margin_var.get(),
+                    "--leverage",
+                    str(self.leverage_var.get())
+                ]
+                
+                if self.limit_order_var.get():
+                    cmd.append("--limit_order")
+                
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                # Store the process
+                self.current_process = process
+                
+                # Read output and check for trade execution
+                output = ""
+                while True:
+                    line = process.stdout.readline()
+                    if line == '' and process.poll() is not None:
+                        break
+                    if line:
+                        output += line
+                        self.queue.put(("append", line))
+                        
+                        # Check if a trade was executed
+                        if "Order placed successfully" in line:
+                            self.queue.put(("append", "\nTrade executed! Auto-trading will now stop.\n"))
+                            self.root.after(0, self.toggle_auto_trading)  # Stop auto-trading
+                            return
+                
+                # Get any remaining output
+                stdout, stderr = process.communicate()
+                if stdout:
+                    output += stdout
+                    self.queue.put(("append", stdout))
+                if stderr:
+                    self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                
+                # Clear current process
+                self.current_process = None
+                
+                # Wait 20 minutes before next analysis if no trade was executed
+                for _ in range(20):  # 20 minutes
+                    if not self.auto_trading:
+                        return
+                    time.sleep(60)  # 1 minute intervals
+                
+            except Exception as e:
+                self.queue.put(("append", f"\nError in auto-trading loop: {str(e)}\n"))
+                time.sleep(60)  # Wait 1 minute before retrying on error
+
     def run(self):
         try:
             self.root.mainloop()
         finally:
+            # Stop auto-trading if active
+            if self.auto_trading:
+                self.toggle_auto_trading()
             # Ensure price updates are stopped and session is closed when the app closes
             self.stop_price_update_thread()
             self.session.close()
