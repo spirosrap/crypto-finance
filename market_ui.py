@@ -17,7 +17,7 @@ class MarketAnalyzerUI:
         # Create main window
         self.root = ctk.CTk()
         self.root.title("Crypto Market Analyzer")
-        self.root.geometry("1460x930")  # Larger default size (width x height)
+        self.root.geometry("1460x1020")  # Larger default size (width x height)
         self.root.minsize(800, 600)    # Larger minimum window size
         
         # Queue for communication between threads
