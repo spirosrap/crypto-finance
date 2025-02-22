@@ -270,12 +270,14 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 
     SYSTEM_PROMPT = (
         "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
-        "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"} "
-        "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\"}. "
+        "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"IS_VALID\": <IS_VALID>} "
+        "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"IS_VALID\": <IS_VALID>}. "
         "Instruction 1: Use code to calculate the R/R ratio. "
         "Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
-        "Instruction 3: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'."
-    )    
+        "Instruction 3: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
+        "Instruction 4: If Stop Loss is below current price for a SELL signal, set IS_VALID to False. (Default is True) "
+        "Instruction 5: If Stop Loss is above current price for a BUY signal, set IS_VALID to False. (Default is True) "
+    )
     
     try:
         if use_hyperbolic:
