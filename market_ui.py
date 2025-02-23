@@ -7,6 +7,8 @@ import json
 import requests
 import time
 import re
+import os
+import traceback
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -17,11 +19,30 @@ class MarketAnalyzerUI:
         # Create main window
         self.root = ctk.CTk()
         self.root.title("Crypto Market Analyzer")
-        self.root.geometry("1460x1020")  # Larger default size (width x height)
+        self.root.geometry("1460x1115")  # Larger default size (width x height)
         self.root.minsize(800, 600)    # Larger minimum window size
+        
+        # Initialize granularity variable first
+        self.granularity_var = ctk.StringVar(value="ONE_HOUR")
         
         # Queue for communication between threads
         self.queue = queue.Queue()
+        
+        # Model retraining tracking
+        self.model_retrain_interval = 10 * 24 * 60 * 60  # 10 days in seconds
+        self.last_train_time = self.get_last_train_time()
+        self.retrain_timer_active = True
+        
+        # Add training timer variables
+        self.training_start_time = None
+        self.training_timer_active = False
+        self.estimated_training_times = {
+            'ONE_MINUTE': 60,  # 1 minute
+            'FIVE_MINUTE': 180,  # 3 minutes
+            'FIFTEEN_MINUTE': 300,  # 5 minutes
+            'THIRTY_MINUTE': 600,  # 10 minutes
+            'ONE_HOUR': 1200,  # 20 minutes
+        }
         
         # Initialize price tracking
         self.current_price = "-.--"
@@ -244,22 +265,47 @@ class MarketAnalyzerUI:
         # Granularity section
         ctk.CTkLabel(sidebar_container, text="Time Frame:", font=ctk.CTkFont(weight="bold")).pack(pady=(20,10))
         
-        # Analysis buttons with reduced height and padding
-        self.five_min_btn = ctk.CTkButton(
-            sidebar_container, 
-            text="5 MINUTE", 
-            command=lambda: self.run_analysis("FIVE_MINUTE"),
-            height=32  # Reduced height
+        # Add granularity dropdown
+        granularities = ["ONE_MINUTE", "FIVE_MINUTE", "FIFTEEN_MINUTE", "THIRTY_MINUTE", "ONE_HOUR"]
+        granularity_menu = ctk.CTkOptionMenu(
+            sidebar_container,
+            values=granularities,
+            variable=self.granularity_var,
+            command=self.update_training_time
         )
-        self.five_min_btn.pack(pady=3, padx=10, fill="x")
+        granularity_menu.pack(pady=(0,5), padx=10, fill="x")
         
-        self.one_hour_btn = ctk.CTkButton(
+        # Add training time frame
+        self.training_frame = ctk.CTkFrame(sidebar_container)
+        self.training_frame.pack(pady=(0,10), padx=5, fill="x")
+        
+        self.retrain_time_label = ctk.CTkLabel(
+            self.training_frame,
+            text="Time until retrain: --:--:--",
+            font=ctk.CTkFont(size=12)
+        )
+        self.retrain_time_label.pack(pady=5)
+        
+        # Progress bar for retraining countdown
+        self.retrain_progress = ctk.CTkProgressBar(
+            self.training_frame,
+            mode="determinate",
+            height=6
+        )
+        self.retrain_progress.pack(pady=(0,5), padx=5, fill="x")
+        self.retrain_progress.set(0)
+        
+        # Start retrain countdown timer
+        self.update_retrain_countdown()
+        
+        # Single analysis button
+        self.analyze_btn = ctk.CTkButton(
             sidebar_container, 
-            text="1 HOUR", 
-            command=lambda: self.run_analysis("ONE_HOUR"),
+            text="Run Analysis", 
+            command=lambda: self.run_analysis(self.granularity_var.get()),
             height=32  # Reduced height
         )
-        self.one_hour_btn.pack(pady=3, padx=10, fill="x")
+        self.analyze_btn.pack(pady=3, padx=10, fill="x")
         
         # Close Positions button
         self.close_positions_btn = ctk.CTkButton(
@@ -347,12 +393,23 @@ class MarketAnalyzerUI:
 
     def run_analysis(self, granularity):
         """Run the market analysis with selected parameters"""
-        # Disable buttons during analysis
-        self.five_min_btn.configure(state="disabled")
-        self.one_hour_btn.configure(state="disabled")
+        # Check if model needs retraining
+        current_time = time.time()
+        if current_time - self.last_train_time >= self.model_retrain_interval:
+            self.queue.put(("append", "\nModel requires retraining before analysis.\n"))
+            self.queue.put(("status", "Model needs retraining"))
+            return
+            
+        # Disable button during analysis
+        self.analyze_btn.configure(state="disabled")
         self.clear_btn.configure(state="disabled")
         
         self.status_var.set("Running analysis...")
+        
+        # Start training timer
+        self.training_start_time = time.time()
+        self.training_timer_active = True
+        self.update_training_timer()
         
         # Create and start thread
         thread = threading.Thread(
@@ -361,6 +418,32 @@ class MarketAnalyzerUI:
         )
         thread.daemon = True
         thread.start()
+
+    def update_training_timer(self):
+        """Update the training timer display"""
+        if not self.training_timer_active:
+            return
+            
+        elapsed = time.time() - self.training_start_time
+        total_time = self.estimated_training_times.get(self.granularity_var.get(), 600)
+        remaining = max(0, total_time - elapsed)
+        
+        # Update progress bar
+        progress = min(1.0, elapsed / total_time)
+        self.retrain_progress.set(progress)
+        
+        # Format remaining time
+        minutes = int(remaining // 60)
+        seconds = int(remaining % 60)
+        self.retrain_time_label.configure(text=f"Time until retrain: {minutes:02d}:{seconds:02d}")
+        
+        # Schedule next update if still active
+        if self.training_timer_active and remaining > 0:
+            self.root.after(1000, self.update_training_timer)
+        elif remaining <= 0:
+            self.training_timer_active = False
+            self.retrain_time_label.configure(text="Time until retrain: Done!")
+            self.retrain_progress.set(1.0)
 
     def _run_analysis_thread(self, granularity):
         """Thread function to run the analysis"""
@@ -441,6 +524,9 @@ class MarketAnalyzerUI:
             self.queue.put(("status", "Error occurred"))
             self.queue.put(("enable_buttons", None))
             self.queue.put(("disable_cancel", None))
+            
+            # Stop training timer on error
+            self.training_timer_active = False
             
             # Clear current process
             self.current_process = None
@@ -629,8 +715,7 @@ class MarketAnalyzerUI:
                 elif action == "status":
                     self.status_var.set(data)
                 elif action == "enable_buttons":
-                    self.five_min_btn.configure(state="normal")
-                    self.one_hour_btn.configure(state="normal")
+                    self.analyze_btn.configure(state="normal")
                     self.clear_btn.configure(state="normal")
                 elif action == "enable_close_button":
                     self.close_positions_btn.configure(state="normal")
@@ -655,6 +740,10 @@ class MarketAnalyzerUI:
             self.current_process.terminate()
             self.queue.put(("append", "\nOperation cancelled by user.\n"))
             self.queue.put(("status", "Operation cancelled"))
+            
+            # Stop training timer
+            self.training_timer_active = False
+            self.retrain_time_label.configure(text="Time until retrain: Cancelled")
             
             # Re-enable buttons
             self.queue.put(("enable_buttons", None))
@@ -823,8 +912,17 @@ class MarketAnalyzerUI:
                 text="Stop Auto-Trading",
                 fg_color="#B22222"  # Fire Brick Red
             )
-            self.root.title("Crypto Market Analyzer [Auto-Trading ON]")
-            self.queue.put(("append", "\nAuto-trading started. Analyzing 1-hour timeframe every 20 minutes...\n"))
+            granularity = self.granularity_var.get()
+            wait_minutes = {
+                'ONE_MINUTE': 0.3,  # Check every 20 seconds
+                'FIVE_MINUTE': 2,   # Check every 2 minutes
+                'FIFTEEN_MINUTE': 5, # Check every 5 minutes
+                'THIRTY_MINUTE': 10, # Check every 10 minutes
+                'ONE_HOUR': 20      # Check every 20 minutes
+            }.get(granularity, 20)  # Default to 20 minutes
+            
+            self.root.title(f"Crypto Market Analyzer [Auto-Trading ON - {granularity}]")
+            self.queue.put(("append", f"\nAuto-trading started. Analyzing {granularity.lower().replace('_', ' ')} timeframe every {wait_minutes} minutes...\n"))
             
             # Start the auto-trading thread
             self.auto_trading_thread = threading.Thread(target=self._auto_trading_loop)
@@ -848,8 +946,18 @@ class MarketAnalyzerUI:
         """Background loop for auto-trading"""
         while self.auto_trading:
             try:
-                # Run 1-hour analysis
-                self.queue.put(("append", "\nRunning automated 1-hour timeframe analysis...\n"))
+                # Check if model needs retraining
+                current_time = time.time()
+                if current_time - self.last_train_time >= self.model_retrain_interval:
+                    self.queue.put(("append", "\nModel requires retraining. Auto-trading will stop.\n"))
+                    self.root.after(0, self.toggle_auto_trading)  # Stop auto-trading
+                    return
+                
+                # Get current granularity
+                granularity = self.granularity_var.get()
+                
+                # Run analysis with current granularity
+                self.queue.put(("append", f"\nRunning automated {granularity.lower().replace('_', ' ')} timeframe analysis...\n"))
                 
                 # Create and run the analysis process
                 cmd = [
@@ -859,7 +967,7 @@ class MarketAnalyzerUI:
                     self.product_var.get(),
                     f"--use_{self.model_var.get()}",
                     "--granularity",
-                    "ONE_HOUR",
+                    granularity,
                     "--execute_trades",
                     "--margin",
                     self.margin_var.get(),
@@ -907,15 +1015,169 @@ class MarketAnalyzerUI:
                 # Clear current process
                 self.current_process = None
                 
-                # Wait 20 minutes before next analysis if no trade was executed
-                for _ in range(20):  # 20 minutes
-                    if not self.auto_trading:
-                        return
-                    time.sleep(60)  # 1 minute intervals
+                # Wait based on granularity before next analysis
+                wait_minutes = {
+                    'ONE_MINUTE': 0.3,  # Check every 20 seconds
+                    'FIVE_MINUTE': 2,   # Check every 2 minutes
+                    'FIFTEEN_MINUTE': 5, # Check every 5 minutes
+                    'THIRTY_MINUTE': 10, # Check every 10 minutes
+                    'ONE_HOUR': 20      # Check every 20 minutes
+                }.get(granularity, 20)  # Default to 20 minutes
+                
+                # For sub-minute intervals, adjust the sleep time
+                if wait_minutes < 1:
+                    time.sleep(wait_minutes * 60)  # Convert to seconds
+                else:
+                    # Wait in 1-minute intervals to allow for clean stopping
+                    for _ in range(int(wait_minutes)):
+                        if not self.auto_trading:
+                            return
+                        time.sleep(60)  # 1 minute intervals
+                    
+                    # Handle any remaining partial minute
+                    remaining_seconds = (wait_minutes - int(wait_minutes)) * 60
+                    if remaining_seconds > 0:
+                        time.sleep(remaining_seconds)
                 
             except Exception as e:
                 self.queue.put(("append", f"\nError in auto-trading loop: {str(e)}\n"))
                 time.sleep(60)  # Wait 1 minute before retrying on error
+
+    def update_training_time(self, _=None):
+        """Update the training time label based on selected granularity"""
+        # Update last training time for new granularity
+        self.last_train_time = self.get_last_train_time()
+        
+        # Training days mapping (from ml_model.py)
+        training_days = {
+            'ONE_MINUTE': 10,
+            'FIVE_MINUTE': 60,
+            'FIFTEEN_MINUTE': 90,
+            'THIRTY_MINUTE': 180,
+            'ONE_HOUR': 365,
+        }
+        
+        days = training_days.get(self.granularity_var.get(), 365)
+        if days < 30:
+            time_text = f"{days} days"
+        elif days < 365:
+            months = days // 30
+            time_text = f"{months} months"
+        else:
+            years = days / 365
+            time_text = f"{years:.1f} years"
+            
+        # Force an immediate update of the retrain countdown
+        self.update_retrain_countdown()
+
+    def find_model_file(self, granularity):
+        """Find the model file path"""
+        try:
+            cwd = os.getcwd()
+            granularity_formatted = granularity.lower().replace('_', ' ')
+            
+            model_paths = [
+                f"models/ml_model_btc_usdc_{granularity_formatted.replace(' ', '_')}.joblib",
+                f"models/btc_usdc_{granularity_formatted.replace(' ', '_')}_prediction_model.joblib",
+                f"models/model_{granularity.lower()}.joblib",
+                f"models/model_{granularity}.joblib",
+                f"model_{granularity.lower()}.joblib",
+                f"model_{granularity}.joblib"
+            ]
+            
+            # Create models directory if it doesn't exist
+            models_dir = os.path.join(cwd, "models")
+            if not os.path.exists(models_dir):
+                os.makedirs(models_dir, exist_ok=True)
+            
+            # Try each path
+            for path in model_paths:
+                full_path = os.path.join(cwd, path)
+                if os.path.exists(full_path):
+                    try:
+                        # Test if file is readable
+                        with open(full_path, 'rb') as f:
+                            f.read(1)
+                        return full_path
+                    except (IOError, PermissionError):
+                        continue
+            
+            return None
+            
+        except Exception:
+            return None
+
+    def get_last_train_time(self):
+        """Get the last training time from a file or return current time if not found"""
+        try:
+            if not hasattr(self, 'granularity_var'):
+                return time.time()
+                
+            model_path = self.find_model_file(self.granularity_var.get())
+            if model_path:
+                try:
+                    return os.path.getmtime(model_path)
+                except OSError:
+                    pass
+        except Exception:
+            pass
+        return time.time()  # Return current time if no model file found
+
+    def format_time_ago(self, seconds):
+        """Format time ago in a human readable format"""
+        if seconds < 60:
+            return "just now"
+        elif seconds < 3600:
+            minutes = int(seconds / 60)
+            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+        elif seconds < 86400:
+            hours = int(seconds / 3600)
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+        else:
+            days = int(seconds / 86400)
+            return f"{days} day{'s' if days != 1 else ''} ago"
+
+    def update_retrain_countdown(self):
+        """Update the countdown display for model retraining"""
+        if not self.retrain_timer_active:
+            return
+            
+        current_time = time.time()
+        elapsed = current_time - self.last_train_time
+        remaining = max(0, self.model_retrain_interval - elapsed)
+        
+        # Update progress bar (inverted progress - starts full and empties)
+        progress = max(0, min(1.0, remaining / self.model_retrain_interval))
+        self.retrain_progress.set(progress)
+        
+        # Format remaining time
+        days = int(remaining // (24 * 3600))
+        hours = int((remaining % (24 * 3600)) // 3600)
+        minutes = int((remaining % 3600) // 60)
+        
+        # Get model file info
+        model_path = self.find_model_file(self.granularity_var.get())
+        
+        if days > 0:
+            time_text = f"{days}d {hours:02d}h {minutes:02d}m"
+        else:
+            time_text = f"{hours:02d}h {minutes:02d}m"
+            
+        self.retrain_time_label.configure(text=f"Retrain in: {time_text}")
+        
+        # Change color based on time until retraining needed
+        if not model_path:
+            self.retrain_time_label.configure(text_color="red")
+            self.retrain_time_label.configure(text="Model not found")
+        elif remaining < 24 * 3600:  # Less than 1 day
+            self.retrain_time_label.configure(text_color="orange")
+        elif remaining < 12 * 3600:  # Less than 12 hours
+            self.retrain_time_label.configure(text_color="red")
+        else:
+            self.retrain_time_label.configure(text_color=("gray10", "#DCE4EE"))
+        
+        # Schedule next update
+        self.root.after(60000, self.update_retrain_countdown)  # Update every minute
 
     def run(self):
         try:
