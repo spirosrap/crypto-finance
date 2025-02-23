@@ -823,6 +823,7 @@ class MarketAnalyzerUI:
                 text="Stop Auto-Trading",
                 fg_color="#B22222"  # Fire Brick Red
             )
+            self.root.title("Crypto Market Analyzer [Auto-Trading ON]")
             self.queue.put(("append", "\nAuto-trading started. Analyzing 1-hour timeframe every 20 minutes...\n"))
             
             # Start the auto-trading thread
@@ -836,6 +837,7 @@ class MarketAnalyzerUI:
                 text="Start Auto-Trading",
                 fg_color="#4B0082"  # Back to Indigo
             )
+            self.root.title("Crypto Market Analyzer")
             self.queue.put(("append", "\nAuto-trading stopped.\n"))
             
             if self.auto_trading_thread:
