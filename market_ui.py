@@ -279,9 +279,10 @@ class MarketAnalyzerUI:
         self.training_frame = ctk.CTkFrame(sidebar_container)
         self.training_frame.pack(pady=(0,10), padx=5, fill="x")
         
+        # Create a single line for retrain countdown
         self.retrain_time_label = ctk.CTkLabel(
             self.training_frame,
-            text="Time until retrain: --:--:--",
+            text="Retrain in: --:--:--",
             font=ctk.CTkFont(size=12)
         )
         self.retrain_time_label.pack(pady=5)
@@ -406,11 +407,6 @@ class MarketAnalyzerUI:
         
         self.status_var.set("Running analysis...")
         
-        # Start training timer
-        self.training_start_time = time.time()
-        self.training_timer_active = True
-        self.update_training_timer()
-        
         # Create and start thread
         thread = threading.Thread(
             target=self._run_analysis_thread,
@@ -418,32 +414,6 @@ class MarketAnalyzerUI:
         )
         thread.daemon = True
         thread.start()
-
-    def update_training_timer(self):
-        """Update the training timer display"""
-        if not self.training_timer_active:
-            return
-            
-        elapsed = time.time() - self.training_start_time
-        total_time = self.estimated_training_times.get(self.granularity_var.get(), 600)
-        remaining = max(0, total_time - elapsed)
-        
-        # Update progress bar
-        progress = min(1.0, elapsed / total_time)
-        self.retrain_progress.set(progress)
-        
-        # Format remaining time
-        minutes = int(remaining // 60)
-        seconds = int(remaining % 60)
-        self.retrain_time_label.configure(text=f"Time until retrain: {minutes:02d}:{seconds:02d}")
-        
-        # Schedule next update if still active
-        if self.training_timer_active and remaining > 0:
-            self.root.after(1000, self.update_training_timer)
-        elif remaining <= 0:
-            self.training_timer_active = False
-            self.retrain_time_label.configure(text="Time until retrain: Done!")
-            self.retrain_progress.set(1.0)
 
     def _run_analysis_thread(self, granularity):
         """Thread function to run the analysis"""
@@ -524,9 +494,6 @@ class MarketAnalyzerUI:
             self.queue.put(("status", "Error occurred"))
             self.queue.put(("enable_buttons", None))
             self.queue.put(("disable_cancel", None))
-            
-            # Stop training timer on error
-            self.training_timer_active = False
             
             # Clear current process
             self.current_process = None
@@ -740,10 +707,6 @@ class MarketAnalyzerUI:
             self.current_process.terminate()
             self.queue.put(("append", "\nOperation cancelled by user.\n"))
             self.queue.put(("status", "Operation cancelled"))
-            
-            # Stop training timer
-            self.training_timer_active = False
-            self.retrain_time_label.configure(text="Time until retrain: Cancelled")
             
             # Re-enable buttons
             self.queue.put(("enable_buttons", None))
@@ -1158,23 +1121,23 @@ class MarketAnalyzerUI:
         # Get model file info
         model_path = self.find_model_file(self.granularity_var.get())
         
-        if days > 0:
-            time_text = f"{days}d {hours:02d}h {minutes:02d}m"
-        else:
-            time_text = f"{hours:02d}h {minutes:02d}m"
-            
-        self.retrain_time_label.configure(text=f"Retrain in: {time_text}")
-        
-        # Change color based on time until retraining needed
         if not model_path:
-            self.retrain_time_label.configure(text_color="red")
-            self.retrain_time_label.configure(text="Model not found")
-        elif remaining < 24 * 3600:  # Less than 1 day
-            self.retrain_time_label.configure(text_color="orange")
-        elif remaining < 12 * 3600:  # Less than 12 hours
-            self.retrain_time_label.configure(text_color="red")
+            self.retrain_time_label.configure(text="Model not found", text_color="red")
         else:
-            self.retrain_time_label.configure(text_color=("gray10", "#DCE4EE"))
+            if days > 0:
+                time_text = f"Retrain in: {days}d {hours:02d}h {minutes:02d}m"
+            else:
+                time_text = f"Retrain in: {hours:02d}h {minutes:02d}m"
+                
+            self.retrain_time_label.configure(text=time_text)
+            
+            # Change color based on time until retraining needed
+            if remaining < 12 * 3600:  # Less than 12 hours
+                self.retrain_time_label.configure(text_color="red")
+            elif remaining < 24 * 3600:  # Less than 1 day
+                self.retrain_time_label.configure(text_color="orange")
+            else:
+                self.retrain_time_label.configure(text_color=("gray10", "#DCE4EE"))
         
         # Schedule next update
         self.root.after(60000, self.update_retrain_countdown)  # Update every minute
