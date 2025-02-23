@@ -135,9 +135,9 @@ class MarketAnalyzerUI:
         
         # Create model mapping for display names
         model_display_names = {
-            "o1_mini": "o1-mini",
-            "o3_mini": "o3-mini",
-            "deepseek": "deepseek-chat",
+            "o1_mini": "o1_mini",
+            "o3_mini": "o3_mini",
+            "deepseek": "deepseek",
             "grok": "grok",
             "gpt4o": "gpt4o"
         }
