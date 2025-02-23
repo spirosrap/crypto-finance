@@ -1041,3 +1041,102 @@ These trading scripts execute real trades on your Coinbase account. Please ensur
 - Have sufficient funds for the intended positions
 - Test with small amounts first
 - Monitor your positions after execution
+
+## Market Analyzer UI
+
+The Market Analyzer UI (`market_ui.py`) provides a sophisticated graphical interface for cryptocurrency market analysis and trading. It combines real-time price tracking, technical analysis, and trading capabilities in a user-friendly desktop application.
+
+### Features
+
+- **Real-Time Price Tracking**
+  - Live price updates for multiple cryptocurrencies
+  - Automatic price refresh with error handling
+  - Last update timestamp display
+
+- **Trading Interface**
+  - Quick LONG/SHORT market orders
+  - Configurable leverage (1x-20x)
+  - Adjustable margin size
+  - Customizable TP/SL percentages
+  - Limit/Market order options
+  - One-click position closing
+
+- **Analysis Tools**
+  - Multiple timeframe analysis (5m, 1h)
+  - Support for various AI models:
+    - O1 Mini
+    - O3 Mini
+    - DeepSeek
+    - Grok
+    - GPT-4o
+  - Real-time analysis output display
+
+- **Auto-Trading Capabilities**
+  - Automated trading based on analysis
+  - Configurable trading parameters
+  - Safety controls and monitoring
+  - Auto-stop on successful trade
+
+### Usage
+
+1. Start the Market Analyzer UI:
+   ```bash
+   python market_ui.py
+   ```
+
+2. Configure Trading Settings:
+   - Select cryptocurrency pair
+   - Set margin amount
+   - Adjust leverage
+   - Configure TP/SL percentages
+   - Choose limit/market order type
+
+3. Analysis Options:
+   - Run 5-minute analysis for short-term trading
+   - Run 1-hour analysis for longer timeframes
+   - Enable auto-trading for automated execution
+
+4. Trading Actions:
+   - Use LONG/SHORT buttons for quick market orders
+   - Close all positions with one click
+   - Monitor real-time price updates
+   - View detailed analysis output
+
+### Auto-Trading
+
+The auto-trading feature automatically:
+- Runs analysis every 20 minutes
+- Monitors for trading opportunities
+- Executes trades based on signals
+- Stops after successful trade execution
+- Provides detailed logging
+
+### Risk Management
+
+The UI includes several risk management features:
+- Configurable TP/SL levels
+- Position size limits
+- Leverage controls
+- Quick position closing
+- Real-time price monitoring
+
+### Requirements
+
+- Python 3.11 or higher
+- CustomTkinter library
+- Active Coinbase API credentials
+- Stable internet connection
+
+### Installation
+
+1. Install required dependencies:
+   ```bash
+   pip install customtkinter requests
+   ```
+
+2. Ensure Coinbase API credentials are configured in `config.py`
+
+3. Launch the UI:
+   ```bash
+   python market_ui.py
+   ```
