@@ -132,23 +132,27 @@ class MarketAnalyzerUI:
         # Model selection with reduced padding
         ctk.CTkLabel(sidebar_container, text="Select Model:").pack(pady=(0,2))
         self.model_var = ctk.StringVar(value="o1_mini")
-        models = [
-            ("O1 Mini", "o1_mini"),
-            ("O3 Mini", "o3_mini"),
-            ("DeepSeek", "deepseek"),
-            ("Grok", "grok"),
-            ("GPT-4o", "gpt4o")
-        ]
         
-        # Create model radio buttons with reduced padding
-        for text, value in models:
-            radio = ctk.CTkRadioButton(
-                sidebar_container, 
-                text=text, 
-                value=value, 
-                variable=self.model_var
-            )
-            radio.pack(pady=2)  # Reduced padding
+        # Create model mapping for display names
+        model_display_names = {
+            "o1_mini": "o1-mini",
+            "o3_mini": "o3-mini",
+            "deepseek": "deepseek-chat",
+            "grok": "grok",
+            "gpt4o": "gpt4o"
+        }
+        
+        models = list(model_display_names.keys())
+        
+        # Create model dropdown menu
+        model_menu = ctk.CTkOptionMenu(
+            sidebar_container,
+            values=[model_display_names[m] for m in models],
+            variable=self.model_var,
+            command=lambda x: self.model_var.set(next(k for k, v in model_display_names.items() if v == x))
+        )
+        model_menu.set(model_display_names[self.model_var.get()])
+        model_menu.pack(pady=(0,10))
             
         # Trading Options Section
         trading_frame = ctk.CTkFrame(sidebar_container)
