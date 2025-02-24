@@ -19,6 +19,8 @@ class CoinbaseService:
         self.BRACKET_ORDER_STOP_LOSS_MULTIPLIER = 0.98
         self.historical_data = HistoricalData(self.client)  # Initialize HistoricalData
         self.logger = logging.getLogger(__name__)
+        self._last_trade_time = {}  # Dictionary to track last trade time per product
+        self._daily_trades = {}  # Dictionary to track number of trades per day per product
 
     def get_portfolio_info(self, portfolio_type="DEFAULT"):
         """
@@ -1042,3 +1044,189 @@ class CoinbaseService:
             "status": "timeout",
             "message": f"Limit order not filled within {max_wait_time} seconds"
         }
+
+    def get_daily_pnl(self) -> float:
+        """
+        Get the daily PnL for the INTX portfolio.
+        Returns the PnL as a percentage of the portfolio value.
+        """
+        try:
+            # Get portfolio history for the last 24 hours
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=1)
+            
+            portfolio_history = self.client.get_portfolio_history(
+                portfolio_id="INTX",
+                start_time=start_time.isoformat(),
+                end_time=end_time.isoformat(),
+                granularity="ONE_HOUR"
+            )
+            
+            if not portfolio_history or 'points' not in portfolio_history:
+                self.logger.warning("Could not retrieve portfolio history")
+                return None
+                
+            # Calculate PnL
+            points = portfolio_history['points']
+            if len(points) < 2:
+                return None
+                
+            start_value = float(points[0]['value'])
+            current_value = float(points[-1]['value'])
+            
+            pnl_percentage = ((current_value - start_value) / start_value) * 100
+            return pnl_percentage
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating daily PnL: {str(e)}")
+            return None
+
+    def get_open_positions(self) -> List[dict]:
+        """
+        Get all open positions in the INTX portfolio.
+        Returns a list of position dictionaries.
+        """
+        try:
+            positions = self.client.get_positions(portfolio_id="INTX")
+            return [pos for pos in positions if float(pos['size']) != 0]
+        except Exception as e:
+            self.logger.error(f"Error getting open positions: {str(e)}")
+            return []
+
+    def calculate_volatility(self, product_id: str, window: int = 24) -> float:
+        """
+        Calculate the current volatility for a given product.
+        Uses standard deviation of returns over the specified window.
+        """
+        try:
+            # Get historical candles
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(hours=window)
+            
+            candles = self.historical_data.get_product_candles(
+                product_id=product_id,
+                start=start_time,
+                end=end_time,
+                granularity="ONE_HOUR"
+            )
+            
+            if not candles:
+                return 0.0
+                
+            # Calculate returns
+            prices = [float(candle['close']) for candle in candles]
+            returns = [(prices[i] - prices[i-1])/prices[i-1] for i in range(1, len(prices))]
+            
+            # Calculate volatility (standard deviation of returns)
+            if returns:
+                import numpy as np
+                volatility = float(np.std(returns))
+                return volatility
+            
+            return 0.0
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating volatility: {str(e)}")
+            return 0.0
+
+    def check_trade_limits(self, product_id: str) -> bool:
+        """
+        Check if trading limits allow for a new trade.
+        Returns True if trade is allowed, False otherwise.
+        """
+        current_time = datetime.utcnow()
+        
+        # Check cooldown period
+        if product_id in self._last_trade_time:
+            last_trade = self._last_trade_time[product_id]
+            cooldown = timedelta(minutes=15)  # 15 minute cooldown
+            if current_time - last_trade < cooldown:
+                remaining = (cooldown - (current_time - last_trade)).seconds / 60
+                self.logger.info(f"Cooldown period still active. {remaining:.1f} minutes remaining.")
+                return False
+        
+        # Check daily trade limit
+        today = current_time.date()
+        if product_id not in self._daily_trades:
+            self._daily_trades[product_id] = {}
+        
+        if today not in self._daily_trades[product_id]:
+            self._daily_trades[product_id] = {today: 0}
+        
+        if self._daily_trades[product_id][today] >= 10:  # Maximum 10 trades per day
+            self.logger.info("Daily trade limit reached")
+            return False
+        
+        return True
+
+    def update_trade_tracking(self, product_id: str):
+        """Update trade tracking after a successful trade."""
+        current_time = datetime.utcnow()
+        self._last_trade_time[product_id] = current_time
+        
+        today = current_time.date()
+        if product_id not in self._daily_trades:
+            self._daily_trades[product_id] = {}
+        if today not in self._daily_trades[product_id]:
+            self._daily_trades[product_id] = {today: 0}
+        
+        self._daily_trades[product_id][today] += 1
+
+    def calculate_position_correlation(self, product_id: str) -> float:
+        """
+        Calculate correlation between the proposed position and existing positions.
+        Returns the highest correlation coefficient.
+        """
+        try:
+            # Get open positions
+            open_positions = self.get_open_positions()
+            if not open_positions:
+                return 0.0
+                
+            # Get historical data for proposed product
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(days=7)
+            proposed_candles = self.historical_data.get_product_candles(
+                product_id=product_id,
+                start=start_time,
+                end=end_time,
+                granularity="ONE_HOUR"
+            )
+            
+            if not proposed_candles:
+                return 0.0
+                
+            proposed_returns = self._calculate_returns([float(c['close']) for c in proposed_candles])
+            
+            max_correlation = 0.0
+            for position in open_positions:
+                pos_product = position['product_id']
+                if pos_product == product_id:
+                    continue
+                    
+                position_candles = self.historical_data.get_product_candles(
+                    product_id=pos_product,
+                    start=start_time,
+                    end=end_time,
+                    granularity="ONE_HOUR"
+                )
+                
+                if not position_candles:
+                    continue
+                    
+                position_returns = self._calculate_returns([float(c['close']) for c in position_candles])
+                
+                if len(proposed_returns) == len(position_returns):
+                    import numpy as np
+                    correlation = abs(float(np.corrcoef(proposed_returns, position_returns)[0,1]))
+                    max_correlation = max(max_correlation, correlation)
+            
+            return max_correlation
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating position correlation: {str(e)}")
+            return 0.0
+
+    def _calculate_returns(self, prices: List[float]) -> List[float]:
+        """Helper method to calculate returns from a list of prices."""
+        return [(prices[i] - prices[i-1])/prices[i-1] for i in range(1, len(prices))]

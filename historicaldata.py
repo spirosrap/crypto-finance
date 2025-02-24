@@ -232,4 +232,45 @@ class HistoricalData:
         except Exception as e:
             self.logger.error(f"Error clearing cache: {e}")
 
+    def _calculate_returns(self, prices: List[float]) -> List[float]:
+        """Helper method to calculate returns from a list of prices."""
+        return [(prices[i] - prices[i-1])/prices[i-1] for i in range(1, len(prices))]
+
+    def get_24h_volume(self, product_id: str) -> float:
+        """
+        Get the 24-hour trading volume for a product.
+        
+        Args:
+            product_id (str): The trading pair to get volume for
+            
+        Returns:
+            float: The 24-hour trading volume in quote currency (e.g., USDC)
+        """
+        try:
+            # Get current time and 24 hours ago
+            end_time = datetime.utcnow()
+            start_time = end_time - timedelta(hours=24)
+            
+            # Get candle data for the last 24 hours
+            candles = self.get_historical_data(
+                product_id=product_id,
+                start_date=start_time,
+                end_date=end_time,
+                granularity="ONE_HOUR"
+            )
+            
+            if not candles:
+                self.logger.warning(f"No candle data available for {product_id}")
+                return 0.0
+            
+            # Calculate total volume
+            total_volume = sum(float(candle['volume']) * float(candle['close']) for candle in candles)
+            
+            self.logger.info(f"24h volume for {product_id}: ${total_volume:,.2f}")
+            return total_volume
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating 24h volume: {str(e)}")
+            return 0.0
+
     # Additional methods related to historical data can be added here

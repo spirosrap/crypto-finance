@@ -65,6 +65,25 @@ COLORS = {
     'end': '\033[0m'
 }
 
+# Add new risk management constants at the top with other constants
+RISK_MANAGEMENT = {
+    'MAX_POSITION_PCT': 0.25,  # Maximum 25% of portfolio in single position
+    'MIN_POSITION_USD': 10.0,  # Minimum position size in USD
+    'MAX_DAILY_TRADES': 10,    # Maximum number of trades per day
+    'MAX_DAILY_LOSS_PCT': 0.05,  # Maximum 5% daily loss
+    'MAX_DRAWDOWN_PCT': 0.15,  # Maximum 15% drawdown
+    'SLIPPAGE_TOLERANCE': 0.002,  # Maximum 0.2% slippage
+    'PRICE_IMPACT_THRESHOLD': 0.01,  # Maximum 1% price impact
+    'MAX_LEVERAGE_VOLATILITY': {
+        'LOW': 20,    # Maximum leverage for low volatility
+        'MEDIUM': 10, # Maximum leverage for medium volatility
+        'HIGH': 5     # Maximum leverage for high volatility
+    },
+    'COOLDOWN_MINUTES': 15,    # Minimum minutes between trades
+    'MAX_OPEN_POSITIONS': 3,   # Maximum number of concurrent open positions
+    'CORRELATION_THRESHOLD': 0.7  # Maximum correlation between positions
+}
+
 def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False):
     global client
     try:
@@ -503,17 +522,70 @@ def validate_model_availability(model: str, provider: str) -> bool:
         return True  # Default to True if check fails
 
 def execute_trade(recommendation: str, product_id: str, margin: float = 100, leverage: int = 20, use_limit_order: bool = False) -> None:
-    """Execute trade based on recommendation if probability > 30% and sets stop loss from recommendation"""
+    """Execute trade based on recommendation with enhanced risk management"""
     try:
-        # Parse the JSON recommendation
-        rec_dict = json.loads(recommendation.replace("'", '"'))  # Convert single quotes to double quotes
+        # Initialize CoinbaseService early to use for risk checks
+        cb_service = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+        
+        # Get portfolio information for risk checks
+        fiat_balance, _ = cb_service.get_portfolio_info("INTX")
+        
+        # Check maximum position size
+        max_position_size = fiat_balance * RISK_MANAGEMENT['MAX_POSITION_PCT']
+        if margin > max_position_size:
+            print(f"{COLORS['red']}Position size (${margin}) exceeds maximum allowed (${max_position_size:.2f}){COLORS['end']}")
+            return
+            
+        # Check minimum position size
+        if margin < RISK_MANAGEMENT['MIN_POSITION_USD']:
+            print(f"{COLORS['red']}Position size (${margin}) below minimum allowed (${RISK_MANAGEMENT['MIN_POSITION_USD']}){COLORS['end']}")
+            return
+            
+        # Check daily loss limit
+        daily_pnl = cb_service.get_daily_pnl()
+        if daily_pnl and (daily_pnl / fiat_balance) < -RISK_MANAGEMENT['MAX_DAILY_LOSS_PCT']:
+            print(f"{COLORS['red']}Daily loss limit reached. Current loss: {-daily_pnl:.2f}%{COLORS['end']}")
+            return
+            
+        # Check trade limits (cooldown and daily max trades)
+        if not cb_service.check_trade_limits(product_id):
+            print(f"{COLORS['red']}Trade limits reached. Please wait for cooldown period or next trading day.{COLORS['end']}")
+            return
+            
+        # Check number of open positions
+        open_positions = cb_service.get_open_positions()
+        if len(open_positions) >= RISK_MANAGEMENT['MAX_OPEN_POSITIONS']:
+            print(f"{COLORS['red']}Maximum number of open positions ({RISK_MANAGEMENT['MAX_OPEN_POSITIONS']}) reached{COLORS['end']}")
+            return
+            
+        # Check position correlation
+        correlation = cb_service.calculate_position_correlation(product_id)
+        if correlation > RISK_MANAGEMENT['CORRELATION_THRESHOLD']:
+            print(f"{COLORS['red']}Position correlation ({correlation:.2f}) exceeds threshold ({RISK_MANAGEMENT['CORRELATION_THRESHOLD']}){COLORS['end']}")
+            return
+            
+        # Calculate volatility and adjust leverage
+        volatility = cb_service.calculate_volatility(product_id)
+        if volatility > 0.05:  # High volatility
+            max_leverage = RISK_MANAGEMENT['MAX_LEVERAGE_VOLATILITY']['HIGH']
+        elif volatility > 0.03:  # Medium volatility
+            max_leverage = RISK_MANAGEMENT['MAX_LEVERAGE_VOLATILITY']['MEDIUM']
+        else:  # Low volatility
+            max_leverage = RISK_MANAGEMENT['MAX_LEVERAGE_VOLATILITY']['LOW']
+            
+        if leverage > max_leverage:
+            print(f"{COLORS['yellow']}Reducing leverage from {leverage}x to {max_leverage}x due to market volatility{COLORS['end']}")
+            leverage = max_leverage
+
+        # Continue with existing trade execution logic
+        rec_dict = json.loads(recommendation.replace("'", '"'))
         
         # Extract probability (now a float without % symbol)
         prob = float(rec_dict['PROBABILITY'])
         
         # Check probability threshold
         if prob <= 60:
-            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 69%{COLORS['end']}")
+            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
             return
             
         # Check R/R ratio threshold
@@ -521,11 +593,7 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         if rr_ratio < 0.5:
             print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.5{COLORS['end']}")
             return
-        
-        # if rr_ratio > 10:
-        #     print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 10{COLORS['end']}")
-        #     return
-            
+
         # Determine trade direction and prices
         if 'SELL AT' in rec_dict:
             side = 'SELL'
@@ -541,44 +609,44 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['red']}Invalid recommendation format{COLORS['end']}")
             return
 
-        try:
-            # Initialize CoinbaseService with API keys
-            cb_service = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
-            
-            # Get current price from market trades (most accurate real-time price)
-            trades = cb_service.client.get_market_trades(product_id=product_id, limit=1)
-            current_price = float(trades['trades'][0]['price'])
-            
-            # Calculate price deviation percentage
-            price_deviation = abs((entry_price - current_price) / current_price * 100)
-            
-            # Determine whether to use market or limit order based on price conditions
-            should_use_market = False
-            PRICE_THRESHOLD = 0.2  # 0.2% threshold for market orders
-            
-            if use_limit_order:
-                if side == 'SELL':
-                    if entry_price < current_price or (entry_price > current_price and price_deviation <= PRICE_THRESHOLD):
-                        print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is below or close to current price (${current_price:.2f}){COLORS['end']}")
-                        should_use_market = True
-                elif side == 'BUY':
-                    if entry_price > current_price or (entry_price < current_price and price_deviation <= PRICE_THRESHOLD):
-                        print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is above or close to current price (${current_price:.2f}){COLORS['end']}")
-                        should_use_market = True
-                    
-                if should_use_market and price_deviation > PRICE_THRESHOLD:
-                    print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds threshold ({PRICE_THRESHOLD}%){COLORS['end']}")
-                    return
-            else:
-                should_use_market = True
-                if price_deviation > PRICE_THRESHOLD:
-                    print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds threshold ({PRICE_THRESHOLD}%){COLORS['end']}")
-                    return
+        # Get current price and check price deviation
+        trades = cb_service.client.get_market_trades(product_id=product_id, limit=1)
+        current_price = float(trades['trades'][0]['price'])
+        price_deviation = abs((entry_price - current_price) / current_price * 100)
+        
+        # Check price impact for large orders
+        avg_daily_volume = cb_service.historical_data.get_24h_volume(product_id)
+        if avg_daily_volume:
+            position_value = margin * leverage
+            price_impact = position_value / avg_daily_volume
+            if price_impact > RISK_MANAGEMENT['PRICE_IMPACT_THRESHOLD']:
+                print(f"{COLORS['red']}Order size too large. Estimated price impact: {price_impact:.2f}%{COLORS['end']}")
+                return
+        
+        # Determine whether to use market or limit order based on price conditions
+        should_use_market = False
+        if use_limit_order:
+            # Add a small buffer (0.1%) to the limit price to account for price movements
+            if side == 'SELL':
+                entry_price = current_price * 1.001  # Add 0.1% for sell orders
+                if entry_price < current_price or (entry_price > current_price and price_deviation <= RISK_MANAGEMENT['SLIPPAGE_TOLERANCE']):
+                    print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is below or close to current price (${current_price:.2f}){COLORS['end']}")
+                    should_use_market = True
+            elif side == 'BUY':
+                entry_price = current_price * 0.999  # Subtract 0.1% for buy orders
+                if entry_price > current_price or (entry_price < current_price and price_deviation <= RISK_MANAGEMENT['SLIPPAGE_TOLERANCE']):
+                    print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is above or close to current price (${current_price:.2f}){COLORS['end']}")
+                    should_use_market = True
                 
-        except Exception as e:
-            print(f"{COLORS['red']}Error getting current price: {str(e)}{COLORS['end']}")
-            return
-            
+            if should_use_market and price_deviation > RISK_MANAGEMENT['SLIPPAGE_TOLERANCE']:
+                print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds slippage tolerance ({RISK_MANAGEMENT['SLIPPAGE_TOLERANCE']*100}%){COLORS['end']}")
+                return
+        else:
+            should_use_market = True
+            if price_deviation > RISK_MANAGEMENT['SLIPPAGE_TOLERANCE']:
+                print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds slippage tolerance ({RISK_MANAGEMENT['SLIPPAGE_TOLERANCE']*100}%){COLORS['end']}")
+                return
+
         # Calculate position size using margin and leverage
         size_usd = margin * leverage
 

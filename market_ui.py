@@ -231,7 +231,7 @@ class MarketAnalyzerUI:
         margin_frame = ctk.CTkFrame(trading_frame)
         margin_frame.pack(fill="x", pady=5)
         ctk.CTkLabel(margin_frame, text="Margin ($):").pack(side="left", padx=5)
-        self.margin_var = ctk.StringVar(value="100")
+        self.margin_var = ctk.StringVar(value="50")
         self.margin_entry = ctk.CTkEntry(
             margin_frame, 
             width=80,
