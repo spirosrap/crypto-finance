@@ -304,17 +304,14 @@ class TechnicalAnalysis:
             # MACD requires at least slow period + signal period candles
             min_periods = self.config.macd_slow + self.config.macd_signal
             if len(prices) < min_periods:
-                self.logger.error(f"Insufficient data for MACD calculation. Need {min_periods} periods, got {len(prices)}")
-                raise InsufficientDataError(f"Need at least {min_periods} candles for MACD calculation")
+                self.logger.warning(f"Insufficient data for MACD calculation. Need {min_periods} periods, got {len(prices)}")
+                return 0.0, 0.0, 0.0  # Return neutral values instead of raising an error
             
             # Convert prices to numpy array and check for valid values
             prices_array = np.array(prices, dtype=float)
             if np.any(np.isnan(prices_array)) or np.any(np.isinf(prices_array)):
                 self.logger.error("Invalid price values detected in MACD calculation")
-                raise ValueError("Invalid price values in data")
-            
-            # Log some price statistics for debugging
-            self.logger.debug(f"Price range: {min(prices_array)} to {max(prices_array)}")
+                return 0.0, 0.0, 0.0  # Return neutral values instead of raising an error
             
             # Calculate EMAs
             ema_fast = talib.EMA(prices_array, timeperiod=self.config.macd_fast)
@@ -329,32 +326,24 @@ class TechnicalAnalysis:
             # Calculate histogram
             histogram = macd_line - signal_line
             
-            # Get the last valid values
-            macd_value = float(macd_line[-1])
-            signal_value = float(signal_line[-1])
-            histogram_value = float(histogram[-1])
-            
-            # Log raw values for debugging
-            self.logger.debug(f"Last price: {prices_array[-1]}")
-            self.logger.debug(f"Fast EMA: {ema_fast[-1]}")
-            self.logger.debug(f"Slow EMA: {ema_slow[-1]}")
-            self.logger.debug(f"Raw MACD values - Last 5 entries:")
-            self.logger.debug(f"MACD: {macd_line[-5:]}")
-            self.logger.debug(f"Signal: {signal_line[-5:]}")
-            self.logger.debug(f"Histogram: {histogram[-5:]}")
+            # Get the last valid values, handling NaN values
+            macd_value = float(macd_line[-1]) if not np.isnan(macd_line[-1]) else 0.0
+            signal_value = float(signal_line[-1]) if not np.isnan(signal_line[-1]) else 0.0
+            histogram_value = float(histogram[-1]) if not np.isnan(histogram[-1]) else 0.0
             
             # Scale the values to be more meaningful (as a percentage of price)
             price_scale = prices_array[-1] * 0.01  # 1% of current price as scale
-            macd_value = macd_value / price_scale
-            signal_value = signal_value / price_scale
-            histogram_value = histogram_value / price_scale
+            if price_scale != 0:  # Avoid division by zero
+                macd_value = macd_value / price_scale
+                signal_value = signal_value / price_scale
+                histogram_value = histogram_value / price_scale
             
             self.logger.info(f"Final MACD values - MACD: {macd_value:.2f}, Signal: {signal_value:.2f}, Histogram: {histogram_value:.2f}")
             return macd_value, signal_value, histogram_value
             
         except Exception as e:
             self.logger.error(f"Error computing MACD: {str(e)}")
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0  # Return neutral values on error
 
     def generate_macd_signal(self, macd: float, signal: float, histogram: float) -> str:
         if macd > signal or histogram >= 0:

@@ -43,6 +43,27 @@ VALID_PRODUCTS = [
     "SHIB-USDC"
 ]
 
+# Add these constants near the top of the file
+GRANULARITY_SETTINGS = {
+    'ONE_MINUTE': {'training_days': 10, 'feature_window': 100},
+    'FIVE_MINUTE': {'training_days': 60, 'feature_window': 200},
+    'FIFTEEN_MINUTE': {'training_days': 90, 'feature_window': 300},
+    'ONE_HOUR': {'training_days': 365*4, 'feature_window': 500},
+    'SIX_HOUR': {'training_days': 730, 'feature_window': 1000},
+    'ONE_DAY': {'training_days': 2000, 'feature_window': 2000},
+}
+
+# Minimum periods required for each indicator
+MIN_PERIODS = {
+    'RSI': 14,
+    'MACD': 35,  # 26 (slow) + 9 (signal)
+    'SMA': 30,
+    'BOLLINGER': 20,
+    'ATR': 14,
+    'STOCH': 14,
+    'MIN_TOTAL': 50  # Minimum total periods needed for all indicators
+}
+
 class PatternType(Enum):
     DOUBLE_TOP = "Double Top"
     DOUBLE_BOTTOM = "Double Bottom"
@@ -90,6 +111,7 @@ class MLModel:
     def __init__(self, model_path: Optional[str] = None):
         self.model = None
         self.scaler = StandardScaler()
+        self._is_fitted = False
         if model_path:
             self.load_model(model_path)
         else:
@@ -97,51 +119,84 @@ class MLModel:
             
     def prepare_features(self, candles: List[Dict]) -> np.ndarray:
         """Prepare features for ML model."""
-        df = pd.DataFrame(candles)
-        
-        # Technical indicators as features
-        features = []
-        prices = df['close'].values
-        volumes = df['volume'].values
-        
-        # Price-based features
-        features.append(np.gradient(prices))  # Price momentum
-        features.append(np.std(prices[-20:]))  # Volatility
-        
-        # Volume-based features
-        features.append(np.gradient(volumes))  # Volume momentum
-        features.append(volumes[-1] / np.mean(volumes[-20:]))  # Relative volume
-        
-        # Trend features
-        sma_20 = np.mean(prices[-20:])
-        sma_50 = np.mean(prices[-50:])
-        features.append((prices[-1] - sma_20) / sma_20)  # Price vs SMA20
-        features.append((sma_20 - sma_50) / sma_50)  # SMA20 vs SMA50
-        
-        return np.array(features).reshape(1, -1)
+        try:
+            if len(candles) < MIN_PERIODS['MIN_TOTAL']:  # Ensure minimum data points
+                return np.zeros((1, 6))  # Return zero features if insufficient data
+            
+            # Convert to numpy arrays first
+            prices = np.array([float(c['close']) for c in candles], dtype=np.float64)
+            volumes = np.array([float(c['volume']) for c in candles], dtype=np.float64)
+            
+            # Calculate features
+            features = []
+            
+            # Price momentum (safely calculated)
+            price_momentum = np.gradient(prices) if len(prices) > 1 else [0]
+            features.append(price_momentum[-1])  # Use last value
+            
+            # Volatility
+            features.append(np.std(prices[-20:]) if len(prices) >= 20 else 0)
+            
+            # Volume momentum
+            volume_momentum = np.gradient(volumes) if len(volumes) > 1 else [0]
+            features.append(volume_momentum[-1])  # Use last value
+            
+            # Relative volume
+            features.append(volumes[-1] / np.mean(volumes[-20:]) if len(volumes) >= 20 else 1.0)
+            
+            # Moving averages
+            sma_20 = np.mean(prices[-20:]) if len(prices) >= 20 else prices[-1]
+            sma_50 = np.mean(prices[-50:]) if len(prices) >= 50 else prices[-1]
+            
+            # Price vs SMA ratios
+            features.append((prices[-1] - sma_20) / sma_20 if sma_20 != 0 else 0)
+            features.append((sma_20 - sma_50) / sma_50 if sma_50 != 0 else 0)
+            
+            # Convert to numpy array and reshape
+            feature_array = np.array(features, dtype=np.float64).reshape(1, -1)
+            
+            return feature_array
+            
+        except Exception as e:
+            logging.error(f"Error preparing features: {str(e)}")
+            return np.zeros((1, 6))  # Return zero features on error
         
     def train(self, candles: List[Dict], labels: List[int]):
         """Train the ML model."""
         X = self.prepare_features(candles)
-        X_scaled = self.scaler.fit_transform(X)
+        self.scaler.fit(X)  # Fit the scaler
+        X_scaled = self.scaler.transform(X)
         self.model.fit(X_scaled, labels)
+        self._is_fitted = True
         
     def predict(self, candles: List[Dict]) -> float:
         """Predict market direction."""
-        if self.model is None:
+        if self.model is None or not self._is_fitted:
             return 0.0
             
         X = self.prepare_features(candles)
-        X_scaled = self.scaler.transform(X)
-        probabilities = self.model.predict_proba(X_scaled)[0]
         
-        # Convert probabilities to signal strength (-1 to 1)
-        return (probabilities[1] - probabilities[0]) * 2 - 1
+        # If scaler is not fitted, fit it with the current data
+        if not self._is_fitted:
+            self.scaler.fit(X)
+            self._is_fitted = True
+            
+        try:
+            X_scaled = self.scaler.transform(X)
+            probabilities = self.model.predict_proba(X_scaled)[0]
+            return (probabilities[1] - probabilities[0]) * 2 - 1
+        except Exception as e:
+            logging.error(f"Error in prediction: {str(e)}")
+            return 0.0
         
     def save_model(self, path: str):
         """Save model to file."""
         if self.model is not None:
-            joblib.dump({'model': self.model, 'scaler': self.scaler}, path)
+            joblib.dump({
+                'model': self.model,
+                'scaler': self.scaler,
+                'is_fitted': self._is_fitted
+            }, path)
             
     def load_model(self, path: str):
         """Load model from file."""
@@ -149,8 +204,12 @@ class MLModel:
             saved = joblib.load(path)
             self.model = saved['model']
             self.scaler = saved['scaler']
+            self._is_fitted = saved.get('is_fitted', False)
         except Exception as e:
             logging.error(f"Error loading ML model: {str(e)}")
+            self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+            self.scaler = StandardScaler()
+            self._is_fitted = False
 
 class SentimentAnalyzer:
     """Analyzes market sentiment from various sources."""
@@ -905,9 +964,37 @@ class MarketAnalyzer:
     def _safe_indicator_calculation(self, calc_func: callable, *args, **kwargs) -> Any:
         """Safely calculate an indicator with error handling."""
         try:
+            # Check if we have enough data for the calculation
+            if len(args) > 0 and isinstance(args[0], list):
+                candles = args[0]
+                
+                # Get minimum periods required for the specific indicator
+                if calc_func.__name__ == 'compute_macd':
+                    min_required = MIN_PERIODS['MACD']
+                elif calc_func.__name__ == 'compute_rsi':
+                    min_required = MIN_PERIODS['RSI']
+                else:
+                    min_required = MIN_PERIODS['MIN_TOTAL']
+                
+                if len(candles) < min_required:
+                    self.logger.warning(f"Insufficient data for {calc_func.__name__}. Need {min_required} periods, got {len(candles)}")
+                    
+                    # Return appropriate default values based on the indicator type
+                    if calc_func.__name__ == 'compute_macd':
+                        return 0.0, 0.0, 0.0
+                    elif calc_func.__name__ == 'compute_rsi':
+                        return 50.0  # Neutral RSI
+                    return None
+                    
             return calc_func(*args, **kwargs)
         except Exception as e:
             self.logger.error(f"Error calculating indicator {calc_func.__name__}: {str(e)}")
+            
+            # Return appropriate default values based on the indicator type
+            if calc_func.__name__ == 'compute_macd':
+                return 0.0, 0.0, 0.0
+            elif calc_func.__name__ == 'compute_rsi':
+                return 50.0  # Neutral RSI
             return None
 
     def _calculate_data_window(self, granularity: str) -> timedelta:
@@ -915,8 +1002,9 @@ class MarketAnalyzer:
         Calculate the optimal data window based on granularity.
         Returns a timedelta representing how far back to fetch data.
         """
-        # Define base number of data points we want (e.g., 500 points)
-        TARGET_DATA_POINTS = 500
+        # Define base number of data points we want
+        # We want at least 3x the MACD requirement to ensure enough data for proper signals
+        TARGET_DATA_POINTS = max(500, MIN_PERIODS['MACD'] * 3)
 
         # Map granularities to their duration in minutes
         GRANULARITY_MINUTES = {
@@ -931,8 +1019,8 @@ class MarketAnalyzer:
         # Calculate minutes needed for target data points
         minutes_needed = TARGET_DATA_POINTS * GRANULARITY_MINUTES[granularity]
         
-        # Convert to days (rounding up) and add a small buffer
-        days_needed = ceil(minutes_needed / (24 * 60)) + 1
+        # Convert to days (rounding up) and add a buffer for safety
+        days_needed = ceil(minutes_needed / (24 * 60)) + 2  # Add 2 days buffer
         
         # Add safety limits
         if days_needed < 7:  # Minimum 7 days
@@ -940,7 +1028,27 @@ class MarketAnalyzer:
         elif days_needed > 365:  # Maximum 365 days
             days_needed = 365
 
+        self.logger.info(f"Calculated data window: {days_needed} days for {granularity} granularity")
         return timedelta(days=days_needed)
+
+    def _validate_data(self, candles: List[Dict]) -> bool:
+        """Validate that we have enough data for all indicators."""
+        if not candles:
+            self.logger.error("No candle data available")
+            return False
+            
+        if len(candles) < MIN_PERIODS['MIN_TOTAL']:
+            self.logger.error(f"Insufficient data for analysis. Need {MIN_PERIODS['MIN_TOTAL']} candles, got {len(candles)}")
+            return False
+            
+        # Validate data structure
+        required_fields = {'close', 'high', 'low', 'volume', 'open', 'start'}
+        for candle in candles:
+            if not all(field in candle for field in required_fields):
+                self.logger.error("Invalid candle data structure")
+                return False
+                
+        return True
 
     @performance_monitor
     def get_market_signal(self) -> Dict:
@@ -960,6 +1068,20 @@ class MarketAnalyzer:
             try:
                 candles = self._get_historical_data_with_retry(start_time, end_time)
                 self.logger.info(f"Retrieved {len(candles)} candles from {start_time} to {end_time}")
+                
+                # Validate the data
+                if not self._validate_data(candles):
+                    return {
+                        'error': 'Invalid or insufficient data',
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'product_id': self.product_id,
+                        'signal': 'HOLD',
+                        'position': 'NEUTRAL',
+                        'confidence': 0.0,
+                        'current_price': float(candles[-1]['close']) if candles else 0.0,
+                        'recommendation': 'Waiting for sufficient valid data to generate signals'
+                    }
+                
             except Exception as e:
                 self.logger.error(f"Failed to get historical data: {str(e)}")
                 return self._generate_error_response()
