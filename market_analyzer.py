@@ -326,9 +326,10 @@ class MarketAnalyzer:
     using technical analysis indicators.
     """
 
-    def __init__(self, product_id: str = 'DOGE-USDC', candle_interval: str = 'ONE_HOUR'):
+    def __init__(self, product_id: str = 'DOGE-USDC', candle_interval: str = 'ONE_HOUR', force_retrain: bool = False):
         self.product_id = product_id
         self.candle_interval = candle_interval
+        self.force_retrain = force_retrain
         self.coinbase_service = CoinbaseService(API_KEY, API_SECRET)
         self.client = RESTClient(API_KEY, API_SECRET)
         self.historical_data = HistoricalData(self.client)
@@ -365,7 +366,8 @@ class MarketAnalyzer:
             self.coinbase_service,
             config=self.ta_config,
             candle_interval=candle_interval,
-            product_id=product_id
+            product_id=product_id,
+            force_retrain=force_retrain
         )
         
         # Initialize ML model
@@ -4101,6 +4103,12 @@ def parse_arguments():
         default='true',
         help='Enable/disable console output (default: true)'
     )
+
+    parser.add_argument(
+        '--force-retrain',
+        action='store_true',
+        help='Force retrain the ML and prediction models'
+    )
     
     return parser.parse_args()
 
@@ -4189,7 +4197,8 @@ def main():
 
     analyzer = MarketAnalyzer(
         product_id=args.product_id,
-        candle_interval=args.granularity
+        candle_interval=args.granularity,
+        force_retrain=args.force_retrain
     )
     
     if args.continuous:

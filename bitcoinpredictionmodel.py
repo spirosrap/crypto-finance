@@ -31,7 +31,7 @@ DAYS_TO_TEST_MODEL = {
 }
 
 class BitcoinPredictionModel:
-    def __init__(self, coinbase_service, product_id="BTC-USDC", granularity="ONE_HOUR"):
+    def __init__(self, coinbase_service, product_id="BTC-USDC", granularity="ONE_HOUR", force_retrain=False):
         self.model = None
         self.scaler_X = StandardScaler()  # Scaler for features
         self.scaler_y = StandardScaler()  # Scaler for target variable
@@ -46,6 +46,7 @@ class BitcoinPredictionModel:
         self.coinbase_service = coinbase_service
         self.product_id = product_id
         self.granularity = granularity
+        self.force_retrain = force_retrain
         self.days_to_test = DAYS_TO_TEST_MODEL.get(granularity, 180)  # Default to 180 days if granularity not found
         self.model_file = os.path.join('models', f'{product_id.lower().replace("-", "_")}_{granularity.lower()}_prediction_model.joblib')
         self.logger = logging.getLogger(__name__)
@@ -396,6 +397,11 @@ class BitcoinPredictionModel:
 
     def load_model(self):
         try:
+            if self.force_retrain:
+                self.logger.info(f"{self.product_id} prediction model force retrain requested.")
+                self.train()
+                return
+
             model_data = joblib.load(self.model_file)
             self.ensemble = model_data['ensemble']
             self.scaler_X = model_data['scaler_X']

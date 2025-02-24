@@ -100,13 +100,16 @@ class TechnicalAnalysis:
     and generating trading signals based on those indicators.
     """
 
-    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None, candle_interval: str = 'ONE_HOUR', product_id: str = 'BTC-USDC'):
+    def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None, candle_interval: str = 'ONE_HOUR', product_id: str = 'BTC-USDC', force_retrain: bool = False):
         """
         Initialize the TechnicalAnalysis class.
 
         Args:
             coinbase_service (CoinbaseService): An instance of the CoinbaseService class.
             config (Optional[TechnicalAnalysisConfig]): Configuration for the technical analysis.
+            candle_interval (str): The interval for candle data.
+            product_id (str): The product ID to analyze.
+            force_retrain (bool): Whether to force retrain the models.
         """
         self.coinbase_service = coinbase_service
         self.config = config or TechnicalAnalysisConfig()
@@ -117,10 +120,10 @@ class TechnicalAnalysis:
         self.product_id = product_id
         self.intervals_per_day = self.calculate_intervals_per_day()
         historical_data = HistoricalData(coinbase_service.client)
-        self.ml_signal = MLSignal(self.logger, historical_data, product_id=self.product_id, granularity=self.candle_interval)
+        self.ml_signal = MLSignal(self.logger, historical_data, product_id=self.product_id, granularity=self.candle_interval, force_retrain=force_retrain)
         self.ml_signal.load_model()
         self.scaler = StandardScaler()
-        self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service, product_id=self.product_id, granularity=self.candle_interval)
+        self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service, product_id=self.product_id, granularity=self.candle_interval, force_retrain=force_retrain)
         self.bitcoin_prediction_model.load_model()
         
         # Set product-specific parameters

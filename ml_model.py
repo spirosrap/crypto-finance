@@ -126,12 +126,13 @@ class StackingEnsemble(BaseEstimator, ClassifierMixin):
         self._classes = value
 
 class MLSignal:
-    def __init__(self, logger, historical_data, product_id='BTC-USDC', granularity='ONE_HOUR'):
+    def __init__(self, logger, historical_data, product_id='BTC-USDC', granularity='ONE_HOUR', force_retrain=False):
         self.logger = logger
         self.ml_model = None
         self.historical_data = historical_data
         self.product_id = product_id
         self.granularity = granularity
+        self.force_retrain = force_retrain
         self.settings = GRANULARITY_SETTINGS.get(granularity, GRANULARITY_SETTINGS['ONE_HOUR'])
         self.model_file = os.path.join('models', f'ml_model_{product_id.lower().replace("-", "_")}_{granularity.lower()}.joblib')
 
@@ -428,7 +429,13 @@ class MLSignal:
 
     def load_model(self):
         try:
-            self.ml_model = joblib.load(self.model_file)
+            if self.force_retrain:
+                self.logger.info(f"{self.product_id} ML model force retrain requested.")
+                self.train_model()
+                return
+
+            model_data = joblib.load(self.model_file)
+            self.ml_model = model_data
             model_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(self.model_file))
             if model_age > timedelta(days=10):  # Retrain every 10 days
                 self.logger.info(f"Model for {self.product_id} with granularity {self.granularity} is over 10 days old. Retraining...")
