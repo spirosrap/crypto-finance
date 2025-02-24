@@ -4071,6 +4071,12 @@ def parse_arguments():
         help='Enable/disable console output (default: true)'
     )
     
+    parser.add_argument(
+        '--force-retrain',
+        action='store_true',
+        help='Force ML model retraining regardless of schedule'
+    )
+    
     return parser.parse_args()
 
 def list_options():
@@ -4160,6 +4166,33 @@ def main():
         product_id=args.product_id,
         candle_interval=args.granularity
     )
+    
+    # Force model retraining if requested
+    if args.force_retrain:
+        print("\n🔄 Forcing ML model retraining...")
+        try:
+            # Get historical data for training
+            end_time = datetime.now(UTC)
+            start_time = end_time - timedelta(days=30)  # Use last 30 days of data
+            candles = analyzer._get_historical_data_with_retry(start_time, end_time)
+            
+            if candles:
+                # Prepare training data
+                formatted_candles = analyzer._format_candles(candles)
+                
+                # Create simple labels for training (1 for price increase, 0 for decrease)
+                labels = []
+                for i in range(1, len(formatted_candles)):
+                    labels.append(1 if formatted_candles[i]['close'] > formatted_candles[i-1]['close'] else 0)
+                
+                # Train the model
+                analyzer.ml_model.train(formatted_candles[:-1], labels)  # Use all but last candle for training
+                print("✅ Model retraining completed successfully")
+            else:
+                print("❌ Error: Could not retrieve historical data for training")
+        except Exception as e:
+            print(f"❌ Error during model retraining: {str(e)}")
+            logging.error(f"Error during model retraining: {str(e)}", exc_info=True)
     
     if args.continuous:
         run_continuous_monitoring(analyzer, args.interval)
