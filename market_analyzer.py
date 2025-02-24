@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, List, Any, Callable, Optional
 from datetime import datetime, timedelta, UTC
+from math import ceil
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis, SignalType, TechnicalAnalysisConfig
 from config import API_KEY, API_SECRET
@@ -22,9 +23,7 @@ VALID_GRANULARITIES = [
     "ONE_MINUTE",
     "FIVE_MINUTE",
     "FIFTEEN_MINUTE",
-    "THIRTY_MINUTE",
     "ONE_HOUR",
-    "TWO_HOUR",
     "SIX_HOUR",
     "ONE_DAY"
 ]
@@ -909,19 +908,51 @@ class MarketAnalyzer:
             self.logger.error(f"Error calculating indicator {calc_func.__name__}: {str(e)}")
             return None
 
+    def _calculate_data_window(self, granularity: str) -> timedelta:
+        """
+        Calculate the optimal data window based on granularity.
+        Returns a timedelta representing how far back to fetch data.
+        """
+        # Define base number of data points we want (e.g., 500 points)
+        TARGET_DATA_POINTS = 500
+
+        # Map granularities to their duration in minutes
+        GRANULARITY_MINUTES = {
+            "ONE_MINUTE": 1,
+            "FIVE_MINUTE": 5,
+            "FIFTEEN_MINUTE": 15,
+            "ONE_HOUR": 60,
+            "SIX_HOUR": 360,
+            "ONE_DAY": 1440
+        }
+
+        # Calculate minutes needed for target data points
+        minutes_needed = TARGET_DATA_POINTS * GRANULARITY_MINUTES[granularity]
+        
+        # Convert to days (rounding up) and add a small buffer
+        days_needed = ceil(minutes_needed / (24 * 60)) + 1
+        
+        # Add safety limits
+        if days_needed < 7:  # Minimum 7 days
+            days_needed = 7
+        elif days_needed > 365:  # Maximum 365 days
+            days_needed = 365
+
+        return timedelta(days=days_needed)
+
     @performance_monitor
     def get_market_signal(self) -> Dict:
         """
-        Analyze the market and generate a trading signal based on the last month of data.
-        
-        Returns:
-            Dict containing the signal analysis results
+        Analyze the market and generate a trading signal.
         """
         self.logger.info(f"Starting market analysis for {self.product_id}")
         try:
-            # Get candle data for the last month
+            # Calculate appropriate data window based on granularity
+            data_window = self._calculate_data_window(self.candle_interval)
+            
+            # Get candle data
             end_time = datetime.now(UTC)
-            start_time = end_time - timedelta(days=30)
+            start_time = end_time - data_window
             
             # Get historical data using HistoricalData class with retry
             try:
@@ -4171,9 +4202,10 @@ def main():
     if args.force_retrain:
         print("\n🔄 Forcing ML model retraining...")
         try:
-            # Get historical data for training
+            # Get historical data for training with dynamic window
             end_time = datetime.now(UTC)
-            start_time = end_time - timedelta(days=30)  # Use last 30 days of data
+            data_window = analyzer._calculate_data_window(args.granularity)
+            start_time = end_time - data_window
             candles = analyzer._get_historical_data_with_retry(start_time, end_time)
             
             if candles:
