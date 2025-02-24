@@ -300,7 +300,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         "Instruction 5: For a BUY signal, ensure that the STOP LOSS is strictly below the BUY AT price. "
         "If STOP LOSS >= BUY AT, set IS_VALID to False (Default True)."
     )
-        
+
     try:
         if use_hyperbolic:
             messages = [
@@ -518,8 +518,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             
         # Check R/R ratio threshold
         rr_ratio = float(rec_dict['R/R_RATIO'])
-        if rr_ratio < 0.99:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.99{COLORS['end']}")
+        if rr_ratio < 0.5:
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.5{COLORS['end']}")
             return
         
         # if rr_ratio > 10:
@@ -605,8 +605,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
                 return
 
         # Validate risk-reward ratio
-        if stop_loss_pct > profit_pct:
-            print(f"{COLORS['red']}Invalid risk-reward: Stop loss distance ({stop_loss_pct:.2f}%) is larger than take profit distance ({profit_pct:.2f}%){COLORS['end']}")
+        if stop_loss_pct > (profit_pct * 2):  # Allow up to 2:1 risk-reward (0.5 R/R ratio)
+            print(f"{COLORS['red']}Invalid risk-reward: Stop loss distance ({stop_loss_pct:.2f}%) is more than twice the take profit distance ({profit_pct:.2f}%){COLORS['end']}")
             return
 
         # Map product_id to perpetual format
