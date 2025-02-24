@@ -270,7 +270,7 @@ class MarketAnalyzerUI:
         ctk.CTkLabel(sidebar_container, text="Time Frame:", font=ctk.CTkFont(weight="bold")).pack(pady=(20,10))
         
         # Add granularity dropdown
-        granularities = ["ONE_MINUTE", "FIVE_MINUTE", "FIFTEEN_MINUTE", "THIRTY_MINUTE", "ONE_HOUR"]
+        granularities = ["ONE_HOUR", "THIRTY_MINUTE", "FIFTEEN_MINUTE", "FIVE_MINUTE", "ONE_MINUTE"]
         granularity_menu = ctk.CTkOptionMenu(
             sidebar_container,
             values=granularities,

@@ -64,3 +64,4 @@ prompt_market.log
 market_analysis.txt
 market_analyzer.log.1
 trade_btc_perp.log
+.env
