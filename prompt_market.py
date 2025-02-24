@@ -518,8 +518,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             
         # Check R/R ratio threshold
         rr_ratio = float(rec_dict['R/R_RATIO'])
-        if rr_ratio < 0.3:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.3{COLORS['end']}")
+        if rr_ratio < 0.99:
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.99{COLORS['end']}")
             return
         
         # if rr_ratio > 10:
