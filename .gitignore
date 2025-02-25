@@ -68,3 +68,13 @@ trade_btc_perp.log
 order_monitor.log
 monitor_orders.log
 output.txt
+.pylance
+check_python.py
+pyrightconfig.json
+test_imports.py
+.vscode/cursor_helper.py
+.vscode/init_terminal.sh
+.vscode/init.sh
+.vscode/run_python.sh
+.vscode/settings.json
+.vscode/terminal.sh
