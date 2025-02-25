@@ -17,6 +17,9 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 import joblib
+import signal
+import sys
+import os
 
 # Add valid choices for granularity and products
 VALID_GRANULARITIES = [
@@ -4051,6 +4054,99 @@ class AlertSystem:
             ]
         }
 
+def timeout_handler(signum, frame):
+    """Handle timeout signal by raising an exception."""
+    raise TimeoutError("Analysis timed out")
+
+def run_with_timeout(func, timeout_seconds, *args, **kwargs):
+    """Run a function with a timeout."""
+    # Set the timeout handler
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(timeout_seconds)
+    
+    try:
+        result = func(*args, **kwargs)
+        # Cancel the alarm if function completes before timeout
+        signal.alarm(0)
+        return result, False
+    except TimeoutError as e:
+        # Function timed out
+        signal.alarm(0)
+        logging.error(f"Function timed out after {timeout_seconds} seconds")
+        return None, True
+    except Exception as e:
+        # Other exception occurred
+        signal.alarm(0)
+        logging.error(f"Error in function: {str(e)}")
+        raise
+
+def restart_program():
+    """Restart the current program."""
+    logging.info("Restarting program due to timeout...")
+    python = sys.executable
+    os.execl(python, python, *sys.argv)
+
+def run_continuous_monitoring(analyzer: MarketAnalyzer, interval: int, timeout_seconds: int = None):
+    """Run the analyzer in continuous monitoring mode."""
+    print(f"\n🔄 Starting continuous market monitoring (interval: {interval}s)")
+    if timeout_seconds:
+        print(f"⏱️ Timeout set to {timeout_seconds} seconds per analysis")
+    print("Press Ctrl+C to stop monitoring\n")
+    
+    last_alert_time = datetime.now(UTC)
+    
+    try:
+        while True:
+            current_time = datetime.now(UTC)
+            
+            # Get market analysis with timeout if specified
+            if timeout_seconds:
+                analysis, timed_out = run_with_timeout(analyzer.get_market_signal, timeout_seconds)
+                if timed_out:
+                    print(f"\n⚠️ Analysis timed out after {timeout_seconds} seconds. Restarting...")
+                    restart_program()
+            else:
+                analysis = analyzer.get_market_signal()
+            
+            # Check for new alerts
+            alerts = analysis.get('alerts', {})
+            new_alerts = []
+            
+            # Collect new triggered alerts
+            if alerts.get('triggered_alerts'):
+                new_alerts.extend([
+                    alert for alert in alerts['triggered_alerts']
+                    if datetime.fromisoformat(alert['timestamp']) > last_alert_time
+                ])
+            
+            # Collect new automatic alerts
+            if alerts.get('auto_alerts'):
+                new_alerts.extend([
+                    alert for alert in alerts['auto_alerts']
+                    if datetime.fromisoformat(alert['timestamp']) > last_alert_time
+                ])
+            
+            # Display new alerts
+            if new_alerts:
+                print(f"\n====== 🔔 New Alerts at {current_time.strftime('%Y-%m-%d %H:%M:%S')} 🔔 ======")
+                for alert in new_alerts:
+                    priority_emoji = '🔴' if alert['priority'] == 'Critical' else \
+                                   '🟡' if alert['priority'] == 'High' else \
+                                   '🟢' if alert['priority'] == 'Medium' else '⚪'
+                    print(f"{priority_emoji} [{alert['priority']}] {alert['type']}: {alert['message']}")
+                print("=" * 60)
+                
+                last_alert_time = current_time
+            
+            # Sleep for the specified interval
+            time.sleep(interval)
+            
+    except KeyboardInterrupt:
+        print("\n\n⛔ Monitoring stopped by user")
+    except Exception as e:
+        print(f"\n❌ Error in continuous monitoring: {str(e)}")
+        logging.error(f"Error in continuous monitoring: {str(e)}", exc_info=True)
+
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Crypto Market Analyzer')
@@ -4110,6 +4206,19 @@ def parse_arguments():
         help='Force retrain the ML and prediction models'
     )
     
+    parser.add_argument(
+        '--timeout',
+        type=int,
+        default=60,  # 1 minute default
+        help='Timeout in seconds for each analysis run (default: 60)'
+    )
+    
+    parser.add_argument(
+        '--disable-timeout',
+        action='store_true',
+        help='Disable the timeout mechanism'
+    )
+    
     return parser.parse_args()
 
 def list_options():
@@ -4122,59 +4231,6 @@ def list_options():
     for granularity in VALID_GRANULARITIES:
         print(f"  - {granularity}")
     print()
-
-def run_continuous_monitoring(analyzer: MarketAnalyzer, interval: int):
-    """Run the analyzer in continuous monitoring mode."""
-    print(f"\n🔄 Starting continuous market monitoring (interval: {interval}s)")
-    print("Press Ctrl+C to stop monitoring\n")
-    
-    last_alert_time = datetime.now(UTC)
-    
-    try:
-        while True:
-            current_time = datetime.now(UTC)
-            
-            # Get market analysis
-            analysis = analyzer.get_market_signal()
-            
-            # Check for new alerts
-            alerts = analysis.get('alerts', {})
-            new_alerts = []
-            
-            # Collect new triggered alerts
-            if alerts.get('triggered_alerts'):
-                new_alerts.extend([
-                    alert for alert in alerts['triggered_alerts']
-                    if datetime.fromisoformat(alert['timestamp']) > last_alert_time
-                ])
-            
-            # Collect new automatic alerts
-            if alerts.get('auto_alerts'):
-                new_alerts.extend([
-                    alert for alert in alerts['auto_alerts']
-                    if datetime.fromisoformat(alert['timestamp']) > last_alert_time
-                ])
-            
-            # Display new alerts
-            if new_alerts:
-                print(f"\n====== 🔔 New Alerts at {current_time.strftime('%Y-%m-%d %H:%M:%S')} 🔔 ======")
-                for alert in new_alerts:
-                    priority_emoji = '🔴' if alert['priority'] == 'Critical' else \
-                                   '🟡' if alert['priority'] == 'High' else \
-                                   '🟢' if alert['priority'] == 'Medium' else '⚪'
-                    print(f"{priority_emoji} [{alert['priority']}] {alert['type']}: {alert['message']}")
-                print("=" * 60)
-                
-                last_alert_time = current_time
-            
-            # Sleep for the specified interval
-            time.sleep(interval)
-            
-    except KeyboardInterrupt:
-        print("\n\n⛔ Monitoring stopped by user")
-    except Exception as e:
-        print(f"\n❌ Error in continuous monitoring: {str(e)}")
-        logging.error(f"Error in continuous monitoring: {str(e)}", exc_info=True)
 
 def main():
     args = parse_arguments()
@@ -4201,15 +4257,33 @@ def main():
         force_retrain=args.force_retrain
     )
     
+    # Determine if timeout should be used
+    timeout_seconds = None if args.disable_timeout else args.timeout
+    
+    if timeout_seconds:
+        logging.info(f"Timeout set to {timeout_seconds} seconds")
+    
     if args.continuous:
-        run_continuous_monitoring(analyzer, args.interval)
+        run_continuous_monitoring(analyzer, args.interval, timeout_seconds)
     else:
         try:
-            # Single analysis run
-            analysis = analyzer.get_market_signal()
-            
-            # Get order book visualization
-            order_book = analyzer.visualize_order_book()
+            # Single analysis run with timeout if enabled
+            if timeout_seconds:
+                print(f"⏱️ Analysis timeout set to {timeout_seconds} seconds")
+                analysis, timed_out = run_with_timeout(analyzer.get_market_signal, timeout_seconds)
+                if timed_out:
+                    print(f"\n⚠️ Analysis timed out after {timeout_seconds} seconds. Restarting...")
+                    restart_program()
+                
+                # Get order book visualization with timeout
+                order_book, timed_out = run_with_timeout(analyzer.visualize_order_book, timeout_seconds)
+                if timed_out:
+                    print(f"\n⚠️ Order book visualization timed out after {timeout_seconds} seconds. Restarting...")
+                    restart_program()
+            else:
+                # Run without timeout
+                analysis = analyzer.get_market_signal()
+                order_book = analyzer.visualize_order_book()
             
             # Enhanced formatted output
             print("\n====== 📊 Comprehensive Market Analysis Report 📊 ======")

@@ -65,3 +65,6 @@ market_analysis.txt
 market_analyzer.log.1
 trade_btc_perp.log
 .env
+order_monitor.log
+monitor_orders.log
+output.txt

@@ -9,6 +9,7 @@ import time
 import re
 import os
 import traceback
+from coinbaseservice import CoinbaseService
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -323,6 +324,17 @@ class MarketAnalyzerUI:
         )
         self.close_positions_btn.pack(pady=(10,5), padx=10, fill="x")
         
+        # Check Orders button
+        self.check_orders_btn = ctk.CTkButton(
+            sidebar_container,
+            text="Check Open Orders",
+            command=self.check_open_orders_and_positions_ui,
+            fg_color="#4682B4",  # Steel Blue
+            hover_color="#36648B",  # Dark Steel Blue
+            height=32  # Reduced height
+        )
+        self.check_orders_btn.pack(pady=(5,10), padx=10, fill="x")
+        
         # Control buttons at bottom
         button_frame = ctk.CTkFrame(sidebar_container)
         button_frame.pack(fill="x", pady=5, padx=5)
@@ -403,6 +415,21 @@ class MarketAnalyzerUI:
         if current_time - self.last_train_time >= self.model_retrain_interval:
             self.queue.put(("append", "\nModel requires retraining before analysis.\n"))
             self.queue.put(("status", "Model needs retraining"))
+            return
+        
+        # Check for open orders or positions
+        has_open_orders, has_positions = self.check_for_open_orders_and_positions()
+        
+        if has_open_orders or has_positions:
+            # Log that we can't run analysis with open orders/positions
+            if has_open_orders and has_positions:
+                self.queue.put(("append", "\nCannot run analysis: Found open orders and positions. Please close them first.\n"))
+            elif has_open_orders:
+                self.queue.put(("append", "\nCannot run analysis: Found open orders. Please close them first.\n"))
+            else:
+                self.queue.put(("append", "\nCannot run analysis: Found open positions. Please close them first.\n"))
+            
+            self.queue.put(("status", "Cannot run with open orders/positions"))
             return
             
         # Disable button during analysis
@@ -720,6 +747,21 @@ class MarketAnalyzerUI:
     def place_quick_market_order(self, side: str):
         """Place a quick market order with configurable TP/SL percentage"""
         try:
+            # Check for open orders or positions
+            has_open_orders, has_positions = self.check_for_open_orders_and_positions()
+            
+            if has_open_orders or has_positions:
+                # Log that we can't place order with open orders/positions
+                if has_open_orders and has_positions:
+                    self.queue.put(("append", "\nCannot place order: Found open orders and positions. Please close them first.\n"))
+                elif has_open_orders:
+                    self.queue.put(("append", "\nCannot place order: Found open orders. Please close them first.\n"))
+                else:
+                    self.queue.put(("append", "\nCannot place order: Found open positions. Please close them first.\n"))
+                
+                self.queue.put(("status", "Cannot trade with open orders/positions"))
+                return
+            
             # Get current price
             product = self.product_var.get()
             perp_product_map = {
@@ -920,6 +962,22 @@ class MarketAnalyzerUI:
                     self.root.after(0, self.toggle_auto_trading)  # Stop auto-trading
                     return
                 
+                # Check for open orders or positions
+                has_open_orders, has_positions = self.check_for_open_orders_and_positions()
+                
+                if has_open_orders or has_positions:
+                    # Log that we're waiting for orders to close
+                    if has_open_orders and has_positions:
+                        self.queue.put(("append", "\nFound open orders and positions. Waiting for them to close before continuing...\n"))
+                    elif has_open_orders:
+                        self.queue.put(("append", "\nFound open orders. Waiting for them to close before continuing...\n"))
+                    else:
+                        self.queue.put(("append", "\nFound open positions. Waiting for them to close before continuing...\n"))
+                    
+                    # Wait for a shorter interval before checking again
+                    time.sleep(60)  # Check every minute
+                    continue
+                
                 # Get current granularity
                 granularity = self.granularity_var.get()
                 
@@ -1009,6 +1067,112 @@ class MarketAnalyzerUI:
             except Exception as e:
                 self.queue.put(("append", f"\nError in auto-trading loop: {str(e)}\n"))
                 time.sleep(60)  # Wait 1 minute before retrying on error
+
+    def get_truly_open_orders(self, service):
+        """
+        Get only truly open orders, filtering out any that are filled or canceled.
+        
+        Args:
+            service: CoinbaseService instance
+            
+        Returns:
+            list: List of truly open orders
+        """
+        try:
+            orders_response = service.client.list_orders(status='OPEN')
+            
+            # Extract orders from response
+            orders = []
+            
+            if isinstance(orders_response, dict):
+                if 'orders' in orders_response:
+                    orders = orders_response['orders']
+            else:
+                # Try to handle if orders_response is an object
+                if hasattr(orders_response, 'orders'):
+                    orders = orders_response.orders
+            
+            # Convert to list if needed
+            if orders and not isinstance(orders, list):
+                orders = [orders]
+            
+            # Filter out orders that are not actually open
+            active_orders = []
+            for order in orders:
+                # Extract status from order
+                status = None
+                if isinstance(order, dict):
+                    status = order.get('status')
+                elif hasattr(order, 'status'):
+                    status = order.status
+                
+                # Only count orders with status "OPEN"
+                if status and status.upper() == 'OPEN':
+                    active_orders.append(order)
+            
+            return active_orders
+        except Exception as e:
+            self.queue.put(("append", f"\nError getting open orders: {str(e)}\n"))
+            return []
+
+    def check_for_open_orders_and_positions(self):
+        """
+        Check if there are any open orders or positions.
+        
+        Returns:
+            tuple: (has_open_orders, has_positions)
+        """
+        try:
+            # Load API keys
+            api_key, api_secret = self.load_api_keys()
+            if not api_key or not api_secret:
+                self.queue.put(("append", "\nError: Failed to load API keys\n"))
+                return False, False
+            
+            # Initialize Coinbase service
+            service = CoinbaseService(api_key, api_secret)
+            
+            # Check for open orders using the more robust method
+            active_orders = self.get_truly_open_orders(service)
+            has_open_orders = len(active_orders) > 0
+            
+            if has_open_orders:
+                self.queue.put(("append", f"\nFound {len(active_orders)} truly open orders\n"))
+            
+            # Check for open positions
+            has_positions = False
+            try:
+                # Get portfolio info for INTX (perpetuals)
+                usd_balance, perp_position_size = service.get_portfolio_info(portfolio_type="INTX")
+                
+                has_positions = abs(perp_position_size) > 0
+                if has_positions:
+                    self.queue.put(("append", f"\nFound open position with size: {perp_position_size}\n"))
+            except Exception as e:
+                self.queue.put(("append", f"\nError checking for open positions: {str(e)}\n"))
+            
+            return has_open_orders, has_positions
+            
+        except Exception as e:
+            self.queue.put(("append", f"\nError checking for open orders and positions: {str(e)}\n"))
+            return False, False
+    
+    def load_api_keys(self):
+        """Load API keys from environment variables or config file."""
+        try:
+            # First try to import from config.py
+            from config import API_KEY_PERPS, API_SECRET_PERPS
+            return API_KEY_PERPS, API_SECRET_PERPS
+        except ImportError:
+            # If config.py doesn't exist, try environment variables
+            api_key = os.getenv('API_KEY_PERPS')
+            api_secret = os.getenv('API_SECRET_PERPS')
+            
+            if not (api_key and api_secret):
+                self.queue.put(("append", "\nAPI keys not found. Please set API_KEY_PERPS and API_SECRET_PERPS in config.py or as environment variables.\n"))
+                return None, None
+                
+            return api_key, api_secret
 
     def update_training_time(self, _=None):
         """Update the training time label based on selected granularity"""
@@ -1145,6 +1309,134 @@ class MarketAnalyzerUI:
         
         # Schedule next update
         self.root.after(60000, self.update_retrain_countdown)  # Update every minute
+
+    def check_open_orders_and_positions_ui(self):
+        """Check for open orders and positions and display the results in the UI"""
+        self.status_var.set("Checking for open orders and positions...")
+        self.check_orders_btn.configure(state="disabled")
+        
+        # Create and start thread
+        thread = threading.Thread(target=self._check_orders_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def _check_orders_thread(self):
+        """Thread function to check for open orders and positions"""
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            header = f"\n{'='*80}\n{timestamp} - Checking for open orders and positions\n{'='*80}\n"
+            self.queue.put(("append", header))
+            
+            # Load API keys and initialize service
+            api_key, api_secret = self.load_api_keys()
+            if not api_key or not api_secret:
+                self.queue.put(("append", "\nError: Failed to load API keys\n"))
+                return
+                
+            service = CoinbaseService(api_key, api_secret)
+            
+            # Get detailed order information
+            try:
+                orders_response = service.client.list_orders(status='OPEN')
+                
+                # Extract orders from response
+                orders = []
+                if isinstance(orders_response, dict):
+                    if 'orders' in orders_response:
+                        orders = orders_response['orders']
+                else:
+                    # Try to handle if orders_response is an object
+                    if hasattr(orders_response, 'orders'):
+                        orders = orders_response.orders
+                
+                # Convert to list if needed
+                if orders and not isinstance(orders, list):
+                    orders = [orders]
+                
+                # Display detailed order information
+                if orders:
+                    self.queue.put(("append", f"\nFound {len(orders)} orders in response\n"))
+                    self.queue.put(("append", "\nOrder details:\n"))
+                    
+                    # Count orders by status
+                    status_counts = {}
+                    
+                    for i, order in enumerate(orders[:10]):  # Limit to first 10 orders to avoid flooding
+                        # Extract order details
+                        order_id = None
+                        product_id = None
+                        status = None
+                        side = None
+                        
+                        if isinstance(order, dict):
+                            order_id = order.get('order_id', 'Unknown')
+                            product_id = order.get('product_id', 'Unknown')
+                            status = order.get('status', 'Unknown')
+                            side = order.get('side', 'Unknown')
+                        else:
+                            order_id = getattr(order, 'order_id', 'Unknown')
+                            product_id = getattr(order, 'product_id', 'Unknown')
+                            status = getattr(order, 'status', 'Unknown')
+                            side = getattr(order, 'side', 'Unknown')
+                        
+                        # Count by status
+                        if status not in status_counts:
+                            status_counts[status] = 0
+                        status_counts[status] += 1
+                        
+                        # Display order details
+                        self.queue.put(("append", f"Order {i+1}: ID={order_id[:8] if order_id and len(order_id) > 8 else order_id}..., Product={product_id}, Status={status}, Side={side}\n"))
+                    
+                    # Display status summary
+                    self.queue.put(("append", "\nOrder status summary:\n"))
+                    for status, count in status_counts.items():
+                        self.queue.put(("append", f"  {status}: {count} orders\n"))
+                    
+                    # Get truly open orders
+                    active_orders = self.get_truly_open_orders(service)
+                    self.queue.put(("append", f"\nTruly open orders: {len(active_orders)}\n"))
+                    
+                    # Display details of truly open orders
+                    if active_orders:
+                        self.queue.put(("append", "\nDetails of truly open orders:\n"))
+                        for i, order in enumerate(active_orders):
+                            # Extract order details
+                            order_id = None
+                            product_id = None
+                            side = None
+                            
+                            if isinstance(order, dict):
+                                order_id = order.get('order_id', 'Unknown')
+                                product_id = order.get('product_id', 'Unknown')
+                                side = order.get('side', 'Unknown')
+                            else:
+                                order_id = getattr(order, 'order_id', 'Unknown')
+                                product_id = getattr(order, 'product_id', 'Unknown')
+                                side = getattr(order, 'side', 'Unknown')
+                            
+                            # Display order details
+                            self.queue.put(("append", f"Open Order {i+1}: ID={order_id[:8] if order_id and len(order_id) > 8 else order_id}..., Product={product_id}, Side={side}\n"))
+                else:
+                    self.queue.put(("append", "\nNo orders found in response\n"))
+            except Exception as e:
+                self.queue.put(("append", f"\nError getting detailed order information: {str(e)}\n"))
+                self.queue.put(("append", f"Error details: {traceback.format_exc()}\n"))
+            
+            # Check for open orders and positions
+            has_open_orders, has_positions = self.check_for_open_orders_and_positions()
+            
+            if not has_open_orders and not has_positions:
+                self.queue.put(("append", "\nNo open orders or positions found. Ready to trade!\n"))
+            
+            # Re-enable button
+            self.queue.put(("status", "Ready"))
+            self.root.after(0, lambda: self.check_orders_btn.configure(state="normal"))
+            
+        except Exception as e:
+            self.queue.put(("append", f"\nError checking for open orders and positions: {str(e)}\n"))
+            self.queue.put(("append", f"Error details: {traceback.format_exc()}\n"))
+            self.queue.put(("status", "Error occurred"))
+            self.root.after(0, lambda: self.check_orders_btn.configure(state="normal"))
 
     def run(self):
         try:

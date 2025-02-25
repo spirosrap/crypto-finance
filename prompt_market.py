@@ -165,11 +165,11 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
                 ['python', 'market_analyzer.py', '--product_id', product_id, '--granularity', granularity, '--console_logging', 'false'],
                 text=True,
                 stderr=devnull,
-                timeout=300  # 5 minute timeout
+                timeout=60  # 1 minute timeout
             )
         return {'success': True, 'data': result}
     except subprocess.TimeoutExpired:
-        logging.error("Market analyzer timed out after 5 minutes")
+        logging.error("Market analyzer timed out after 1 minute")
         return {'success': False, 'error': "Analysis timed out"}
     except subprocess.CalledProcessError as e:
         logging.error(f"Market analyzer error: {str(e)}")
@@ -512,14 +512,14 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         prob = float(rec_dict['PROBABILITY'])
         
         # Check probability threshold
-        if prob <= 69:
-            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 69%{COLORS['end']}")
+        if prob <= 60:
+            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
             return
             
         # Check R/R ratio threshold
         rr_ratio = float(rec_dict['R/R_RATIO'])
-        if rr_ratio < 0.99:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.99{COLORS['end']}")
+        if rr_ratio < 0.5:
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.5{COLORS['end']}")
             return
         
         # if rr_ratio > 10:
@@ -726,7 +726,7 @@ def main():
     trading_group.add_argument('--leverage', type=int, default=20,
                         help='Leverage multiplier for trading (default: 20, range: 1-20)')
     trading_group.add_argument('--execute_trades', action='store_true',
-                        help='Execute trades automatically when probability exceeds 69%% and other conditions are met')
+                        help='Execute trades automatically when probability exceeds 60%% and other conditions are met')
     trading_group.add_argument('--limit_order', action='store_true',
                         help='Use limit orders instead of market orders, using the SELL_AT or BUY_AT price from the recommendation')
 
