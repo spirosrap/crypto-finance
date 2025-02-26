@@ -10,6 +10,7 @@ import re
 import os
 import traceback
 from coinbaseservice import CoinbaseService
+import select
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -80,6 +81,9 @@ class MarketAnalyzerUI:
         
         # Start price updates
         self.start_price_updates()
+        
+        # Monitor threads
+        self.monitor_threads()
 
     def create_gui(self):
         # Create main container that fills the window
@@ -494,16 +498,24 @@ class MarketAnalyzerUI:
             # Enable cancel button
             self.queue.put(("enable_cancel", None))
             
-            # Read output in real-time
+            # Read output in real-time with non-blocking I/O
             while True:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
+                reads = [process.stdout.fileno(), process.stderr.fileno()]
+                ret = select.select(reads, [], [])
+                for fd in ret[0]:
+                    if fd == process.stdout.fileno():
+                        output = process.stdout.readline()
+                        if output:
+                            self.queue.put(("append", output))
+                    if fd == process.stderr.fileno():
+                        error = process.stderr.readline()
+                        if error:
+                            self.queue.put(("append", f"\nErrors:\n{error}"))
+                if process.poll() is not None:
                     break
-                if output:
-                    self.queue.put(("append", output))
             
             # Get any remaining output
-            stdout, stderr = process.communicate()
+            stdout, stderr = process.communicate(timeout=10)
             if stdout:
                 self.queue.put(("append", stdout))
             if stderr:
@@ -836,16 +848,29 @@ class MarketAnalyzerUI:
                 '--no-confirm'
             ]
             
+            # Add limit price if limit orders are enabled
+            if self.limit_order_var.get():
+                # For limit orders, set entry slightly better than current price
+                limit_offset = 0.001  # 0.1% better entry
+                if side == "BUY":
+                    limit_price = round_to_precision(current_price * (1 - limit_offset), price_precision)
+                else:  # SELL
+                    limit_price = round_to_precision(current_price * (1 + limit_offset), price_precision)
+                cmd.extend(['--limit', str(limit_price)])
+            
             # Log the order details
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            header = f"\n{'='*80}\n{timestamp} - Placing {side} Market Order\n"
+            header = f"\n{'='*80}\n{timestamp} - Placing {side} {'Limit' if self.limit_order_var.get() else 'Market'} Order\n"
             header += f"Product: {perp_product}\n"
             header += f"Size: ${size_usd} (Margin: ${margin}, Leverage: {leverage}x)\n"
-            header += f"Entry: ~${current_price:.2f}\n"
+            header += f"Current Price: ${current_price:.2f}\n"
+            if self.limit_order_var.get():
+                header += f"Limit Entry: ${limit_price:.6f}\n"
             header += f"Take Profit: ${tp_price:.6f} ({'+' if side == 'BUY' else '-'}{tp_sl_pct*100:.1f}%)\n"
             header += f"Stop Loss: ${sl_price:.6f} ({'-' if side == 'BUY' else '+'}{tp_sl_pct*100:.1f}%)\n"
             header += f"{'='*80}\n"
             self.queue.put(("append", header))
+            self.queue.put(("status", f"Executing {side.lower()} {perp_product} trade..."))
             
             # Disable buttons during execution
             self.long_btn.configure(state="disabled")
@@ -880,13 +905,31 @@ class MarketAnalyzerUI:
             # Enable cancel button
             self.queue.put(("enable_cancel", None))
             
-            # Read output in real-time
+            # Read output in real-time with non-blocking I/O
             while True:
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
+                reads = [process.stdout.fileno(), process.stderr.fileno()]
+                ret = select.select(reads, [], [])
+                for fd in ret[0]:
+                    if fd == process.stdout.fileno():
+                        output = process.stdout.readline()
+                        if output:
+                            self.queue.put(("append", output))
+                            # Update status based on output
+                            if "Order placed successfully" in output:
+                                self.queue.put(("status", "Order placed successfully"))
+                            elif "Monitoring limit order" in output:
+                                self.queue.put(("status", "Monitoring limit order for fill..."))
+                            elif "Limit order filled" in output:
+                                self.queue.put(("status", "Limit order filled, placing bracket orders..."))
+                            elif "Bracket orders placed" in output:
+                                self.queue.put(("status", "Bracket orders placed successfully"))
+                    if fd == process.stderr.fileno():
+                        error = process.stderr.readline()
+                        if error:
+                            self.queue.put(("append", f"\nErrors:\n{error}"))
+                            self.queue.put(("status", "Error occurred"))
+                if process.poll() is not None:
                     break
-                if output:
-                    self.queue.put(("append", output))
             
             # Get any remaining output
             stdout, stderr = process.communicate()
@@ -894,6 +937,11 @@ class MarketAnalyzerUI:
                 self.queue.put(("append", stdout))
             if stderr:
                 self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                self.queue.put(("status", "Error occurred"))
+            
+            # If no error occurred and status hasn't been updated, set to Ready
+            if not stderr:
+                self.queue.put(("status", "Ready"))
             
             # Re-enable buttons
             self.long_btn.configure(state="normal")
@@ -904,7 +952,8 @@ class MarketAnalyzerUI:
             self.current_process = None
             
         except Exception as e:
-            self.queue.put(("append", f"\nError executing market order: {str(e)}"))
+            self.queue.put(("append", f"\nError executing order: {str(e)}\n"))
+            self.queue.put(("status", "Error occurred"))
             self.long_btn.configure(state="normal")
             self.short_btn.configure(state="normal")
             self.queue.put(("disable_cancel", None))
@@ -1445,6 +1494,19 @@ class MarketAnalyzerUI:
             self.queue.put(("append", f"Error details: {traceback.format_exc()}\n"))
             self.queue.put(("status", "Error occurred"))
             self.root.after(0, lambda: self.check_orders_btn.configure(state="normal"))
+
+    def monitor_threads(self):
+        """Monitor the health of threads and restart if necessary"""
+        if self.price_update_thread and not self.price_update_thread.is_alive():
+            self.queue.put(("append", "\nPrice update thread stopped unexpectedly. Restarting...\n"))
+            self.start_price_updates()
+        if self.auto_trading_thread and not self.auto_trading_thread.is_alive() and self.auto_trading:
+            self.queue.put(("append", "\nAuto-trading thread stopped unexpectedly. Restarting...\n"))
+            self.auto_trading_thread = threading.Thread(target=self._auto_trading_loop)
+            self.auto_trading_thread.daemon = True
+            self.auto_trading_thread.start()
+        # Schedule next check
+        self.root.after(60000, self.monitor_threads)  # Check every minute
 
     def run(self):
         try:

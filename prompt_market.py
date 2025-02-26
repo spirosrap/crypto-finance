@@ -523,11 +523,11 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             return
         
         if rr_ratio >= 2.52 and prob < 79:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 2.52 and probability {prob:.1f}% is below threshold of 79%{COLORS['end']}")
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 2.52 (for probability {prob:.1f}% below threshold of 79% and above 60%){COLORS['end']}")
             return
 
         if rr_ratio >= 5:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 5, even with good probability{COLORS['end']}")
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 5 (even with good probability above 79%){COLORS['end']}")
             return
             
         # Determine trade direction and prices
