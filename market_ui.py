@@ -932,6 +932,7 @@ class MarketAnalyzerUI:
             
             self.root.title(f"Crypto Market Analyzer [Auto-Trading ON - {granularity}]")
             self.queue.put(("append", f"\nAuto-trading started. Analyzing {granularity.lower().replace('_', ' ')} timeframe every {wait_minutes} minutes...\n"))
+            self.queue.put(("append", "When an order is placed, auto-trading will pause until the order/position is closed, then resume automatically.\n"))
             
             # Start the auto-trading thread
             self.auto_trading_thread = threading.Thread(target=self._auto_trading_loop)
@@ -1015,6 +1016,7 @@ class MarketAnalyzerUI:
                 
                 # Read output and check for trade execution
                 output = ""
+                order_placed = False
                 while True:
                     line = process.stdout.readline()
                     if line == '' and process.poll() is not None:
@@ -1025,9 +1027,8 @@ class MarketAnalyzerUI:
                         
                         # Check if a trade was executed
                         if "Order placed successfully" in line:
-                            self.queue.put(("append", "\nTrade executed! Auto-trading will now stop.\n"))
-                            self.root.after(0, self.toggle_auto_trading)  # Stop auto-trading
-                            return
+                            self.queue.put(("append", "\nTrade executed! Waiting for order to close before continuing auto-trading...\n"))
+                            order_placed = True
                 
                 # Get any remaining output
                 stdout, stderr = process.communicate()
@@ -1039,6 +1040,13 @@ class MarketAnalyzerUI:
                 
                 # Clear current process
                 self.current_process = None
+                
+                # If an order was placed, wait for a shorter interval before checking again
+                if order_placed:
+                    self.queue.put(("append", "\nChecking order status every minute until it's closed...\n"))
+                    # Wait for a shorter interval before checking again
+                    time.sleep(60)  # Check every minute
+                    continue
                 
                 # Wait based on granularity before next analysis
                 wait_minutes = {
