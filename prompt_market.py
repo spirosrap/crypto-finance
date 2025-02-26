@@ -522,8 +522,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.5{COLORS['end']}")
             return
         
-        if rr_ratio > 5:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 5{COLORS['end']}")
+        if rr_ratio >= 2.52:
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 2.52{COLORS['end']}")
             return
             
         # Determine trade direction and prices
