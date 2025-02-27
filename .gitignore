@@ -78,3 +78,4 @@ test_imports.py
 .vscode/run_python.sh
 .vscode/settings.json
 .vscode/terminal.sh
+trade_output.txt
