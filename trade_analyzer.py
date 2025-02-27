@@ -39,8 +39,8 @@ class TradingAnalyzer:
         # Create DataFrame
         df = pd.DataFrame(data, columns=headers)
         
-        # Convert timestamp to datetime
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'])
+        # Convert timestamp to datetime with explicit format
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%Y-%m-%d %H:%M:%S')
         
         # Convert numeric columns with percentage values
         percentage_columns = ['Probability', 'Outcome %']
