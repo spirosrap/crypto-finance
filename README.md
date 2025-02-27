@@ -1031,6 +1031,83 @@ python close_positions.py
 3. Closes each position with market orders
 4. Logs the entire process
 
+### trade_tracker.py
+A comprehensive trade tracking and analysis tool that monitors your trading activity in real-time.
+
+**Features:**
+- Real-time trade monitoring and logging
+- Performance metrics calculation
+- Trade history visualization
+- PnL tracking and analysis
+- Risk metrics computation
+- Export capabilities for trade data
+
+**Usage:**
+```bash
+python trade_tracker.py [--days DAYS] [--export FORMAT]
+```
+
+**Arguments:**
+- `--days`: Number of days of trade history to analyze (default: 30)
+- `--export`: Export format for trade data (CSV/JSON/XLSX)
+
+**Key Metrics Tracked:**
+- Win/Loss ratio
+- Average profit/loss
+- Maximum drawdown
+- Sharpe ratio
+- Risk-adjusted returns
+- Trade duration statistics
+
+### process_trade.py
+A utility script for processing and analyzing individual trades with detailed execution analysis.
+
+**Features:**
+- Trade execution quality analysis
+- Slippage calculation
+- Fee analysis and optimization
+- Entry/exit timing evaluation
+- Trade context recording
+- Market impact assessment
+
+**Usage:**
+```bash
+python process_trade.py --trade-id [TRADE_ID] [--detailed]
+```
+
+**Arguments:**
+- `--trade-id`: Specific trade ID to analyze
+- `--detailed`: Flag for detailed analysis output
+
+**Analysis Components:**
+1. Execution Quality
+   - Price improvement/slippage
+   - Fill rate analysis
+   - Timing efficiency
+
+2. Cost Analysis
+   - Fee breakdown
+   - Cost optimization suggestions
+   - Impact on overall PnL
+
+3. Market Context
+   - Market conditions during trade
+   - Volatility impact
+   - Liquidity analysis
+
+**Example Output:**
+```
+Trade Analysis Report - ID: 12345
+================================
+Entry Price: $44,500.00
+Exit Price: $45,200.00
+Slippage: 0.05%
+Execution Time: 1.2s
+Fee Impact: $12.50
+Market Impact: Minimal
+Timing Efficiency: 92%
+```
+
 **Note:** All trading scripts require valid Coinbase API credentials to be set in `config.py`. Exercise caution when using these scripts as they can affect your real trading positions and orders.
 
 ### Risk Warning

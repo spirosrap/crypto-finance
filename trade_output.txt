@@ -1,0 +1,41 @@
+====== 🤖 AI Trading Recommendation (2025-02-27 08:44:35) ======
+{"SELL AT": 86294.66, "BUY BACK AT": 85011.91, "STOP LOSS": 86813.38, "PROBABILITY": 70.2, "CONFIDENCE": "High", "R/R_RATIO": 2.48, "VOLUME_STRENGTH": "Moderate", "IS_VALID": true}
+Switching to market order: Limit price ($86294.66) is below or close to current price ($86327.75)
+
+Executing trade with parameters:
+Product: BTC-PERP-INTX
+Side: SELL
+Initial Margin: $50.0
+Leverage: 10x
+Position Size: $500.0
+Entry Price: $86294.66
+Current Price: $86327.75
+Price Deviation: 0.04%
+Take Profit: $85011.91 (1.49% / $7.43)
+Stop Loss: $86813.38 (0.60% / $3.01)
+Probability: 70.2%
+Signal Confidence: High
+R/R Ratio: 2.480
+Volume Strength: Moderate
+Order Type: Market
+Trade executed successfully!
+
+=== Order Summary ===
+Product: BTC-PERP-INTX
+Side: SELL
+Position Size: $500.0 (≈0.0058 BTC)
+Leverage: 10.0x
+Required Margin: $50.0
+Current Price: $86335.5
+Take Profit Price: $85011.0
+Stop Loss Price: $86813.0
+Order Type: Market
+
+Order placed successfully!
+
+Trade executed! Waiting for order to close before continuing auto-trading...
+Order ID: 71631950-52a1-4fbf-84c9-cce216301d55
+Take Profit Price: $85011.0
+Stop Loss Price: $86813.0
+
+STOP LOSS. 

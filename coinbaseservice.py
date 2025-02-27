@@ -1042,3 +1042,54 @@ class CoinbaseService:
             "status": "timeout",
             "message": f"Limit order not filled within {max_wait_time} seconds"
         }
+
+    def get_recent_trades(self):
+        """
+        Fetch recent trades from the account.
+        
+        Returns:
+            list: List of recent trades with their details
+        """
+        try:
+            # Get the INTX portfolio UUID
+            ports = self.client.get_portfolios()
+            portfolio_uuid = None
+            
+            for p in ports['portfolios']:
+                if p['type'] == "INTX":
+                    portfolio_uuid = p['uuid']
+                    break
+            
+            if not portfolio_uuid:
+                self.logger.error("Could not find INTX portfolio")
+                return []
+            
+            # Get recent trades using the orders endpoint
+            orders = self.client.list_orders(
+                portfolio_uuid=portfolio_uuid,
+                order_status="FILLED",  # Only get filled orders
+                limit=10  # Get last 10 trades
+            )
+            
+            # Convert orders to list of trade dictionaries
+            trades = []
+            
+            if isinstance(orders, dict) and 'orders' in orders:
+                for order in orders['orders']:
+                    # Extract the trade details
+                    trade_time = order.get('created_time') or order.get('completion_time')
+                    if trade_time:
+                        trade = {
+                            'trade_time': int(datetime.strptime(trade_time, "%Y-%m-%dT%H:%M:%S.%fZ").timestamp()),
+                            'side': order.get('side', ''),
+                            'price': order.get('average_filled_price') or order.get('limit_price'),
+                            'size': order.get('filled_size') or order.get('base_size'),
+                            'product_id': order.get('product_id', '')
+                        }
+                        trades.append(trade)
+            
+            return trades
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching recent trades: {str(e)}")
+            return []
