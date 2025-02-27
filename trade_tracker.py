@@ -75,16 +75,7 @@ class TradeTracker:
             outcome_pct = "0.00"
             
             # Look for success/failure indicators in the entire output
-            if "SUCCESS" in output_text.upper():
-                outcome = "SUCCESS"
-                # Calculate success percentage based on entry and take profit prices
-                if side == "LONG":
-                    pct_change = ((take_profit - entry_price) / entry_price) * 100
-                else:  # SHORT
-                    pct_change = ((entry_price - take_profit) / entry_price) * 100
-                # Apply leverage
-                outcome_pct = f"{pct_change * float(leverage):.2f}"
-            elif "STOP LOSS HIT" in output_text.upper():
+            if "STOP LOSS HIT" in output_text.upper():
                 outcome = "STOP LOSS"
                 # Calculate loss percentage based on entry and stop loss prices
                 if side == "LONG":
@@ -92,6 +83,15 @@ class TradeTracker:
                 else:  # SHORT
                     pct_change = ((entry_price - stop_loss) / entry_price) * 100
                 # Apply leverage and make it negative for losses
+                outcome_pct = f"{pct_change * float(leverage):.2f}"
+            elif "SUCCESS" in output_text.upper():
+                outcome = "SUCCESS"
+                # Calculate success percentage based on entry and take profit prices
+                if side == "LONG":
+                    pct_change = ((take_profit - entry_price) / entry_price) * 100
+                else:  # SHORT
+                    pct_change = ((entry_price - take_profit) / entry_price) * 100
+                # Apply leverage
                 outcome_pct = f"{pct_change * float(leverage):.2f}"
             elif "CLOSED" in output_text.upper():
                 outcome = "CLOSED"
