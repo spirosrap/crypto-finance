@@ -1285,3 +1285,32 @@ From 2024-02-01 to 2024-02-15: -15.40%
 2. **Risk Assessment**: Evaluate risk-adjusted returns and identify potential areas of improvement.
 3. **Pattern Recognition**: Identify periods of strong performance and challenging drawdowns.
 4. **Strategy Optimization**: Use metrics to refine your trading approach and risk management.
+
+# Markdown to CSV Converter
+
+This simple Python script converts a markdown table to CSV format.
+
+## Setup
+
+1. Install the required dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+1. Place your markdown file (automated_trades.md) in the same directory as the script
+2. Run the script:
+```bash
+python convert_to_csv.py
+```
+
+The script will generate `automated_trades.csv` in the same directory.
+
+## Input Format
+
+The script expects a markdown table with the following format:
+- Table should start with a header row
+- Columns should be separated by pipes (|)
+- The first line of content should be the header
+- The second line should be the markdown separator (|----|)
