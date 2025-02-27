@@ -1217,3 +1217,71 @@ The UI includes several risk management features:
    ```bash
    python market_ui.py
    ```
+
+# Trading Performance Analyzer
+
+The Trading Performance Analyzer (`trade_analyzer.py`) is a powerful tool for evaluating trading performance metrics from your trading history. It processes trading data stored in markdown format and generates comprehensive performance reports.
+
+### Features
+
+- **Basic Trading Metrics**
+  - Total number of trades
+  - Win rate and win/loss ratio
+  - Average profit per trade
+  - Total profit/loss
+
+- **Risk-Adjusted Returns**
+  - Sharpe ratio (annualized)
+  - Maximum drawdown analysis
+  - Standard deviation of returns
+  - Risk/Reward ratio statistics
+
+- **Risk Management Metrics**
+  - Average trade probability
+  - Average leverage used
+  - Drawdown period analysis
+  - Position sizing statistics
+
+### Usage
+
+1. Prepare your trading data in markdown format:
+```markdown
+| No. | Timestamp | SIDE | ENTRY | Take Profit | Stop Loss | Probability | Confidence | R/R Ratio | Volume Strength | Outcome | Outcome % | Leverage | Margin |
+|-----|-----------|------|-------|-------------|-----------|-------------|------------|------------|-----------------|----------|-----------|----------|---------|
+| 1   | 2024-03-21| LONG | 65000 | 66000      | 64000    | 75%        | Strong     | 2.0       | High           | SUCCESS  | 1.5      | 10x      | 100    |
+```
+
+2. Run the analyzer:
+```bash
+python trade_analyzer.py
+```
+
+### Sample Output
+```
+=== Trading Performance Report ===
+
+Basic Metrics:
+Total Trades: 50
+Win Rate: 65.00%
+Win/Loss Ratio: 1.86
+Average Profit per Trade: 2.45%
+Total Profit: 122.50%
+
+Risk Metrics:
+Sharpe Ratio (Annualized): 3.25
+Maximum Drawdown: -15.40%
+Standard Deviation: 4.82%
+Average R/R Ratio: 2.15
+Average Trade Probability: 72.50%
+Average Leverage: 10.00x
+
+Largest Drawdown Periods:
+From 2024-02-01 to 2024-02-15: -15.40%
+```
+
+### Key Benefits
+
+1. **Performance Tracking**: Monitor your trading strategy's effectiveness through key performance indicators.
+2. **Risk Assessment**: Evaluate risk-adjusted returns and identify potential areas of improvement.
+3. **Pattern Recognition**: Identify periods of strong performance and challenging drawdowns.
+4. **Strategy Optimization**: Use metrics to refine your trading approach and risk management.

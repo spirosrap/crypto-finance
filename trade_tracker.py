@@ -18,8 +18,8 @@ class TradeTracker:
         if not os.path.exists(self.trades_file):
             headers = """# AI Trading Recommendations
 
-| Timestamp           | SIDE   | ENTRY    | Take Profit | Stop Loss  | Probability | Confidence | R/R Ratio | Volume Strength | Outcome  | Outcome % | Leverage | Margin |
-|:-------------------|:-------|:---------|:------------|:-----------|:------------|:-----------|:----------|:----------------|:---------|:----------|:---------|:-------|"""
+| No. | Timestamp           | SIDE   | ENTRY    | Take Profit | Stop Loss  | Probability | Confidence | R/R Ratio | Volume Strength | Outcome  | Outcome % | Leverage | Margin |
+|-----|:-------------------|:-------|:---------|:------------|:-----------|:------------|:-----------|:----------|:----------------|:---------|:----------|:---------|:-------|"""
             with open(self.trades_file, 'w') as file:
                 file.write(headers)
 
@@ -142,11 +142,25 @@ class TradeTracker:
     def format_trade_entry(self, trade_info):
         """Format a trade into the markdown table format"""
         try:
-            # Format the entry with exact spacing
-            fmt = "| {:<19} | {:<5} | {:<9.2f} | {:<11.2f} | {:<10.2f} | {:>4.1f}%       | {:<8}     |{:>5.2f}      | {:<8}        | {:<9}  | {:<9} | {}x      | {:<d}      |"
+            # Get the last trade number from the file
+            last_trade_num = 0
+            with open(self.trades_file, 'r') as file:
+                lines = file.readlines()
+                for line in lines:
+                    if '|' in line:
+                        # Try to extract trade number from each line
+                        try:
+                            num = int(line.split('|')[1].strip())
+                            last_trade_num = max(last_trade_num, num)
+                        except (ValueError, IndexError):
+                            continue
+            
+            # Format the entry with exact spacing including the trade number
+            fmt = "| {:<3} | {:<19} | {:<5} | {:<9.2f} | {:<11.2f} | {:<10.2f} | {:>4.1f}%       | {:<8}     |{:>5.2f}      | {:<8}        | {:<9}  | {:<9} | {}x      | {:<d}      |"
             
             # Format the entry using the format string
             entry = fmt.format(
+                last_trade_num + 1,  # Next trade number
                 trade_info['timestamp'],
                 trade_info['side'],
                 trade_info['entry_price'],
