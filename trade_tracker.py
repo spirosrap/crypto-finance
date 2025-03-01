@@ -156,7 +156,7 @@ class TradeTracker:
                             continue
             
             # Format the entry with exact spacing including the trade number
-            fmt = "| {:<3} | {:<19} | {:<5} | {:<9.2f} | {:<11.2f} | {:<10.2f} | {:>4.1f}%       | {:<8}     |{:>5.2f}      | {:<8}        | {:<9}  | {:<9} | {}x      | {:>6d} |"
+            fmt = "| {:<3} | {:<19} | {:<5} | {:<9.2f} | {:<11.2f} | {:<10.2f} | {:>4.1f}%       | {:<8}     |{:>5.2f}      | {:<8}        | {:<9}  | {:<9} | {}x      | {:<6d}  |"
             
             # Format the entry using the format string
             entry = fmt.format(

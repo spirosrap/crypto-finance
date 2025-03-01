@@ -11,52 +11,34 @@ class TradingAnalyzer:
         self.risk_free_rate = 0.0525  # 5.25% annual risk-free rate
         
     def _load_data(self) -> pd.DataFrame:
-        """Load trading data from markdown file."""
-        # Read all lines from the file
-        with open(self.file_path, 'r') as f:
-            lines = f.readlines()
-        
-        # Find the table header line (contains '|')
-        header_idx = 0
-        for i, line in enumerate(lines):
-            if '|' in line and '---' not in line and 'No.' in line:
-                header_idx = i
-                break
-        
-        # Skip the header and separator lines, keep only data rows
-        data_lines = [line.strip() for line in lines[header_idx:] if '|' in line and '---' not in line]
-        
-        # Parse the header
-        headers = [col.strip() for col in data_lines[0].split('|')[1:-1]]
-        
-        # Parse the data rows
-        data = []
-        for line in data_lines[1:]:
-            row = [col.strip() for col in line.split('|')[1:-1]]
-            if len(row) == len(headers):  # Only include rows that match header length
-                data.append(row)
-        
-        # Create DataFrame
-        df = pd.DataFrame(data, columns=headers)
+        """Load trading data from CSV file."""
+        # Read the CSV file
+        df = pd.read_csv(self.file_path)
         
         # Convert timestamp to datetime with explicit format
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%Y-%m-%d %H:%M:%S')
         
-        # Convert numeric columns with percentage values
+        # Convert percentage columns
         percentage_columns = ['Probability', 'Outcome %']
         for col in percentage_columns:
-            df[col] = pd.to_numeric(df[col].str.replace('%', '').str.strip(), errors='coerce')
+            if df[col].dtype == 'object':  # Only apply string operations if column contains strings
+                df[col] = pd.to_numeric(df[col].str.replace('%', '').str.strip(), errors='coerce')
+            else:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Convert other numeric columns
+        # Convert numeric columns
         numeric_columns = ['ENTRY', 'Take Profit', 'Stop Loss', 'R/R Ratio']
         for col in numeric_columns:
-            df[col] = pd.to_numeric(df[col].str.strip(), errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # Handle Leverage column specifically (remove 'x' if present)
-        df['Leverage'] = pd.to_numeric(df['Leverage'].str.replace('x', '').str.strip(), errors='coerce')
+        if df['Leverage'].dtype == 'object':  # Only apply string operations if column contains strings
+            df['Leverage'] = pd.to_numeric(df['Leverage'].str.replace('x', '').str.strip(), errors='coerce')
+        else:
+            df['Leverage'] = pd.to_numeric(df['Leverage'], errors='coerce')
         
         # Handle Margin column
-        df['Margin'] = pd.to_numeric(df['Margin'].str.strip(), errors='coerce')
+        df['Margin'] = pd.to_numeric(df['Margin'], errors='coerce')
         
         return df
     
@@ -167,5 +149,5 @@ class TradingAnalyzer:
             print(f"From {period['start_date'].date()} to {period['end_date'].date()}: {period['drawdown']:.2f}%")
 
 if __name__ == "__main__":
-    analyzer = TradingAnalyzer("automated_trades.md")
+    analyzer = TradingAnalyzer("automated_trades.csv")
     analyzer.generate_report() 
