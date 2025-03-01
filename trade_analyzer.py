@@ -64,6 +64,66 @@ class TradingAnalyzer:
             'Total Profit (%)': total_profit
         }
     
+    def calculate_dollar_profits(self) -> dict:
+        """Calculate profits in dollar terms using margin, leverage, and outcome percentage."""
+        # Calculate dollar profit for each trade
+        self.df['Dollar Profit'] = self.df.apply(
+            lambda row: row['Margin'] * (row['Outcome %'] / 100), axis=1
+        )
+        
+        # Calculate total dollar profit
+        total_dollar_profit = self.df['Dollar Profit'].sum()
+        
+        # Calculate average dollar profit per trade
+        avg_dollar_profit = self.df['Dollar Profit'].mean()
+        
+        # Calculate dollar profit for winning trades
+        winning_trades_profit = self.df[self.df['Outcome'] == 'SUCCESS']['Dollar Profit'].sum()
+        
+        # Calculate dollar loss for losing trades
+        losing_trades_loss = self.df[self.df['Outcome'] == 'STOP LOSS']['Dollar Profit'].sum()
+        
+        # Calculate profit factor (total profit / total loss)
+        profit_factor = abs(winning_trades_profit / losing_trades_loss) if losing_trades_loss != 0 else float('inf')
+        
+        return {
+            'Total Dollar Profit': total_dollar_profit,
+            'Average Dollar Profit per Trade': avg_dollar_profit,
+            'Winning Trades Dollar Profit': winning_trades_profit,
+            'Losing Trades Dollar Loss': losing_trades_loss,
+            'Profit Factor': profit_factor
+        }
+    
+    def calculate_leveraged_dollar_profits(self) -> dict:
+        """Calculate profits in dollar terms considering margin, leverage, and outcome percentage."""
+        # Calculate leveraged dollar profit for each trade
+        self.df['Leveraged Dollar Profit'] = self.df.apply(
+            lambda row: row['Margin'] * row['Leverage'] * (row['Outcome %'] / 100), axis=1
+        )
+        
+        # Calculate total leveraged dollar profit
+        total_leveraged_profit = self.df['Leveraged Dollar Profit'].sum()
+        
+        # Calculate average leveraged dollar profit per trade
+        avg_leveraged_profit = self.df['Leveraged Dollar Profit'].mean()
+        
+        # Calculate leveraged dollar profit for winning trades
+        winning_leveraged_profit = self.df[self.df['Outcome'] == 'SUCCESS']['Leveraged Dollar Profit'].sum()
+        
+        # Calculate leveraged dollar loss for losing trades
+        losing_leveraged_loss = self.df[self.df['Outcome'] == 'STOP LOSS']['Leveraged Dollar Profit'].sum()
+        
+        # Calculate leveraged profit factor
+        leveraged_profit_factor = abs(winning_leveraged_profit / losing_leveraged_loss) if losing_leveraged_loss != 0 else float('inf')
+        
+        return {
+            'Total Leveraged Dollar Profit': total_leveraged_profit,
+            'Average Leveraged Dollar Profit per Trade': avg_leveraged_profit,
+            'Winning Trades Leveraged Profit': winning_leveraged_profit,
+            'Losing Trades Leveraged Loss': losing_leveraged_loss,
+            'Leveraged Profit Factor': leveraged_profit_factor
+        }
+    
     def calculate_sharpe_ratio(self) -> float:
         """Calculate annualized Sharpe ratio."""
         returns = self.df['Outcome %'] / 100  # Convert percentage to decimal
@@ -120,6 +180,8 @@ class TradingAnalyzer:
     def generate_report(self) -> None:
         """Generate and print a comprehensive trading report."""
         basic_metrics = self.calculate_basic_metrics()
+        dollar_profits = self.calculate_dollar_profits()
+        leveraged_profits = self.calculate_leveraged_dollar_profits()
         sharpe_ratio = self.calculate_sharpe_ratio()
         max_drawdown, drawdown_periods = self.calculate_max_drawdown()
         risk_metrics = self.calculate_risk_metrics()
@@ -132,6 +194,20 @@ class TradingAnalyzer:
         print(f"Win/Loss Ratio: {basic_metrics['Win/Loss Ratio']:.2f}")
         print(f"Average Profit per Trade: {basic_metrics['Average Profit per Trade (%)']:.2f}%")
         print(f"Total Profit: {basic_metrics['Total Profit (%)']:.2f}%")
+        
+        print("\nDollar Profit Metrics (Without Leverage):")
+        print(f"Total Dollar Profit: ${dollar_profits['Total Dollar Profit']:.2f}")
+        print(f"Average Dollar Profit per Trade: ${dollar_profits['Average Dollar Profit per Trade']:.2f}")
+        print(f"Winning Trades Dollar Profit: ${dollar_profits['Winning Trades Dollar Profit']:.2f}")
+        print(f"Losing Trades Dollar Loss: ${dollar_profits['Losing Trades Dollar Loss']:.2f}")
+        print(f"Profit Factor (Gross Profit / Gross Loss): {dollar_profits['Profit Factor']:.2f}")
+        
+        print("\nLeveraged Dollar Profit Metrics:")
+        print(f"Total Leveraged Dollar Profit: ${leveraged_profits['Total Leveraged Dollar Profit']:.2f}")
+        print(f"Average Leveraged Dollar Profit per Trade: ${leveraged_profits['Average Leveraged Dollar Profit per Trade']:.2f}")
+        print(f"Winning Trades Leveraged Profit: ${leveraged_profits['Winning Trades Leveraged Profit']:.2f}")
+        print(f"Losing Trades Leveraged Loss: ${leveraged_profits['Losing Trades Leveraged Loss']:.2f}")
+        print(f"Leveraged Profit Factor: {leveraged_profits['Leveraged Profit Factor']:.2f}")
         
         print("\nRisk Metrics:")
         print(f"Sharpe Ratio (Annualized): {sharpe_ratio:.2f}")
