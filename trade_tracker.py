@@ -10,18 +10,16 @@ from config import API_KEY_PERPS, API_SECRET_PERPS
 class TradeTracker:
     def __init__(self, api_key, api_secret):
         self.coinbase_service = CoinbaseService(api_key, api_secret)
-        self.trades_file = "automated_trades.md"
+        self.trades_file = "automated_trades.csv"
         self.ensure_trades_file_exists()
 
     def ensure_trades_file_exists(self):
-        """Create the trades file with headers if it doesn't exist"""
+        """Create the trades CSV file with headers if it doesn't exist"""
         if not os.path.exists(self.trades_file):
-            headers = """# AI Trading Recommendations
-
-| No. | Timestamp           | SIDE   | ENTRY    | Take Profit | Stop Loss  | Probability | Confidence | R/R Ratio | Volume Strength | Outcome  | Outcome % | Leverage | Margin |
-|-----|:-------------------|:-------|:---------|:------------|:-----------|:------------|:-----------|:----------|:----------------|:---------|:----------|:---------|:-------|"""
-            with open(self.trades_file, 'w') as file:
-                file.write(headers)
+            headers = ["No.", "Timestamp", "SIDE", "ENTRY", "Take Profit", "Stop Loss", 
+                      "Probability", "Confidence", "R/R Ratio", "Volume Strength", 
+                      "Outcome", "Outcome %", "Leverage", "Margin"]
+            pd.DataFrame(columns=headers).to_csv(self.trades_file, index=False)
 
     def parse_trade_execution(self, output_text):
         """Parse the trade execution output text and extract relevant information"""
@@ -67,7 +65,7 @@ class TradeTracker:
             tp_match = re.search(r'Take Profit Price: \$(\d+\.?\d*)', output_text)
             sl_match = re.search(r'Stop Loss Price: \$(\d+\.?\d*)', output_text)
             
-            take_profit = float(tp_match.group(1)) if tp_match else float(trade_data.get("SELL BACK AT" if side == "BUY" else "BUY BACK AT", 0))
+            take_profit = float(tp_match.group(1)) if tp_match else float(trade_data.get("SELL BACK AT" if side == "LONG" else "BUY BACK AT", 0))
             stop_loss = float(sl_match.group(1)) if sl_match else float(trade_data.get("STOP LOSS", 0))
             
             # Extract outcome information if available
@@ -139,66 +137,80 @@ class TradeTracker:
             print(f"Error parsing trade execution: {str(e)}")
             return None
 
-    def format_trade_entry(self, trade_info):
-        """Format a trade into the markdown table format"""
+    def get_next_trade_number(self):
+        """Get the next trade number from the CSV file"""
         try:
-            # Get the last trade number from the file
-            last_trade_num = 0
-            with open(self.trades_file, 'r') as file:
-                lines = file.readlines()
-                for line in lines:
-                    if '|' in line:
-                        # Try to extract trade number from each line
-                        try:
-                            num = int(line.split('|')[1].strip())
-                            last_trade_num = max(last_trade_num, num)
-                        except (ValueError, IndexError):
-                            continue
-            
-            # Format the entry with exact spacing including the trade number
-            fmt = "| {:<3} | {:<19} | {:<5} | {:<9.2f} | {:<11.2f} | {:<10.2f} | {:>4.1f}%       | {:<8}     |{:>5.2f}      | {:<8}        | {:<9}  | {:<9} | {}x      | {:<6d}  |"
-            
-            # Format the entry using the format string
-            entry = fmt.format(
-                last_trade_num + 1,  # Next trade number
-                trade_info['timestamp'],
-                trade_info['side'],
-                trade_info['entry_price'],
-                trade_info['take_profit'],
-                trade_info['stop_loss'],
-                trade_info['probability'],
-                trade_info['confidence'],
-                trade_info['rr_ratio'],
-                trade_info['volume_strength'],
-                trade_info['outcome'],
-                trade_info['outcome_pct'],
-                trade_info['leverage'],
-                trade_info['margin']
-            )
-            
-            return entry
-            
+            if os.path.exists(self.trades_file):
+                df = pd.read_csv(self.trades_file)
+                if not df.empty and 'No.' in df.columns:
+                    return df['No.'].max() + 1
+            return 1
         except Exception as e:
-            print(f"Error formatting trade entry: {str(e)}")
-            return None
+            print(f"Error getting next trade number: {str(e)}")
+            return 1
 
-    def add_trade_to_file(self, trade_entry):
-        """Add a trade entry to the markdown file"""
+    def add_trade_to_csv(self, trade_info):
+        """Add a trade entry to the CSV file"""
         try:
             # Ensure file exists
             self.ensure_trades_file_exists()
             
-            # Append the new trade entry to the end of the file
-            with open(self.trades_file, 'a') as file:
-                file.write('\n' + trade_entry)
-                
+            # Check if a trade with the same timestamp and entry price already exists
+            if os.path.exists(self.trades_file) and os.path.getsize(self.trades_file) > 0:
+                df = pd.read_csv(self.trades_file)
+                # Check for duplicates based on timestamp and entry price
+                duplicate = df[(df['Timestamp'] == trade_info['timestamp']) & 
+                               (df['ENTRY'] == trade_info['entry_price'])]
+                if not duplicate.empty:
+                    print(f"Trade from {trade_info['timestamp']} with entry price {trade_info['entry_price']} already exists. Skipping.")
+                    return True
+            
+            # Get the next trade number
+            next_trade_num = self.get_next_trade_number()
+            
+            # Format probability as percentage with % symbol
+            probability_str = f"{trade_info['probability']}%"
+            
+            # Format leverage with 'x' suffix
+            leverage_str = f"{trade_info['leverage']}x"
+            
+            # Create a new row for the CSV
+            new_row = {
+                'No.': next_trade_num,
+                'Timestamp': trade_info['timestamp'],
+                'SIDE': trade_info['side'],
+                'ENTRY': trade_info['entry_price'],
+                'Take Profit': trade_info['take_profit'],
+                'Stop Loss': trade_info['stop_loss'],
+                'Probability': probability_str,
+                'Confidence': trade_info['confidence'],
+                'R/R Ratio': trade_info['rr_ratio'],
+                'Volume Strength': trade_info['volume_strength'],
+                'Outcome': trade_info['outcome'],
+                'Outcome %': trade_info['outcome_pct'],
+                'Leverage': leverage_str,
+                'Margin': trade_info['margin']
+            }
+            
+            # Read existing CSV if it exists
+            if os.path.exists(self.trades_file) and os.path.getsize(self.trades_file) > 0:
+                df = pd.read_csv(self.trades_file)
+                # Append new row
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            else:
+                # Create new DataFrame with just this row
+                df = pd.DataFrame([new_row])
+            
+            # Write back to CSV
+            df.to_csv(self.trades_file, index=False)
+            
             return True
         except Exception as e:
-            print(f"Error adding trade to file: {str(e)}")
+            print(f"Error adding trade to CSV: {str(e)}")
             return False
 
     def add_trade_from_execution(self, execution_output):
-        """Process trade execution output and add it to the trades file"""
+        """Process trade execution output and add it to the trades CSV file"""
         try:
             # Parse the execution output
             trade_info = self.parse_trade_execution(execution_output)
@@ -206,18 +218,12 @@ class TradeTracker:
                 print("Failed to parse trade execution output")
                 return False
             
-            # Format the trade entry
-            trade_entry = self.format_trade_entry(trade_info)
-            if not trade_entry:
-                print("Failed to format trade entry")
-                return False
-            
-            # Add the entry to the file
-            success = self.add_trade_to_file(trade_entry)
+            # Add the entry to the CSV file
+            success = self.add_trade_to_csv(trade_info)
             if success:
-                print(f"Successfully added trade from {trade_info['timestamp']}")
+                print(f"Successfully added trade from {trade_info['timestamp']} to CSV")
             else:
-                print(f"Failed to add trade to file")
+                print(f"Failed to add trade to CSV file")
             
             return success
             
