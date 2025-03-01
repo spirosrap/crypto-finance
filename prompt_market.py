@@ -46,9 +46,7 @@ MODEL_CONFIG = {
     'gpt4o': 'gpt-4o',
     'deepseek-r1': 'deepseek/deepseek-r1',  # Add DeepSeek R1 model
     'ollama': 'deepseek-r1:7b',  # Add Ollama model
-    'hyperbolic': 'deepseek-ai/DeepSeek-R1',  # Add Hyperbolic model
-    'o1': 'o1',  # Add full o1 model
-    'gpt45': 'gpt-4.5-preview'  # Add GPT-4.5-preview model
+    'hyperbolic': 'deepseek-ai/DeepSeek-R1'  # Add Hyperbolic model
 }
 
 # Add Ollama API configuration
@@ -67,7 +65,7 @@ COLORS = {
     'end': '\033[0m'
 }
 
-def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False, use_o1: bool = False, use_gpt45: bool = False):
+def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False):
     global client
     try:
         if use_ollama:
@@ -120,7 +118,7 @@ def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, us
         logging.error(f"Failed to initialize API client: {str(e)}")
         return False
 
-def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_hyperbolic: bool = False, use_o1: bool = False, use_gpt45: bool = False) -> bool:
+def validate_api_key(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_hyperbolic: bool = False) -> bool:
     """Validate that the API key is set and well-formed."""
     if use_hyperbolic:
         api_key = HYPERBOLIC_KEY
@@ -259,7 +257,7 @@ def get_hyperbolic_response(messages: list, model: str = "deepseek-ai/DeepSeek-R
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False, use_hyperbolic: bool = False, use_o1: bool = False, use_gpt45: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False, use_hyperbolic: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
     if not (use_ollama or use_hyperbolic) and client is None:
         raise ValueError("API client not properly initialized")
@@ -269,6 +267,17 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 
     # Define provider at the start of the function
     provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
+
+    # SYSTEM_PROMPT = (
+    #     "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
+    #     "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"IS_VALID\": <IS_VALID>} "
+    #     "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"IS_VALID\": <IS_VALID>}. "
+    #     "Instruction 1: Use code to calculate the R/R ratio. "
+    #     "Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
+    #     "Instruction 3: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
+    #     "Instruction 4: If Stop Loss is below current price for a SELL signal, set IS_VALID to False. (Default is True) "
+    #     "Instruction 5: If Stop Loss is above current price for a BUY signal, set IS_VALID to False. (Default is True) "
+    # )
 
     SYSTEM_PROMPT = (
         "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
@@ -327,10 +336,6 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             model = MODEL_CONFIG['gpt4o']
         elif use_deepseek_r1:
             model = MODEL_CONFIG['deepseek-r1']
-        elif use_o1:
-            model = MODEL_CONFIG['o1']
-        elif use_gpt45:
-            model = MODEL_CONFIG['gpt45']
             
         logging.info(f"Using model: {model} from provider: {provider}")
         
@@ -338,7 +343,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         messages = []
         user_content = f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."
         
-        if model in [MODEL_CONFIG['o1-mini'], MODEL_CONFIG['o3-mini'], MODEL_CONFIG['o1']]:  # Add o1 to the list of models that need combined messages
+        if model in [MODEL_CONFIG['o1-mini'], MODEL_CONFIG['o3-mini']]:  # Add o3-mini to the list of models that need combined messages
             messages = [
                 {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{user_content}"}
             ]
@@ -510,7 +515,7 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         if prob <= 60:
             print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
             return
-            
+        
         # Check confidence level
         confidence = rec_dict['CONFIDENCE']
         if confidence in ['Weak', 'Very Weak']:
@@ -523,8 +528,12 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.5{COLORS['end']}")
             return
         
-        if rr_ratio >= 4:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 4 {COLORS['end']}")
+        if rr_ratio >= 2.52 and prob < 79:
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 2.52 (for probability {prob:.1f}% below threshold of 79% and above 60%){COLORS['end']}")
+            return
+
+        if rr_ratio >= 5:
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 5 (even with good probability above 79%){COLORS['end']}")
             return
             
         # Determine trade direction and prices
@@ -751,27 +760,22 @@ def main():
                         help='Use local Ollama model for offline analysis')
     model_group.add_argument('--use_hyperbolic', action='store_true',
                         help='Use Hyperbolic API for market analysis')
-    model_group.add_argument('--use_o1', action='store_true',
-                        help='Use full o1 model for advanced analysis')
-    model_group.add_argument('--use_gpt45', action='store_true',
-                        help='Use GPT-4.5-preview model for cutting-edge analysis')
 
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, 
-            args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic, args.use_o1, args.use_gpt45]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_o3_mini, --use_gpt4o, --use_deepseek_r1, --use_ollama, --use_hyperbolic, --use_o1, or --use_gpt45.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_o3_mini, --use_gpt4o, --use_deepseek_r1, --use_ollama, or --use_hyperbolic.")
         exit(1)
 
     try:
         # Validate API key first
-        if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1, args.use_hyperbolic, args.use_o1, args.use_gpt45):
+        if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1, args.use_hyperbolic):
             provider = 'OpenRouter' if args.use_deepseek_r1 else ('X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI'))
             print(f"{COLORS['red']}Error: Invalid or missing {provider} API key. Please check your configuration.{COLORS['end']}")
             exit(1)
 
         # Initialize the client
-        if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1, args.use_ollama, args.use_o1, args.use_gpt45):
+        if not initialize_client(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1, args.use_ollama):
             exit(1)  # Error message already printed in initialize_client
 
         # Add input validation
@@ -812,8 +816,7 @@ def main():
         recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
                                                             args.use_deepseek, args.use_reasoner, args.use_grok, 
                                                             args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, 
-                                                            args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic,
-                                                            args.use_o1, args.use_gpt45)
+                                                            args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
