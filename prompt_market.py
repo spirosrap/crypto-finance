@@ -511,6 +511,12 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
             return
             
+        # Check confidence level
+        confidence = rec_dict['CONFIDENCE']
+        if confidence in ['Weak', 'Very Weak']:
+            print(f"{COLORS['yellow']}Trade not executed: Signal confidence '{confidence}' is too low{COLORS['end']}")
+            return
+            
         # Check R/R ratio threshold
         rr_ratio = float(rec_dict['R/R_RATIO'])
         if rr_ratio < 0.5:
