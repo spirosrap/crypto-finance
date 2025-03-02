@@ -516,6 +516,12 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
             return
         
+        # Check volume strength
+        volume_strength = rec_dict['VOLUME_STRENGTH']
+        if volume_strength == 'VERY WEAK':
+            print(f"{COLORS['red']}Trade not executed: Volume strength '{volume_strength}' is too low{COLORS['end']}")
+            return
+            
         # Check confidence level
         confidence = rec_dict['CONFIDENCE']
         if confidence in ['Weak', 'Very Weak']:
@@ -597,6 +603,11 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         
         # Calculate potential profit percentage
         profit_pct = abs((target_price - entry_price) / entry_price * 100)
+        
+        # Check if take profit is less than 1%
+        if profit_pct < 1.0:
+            print(f"{COLORS['red']}Trade not executed: Take profit percentage ({profit_pct:.2f}%) is less than minimum threshold of 1%{COLORS['end']}")
+            return
         
         # Validate stop loss direction based on trade direction
         if side == 'SELL':
