@@ -514,7 +514,7 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         
         # Check volume strength
         volume_strength = rec_dict['VOLUME_STRENGTH']
-        if volume_strength == 'VERY WEAK':
+        if volume_strength == 'Very Weak':
             print(f"{COLORS['red']}Trade not executed: Volume strength '{volume_strength}' is too low{COLORS['end']}")
             return
             
