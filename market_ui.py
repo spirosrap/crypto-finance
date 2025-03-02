@@ -73,6 +73,10 @@ class MarketAnalyzerUI:
         self.auto_trading_thread = None
         self.last_trade_time = None
         
+        # Add trade output tracking
+        self.current_trade_output = ""
+        self.trade_in_progress = False
+        
         # Create main container with padding
         self.create_gui()
         
@@ -498,6 +502,11 @@ class MarketAnalyzerUI:
             # Enable cancel button
             self.queue.put(("enable_cancel", None))
             
+            # Variables to track trade output
+            trade_output_buffer = ""
+            capturing_trade_output = False
+            order_placed = False
+            
             # Read output in real-time with non-blocking I/O
             while True:
                 reads = [process.stdout.fileno(), process.stderr.fileno()]
@@ -507,6 +516,25 @@ class MarketAnalyzerUI:
                         output = process.stdout.readline()
                         if output:
                             self.queue.put(("append", output))
+                            
+                            # Start capturing trade output when we see a JSON recommendation
+                            if "{\"BUY AT\":" in output or "{\"SELL AT\":" in output:
+                                capturing_trade_output = True
+                                trade_output_buffer = output
+                            # Continue capturing trade output
+                            elif capturing_trade_output:
+                                trade_output_buffer += output
+                            
+                            # Check if a trade was executed
+                            if "Order placed successfully" in output:
+                                order_placed = True
+                                
+                                # Save the trade output to file
+                                if trade_output_buffer:
+                                    self.save_trade_output(trade_output_buffer)
+                                    trade_output_buffer = ""
+                                    capturing_trade_output = False
+                                    
                     if fd == process.stderr.fileno():
                         error = process.stderr.readline()
                         if error:
@@ -905,6 +933,10 @@ class MarketAnalyzerUI:
             # Enable cancel button
             self.queue.put(("enable_cancel", None))
             
+            # Variables to track trade output
+            trade_output_buffer = ""
+            capturing_trade_output = False
+            
             # Read output in real-time with non-blocking I/O
             while True:
                 reads = [process.stdout.fileno(), process.stderr.fileno()]
@@ -914,9 +946,25 @@ class MarketAnalyzerUI:
                         output = process.stdout.readline()
                         if output:
                             self.queue.put(("append", output))
+                            
+                            # Start capturing trade output when we see a JSON recommendation or order summary
+                            if "{\"BUY AT\":" in output or "{\"SELL AT\":" in output or "=== Order Summary ===" in output:
+                                capturing_trade_output = True
+                                trade_output_buffer = output
+                            # Continue capturing trade output
+                            elif capturing_trade_output:
+                                trade_output_buffer += output
+                            
                             # Update status based on output
                             if "Order placed successfully" in output:
                                 self.queue.put(("status", "Order placed successfully"))
+                                
+                                # Save the trade output to file
+                                if trade_output_buffer:
+                                    self.save_trade_output(trade_output_buffer)
+                                    trade_output_buffer = ""
+                                    capturing_trade_output = False
+                                    
                             elif "Monitoring limit order" in output:
                                 self.queue.put(("status", "Monitoring limit order for fill..."))
                             elif "Limit order filled" in output:
@@ -974,7 +1022,7 @@ class MarketAnalyzerUI:
             wait_minutes = {
                 'ONE_MINUTE': 0.3,  # Check every 20 seconds
                 'FIVE_MINUTE': 2,   # Check every 2 minutes
-                'FIFTEEN_MINUTE': 5, # Check every 5 minutes
+                'FIFTEEN_MINUTE': 2, # Check every 2 minutes (changed from 5)
                 'THIRTY_MINUTE': 10, # Check every 10 minutes
                 'ONE_HOUR': 20      # Check every 20 minutes
             }.get(granularity, 20)  # Default to 20 minutes
@@ -1001,10 +1049,35 @@ class MarketAnalyzerUI:
                 self.auto_trading_thread.join(timeout=1)
                 self.auto_trading_thread = None
 
+    def is_trading_allowed(self):
+        """Check if trading is allowed based on current time"""
+        current_time = datetime.now()
+        current_hour = current_time.hour
+        current_minute = current_time.minute
+        current_time_float = current_hour + current_minute / 60.0
+        
+        # Trading is not allowed between 14:30 and 17:00
+        if 14.5 <= current_time_float < 17.0:
+            return False
+        return True
+
     def _auto_trading_loop(self):
         """Background loop for auto-trading"""
         while self.auto_trading:
             try:
+                # Check if trading is allowed based on time
+                if not self.is_trading_allowed():
+                    if not hasattr(self, '_trading_paused_logged'):
+                        self.queue.put(("append", "\nTrading paused: Current time is in high-risk period (14:30-17:00). Will resume after 17:00.\n"))
+                        self._trading_paused_logged = True
+                    time.sleep(60)  # Check every minute
+                    continue
+                else:
+                    # Reset the logged flag when we're out of the pause period
+                    if hasattr(self, '_trading_paused_logged'):
+                        del self._trading_paused_logged
+                        self.queue.put(("append", "\nTrading resumed: Current time is outside high-risk period.\n"))
+
                 # Check if model needs retraining
                 current_time = time.time()
                 if current_time - self.last_train_time >= self.model_retrain_interval:
@@ -1066,6 +1139,9 @@ class MarketAnalyzerUI:
                 # Read output and check for trade execution
                 output = ""
                 order_placed = False
+                trade_output_buffer = ""
+                capturing_trade_output = False
+                
                 while True:
                     line = process.stdout.readline()
                     if line == '' and process.poll() is not None:
@@ -1074,10 +1150,24 @@ class MarketAnalyzerUI:
                         output += line
                         self.queue.put(("append", line))
                         
+                        # Start capturing trade output when we see a JSON recommendation
+                        if "{\"BUY AT\":" in line or "{\"SELL AT\":" in line:
+                            capturing_trade_output = True
+                            trade_output_buffer = line
+                        # Continue capturing trade output
+                        elif capturing_trade_output:
+                            trade_output_buffer += line
+                        
                         # Check if a trade was executed
                         if "Order placed successfully" in line:
                             self.queue.put(("append", "\nTrade executed! Waiting for order to close before continuing auto-trading...\n"))
                             order_placed = True
+                            
+                            # Save the trade output to file
+                            if trade_output_buffer:
+                                self.save_trade_output(trade_output_buffer)
+                                trade_output_buffer = ""
+                                capturing_trade_output = False
                 
                 # Get any remaining output
                 stdout, stderr = process.communicate()
@@ -1101,7 +1191,7 @@ class MarketAnalyzerUI:
                 wait_minutes = {
                     'ONE_MINUTE': 0.3,  # Check every 20 seconds
                     'FIVE_MINUTE': 2,   # Check every 2 minutes
-                    'FIFTEEN_MINUTE': 5, # Check every 5 minutes
+                    'FIFTEEN_MINUTE': 2, # Check every 2 minutes (changed from 5)
                     'THIRTY_MINUTE': 10, # Check every 10 minutes
                     'ONE_HOUR': 20      # Check every 20 minutes
                 }.get(granularity, 20)  # Default to 20 minutes
@@ -1507,6 +1597,26 @@ class MarketAnalyzerUI:
             self.auto_trading_thread.start()
         # Schedule next check
         self.root.after(60000, self.monitor_threads)  # Check every minute
+
+    def save_trade_output(self, output_text):
+        """Save trade output to a file"""
+        try:
+            # Create a timestamp
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Clean the output text (remove ANSI codes)
+            clean_text = self._strip_ansi_codes(output_text)
+            
+            # Format the output with a header
+            formatted_output = f"\n\n====== 🤖 AI Trading Recommendation ({timestamp}) ======\n{clean_text}"
+            
+            # Append to the trade_output.txt file
+            with open("trade_output.txt", "a") as f:
+                f.write(formatted_output)
+                
+            self.queue.put(("append", "\nTrade output saved to trade_output.txt\n"))
+        except Exception as e:
+            self.queue.put(("append", f"\nError saving trade output: {str(e)}\n"))
 
     def run(self):
         try:
