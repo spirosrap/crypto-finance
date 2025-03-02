@@ -11,6 +11,7 @@ import os
 import traceback
 from coinbaseservice import CoinbaseService
 import select
+import tkinter.messagebox as messagebox
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -77,6 +78,17 @@ class MarketAnalyzerUI:
         self.current_trade_output = ""
         self.trade_in_progress = False
         
+        # Add trade history and risk management variables
+        self.trade_history = []  # List of trade results (win/loss)
+        self.consecutive_losses = 0  # Track consecutive losses
+        self.max_consecutive_losses = 0  # Track maximum consecutive losses
+        self.original_margin = 120  # Store original margin for recovery
+        self.original_leverage = 10  # Store original leverage for recovery
+        self.risk_level = "Normal"  # Current risk level (Normal, Reduced, Conservative)
+        self.in_recovery_mode = False  # Whether we're in recovery mode
+        self.trades_since_last_loss = 0  # Track trades since last loss for recovery
+        self.recovery_trades_needed = 3  # Number of successful trades needed to recover
+        
         # Create main container with padding
         self.create_gui()
         
@@ -88,6 +100,9 @@ class MarketAnalyzerUI:
         
         # Monitor threads
         self.monitor_threads()
+        
+        # Load trade history if available
+        self.load_trade_history()
 
     def create_gui(self):
         # Create main container that fills the window
@@ -162,10 +177,217 @@ class MarketAnalyzerUI:
         )
         model_menu.set(model_display_names[self.model_var.get()])
         model_menu.pack(pady=(0,10))
+        
+        # Granularity section
+        ctk.CTkLabel(sidebar_container, text="Time Frame:", font=ctk.CTkFont(weight="bold")).pack(pady=(20,10))
+        
+        # Add granularity dropdown
+        granularities = ["ONE_HOUR", "THIRTY_MINUTE", "FIFTEEN_MINUTE", "FIVE_MINUTE", "ONE_MINUTE"]
+        granularity_menu = ctk.CTkOptionMenu(
+            sidebar_container,
+            values=granularities,
+            variable=self.granularity_var,
+            command=self.update_training_time
+        )
+        granularity_menu.pack(pady=(0,5), padx=10, fill="x")
+        
+        # Add training time frame
+        self.training_frame = ctk.CTkFrame(sidebar_container)
+        self.training_frame.pack(pady=(0,10), padx=5, fill="x")
+        
+        # Create a single line for retrain countdown
+        self.retrain_time_label = ctk.CTkLabel(
+            self.training_frame,
+            text="Retrain in: --:--:--",
+            font=ctk.CTkFont(size=12)
+        )
+        self.retrain_time_label.pack(pady=5)
+        
+        # Progress bar for retraining countdown
+        self.retrain_progress = ctk.CTkProgressBar(
+            self.training_frame,
+            mode="determinate",
+            height=6
+        )
+        self.retrain_progress.pack(pady=(0,5), padx=5, fill="x")
+        self.retrain_progress.set(0)
+        
+        # Start retrain countdown timer
+        self.update_retrain_countdown()
+        
+        # Single analysis button
+        self.analyze_btn = ctk.CTkButton(
+            sidebar_container, 
+            text="Run Analysis", 
+            command=lambda: self.run_analysis(self.granularity_var.get()),
+            height=32  # Reduced height
+        )
+        self.analyze_btn.pack(pady=3, padx=10, fill="x")
+        
+        # Close Positions button
+        self.close_positions_btn = ctk.CTkButton(
+            sidebar_container,
+            text="Close All Positions",
+            command=self.close_positions,
+            fg_color="#b22222",
+            hover_color="#8b0000",
+            height=32  # Reduced height
+        )
+        self.close_positions_btn.pack(pady=(10,5), padx=10, fill="x")
+        
+        # Check Orders button
+        self.check_orders_btn = ctk.CTkButton(
+            sidebar_container,
+            text="Check Open Orders",
+            command=self.check_open_orders_and_positions_ui,
+            fg_color="#4682B4",  # Steel Blue
+            hover_color="#36648B",  # Dark Steel Blue
+            height=32  # Reduced height
+        )
+        self.check_orders_btn.pack(pady=(5,10), padx=10, fill="x")
+        
+        # Control buttons at bottom
+        button_frame = ctk.CTkFrame(sidebar_container)
+        button_frame.pack(fill="x", pady=5, padx=5)
+        
+        # Clear and Cancel buttons side by side
+        self.clear_btn = ctk.CTkButton(
+            button_frame, 
+            text="Clear", 
+            command=self.clear_output,
+            fg_color="transparent",
+            border_width=2,
+            text_color=("gray10", "#DCE4EE"),
+            width=90,
+            height=32
+        )
+        self.clear_btn.pack(side="left", padx=2)
+        
+        self.cancel_btn = ctk.CTkButton(
+            button_frame, 
+            text="Cancel", 
+            command=self.cancel_operation,
+            fg_color="#FF4B4B",
+            hover_color="#CC3C3C",
+            state="disabled",
+            width=90,
+            height=32
+        )
+        self.cancel_btn.pack(side="right", padx=2)
+        
+        # Status indicator
+        self.status_var = ctk.StringVar(value="Ready")
+        self.status_label = ctk.CTkLabel(
+            sidebar_container, 
+            textvariable=self.status_var,
+            font=ctk.CTkFont(size=11)
+        )
+        self.status_label.pack(pady=(5,0))
+        
+        # Create center content area with output text
+        center_content = ctk.CTkFrame(main_container)
+        center_content.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        
+        # Output text area
+        self.output_text = ctk.CTkTextbox(
+            center_content,
+            wrap="word",
+            font=ctk.CTkFont(family="Courier", size=14)  # Slightly smaller font
+        )
+        self.output_text.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Create right pane for risk management and trading options
+        right_pane = ctk.CTkFrame(main_container, width=200)
+        right_pane.pack(side="right", fill="y", padx=5, pady=5)
+        right_pane.pack_propagate(False)  # Prevent the frame from shrinking
+        
+        # Title in right pane
+        right_title = ctk.CTkLabel(
+            right_pane,
+            text="Trading Controls",
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        right_title.pack(pady=(10,15))
+        
+        # Add Risk Management Section to right pane
+        risk_frame = ctk.CTkFrame(right_pane)
+        risk_frame.pack(pady=10, padx=5, fill="x")
+        
+        ctk.CTkLabel(risk_frame, text="Risk Management", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(pady=5)
+        
+        # Risk level indicator
+        risk_level_frame = ctk.CTkFrame(risk_frame)
+        risk_level_frame.pack(fill="x", pady=5)
+        
+        ctk.CTkLabel(risk_level_frame, text="Risk Level:").pack(side="left", padx=5)
+        self.risk_level_label = ctk.CTkLabel(
+            risk_level_frame, 
+            text=self.risk_level,
+            text_color=self.get_risk_color(self.risk_level)
+        )
+        self.risk_level_label.pack(side="right", padx=5)
+        
+        # Consecutive losses indicator
+        losses_frame = ctk.CTkFrame(risk_frame)
+        losses_frame.pack(fill="x", pady=5)
+        
+        ctk.CTkLabel(losses_frame, text="Consecutive Losses:").pack(side="left", padx=5)
+        self.losses_label = ctk.CTkLabel(losses_frame, text=str(self.consecutive_losses))
+        self.losses_label.pack(side="right", padx=5)
+        
+        # Recovery mode indicator
+        recovery_frame = ctk.CTkFrame(risk_frame)
+        recovery_frame.pack(fill="x", pady=5)
+        
+        ctk.CTkLabel(recovery_frame, text="Recovery Mode:").pack(side="left", padx=5)
+        self.recovery_label = ctk.CTkLabel(
+            recovery_frame, 
+            text="ON" if self.in_recovery_mode else "OFF",
+            text_color="#FF5555" if self.in_recovery_mode else "#55FF55"
+        )
+        self.recovery_label.pack(side="right", padx=5)
+        
+        # Manual trade result buttons
+        manual_result_frame = ctk.CTkFrame(risk_frame)
+        manual_result_frame.pack(fill="x", pady=5)
+        
+        self.win_btn = ctk.CTkButton(
+            manual_result_frame,
+            text="Record Win",
+            command=lambda: self.record_manual_trade_result("win"),
+            fg_color="#228B22",  # Forest Green
+            hover_color="#006400",  # Dark Green
+            width=90,
+            height=28
+        )
+        self.win_btn.pack(side="left", padx=2, expand=True)
+        
+        self.loss_btn = ctk.CTkButton(
+            manual_result_frame,
+            text="Record Loss",
+            command=lambda: self.record_manual_trade_result("loss"),
+            fg_color="#B22222",  # Fire Brick
+            hover_color="#8B0000",  # Dark Red
+            width=90,
+            height=28
+        )
+        self.loss_btn.pack(side="right", padx=2, expand=True)
+        
+        # Reset risk button
+        self.reset_risk_btn = ctk.CTkButton(
+            risk_frame,
+            text="Reset Risk Level",
+            command=self.reset_risk_level,
+            fg_color="#4682B4",  # Steel Blue
+            hover_color="#36648B",  # Dark Steel Blue
+            height=28
+        )
+        self.reset_risk_btn.pack(pady=5, padx=10, fill="x")
             
-        # Trading Options Section
-        trading_frame = ctk.CTkFrame(sidebar_container)
-        trading_frame.pack(pady=10, padx=5, fill="x")  # Reduced padding
+        # Trading Options Section in right pane
+        trading_frame = ctk.CTkFrame(right_pane)
+        trading_frame.pack(pady=10, padx=5, fill="x")
         
         ctk.CTkLabel(trading_frame, text="Trading Options", 
                     font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
@@ -274,124 +496,6 @@ class MarketAnalyzerUI:
         
         # Initially disable trading options
         self.toggle_trading_options()
-            
-        # Granularity section
-        ctk.CTkLabel(sidebar_container, text="Time Frame:", font=ctk.CTkFont(weight="bold")).pack(pady=(20,10))
-        
-        # Add granularity dropdown
-        granularities = ["ONE_HOUR", "THIRTY_MINUTE", "FIFTEEN_MINUTE", "FIVE_MINUTE", "ONE_MINUTE"]
-        granularity_menu = ctk.CTkOptionMenu(
-            sidebar_container,
-            values=granularities,
-            variable=self.granularity_var,
-            command=self.update_training_time
-        )
-        granularity_menu.pack(pady=(0,5), padx=10, fill="x")
-        
-        # Add training time frame
-        self.training_frame = ctk.CTkFrame(sidebar_container)
-        self.training_frame.pack(pady=(0,10), padx=5, fill="x")
-        
-        # Create a single line for retrain countdown
-        self.retrain_time_label = ctk.CTkLabel(
-            self.training_frame,
-            text="Retrain in: --:--:--",
-            font=ctk.CTkFont(size=12)
-        )
-        self.retrain_time_label.pack(pady=5)
-        
-        # Progress bar for retraining countdown
-        self.retrain_progress = ctk.CTkProgressBar(
-            self.training_frame,
-            mode="determinate",
-            height=6
-        )
-        self.retrain_progress.pack(pady=(0,5), padx=5, fill="x")
-        self.retrain_progress.set(0)
-        
-        # Start retrain countdown timer
-        self.update_retrain_countdown()
-        
-        # Single analysis button
-        self.analyze_btn = ctk.CTkButton(
-            sidebar_container, 
-            text="Run Analysis", 
-            command=lambda: self.run_analysis(self.granularity_var.get()),
-            height=32  # Reduced height
-        )
-        self.analyze_btn.pack(pady=3, padx=10, fill="x")
-        
-        # Close Positions button
-        self.close_positions_btn = ctk.CTkButton(
-            sidebar_container,
-            text="Close All Positions",
-            command=self.close_positions,
-            fg_color="#b22222",
-            hover_color="#8b0000",
-            height=32  # Reduced height
-        )
-        self.close_positions_btn.pack(pady=(10,5), padx=10, fill="x")
-        
-        # Check Orders button
-        self.check_orders_btn = ctk.CTkButton(
-            sidebar_container,
-            text="Check Open Orders",
-            command=self.check_open_orders_and_positions_ui,
-            fg_color="#4682B4",  # Steel Blue
-            hover_color="#36648B",  # Dark Steel Blue
-            height=32  # Reduced height
-        )
-        self.check_orders_btn.pack(pady=(5,10), padx=10, fill="x")
-        
-        # Control buttons at bottom
-        button_frame = ctk.CTkFrame(sidebar_container)
-        button_frame.pack(fill="x", pady=5, padx=5)
-        
-        # Clear and Cancel buttons side by side
-        self.clear_btn = ctk.CTkButton(
-            button_frame, 
-            text="Clear", 
-            command=self.clear_output,
-            fg_color="transparent",
-            border_width=2,
-            text_color=("gray10", "#DCE4EE"),
-            width=90,
-            height=32
-        )
-        self.clear_btn.pack(side="left", padx=2)
-        
-        self.cancel_btn = ctk.CTkButton(
-            button_frame, 
-            text="Cancel", 
-            command=self.cancel_operation,
-            fg_color="#FF4B4B",
-            hover_color="#CC3C3C",
-            state="disabled",
-            width=90,
-            height=32
-        )
-        self.cancel_btn.pack(side="right", padx=2)
-        
-        # Status indicator
-        self.status_var = ctk.StringVar(value="Ready")
-        self.status_label = ctk.CTkLabel(
-            sidebar_container, 
-            textvariable=self.status_var,
-            font=ctk.CTkFont(size=11)
-        )
-        self.status_label.pack(pady=(5,0))
-        
-        # Create main content area with output text
-        main_content = ctk.CTkFrame(main_container)
-        main_content.pack(side="right", fill="both", expand=True, padx=5, pady=5)
-        
-        # Output text area
-        self.output_text = ctk.CTkTextbox(
-            main_content,
-            wrap="word",
-            font=ctk.CTkFont(family="Courier", size=14)  # Slightly smaller font
-        )
-        self.output_text.pack(fill="both", expand=True, padx=5, pady=5)
 
     def update_leverage_label(self, value):
         """Update the leverage label when slider moves"""
@@ -936,6 +1040,8 @@ class MarketAnalyzerUI:
             # Variables to track trade output
             trade_output_buffer = ""
             capturing_trade_output = False
+            order_placed = False
+            trade_completed = False
             
             # Read output in real-time with non-blocking I/O
             while True:
@@ -958,12 +1064,11 @@ class MarketAnalyzerUI:
                             # Update status based on output
                             if "Order placed successfully" in output:
                                 self.queue.put(("status", "Order placed successfully"))
+                                order_placed = True
                                 
                                 # Save the trade output to file
                                 if trade_output_buffer:
                                     self.save_trade_output(trade_output_buffer)
-                                    trade_output_buffer = ""
-                                    capturing_trade_output = False
                                     
                             elif "Monitoring limit order" in output:
                                 self.queue.put(("status", "Monitoring limit order for fill..."))
@@ -971,6 +1076,25 @@ class MarketAnalyzerUI:
                                 self.queue.put(("status", "Limit order filled, placing bracket orders..."))
                             elif "Bracket orders placed" in output:
                                 self.queue.put(("status", "Bracket orders placed successfully"))
+                            
+                            # Check for trade completion indicators
+                            if "Take profit hit" in output or "TP hit" in output:
+                                self.queue.put(("status", "Trade completed - Take Profit hit"))
+                                trade_completed = True
+                                # Record as a win
+                                self.record_trade_result("win")
+                            elif "Stop loss hit" in output or "SL hit" in output:
+                                self.queue.put(("status", "Trade completed - Stop Loss hit"))
+                                trade_completed = True
+                                # Record as a loss
+                                self.record_trade_result("loss")
+                            elif "Position closed" in output:
+                                # Try to determine if it was a win or loss
+                                result = self.detect_trade_result(trade_output_buffer)
+                                if result:
+                                    self.record_trade_result(result)
+                                    trade_completed = True
+                                    
                     if fd == process.stderr.fileno():
                         error = process.stderr.readline()
                         if error:
@@ -983,6 +1107,15 @@ class MarketAnalyzerUI:
             stdout, stderr = process.communicate()
             if stdout:
                 self.queue.put(("append", stdout))
+                trade_output_buffer += stdout
+                
+                # Check for trade completion in final output if not already detected
+                if not trade_completed and order_placed:
+                    result = self.detect_trade_result(trade_output_buffer)
+                    if result:
+                        self.record_trade_result(result)
+                        trade_completed = True
+                
             if stderr:
                 self.queue.put(("append", f"\nErrors:\n{stderr}"))
                 self.queue.put(("status", "Error occurred"))
@@ -998,6 +1131,10 @@ class MarketAnalyzerUI:
             
             # Clear current process
             self.current_process = None
+            
+            # Update risk UI if trade was completed
+            if trade_completed and hasattr(self, 'update_risk_ui'):
+                self.root.after(0, self.update_risk_ui)
             
         except Exception as e:
             self.queue.put(("append", f"\nError executing order: {str(e)}\n"))
@@ -1104,6 +1241,11 @@ class MarketAnalyzerUI:
                 # Get current granularity
                 granularity = self.granularity_var.get()
                 
+                # Log risk level before running analysis
+                if self.in_recovery_mode:
+                    self.queue.put(("append", f"\nRunning automated analysis with {self.risk_level} risk level (after {self.consecutive_losses} consecutive losses).\n"))
+                    self.queue.put(("append", f"Using reduced margin: ${self.margin_var.get()}, leverage: {self.leverage_var.get()}x\n"))
+                
                 # Run analysis with current granularity
                 self.queue.put(("append", f"\nRunning automated {granularity.lower().replace('_', ' ')} timeframe analysis...\n"))
                 
@@ -1141,6 +1283,7 @@ class MarketAnalyzerUI:
                 order_placed = False
                 trade_output_buffer = ""
                 capturing_trade_output = False
+                trade_completed = False
                 
                 while True:
                     line = process.stdout.readline()
@@ -1166,19 +1309,47 @@ class MarketAnalyzerUI:
                             # Save the trade output to file
                             if trade_output_buffer:
                                 self.save_trade_output(trade_output_buffer)
-                                trade_output_buffer = ""
-                                capturing_trade_output = False
+                        
+                        # Check for trade completion indicators
+                        if "Take profit hit" in line or "TP hit" in line:
+                            self.queue.put(("status", "Trade completed - Take Profit hit"))
+                            trade_completed = True
+                            # Record as a win
+                            self.record_trade_result("win")
+                        elif "Stop loss hit" in line or "SL hit" in line:
+                            self.queue.put(("status", "Trade completed - Stop Loss hit"))
+                            trade_completed = True
+                            # Record as a loss
+                            self.record_trade_result("loss")
+                        elif "Position closed" in line:
+                            # Try to determine if it was a win or loss
+                            result = self.detect_trade_result(trade_output_buffer)
+                            if result:
+                                self.record_trade_result(result)
+                                trade_completed = True
                 
                 # Get any remaining output
                 stdout, stderr = process.communicate()
                 if stdout:
                     output += stdout
                     self.queue.put(("append", stdout))
+                    
+                    # Check for trade completion in final output if not already detected
+                    if not trade_completed and order_placed:
+                        result = self.detect_trade_result(output)
+                        if result:
+                            self.record_trade_result(result)
+                            trade_completed = True
+                            
                 if stderr:
                     self.queue.put(("append", f"\nErrors:\n{stderr}"))
                 
                 # Clear current process
                 self.current_process = None
+                
+                # Update risk UI if trade was completed
+                if trade_completed and hasattr(self, 'update_risk_ui'):
+                    self.root.after(0, self.update_risk_ui)
                 
                 # If an order was placed, wait for a shorter interval before checking again
                 if order_placed:
@@ -1617,6 +1788,253 @@ class MarketAnalyzerUI:
             self.queue.put(("append", "\nTrade output saved to trade_output.txt\n"))
         except Exception as e:
             self.queue.put(("append", f"\nError saving trade output: {str(e)}\n"))
+
+    def load_trade_history(self):
+        """Load trade history from file if it exists"""
+        try:
+            if os.path.exists("trade_history.json"):
+                with open("trade_history.json", "r") as f:
+                    data = json.load(f)
+                    self.trade_history = data.get("history", [])
+                    self.consecutive_losses = data.get("consecutive_losses", 0)
+                    self.max_consecutive_losses = data.get("max_consecutive_losses", 0)
+                    self.in_recovery_mode = data.get("in_recovery_mode", False)
+                    self.trades_since_last_loss = data.get("trades_since_last_loss", 0)
+                    
+                    # Update risk level based on loaded data
+                    self.update_risk_level()
+                    
+                    # Log the loaded history
+                    self.queue.put(("append", f"\nLoaded trade history: {len(self.trade_history)} trades, {self.consecutive_losses} consecutive losses\n"))
+                    
+                    if self.in_recovery_mode:
+                        self.queue.put(("append", f"\nSystem is in recovery mode after consecutive losses. Risk level: {self.risk_level}\n"))
+        except Exception as e:
+            self.queue.put(("append", f"\nError loading trade history: {str(e)}\n"))
+            # Initialize with empty history
+            self.trade_history = []
+            self.consecutive_losses = 0
+            self.max_consecutive_losses = 0
+            self.in_recovery_mode = False
+            self.trades_since_last_loss = 0
+
+    def save_trade_history(self):
+        """Save trade history to file"""
+        try:
+            data = {
+                "history": self.trade_history,
+                "consecutive_losses": self.consecutive_losses,
+                "max_consecutive_losses": self.max_consecutive_losses,
+                "in_recovery_mode": self.in_recovery_mode,
+                "trades_since_last_loss": self.trades_since_last_loss,
+                "last_updated": datetime.now().isoformat()
+            }
+            
+            with open("trade_history.json", "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            self.queue.put(("append", f"\nError saving trade history: {str(e)}\n"))
+
+    def record_trade_result(self, result):
+        """Record a trade result (win or loss) and update risk management"""
+        try:
+            # Add result to history
+            self.trade_history.append({
+                "result": result,
+                "timestamp": datetime.now().isoformat(),
+                "product": self.product_var.get()
+            })
+            
+            # Update consecutive losses counter
+            if result == "loss":
+                self.consecutive_losses += 1
+                self.trades_since_last_loss = 0
+                
+                # Update max consecutive losses if needed
+                if self.consecutive_losses > self.max_consecutive_losses:
+                    self.max_consecutive_losses = self.consecutive_losses
+                
+                # Enter recovery mode if we have 2 or more consecutive losses
+                if self.consecutive_losses >= 2 and not self.in_recovery_mode:
+                    self.in_recovery_mode = True
+                    self.queue.put(("append", "\n⚠️ Entering recovery mode after consecutive losses ⚠️\n"))
+                    self.queue.put(("append", "Risk will be reduced until recovery criteria are met.\n"))
+                    
+                    # Store original values if not already stored
+                    if hasattr(self, 'margin_var') and hasattr(self, 'leverage_var'):
+                        self.original_margin = float(self.margin_var.get())
+                        self.original_leverage = self.leverage_var.get()
+            else:  # Win
+                if self.in_recovery_mode:
+                    self.trades_since_last_loss += 1
+                    
+                    # Check if we can exit recovery mode
+                    if self.trades_since_last_loss >= self.recovery_trades_needed:
+                        self.in_recovery_mode = False
+                        self.consecutive_losses = 0
+                        self.queue.put(("append", f"\n✅ Recovery complete after {self.trades_since_last_loss} successful trades! Returning to normal risk level.\n"))
+                        
+                        # Restore original values
+                        if hasattr(self, 'margin_var') and hasattr(self, 'leverage_var'):
+                            self.margin_var.set(str(self.original_margin))
+                            self.leverage_var.set(self.original_leverage)
+                            self.update_leverage_label(self.original_leverage)
+                else:
+                    # Reset consecutive losses on win if not in recovery mode
+                    self.consecutive_losses = 0
+                    self.trades_since_last_loss += 1
+            
+            # Update risk level based on consecutive losses
+            self.update_risk_level()
+            
+            # Save updated history
+            self.save_trade_history()
+            
+            # Log the result
+            self.queue.put(("append", f"\nTrade result recorded: {result.upper()}\n"))
+            self.queue.put(("append", f"Consecutive losses: {self.consecutive_losses}\n"))
+            self.queue.put(("append", f"Current risk level: {self.risk_level}\n"))
+            
+        except Exception as e:
+            self.queue.put(("append", f"\nError recording trade result: {str(e)}\n"))
+
+    def update_risk_level(self):
+        """Update risk level based on consecutive losses"""
+        if not self.in_recovery_mode:
+            self.risk_level = "Normal"
+            return
+            
+        # Determine risk level based on consecutive losses
+        if self.consecutive_losses == 2:
+            self.risk_level = "Reduced"
+            # Reduce margin by 25% and leverage by 1 level
+            if hasattr(self, 'margin_var') and hasattr(self, 'leverage_var'):
+                new_margin = self.original_margin * 0.75
+                new_leverage = max(self.original_leverage - 1, 1)  # Ensure leverage is at least 1
+                
+                self.margin_var.set(str(round(new_margin, 2)))
+                self.leverage_var.set(new_leverage)
+                self.update_leverage_label(new_leverage)
+                
+        elif self.consecutive_losses >= 3:
+            self.risk_level = "Conservative"
+            # Reduce margin by 50% and leverage by 2 levels
+            if hasattr(self, 'margin_var') and hasattr(self, 'leverage_var'):
+                new_margin = self.original_margin * 0.5
+                new_leverage = max(self.original_leverage - 2, 1)  # Ensure leverage is at least 1
+                
+                self.margin_var.set(str(round(new_margin, 2)))
+                self.leverage_var.set(new_leverage)
+                self.update_leverage_label(new_leverage)
+                
+        # Update UI to reflect risk level
+        if hasattr(self, 'status_var'):
+            current_status = self.status_var.get()
+            if "Risk" not in current_status:
+                self.status_var.set(f"{current_status} | Risk: {self.risk_level}")
+
+    def detect_trade_result(self, output_text):
+        """Detect if a trade was a win or loss from the output text"""
+        # Clean the text
+        clean_text = self._strip_ansi_codes(output_text.lower())
+        
+        # Check for win/loss indicators
+        if "take profit hit" in clean_text or "tp hit" in clean_text or "profit:" in clean_text and "+" in clean_text:
+            return "win"
+        elif "stop loss hit" in clean_text or "sl hit" in clean_text or "loss:" in clean_text:
+            return "loss"
+        
+        # If no clear indicator, return None
+        return None
+
+    def get_risk_color(self, risk_level):
+        """Get color for risk level display"""
+        if risk_level == "Normal":
+            return "#55FF55"  # Green
+        elif risk_level == "Reduced":
+            return "#FFAA00"  # Orange
+        else:  # Conservative
+            return "#FF5555"  # Red
+
+    def reset_risk_level(self):
+        """Reset risk level to normal"""
+        if not self.in_recovery_mode:
+            self.queue.put(("append", "\nRisk level is already normal.\n"))
+            return
+            
+        # Confirm with user
+        confirm = messagebox.askyesno(
+            title="Confirm Reset",
+            message="Are you sure you want to reset the risk level to normal?\nThis will exit recovery mode."
+        )
+        
+        if confirm:
+            # Reset risk management variables
+            self.in_recovery_mode = False
+            self.consecutive_losses = 0
+            self.trades_since_last_loss = 0
+            self.risk_level = "Normal"
+            
+            # Restore original values
+            if hasattr(self, 'margin_var') and hasattr(self, 'leverage_var'):
+                self.margin_var.set(str(self.original_margin))
+                self.leverage_var.set(self.original_leverage)
+                self.update_leverage_label(self.original_leverage)
+            
+            # Update UI
+            self.update_risk_ui()
+            
+            # Save updated history
+            self.save_trade_history()
+            
+            self.queue.put(("append", "\nRisk level has been reset to normal.\n"))
+            self.queue.put(("status", "Ready | Risk: Normal"))
+
+    def update_risk_ui(self):
+        """Update the risk management UI elements"""
+        # Update risk level label
+        self.risk_level_label.configure(
+            text=self.risk_level,
+            text_color=self.get_risk_color(self.risk_level)
+        )
+        
+        # Update consecutive losses label
+        self.losses_label.configure(text=str(self.consecutive_losses))
+        
+        # Update recovery mode label
+        self.recovery_label.configure(
+            text="ON" if self.in_recovery_mode else "OFF",
+            text_color="#FF5555" if self.in_recovery_mode else "#55FF55"
+        )
+
+    def record_manual_trade_result(self, result):
+        """Manually record a trade result"""
+        # Confirm with user
+        result_text = "WIN" if result == "win" else "LOSS"
+        
+        # Use standard tkinter messagebox instead of CTkMessagebox
+        confirm = messagebox.askyesno(
+            title=f"Confirm {result_text}",
+            message=f"Are you sure you want to record a {result_text}?"
+        )
+        
+        if confirm:
+            # Record the result
+            self.record_trade_result(result)
+            
+            # Update UI
+            self.update_risk_ui()
+            
+            # Log the action
+            self.queue.put(("append", f"\nManually recorded trade result: {result_text}\n"))
+            self.queue.put(("append", f"Consecutive losses: {self.consecutive_losses}\n"))
+            self.queue.put(("append", f"Current risk level: {self.risk_level}\n"))
+            
+            if self.in_recovery_mode:
+                self.queue.put(("append", f"In recovery mode. {self.recovery_trades_needed - self.trades_since_last_loss} more successful trades needed to exit recovery mode.\n"))
+            
+            # Update status
+            self.queue.put(("status", f"Ready | Risk: {self.risk_level}"))
 
     def run(self):
         try:

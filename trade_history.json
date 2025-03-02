@@ -1,0 +1,49 @@
+{
+  "history": [
+    {
+      "result": "win",
+      "timestamp": "2025-03-02T12:21:28.386957",
+      "product": "BTC-USDC"
+    },
+    {
+      "result": "loss",
+      "timestamp": "2025-03-02T12:21:37.140266",
+      "product": "BTC-USDC"
+    },
+    {
+      "result": "win",
+      "timestamp": "2025-03-02T12:21:48.950414",
+      "product": "BTC-USDC"
+    },
+    {
+      "result": "loss",
+      "timestamp": "2025-03-02T17:35:47.060658",
+      "product": "BTC-USDC"
+    },
+    {
+      "result": "win",
+      "timestamp": "2025-03-02T17:53:37.452875",
+      "product": "BTC-USDC"
+    },
+    {
+      "result": "loss",
+      "timestamp": "2025-03-02T17:53:42.326513",
+      "product": "BTC-USDC"
+    },
+    {
+      "result": "loss",
+      "timestamp": "2025-03-02T18:10:47.644712",
+      "product": "BTC-USDC"
+    },
+    {
+      "result": "loss",
+      "timestamp": "2025-03-02T18:10:58.217552",
+      "product": "BTC-USDC"
+    }
+  ],
+  "consecutive_losses": 1,
+  "max_consecutive_losses": 2,
+  "in_recovery_mode": false,
+  "trades_since_last_loss": 0,
+  "last_updated": "2025-03-02T18:10:58.217569"
+}
