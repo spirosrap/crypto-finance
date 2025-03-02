@@ -1193,8 +1193,12 @@ class MarketAnalyzer:
                     'change': round(volume_info['volume_change'], 1),
                     'trend': volume_info['volume_trend'],
                     'strength': volume_info['strength'],
+                    'strength_score': volume_info.get('strength_score', 0),
                     'is_confirming': volume_info['is_confirming'],
-                    'price_change': round(volume_info['price_change'], 1)
+                    'price_change': round(volume_info['price_change'], 1),
+                    'consistency': round(volume_info.get('volume_consistency', 0), 1),
+                    'acceleration': round(volume_info.get('volume_acceleration', 0), 1),
+                    'price_volume_ratio': round(volume_info.get('volume_price_ratio', 0), 2)
                 },
                 'ml_analysis': {
                     'prediction': ml_prediction,
@@ -1524,8 +1528,10 @@ class MarketAnalyzer:
             volume_message = f"\nVolume Analysis:\n" \
                             f"• Volume Change: {volume_info['volume_change']:.1f}%\n" \
                             f"• Volume Trend: {volume_info['volume_trend']}\n" \
-                            f"• Signal Strength: {volume_info['strength']}\n" \
+                            f"• Signal Strength: {volume_info['strength']} (Score: {volume_info.get('strength_score', 0)})\n" \
                             f"• Price Change: {volume_info['price_change']:.1f}%\n" \
+                            f"• Volume Consistency: {volume_info.get('volume_consistency', 0):.1f}%\n" \
+                            f"• Volume Acceleration: {volume_info.get('volume_acceleration', 0):.1f}%\n" \
                             f"• Volume Confirmation: {'Yes' if volume_info['is_confirming'] else 'No'}"
             
             # Add volume message to each recommendation
@@ -2130,24 +2136,41 @@ class MarketAnalyzer:
             volume_change = volume_info.get('volume_change', 0)
             is_confirming = volume_info.get('is_confirming', False)
             volume_trend = volume_info.get('volume_trend', 'Neutral')
+            volume_consistency = volume_info.get('consistency', 0)
+            volume_acceleration = volume_info.get('acceleration', 0)
+            volume_strength_score = volume_info.get('strength_score', 0)
             
             volume_quality = {
                 'trend': volume_trend,
-                'strength': 'Strong' if abs(volume_change) > 50 else 'Moderate' if abs(volume_change) > 20 else 'Weak',
-                'consistency': 'High' if is_confirming else 'Low',
+                'strength': 'Strong' if volume_strength_score > 60 else 'Moderate' if volume_strength_score > 40 else 'Weak',
+                'consistency': 'High' if volume_consistency > 70 else 'Moderate' if volume_consistency > 40 else 'Low',
+                'acceleration': 'Increasing' if volume_acceleration > 10 else 'Decreasing' if volume_acceleration < -10 else 'Stable',
                 'price_alignment': 'Confirmed' if is_confirming else 'Divergent',
-                'trend_support': 'Strong' if volume_trend == "Increasing" and is_confirming else
-                               'Weak' if volume_trend == "Decreasing" else 'Neutral'
+                'trend_support': 'Strong' if volume_trend in ["Strongly Increasing", "Increasing"] and is_confirming else
+                               'Weak' if volume_trend in ["Strongly Decreasing", "Decreasing"] else 'Neutral'
             }
             
             volume_score = 0
+            
+            # Base score from volume strength
+            volume_score += min(15, volume_strength_score / 5)
+            
+            # Add confirmation bonus
             if is_confirming:
-                volume_score = min(20, abs(volume_change) / 5)
-                # Add trend support bonus
-                if volume_quality['trend_support'] == 'Strong':
-                    volume_score += 5
-            else:
-                volume_score = 5
+                volume_score += 5
+                
+            # Add consistency bonus
+            volume_score += min(5, volume_consistency / 20)
+                
+            # Add trend support bonus
+            if volume_quality['trend_support'] == 'Strong':
+                volume_score += 5
+                
+            # Add acceleration bonus
+            if volume_acceleration > 20:
+                volume_score += 5
+            elif volume_acceleration > 0:
+                volume_score += 2
                 
             probability_factors.append(("Volume", volume_score))
             move_characteristics['volume_quality'] = volume_quality
@@ -4322,9 +4345,15 @@ def main():
             volume = analysis['volume_analysis']
             print(f"📈 Volume Change: {volume['change']:.1f}%")
             print(f"📊 Volume Trend: {volume['trend']}")
-            print(f"💪 Volume Strength: {volume['strength']}")
+            print(f"💪 Volume Strength: {volume['strength']} (Score: {volume.get('strength_score', 0)})")
             print(f"📉 Price Change: {volume['price_change']:.1f}%")
             print(f"✅ Volume Confirmation: {'Yes' if volume['is_confirming'] else 'No'}")
+            
+            # Add new volume metrics
+            print("\n=== 📊 Advanced Volume Metrics ===")
+            print(f"📊 Volume Consistency: {volume.get('consistency', 0):.1f}%")
+            print(f"📈 Volume Acceleration: {volume.get('acceleration', 0):.1f}%")
+            print(f"📉 Price/Volume Ratio: {volume.get('price_volume_ratio', 0):.2f}")
 
             # Add new enhanced analysis sections
             print("\n====== 🔄 Enhanced Market Analysis ======")

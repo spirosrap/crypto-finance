@@ -1437,7 +1437,7 @@ class TechnicalAnalysis:
 
     def analyze_volume_confirmation(self, candles: List[Dict], lookback: int = 20) -> Dict[str, Union[bool, float, str]]:
         """
-        Analyze volume patterns for trade confirmation.
+        Analyze volume patterns for trade confirmation with enhanced robustness.
         
         Args:
             candles: List of candle data
@@ -1447,47 +1447,193 @@ class TechnicalAnalysis:
             Dict containing volume analysis results
         """
         try:
-            # Get recent data
-            recent_candles = candles[-lookback:]
-            volumes = self.extract_prices(recent_candles, 'volume')
-            prices = self.extract_prices(recent_candles, 'close')
+            # Ensure we have enough data
+            if len(candles) < 5:  # Minimum required data
+                return {
+                    'is_confirming': False,
+                    'volume_change': 0.0,
+                    'volume_trend': "Insufficient Data",
+                    'strength': "Unknown",
+                    'strength_score': 0,
+                    'current_volume': 0.0,
+                    'average_volume': 0.0,
+                    'price_change': 0.0,
+                    'volume_consistency': 0.0,
+                    'volume_acceleration': 0.0,
+                    'volume_price_ratio': 0.0
+                }
             
-            # Calculate average volume
-            avg_volume = np.mean(volumes[:-1])  # Excluding current volume
+            # Extract volume and price data
+            volumes = []
+            prices = []
+            for candle in candles:
+                volumes.append(candle.get('volume', 0))
+                prices.append(candle.get('close', 0))
+            
+            # Ensure we have data
+            if not volumes or not prices:
+                return {
+                    'is_confirming': False,
+                    'volume_change': 0.0,
+                    'volume_trend': "No Data",
+                    'strength': "Unknown",
+                    'strength_score': 0,
+                    'current_volume': 0.0,
+                    'average_volume': 0.0,
+                    'price_change': 0.0,
+                    'volume_consistency': 0.0,
+                    'volume_acceleration': 0.0,
+                    'volume_price_ratio': 0.0
+                }
+            
+            # Get current volume and calculate averages
             current_volume = volumes[-1]
             
-            # Calculate volume change
-            volume_change = ((current_volume - avg_volume) / avg_volume) * 100
+            # Calculate short-term average (last 5 periods or less)
+            short_term_count = min(5, len(volumes))
+            short_term_volumes = volumes[-short_term_count:]
+            avg_volume_short = sum(short_term_volumes) / short_term_count if short_term_count > 0 else 0
             
-            # Calculate price change
-            price_change = ((prices[-1] - prices[-2]) / prices[-2]) * 100
+            # Calculate medium-term average (last 10 periods or less)
+            medium_term_count = min(10, len(volumes))
+            medium_term_volumes = volumes[-medium_term_count:]
+            avg_volume_medium = sum(medium_term_volumes) / medium_term_count if medium_term_count > 0 else 0
             
-            # Determine if volume is confirming price movement
-            is_confirming = (price_change > 0 and volume_change > 20) or \
-                           (price_change < 0 and volume_change > 20)
+            # Calculate long-term average (lookback periods or less)
+            long_term_count = min(lookback, len(volumes))
+            long_term_volumes = volumes[-long_term_count:]
+            avg_volume_long = sum(long_term_volumes) / long_term_count if long_term_count > 0 else 0
+            
+            # Calculate volume changes
+            volume_change_short = ((current_volume - avg_volume_short) / avg_volume_short * 100) if avg_volume_short > 0 else 0
+            volume_change_medium = ((current_volume - avg_volume_medium) / avg_volume_medium * 100) if avg_volume_medium > 0 else 0
+            volume_change_long = ((current_volume - avg_volume_long) / avg_volume_long * 100) if avg_volume_long > 0 else 0
             
             # Calculate volume trend
-            volume_sma = np.mean(volumes[-5:])  # 5-period volume SMA
-            volume_trend = "Increasing" if volume_sma > avg_volume else "Decreasing"
+            volume_trend = "Flat"
+            if avg_volume_short > avg_volume_medium > avg_volume_long:
+                volume_trend = "Strongly Increasing"
+            elif avg_volume_short > avg_volume_medium:
+                volume_trend = "Increasing"
+            elif avg_volume_short < avg_volume_medium < avg_volume_long:
+                volume_trend = "Strongly Decreasing"
+            elif avg_volume_short < avg_volume_medium:
+                volume_trend = "Decreasing"
             
-            # Determine volume signal strength
-            if volume_change > 100:  # Volume spike (2x average)
+            # Calculate volume consistency (standard deviation relative to mean)
+            volume_std = 0
+            if short_term_count > 1:
+                mean_vol = sum(short_term_volumes) / short_term_count
+                squared_diffs = [(v - mean_vol) ** 2 for v in short_term_volumes]
+                volume_std = (sum(squared_diffs) / short_term_count) ** 0.5
+            
+            volume_consistency = 1 - (volume_std / avg_volume_short if avg_volume_short > 0 else 1)
+            
+            # Calculate price change
+            price_change = 0
+            if len(prices) >= 2:
+                price_change = ((prices[-1] - prices[-2]) / prices[-2] * 100) if prices[-2] > 0 else 0
+            
+            # Calculate price volatility
+            price_changes = []
+            for i in range(1, min(10, len(prices))):
+                if i < len(prices) and prices[-i-1] > 0:
+                    change = (prices[-i] - prices[-i-1]) / prices[-i-1] * 100
+                    price_changes.append(change)
+            
+            price_volatility = 0
+            if price_changes:
+                mean_change = sum(price_changes) / len(price_changes)
+                squared_diffs = [(c - mean_change) ** 2 for c in price_changes]
+                price_volatility = (sum(squared_diffs) / len(price_changes)) ** 0.5
+            
+            # Calculate volume acceleration
+            volume_changes = []
+            for i in range(1, min(5, len(volumes))):
+                if i < len(volumes) and volumes[-i-1] > 0:
+                    change = (volumes[-i] - volumes[-i-1]) / volumes[-i-1] * 100
+                    volume_changes.append(change)
+            
+            volume_acceleration = sum(volume_changes) / len(volume_changes) if volume_changes else 0
+            
+            # Calculate volume relative to price movement
+            volume_price_ratio = abs(current_volume / (price_change if price_change != 0 else 0.01))
+            
+            # Determine if volume is confirming price movement
+            is_confirming = (
+                (price_change > 0 and volume_change_short > 20 and volume_trend in ["Increasing", "Strongly Increasing"]) or
+                (price_change < 0 and volume_change_short > 20 and volume_trend in ["Increasing", "Strongly Increasing"]) or
+                (abs(price_change) > price_volatility * 1.5 and volume_change_short > 30)
+            )
+            
+            # Calculate weighted volume change
+            weighted_volume_change = (
+                volume_change_short * 0.6 +
+                volume_change_medium * 0.3 +
+                volume_change_long * 0.1
+            )
+            
+            # Calculate strength score
+            strength_score = 0
+            
+            # Factor 1: Weighted volume change
+            if weighted_volume_change > 100:
+                strength_score += 40
+            elif weighted_volume_change > 50:
+                strength_score += 30
+            elif weighted_volume_change > 20:
+                strength_score += 20
+            elif weighted_volume_change > 0:
+                strength_score += 10
+                
+            # Factor 2: Volume trend
+            if volume_trend == "Strongly Increasing":
+                strength_score += 25
+            elif volume_trend == "Increasing":
+                strength_score += 15
+            elif volume_trend == "Flat":
+                strength_score += 5
+                
+            # Factor 3: Volume consistency
+            if volume_consistency > 0.8:
+                strength_score += 15
+            elif volume_consistency > 0.5:
+                strength_score += 10
+            elif volume_consistency > 0.3:
+                strength_score += 5
+                
+            # Factor 4: Volume acceleration
+            if volume_acceleration > 20:
+                strength_score += 20
+            elif volume_acceleration > 10:
+                strength_score += 10
+            elif volume_acceleration > 0:
+                strength_score += 5
+                
+            # Determine strength category
+            if strength_score >= 80:
                 strength = "Very Strong"
-            elif volume_change > 50:
+            elif strength_score >= 60:
                 strength = "Strong"
-            elif volume_change > 20:
+            elif strength_score >= 40:
                 strength = "Moderate"
-            else:
+            elif strength_score >= 20:
                 strength = "Weak"
+            else:
+                strength = "Very Weak"
                 
             return {
                 'is_confirming': is_confirming,
-                'volume_change': volume_change,
+                'volume_change': weighted_volume_change,
                 'volume_trend': volume_trend,
                 'strength': strength,
+                'strength_score': strength_score,
                 'current_volume': current_volume,
-                'average_volume': avg_volume,
-                'price_change': price_change
+                'average_volume': avg_volume_medium,
+                'price_change': price_change,
+                'volume_consistency': volume_consistency * 100,
+                'volume_acceleration': volume_acceleration,
+                'volume_price_ratio': volume_price_ratio
             }
             
         except Exception as e:
@@ -1497,9 +1643,13 @@ class TechnicalAnalysis:
                 'volume_change': 0.0,
                 'volume_trend': "Unknown",
                 'strength': "Unknown",
+                'strength_score': 0,
                 'current_volume': 0.0,
                 'average_volume': 0.0,
-                'price_change': 0.0
+                'price_change': 0.0,
+                'volume_consistency': 0.0,
+                'volume_acceleration': 0.0,
+                'volume_price_ratio': 0.0
             }
 
 # ... (any additional classes or functions)
