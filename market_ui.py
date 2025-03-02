@@ -82,7 +82,7 @@ class MarketAnalyzerUI:
         self.trade_history = []  # List of trade results (win/loss)
         self.consecutive_losses = 0  # Track consecutive losses
         self.max_consecutive_losses = 0  # Track maximum consecutive losses
-        self.original_margin = 200  # Store original margin for recovery
+        self.original_margin = 120  # Store original margin for recovery
         self.original_leverage = 10  # Store original leverage for recovery
         self.risk_level = "Normal"  # Current risk level (Normal, Reduced, Conservative)
         self.in_recovery_mode = False  # Whether we're in recovery mode
@@ -462,7 +462,7 @@ class MarketAnalyzerUI:
         margin_frame = ctk.CTkFrame(trading_frame)
         margin_frame.pack(fill="x", pady=5)
         ctk.CTkLabel(margin_frame, text="Margin ($):").pack(side="left", padx=5)
-        self.margin_var = ctk.StringVar(value="200")
+        self.margin_var = ctk.StringVar(value="120")
         self.margin_entry = ctk.CTkEntry(
             margin_frame, 
             width=80,
