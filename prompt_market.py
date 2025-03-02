@@ -268,23 +268,12 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     # Define provider at the start of the function
     provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
 
-    # SYSTEM_PROMPT = (
-    #     "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
-    #     "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"IS_VALID\": <IS_VALID>} "
-    #     "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, \"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"IS_VALID\": <IS_VALID>}. "
-    #     "Instruction 1: Use code to calculate the R/R ratio. "
-    #     "Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
-    #     "Instruction 3: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
-    #     "Instruction 4: If Stop Loss is below current price for a SELL signal, set IS_VALID to False. (Default is True) "
-    #     "Instruction 5: If Stop Loss is above current price for a BUY signal, set IS_VALID to False. (Default is True) "
-    # )
-
     SYSTEM_PROMPT = (
         "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
         "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, "
-        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"IS_VALID\": <IS_VALID>} "
+        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", \"IS_VALID\": <IS_VALID>} "
         "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, "
-        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"IS_VALID\": <IS_VALID>}. "
+        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", \"IS_VALID\": <IS_VALID>}. "
 
         "Instruction 1: Use code to calculate the R/R ratio as follows: "
         "• For a SELL signal: R/R_RATIO = (Target Price - SELL AT) / (SELL AT - STOP LOSS). "
@@ -293,11 +282,12 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 
         "Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
         "Instruction 3: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
+        "Instruction 4: Volatility should be one of: 'Very Low', 'Low', 'Medium', 'High', 'Very High'. "
 
-        "Instruction 4: For a SELL signal, ensure that the STOP LOSS is strictly above the SELL AT price. "
+        "Instruction 5: For a SELL signal, ensure that the STOP LOSS is strictly above the SELL AT price. "
         "If STOP LOSS <= SELL AT, set IS_VALID to False (Default True). "
 
-        "Instruction 5: For a BUY signal, ensure that the STOP LOSS is strictly below the BUY AT price. "
+        "Instruction 6: For a BUY signal, ensure that the STOP LOSS is strictly below the BUY AT price. "
         "If STOP LOSS >= BUY AT, set IS_VALID to False (Default True)."
     )
         
@@ -514,6 +504,12 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         # Check probability threshold
         if prob <= 60:
             print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
+            return
+        
+        # Check volatility conditions
+        volatility = rec_dict.get('VOLATILITY', 'Medium')  # Default to Medium if not present
+        if volatility in ['Very High', 'Very Low']:
+            print(f"{COLORS['yellow']}Trade not executed: Market volatility '{volatility}' is not optimal for trading{COLORS['end']}")
             return
         
         # Check volume strength
