@@ -271,23 +271,33 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     SYSTEM_PROMPT = (
         "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
         "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, "
-        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", \"IS_VALID\": <IS_VALID>} "
+        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", "
+        "\"MARKET_REGIME\": \"<MARKET_REGIME>\", \"REGIME_CONFIDENCE\": \"<REGIME_CONFIDENCE>\", \"IS_VALID\": <IS_VALID>} "
         "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, "
-        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", \"IS_VALID\": <IS_VALID>}. "
+        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", "
+        "\"MARKET_REGIME\": \"<MARKET_REGIME>\", \"REGIME_CONFIDENCE\": \"<REGIME_CONFIDENCE>\", \"IS_VALID\": <IS_VALID>}. "
 
-        "Instruction 1: Use code to calculate the R/R ratio as follows: "
+        "Instruction 1: Market Regime Analysis - "
+        "• Identify the current market regime as one of: 'Strong Bullish', 'Bullish', 'Choppy Bullish', 'Choppy', 'Choppy Bearish', 'Bearish', 'Strong Bearish'. "
+        "• Set REGIME_CONFIDENCE as: 'Very High', 'High', 'Moderate', 'Low', 'Very Low'. "
+        "• Only generate BUY signals in Bullish or Strong Bullish regimes (unless there's a clear reversal pattern). "
+        "• Only generate SELL signals in Bearish or Strong Bearish regimes (unless there's a clear reversal pattern). "
+        "• In Choppy markets, require higher PROBABILITY and R/R_RATIO thresholds. "
+        "• Consider regime transitions and momentum shifts in your analysis. "
+
+        "Instruction 2: Use code to calculate the R/R ratio as follows: "
         "• For a SELL signal: R/R_RATIO = (Target Price - SELL AT) / (SELL AT - STOP LOSS). "
         "• For a BUY signal: R/R_RATIO = (BUY AT - Target Price) / (STOP LOSS - BUY AT). "
         "Ensure the R/R ratio is positive and above an acceptable threshold. "
 
-        "Instruction 2: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
-        "Instruction 3: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
-        "Instruction 4: Volatility should be one of: 'Very Low', 'Low', 'Medium', 'High', 'Very High'. "
+        "Instruction 3: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
+        "Instruction 4: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
+        "Instruction 5: Volatility should be one of: 'Very Low', 'Low', 'Medium', 'High', 'Very High'. "
 
-        "Instruction 5: For a SELL signal, ensure that the STOP LOSS is strictly above the SELL AT price. "
+        "Instruction 6: For a SELL signal, ensure that the STOP LOSS is strictly above the SELL AT price. "
         "If STOP LOSS <= SELL AT, set IS_VALID to False (Default True). "
 
-        "Instruction 6: For a BUY signal, ensure that the STOP LOSS is strictly below the BUY AT price. "
+        "Instruction 7: For a BUY signal, ensure that the STOP LOSS is strictly below the BUY AT price. "
         "If STOP LOSS >= BUY AT, set IS_VALID to False (Default True)."
     )
         
@@ -505,6 +515,31 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         if prob <= 60:
             print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
             return
+            
+        # Check market regime conditions
+        market_regime = rec_dict.get('MARKET_REGIME', 'Choppy')  # Default to Choppy if not present
+        regime_confidence = rec_dict.get('REGIME_CONFIDENCE', 'Low')  # Default to Low if not present
+        
+        # Validate trade direction against market regime
+        side = 'SELL' if 'SELL AT' in rec_dict else 'BUY'
+        
+        if side == 'BUY' and market_regime in ['Bearish', 'Strong Bearish', 'Choppy Bearish']:
+            if regime_confidence in ['High', 'Very High'] and prob < 85:
+                print(f"{COLORS['red']}Trade not executed: {side} signal in {market_regime} regime requires >85% probability (current: {prob:.1f}%){COLORS['end']}")
+                return
+        elif side == 'SELL' and market_regime in ['Bullish', 'Strong Bullish', 'Choppy Bullish']:
+            if regime_confidence in ['High', 'Very High'] and prob < 85:
+                print(f"{COLORS['red']}Trade not executed: {side} signal in {market_regime} regime requires >85% probability (current: {prob:.1f}%){COLORS['end']}")
+                return
+                
+        # Adjust thresholds for choppy markets
+        if 'Choppy' in market_regime:
+            if prob < 75:
+                print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below choppy market threshold of 75%{COLORS['end']}")
+                return
+            if float(rec_dict['R/R_RATIO']) < 2.0:
+                print(f"{COLORS['yellow']}Trade not executed: R/R ratio {float(rec_dict['R/R_RATIO']):.2f} is below choppy market threshold of 2.0{COLORS['end']}")
+                return
         
         # Check volatility conditions
         volatility = rec_dict.get('VOLATILITY', 'Medium')  # Default to Medium if not present
@@ -540,12 +575,10 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             
         # Determine trade direction and prices
         if 'SELL AT' in rec_dict:
-            side = 'SELL'
             entry_price = float(rec_dict['SELL AT'])
             target_price = float(rec_dict['BUY BACK AT'])
             stop_loss = float(rec_dict['STOP LOSS'])
         elif 'BUY AT' in rec_dict:
-            side = 'BUY'
             entry_price = float(rec_dict['BUY AT'])
             target_price = float(rec_dict['SELL BACK AT'])
             stop_loss = float(rec_dict['STOP LOSS'])
@@ -671,6 +704,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         print(f"\n{COLORS['cyan']}Executing trade with parameters:{COLORS['end']}")
         print(f"Product: {perp_product}")
         print(f"Side: {side}")
+        print(f"Market Regime: {market_regime}")
+        print(f"Regime Confidence: {regime_confidence}")
         print(f"Initial Margin: ${margin}")
         print(f"Leverage: {leverage}x")
         print(f"Position Size: ${size_usd}")
