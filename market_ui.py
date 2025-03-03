@@ -378,7 +378,7 @@ class MarketAnalyzerUI:
         margin_frame = ctk.CTkFrame(trading_frame)
         margin_frame.pack(fill="x", pady=5)
         ctk.CTkLabel(margin_frame, text="Margin ($):").pack(side="left", padx=5)
-        self.margin_var = ctk.StringVar(value="120")
+        self.margin_var = ctk.StringVar(value="60")
         self.margin_entry = ctk.CTkEntry(
             margin_frame, 
             width=80,
@@ -1020,21 +1020,32 @@ class MarketAnalyzerUI:
                 if stderr:
                     self.queue.put(("append", f"\nErrors:\n{stderr}"))
                 
-                # If no error occurred and status hasn't been updated, set to Ready
-                if not stderr:
-                    self.queue.put(("status", "Ready"))
-                
-                # Re-enable buttons
-                self.long_btn.configure(state="normal")
-                self.short_btn.configure(state="normal")
-                self.queue.put(("disable_cancel", None))
-                
                 # Clear current process
                 self.current_process = None
                 
-                # Update risk UI if trade completed
-                if trade_completed and hasattr(self, 'update_risk_ui'):
-                    self.root.after(0, self.update_risk_ui)
+                # Wait based on granularity before next analysis
+                wait_minutes = {
+                    'ONE_MINUTE': 0.3,  # Check every 20 seconds
+                    'FIVE_MINUTE': 2,   # Check every 2 minutes
+                    'FIFTEEN_MINUTE': 2, # Check every 2 minutes (changed from 5)
+                    'THIRTY_MINUTE': 10, # Check every 10 minutes
+                    'ONE_HOUR': 20      # Check every 20 minutes
+                }.get(self.granularity_var.get(), 20)  # Default to 20 minutes
+                
+                # For sub-minute intervals, adjust the sleep time
+                if wait_minutes < 1:
+                    time.sleep(wait_minutes * 60)  # Convert to seconds
+                else:
+                    # Wait in 1-minute intervals to allow for clean stopping
+                    for _ in range(int(wait_minutes)):
+                        if not self.auto_trading:
+                            return
+                        time.sleep(60)  # 1 minute intervals
+                    
+                    # Handle any remaining partial minute
+                    remaining_seconds = (wait_minutes - int(wait_minutes)) * 60
+                    if remaining_seconds > 0:
+                        time.sleep(remaining_seconds)
                 
         except Exception as e:
             self.queue.put(("append", f"\nError executing order: {str(e)}\n"))
@@ -1093,8 +1104,8 @@ class MarketAnalyzerUI:
         current_minute = current_time.minute
         current_time_float = current_hour + current_minute / 60.0
         
-        # Trading is not allowed between 14:30 and 17:00
-        if 14.5 <= current_time_float < 17.0:
+        # Trading is allowed from 17:00 (5 PM) to 7:20 AM
+        if current_time_float >= 7.35 and current_time_float < 17.0:  # 7:21 AM to 5:00 PM
             return False
         return True
 
@@ -1105,7 +1116,7 @@ class MarketAnalyzerUI:
                 # Check if trading is allowed based on time
                 if not self.is_trading_allowed():
                     if not hasattr(self, '_trading_paused_logged'):
-                        self.queue.put(("append", "\nTrading paused: Current time is in high-risk period (14:30-17:00). Will resume after 17:00.\n"))
+                        self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (5:00 PM - 7:20 AM). Will resume at 5:00 PM.\n"))
                         self._trading_paused_logged = True
                     time.sleep(60)  # Check every minute
                     continue
@@ -1113,7 +1124,7 @@ class MarketAnalyzerUI:
                     # Reset the logged flag when we're out of the pause period
                     if hasattr(self, '_trading_paused_logged'):
                         del self._trading_paused_logged
-                        self.queue.put(("append", "\nTrading resumed: Current time is outside high-risk period.\n"))
+                        self.queue.put(("append", "\nTrading resumed: Current time is within trading hours (5:00 PM - 7:20 AM).\n"))
 
                 # Check if model needs retraining
                 current_time = time.time()
@@ -1242,17 +1253,6 @@ class MarketAnalyzerUI:
                 # Clear current process
                 self.current_process = None
                 
-                # Check if process has exited
-                if process.poll() is not None:
-                    break
-                
-                # If an order was placed, wait for a shorter interval before checking again
-                if order_placed:
-                    self.queue.put(("append", "\nChecking order status every minute until it's closed...\n"))
-                    # Wait for a shorter interval before checking again
-                    time.sleep(60)  # Check every minute
-                    continue
-                
                 # Wait based on granularity before next analysis
                 wait_minutes = {
                     'ONE_MINUTE': 0.3,  # Check every 20 seconds
@@ -1278,8 +1278,10 @@ class MarketAnalyzerUI:
                         time.sleep(remaining_seconds)
                 
             except Exception as e:
-                self.queue.put(("append", f"\nError in auto-trading loop: {str(e)}\n"))
+                self.queue.put(("append", f"\nError in auto-trading loop: {str(e)}\nTraceback:\n{traceback.format_exc()}\n"))
+                # Don't exit the thread on error, just wait a bit and continue
                 time.sleep(60)  # Wait 1 minute before retrying on error
+                continue
 
     def get_truly_open_orders(self, service):
         """
