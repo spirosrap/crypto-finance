@@ -41,6 +41,8 @@ MODEL_CONFIG = {
     'reasoner': 'deepseek-reasoner',
     'deepseek': 'deepseek-chat',
     'default': 'gpt-4o-mini',
+    'gpt45-preview': 'gpt-4.5-preview',  # Add GPT-4.5 Preview model
+    'o1': 'o1',  # Add O1 model
     'o1-mini': 'o1-mini',
     'o3-mini': 'o3-mini',  # Add O3 Mini model
     'gpt4o': 'gpt-4o',
@@ -257,7 +259,7 @@ def get_hyperbolic_response(messages: list, model: str = "deepseek-ai/DeepSeek-R
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False, use_hyperbolic: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_gpt45_preview: bool = False, use_o1: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False, use_hyperbolic: bool = False) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic."""
     if not (use_ollama or use_hyperbolic) and client is None:
         raise ValueError("API client not properly initialized")
@@ -328,6 +330,10 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             model = MODEL_CONFIG['reasoner']
         elif use_deepseek:
             model = MODEL_CONFIG['deepseek']
+        elif use_gpt45_preview:
+            model = MODEL_CONFIG['gpt45-preview']
+        elif use_o1:
+            model = MODEL_CONFIG['o1']
         elif use_o1_mini:
             model = MODEL_CONFIG['o1-mini']
         elif use_o3_mini:
@@ -807,6 +813,10 @@ def main():
                         help='Use DeepSeek Reasoner API (includes detailed reasoning steps)')
     model_group.add_argument('--use_grok', action='store_true',
                         help='Use X AI Grok API for analysis')
+    model_group.add_argument('--use_gpt45_preview', action='store_true',
+                        help='Use GPT-4.5 Preview model for analysis')
+    model_group.add_argument('--use_o1', action='store_true',
+                        help='Use o1 model for analysis')
     model_group.add_argument('--use_o1_mini', action='store_true',
                         help='Use o1 Mini model for faster, lighter analysis')
     model_group.add_argument('--use_o3_mini', action='store_true',
@@ -822,8 +832,8 @@ def main():
 
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_o1_mini, --use_o3_mini, --use_gpt4o, --use_deepseek_r1, --use_ollama, or --use_hyperbolic.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_gpt45_preview, args.use_o1, args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_gpt45_preview, --use_o1, --use_o1_mini, --use_o3_mini, --use_gpt4o, --use_deepseek_r1, --use_ollama, or --use_hyperbolic.")
         exit(1)
 
     try:
@@ -874,8 +884,9 @@ def main():
         # Get trading recommendation
         recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
                                                             args.use_deepseek, args.use_reasoner, args.use_grok, 
-                                                            args.use_o1_mini, args.use_o3_mini, args.use_gpt4o, 
-                                                            args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic)
+                                                            args.use_gpt45_preview, args.use_o1, args.use_o1_mini, 
+                                                            args.use_o3_mini, args.use_gpt4o, args.use_deepseek_r1, 
+                                                            args.use_ollama, args.use_hyperbolic)
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
