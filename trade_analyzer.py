@@ -151,13 +151,22 @@ class TradingAnalyzer:
             if not in_drawdown and drawdowns.iloc[i] < 0:
                 in_drawdown = True
                 start_idx = i
-            elif in_drawdown and drawdowns.iloc[i] >= 0:
+            elif in_drawdown and (drawdowns.iloc[i] >= 0 or i == len(drawdowns) - 1):
+                # End the drawdown period if we recover or reach the end of data
                 in_drawdown = False
-                drawdown_periods.append({
-                    'start_date': self.df['Timestamp'].iloc[start_idx],
-                    'end_date': self.df['Timestamp'].iloc[i],
-                    'drawdown': drawdowns.iloc[start_idx:i].min()
-                })
+                end_idx = i if drawdowns.iloc[i] >= 0 else i + 1
+                period_drawdown = drawdowns.iloc[start_idx:end_idx].min()
+                
+                # Only add significant drawdowns (e.g., more than 1%)
+                if period_drawdown < -1:
+                    drawdown_periods.append({
+                        'start_date': self.df['Timestamp'].iloc[start_idx],
+                        'end_date': self.df['Timestamp'].iloc[end_idx - 1],
+                        'drawdown': period_drawdown
+                    })
+        
+        # Sort drawdown periods by magnitude
+        drawdown_periods.sort(key=lambda x: x['drawdown'])
         
         return max_drawdown, drawdown_periods
     
