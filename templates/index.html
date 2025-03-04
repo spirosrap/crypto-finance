@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Market Analyzer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&display=swap">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 sidebar">
+                <div class="sidebar-content">
+                    <h2 class="text-center mb-4">Market Analysis</h2>
+                    
+                    <!-- Product Selection -->
+                    <div class="mb-3">
+                        <label for="product" class="form-label">Select Product:</label>
+                        <select id="product" class="form-select">
+                            {% for product in products %}
+                            <option value="{{ product }}" {% if product == config.product %}selected{% endif %}>{{ product }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <!-- Price Display -->
+                    <div class="price-display mb-3">
+                        <h5>Current Price:</h5>
+                        <div id="current-price" class="price">-.--</div>
+                        <div id="price-time" class="price-time">Last update: Never</div>
+                    </div>
+                    
+                    <!-- Model Selection -->
+                    <div class="mb-3">
+                        <label for="model" class="form-label">Select Model:</label>
+                        <select id="model" class="form-select">
+                            {% for key, value in models.items() %}
+                            <option value="{{ key }}" {% if key == config.model %}selected{% endif %}>{{ value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <!-- Granularity Selection -->
+                    <div class="mb-3">
+                        <label for="granularity" class="form-label">Time Frame:</label>
+                        <select id="granularity" class="form-select">
+                            {% for granularity in granularities %}
+                            <option value="{{ granularity }}" {% if granularity == config.granularity %}selected{% endif %}>{{ granularity.replace('_', ' ').title() }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <!-- Trading Options -->
+                    <div class="mb-3">
+                        <div class="card trading-options-card">
+                            <div class="card-header">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="trading-options-toggle">
+                                    <label class="form-check-label" for="trading-options-toggle">Trading Options</label>
+                                </div>
+                            </div>
+                            <div class="card-body trading-options" style="display: none;">
+                                <!-- Margin Type -->
+                                <div class="mb-2">
+                                    <label for="margin" class="form-label">Margin Type:</label>
+                                    <select id="margin" class="form-select">
+                                        <option value="CROSS" {% if config.margin == "CROSS" %}selected{% endif %}>Cross</option>
+                                        <option value="ISOLATED" {% if config.margin == "ISOLATED" %}selected{% endif %}>Isolated</option>
+                                    </select>
+                                </div>
+                                
+                                <!-- Margin Amount -->
+                                <div class="mb-2">
+                                    <label for="margin-amount" class="form-label">Margin Amount ($):</label>
+                                    <input type="number" class="form-control" id="margin-amount" value="{{ config.margin_amount }}" min="1" step="1">
+                                </div>
+                                
+                                <!-- Leverage -->
+                                <div class="mb-2">
+                                    <label for="leverage" class="form-label">Leverage: <span id="leverage-value">{{ config.leverage }}</span>x</label>
+                                    <input type="range" class="form-range" id="leverage" min="1" max="20" value="{{ config.leverage }}">
+                                </div>
+                                
+                                <!-- Take Profit / Stop Loss -->
+                                <div class="mb-2">
+                                    <label for="tp-sl" class="form-label">TP/SL: <span id="tp-sl-value">{{ config.take_profit }}</span>%</label>
+                                    <input type="range" class="form-range" id="tp-sl" min="0.5" max="5" step="0.1" value="{{ config.take_profit }}">
+                                </div>
+                                
+                                <!-- Limit Order -->
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="limit-order" {% if config.limit_order %}checked{% endif %}>
+                                    <label class="form-check-label" for="limit-order">Use Limit Orders</label>
+                                </div>
+                                
+                                <!-- Risk Level -->
+                                <div class="mt-2">
+                                    <label for="risk-level" class="form-label">Risk Level:</label>
+                                    <select id="risk-level" class="form-select">
+                                        <option value="low" {% if config.risk_level == "low" %}selected{% endif %}>Low</option>
+                                        <option value="medium" {% if config.risk_level == "medium" %}selected{% endif %}>Medium</option>
+                                        <option value="high" {% if config.risk_level == "high" %}selected{% endif %}>High</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="mb-3">
+                        <button id="analyze-btn" class="btn btn-primary w-100 mb-2">Run Analysis</button>
+                        <div class="row mb-2">
+                            <div class="col-6">
+                                <button id="long-btn" class="btn btn-success w-100">LONG</button>
+                            </div>
+                            <div class="col-6">
+                                <button id="short-btn" class="btn btn-danger w-100">SHORT</button>
+                            </div>
+                        </div>
+                        <button id="close-positions-btn" class="btn btn-warning w-100 mb-2">Close All Positions</button>
+                        <button id="check-orders-btn" class="btn btn-info w-100 mb-2">Check Open Orders</button>
+                        <button id="auto-trade-btn" class="btn btn-indigo w-100">Start Auto-Trading</button>
+                    </div>
+                    
+                    <!-- Control Buttons -->
+                    <div class="mb-3">
+                        <div class="row">
+                            <div class="col-6">
+                                <button id="clear-btn" class="btn btn-outline-secondary w-100">Clear</button>
+                            </div>
+                            <div class="col-6">
+                                <button id="cancel-btn" class="btn btn-outline-danger w-100">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 main-content">
+                <div class="row">
+                    <!-- Output Console -->
+                    <div class="col-md-8">
+                        <div class="card h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">Analysis Output</h5>
+                                <div id="status-indicator">Ready</div>
+                            </div>
+                            <div class="card-body">
+                                <div id="output-console" class="output-console"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Trade History and Stats -->
+                    <div class="col-md-4">
+                        <div class="card h-100">
+                            <div class="card-header">
+                                <h5 class="mb-0">Trade History</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="trade-stats mb-3">
+                                    <div class="row">
+                                        <div class="col-6">
+                                            <div class="stat-card bg-success text-white">
+                                                <div class="stat-title">Wins</div>
+                                                <div id="win-count" class="stat-value">0</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="stat-card bg-danger text-white">
+                                                <div class="stat-title">Losses</div>
+                                                <div id="loss-count" class="stat-value">0</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row mt-2">
+                                        <div class="col-12">
+                                            <div class="stat-card bg-primary text-white">
+                                                <div class="stat-title">Win Rate</div>
+                                                <div id="win-rate" class="stat-value">0%</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="trade-chart-container mb-3">
+                                    <canvas id="trade-chart"></canvas>
+                                </div>
+                                
+                                <div class="trade-history">
+                                    <h6>Recent Trades</h6>
+                                    <div id="trade-history-list" class="trade-history-list">
+                                        <div class="text-center text-muted">No trades yet</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html> 

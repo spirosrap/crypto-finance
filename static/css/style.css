@@ -1,0 +1,422 @@
+/* Main Layout */
+body {
+    background-color: #121212;
+    color: #ffffff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    min-height: 100vh;
+    font-weight: 400;
+    letter-spacing: 0.2px;
+}
+
+.container-fluid {
+    padding: 0;
+    height: 100vh;
+}
+
+.row {
+    margin: 0;
+    height: 100%;
+}
+
+/* Sidebar Styles */
+.sidebar {
+    background-color: #1e1e1e;
+    border-right: 1px solid #333;
+    padding: 20px;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.sidebar-content {
+    max-width: 100%;
+}
+
+/* Price Display */
+.price-display {
+    background-color: #2a2a2a;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+    margin-bottom: 20px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    position: relative;
+    border: 1px solid #444;
+}
+
+.price-display:hover {
+    background-color: #333;
+    border-color: #666;
+}
+
+.price-display::after {
+    content: "↻";
+    font-size: 16px;
+    color: #aaa;
+    position: absolute;
+    right: 15px;
+    top: 10px;
+}
+
+.price {
+    font-size: 28px;
+    font-weight: bold;
+    color: #4caf50;
+    margin: 5px 0;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.price-time {
+    font-size: 13px;
+    color: #bbb;
+    margin-top: 5px;
+}
+
+/* Main Content */
+.main-content {
+    padding: 20px;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+/* Output Console */
+.output-console {
+    background-color: #1a1a1a;
+    color: #ffffff;
+    font-family: 'Roboto Mono', 'Courier New', monospace;
+    padding: 15px;
+    border-radius: 5px;
+    height: calc(100% - 30px);
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.5;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+    border: 1px solid #333;
+}
+
+/* Status Indicator */
+#status-indicator {
+    padding: 5px 10px;
+    border-radius: 4px;
+    background-color: #2a2a2a;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    border: 1px solid #444;
+}
+
+/* Trade Stats */
+.stat-card {
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stat-title {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+.stat-value {
+    font-size: 22px;
+    font-weight: bold;
+    margin-top: 5px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Trade History List */
+.trade-history-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 5px;
+}
+
+.trade-item {
+    padding: 10px;
+    border-bottom: 1px solid #333;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.trade-success {
+    color: #4caf50;
+    font-weight: 500;
+}
+
+.trade-failure {
+    color: #f44336;
+    font-weight: 500;
+}
+
+/* Chart Container */
+.trade-chart-container {
+    height: 200px;
+    margin-bottom: 15px;
+}
+
+/* Button Styles */
+.btn-indigo {
+    background-color: #4B0082;
+    color: white;
+}
+
+.btn-indigo:hover {
+    background-color: #3a006b;
+    color: white;
+}
+
+/* Form Controls */
+.form-control, .form-select {
+    background-color: #2a2a2a;
+    border-color: #444;
+    color: #ffffff;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+    padding: 10px 12px;
+    height: auto;
+}
+
+.form-control:focus, .form-select:focus {
+    background-color: #333;
+    border-color: #666;
+    color: #fff;
+    box-shadow: 0 0 0 0.25rem rgba(75, 0, 130, 0.25);
+}
+
+/* Form Range (Sliders) */
+.form-range::-webkit-slider-thumb {
+    background-color: #0d6efd;
+    box-shadow: 0 0 5px rgba(13, 110, 253, 0.5);
+}
+
+.form-range::-moz-range-thumb {
+    background-color: #0d6efd;
+    box-shadow: 0 0 5px rgba(13, 110, 253, 0.5);
+}
+
+/* Form Switch */
+.form-switch .form-check-input {
+    background-color: #444;
+    border-color: #666;
+    width: 2.5em;
+    height: 1.25em;
+}
+
+.form-switch .form-check-input:checked {
+    background-color: #0d6efd;
+    border-color: #0a58ca;
+}
+
+/* Trading Options Toggle - Enhanced Visibility */
+#trading-options-toggle {
+    width: 3em;
+    height: 1.5em;
+    background-color: #555;
+    border: 2px solid #777;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+    animation: pulse-toggle 2s infinite;
+}
+
+@keyframes pulse-toggle {
+    0% {
+        box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+    }
+    50% {
+        box-shadow: 0 0 10px rgba(33, 150, 243, 0.6);
+    }
+    100% {
+        box-shadow: 0 0 5px rgba(0, 0, 0, 0.3);
+    }
+}
+
+#trading-options-toggle:checked {
+    background-color: #2196F3;
+    border-color: #0d6efd;
+    box-shadow: 0 0 8px rgba(33, 150, 243, 0.6);
+    animation: none;
+}
+
+.card-header .form-check-label {
+    font-weight: 600;
+    font-size: 15px;
+    color: #e0e0e0;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.card-header .form-switch {
+    padding-left: 2.8em;
+}
+
+/* Form Check */
+.form-check-input {
+    background-color: #444;
+    border-color: #666;
+}
+
+.form-check-input:checked {
+    background-color: #0d6efd;
+    border-color: #0a58ca;
+}
+
+/* Improve checkbox label visibility */
+.form-check-label {
+    color: #ffffff;
+    font-weight: 500;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.3px;
+}
+
+/* Special styling for the limit orders checkbox */
+#limit-order + .form-check-label {
+    color: #4dabf7;
+    font-weight: 500;
+}
+
+/* Card Styles */
+.card {
+    background-color: #2a2a2a;
+    border-color: #444;
+    height: 100%;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.card-header {
+    background-color: #333;
+    border-bottom-color: #444;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    padding: 12px 15px;
+}
+
+/* Trading Options Card Header */
+.trading-options-card .card-header {
+    background-color: #2c3e50;
+    background-image: linear-gradient(to right, #2c3e50, #3498db);
+    border-bottom: 1px solid #4a6b8a;
+    padding: 14px 16px;
+    cursor: pointer;
+    position: relative;
+}
+
+.trading-options-card .card-header:hover {
+    background-image: linear-gradient(to right, #34495e, #2980b9);
+}
+
+.trading-options-card .card-header::after {
+    content: "⚙️";
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 18px;
+    opacity: 0.8;
+}
+
+.card-header h5 {
+    margin-bottom: 0;
+    font-size: 16px;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Labels */
+.form-label {
+    color: #ffffff;
+    font-weight: 500;
+    margin-bottom: 5px;
+    font-size: 14px;
+}
+
+/* Buttons with better contrast */
+.btn {
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+    padding: 8px 16px;
+    border-width: 2px;
+}
+
+.btn-primary {
+    background-color: #0d6efd;
+    border-color: #0a58ca;
+}
+
+.btn-success {
+    background-color: #198754;
+    border-color: #146c43;
+}
+
+.btn-danger {
+    background-color: #dc3545;
+    border-color: #b02a37;
+}
+
+.btn-warning {
+    background-color: #ffc107;
+    border-color: #cc9a06;
+    color: #000;
+}
+
+.btn-info {
+    background-color: #0dcaf0;
+    border-color: #0aa2c0;
+    color: #000;
+}
+
+.btn-outline-secondary {
+    border-color: #6c757d;
+    color: #e0e0e0;
+}
+
+.btn-outline-danger {
+    border-color: #dc3545;
+    color: #e0e0e0;
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+    color: #ffffff;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-bottom: 15px;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .sidebar {
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid #333;
+    }
+    
+    .main-content {
+        height: auto;
+    }
+    
+    .row {
+        height: auto;
+    }
+} 
