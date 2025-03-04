@@ -624,16 +624,13 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['red']}Error getting current price: {str(e)}{COLORS['end']}")
             return
             
-        # Calculate position size using margin and leverage
-        size_usd = margin * leverage
-
         # Calculate stop loss percentage
         stop_loss_pct = abs((stop_loss - entry_price) / entry_price * 100)
         
         # Calculate potential profit percentage
         profit_pct = abs((target_price - entry_price) / entry_price * 100)
         
-        # Check if top loss is less than 0.4%
+        # Check if stop loss is less than 0.4%
         if stop_loss_pct < 0.4:
             print(f"{COLORS['red']}Trade not executed: Stop loss percentage ({stop_loss_pct:.2f}%) is less than minimum threshold of 0.4%{COLORS['end']}")
             return
@@ -659,6 +656,25 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['red']}Invalid risk-reward: Stop loss distance ({stop_loss_pct:.2f}%) is larger than take profit distance ({profit_pct:.2f}%){COLORS['end']}")
             return
 
+        # Apply position sizing rules based on stop loss percentage
+        # Calculate base position size using margin and leverage
+        base_size_usd = margin * leverage
+        size_usd = base_size_usd  # Default to full margin
+        
+        # Apply position sizing rules based on stop loss percentage
+        position_sizing_message = ""
+        if stop_loss_pct <= 2.0:
+            # Standard position sizing (full margin)
+            position_sizing_message = f"{COLORS['green']}Using standard position sizing (full margin) - SL ≤ 2%{COLORS['end']}"
+        else:
+            # # If SL > 2%, verify R/R ≥ 1.5 AND reduce position size by 50%
+            # if rr_ratio < 1.5:
+            #     print(f"{COLORS['red']}Trade not executed: For SL > 2% ({stop_loss_pct:.2f}%), R/R ratio must be ≥ 1.5 (current: {rr_ratio:.2f}){COLORS['end']}")
+            #     return            
+            # Reduce position size by 30%
+            size_usd = base_size_usd * 0.7
+            position_sizing_message = f"{COLORS['yellow']}Reducing position size by 30% - SL > 2% ({stop_loss_pct:.2f}%){COLORS['end']}"
+
         # Map product_id to perpetual format
         perp_product_map = {
             'BTC-USDC': 'BTC-PERP-INTX',
@@ -673,7 +689,7 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['red']}Unsupported product for perpetual trading: {product_id}{COLORS['end']}")
             return
 
-        # Calculate potential profit/loss in USD based on initial margin
+        # Calculate potential profit/loss in USD based on adjusted position size
         profit_usd = size_usd * (profit_pct / 100)
         loss_usd = size_usd * (stop_loss_pct / 100)
         
@@ -708,7 +724,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         print(f"Regime Confidence: {regime_confidence}")
         print(f"Initial Margin: ${margin}")
         print(f"Leverage: {leverage}x")
-        print(f"Position Size: ${size_usd}")
+        print(position_sizing_message)
+        print(f"Position Size: ${size_usd:.2f}")
         print(f"Entry Price: ${entry_price:.2f}")
         print(f"Current Price: ${current_price:.2f}")
         print(f"Price Deviation: {price_deviation:.2f}%")
