@@ -31,10 +31,19 @@ class MarketAnalyzerUI:
             from app_icon import create_icon
             icon_path = create_icon()
             if os.path.exists(icon_path):
-                if os.uname().sysname == 'Darwin':  # macOS
-                    # Load the PNG version for the window icon
-                    png_path = 'icons/market_analyzer_256x256.png'
-                    if os.path.exists(png_path):
+                # Define icon sizes to try in order of preference
+                icon_sizes = ['256x256', '128x128', '64x64', '48x48', '32x32', '16x16']
+                
+                # Try to find the best available icon
+                png_path = None
+                for size in icon_sizes:
+                    test_path = f'icons/market_analyzer_{size}.png'
+                    if os.path.exists(test_path):
+                        png_path = test_path
+                        break
+                
+                if png_path:
+                    if os.uname().sysname == 'Darwin':  # macOS
                         import tkinter as tk
                         icon_image = tk.PhotoImage(file=png_path)
                         self.root.iconphoto(True, icon_image)
@@ -50,7 +59,18 @@ class MarketAnalyzerUI:
                             NSApplication.sharedApplication().setApplicationIconImage_(image)
                         except Exception as e:
                             print(f"Warning: Could not set dock icon: {str(e)}")
-                else:  # Windows/Linux
+                    else:  # Windows/Linux
+                        try:
+                            import tkinter as tk
+                            icon_image = tk.PhotoImage(file=png_path)
+                            self.root.iconphoto(True, icon_image)
+                            self._icon_image = icon_image
+                        except Exception as e:
+                            print(f"Warning: Could not set window icon using PNG: {str(e)}")
+                            # Fallback to ICO if PNG fails
+                            if os.path.exists(icon_path):
+                                self.root.iconbitmap(icon_path)
+                elif os.path.exists(icon_path):
                     self.root.iconbitmap(icon_path)
         except Exception as e:
             print(f"Warning: Could not set application icon: {str(e)}\nTraceback: {traceback.format_exc()}")
