@@ -128,7 +128,7 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
         position_size = trade_details['position_size']
         effective_leverage = trade_details['effective_leverage']
         
-        print(f"Analyzing trade from {start_date} to {end_date}")
+        print(f"\nAnalyzing trade from {start_date} to {end_date}")
         print(f"Entry: {entry_price}, TP: {take_profit}, SL: {stop_loss}, Side: {'SHORT' if is_short else 'LONG'}")
         print(f"Position Size: ${position_size}, Effective Leverage: {effective_leverage}x")
         
@@ -144,6 +144,7 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
                         # Calculate profit based on position size and effective leverage
                         price_change_pct = ((entry_price - take_profit) / entry_price)
                         profit_pct = price_change_pct * 100 * effective_leverage
+                        print(f"SHORT SUCCESS - Price change: {price_change_pct*100:.2f}%, Leverage: {effective_leverage}x, Total: {profit_pct:.2f}%")
                         return {
                             'outcome': 'SUCCESS',
                             'outcome_pct': profit_pct,
@@ -154,6 +155,7 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
                         # Calculate loss based on position size and effective leverage
                         price_change_pct = ((stop_loss - entry_price) / entry_price)
                         loss_pct = price_change_pct * 100 * effective_leverage
+                        print(f"SHORT STOP LOSS - Price change: {price_change_pct*100:.2f}%, Leverage: {effective_leverage}x, Total: {-loss_pct:.2f}%")
                         return {
                             'outcome': 'STOP LOSS',
                             'outcome_pct': -loss_pct,
@@ -166,6 +168,7 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
                         # Calculate profit based on position size and effective leverage
                         price_change_pct = ((take_profit - entry_price) / entry_price)
                         profit_pct = price_change_pct * 100 * effective_leverage
+                        print(f"LONG SUCCESS - Price change: {price_change_pct*100:.2f}%, Leverage: {effective_leverage}x, Total: {profit_pct:.2f}%")
                         return {
                             'outcome': 'SUCCESS',
                             'outcome_pct': profit_pct,
@@ -176,6 +179,7 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
                         # Calculate loss based on position size and effective leverage
                         price_change_pct = ((entry_price - stop_loss) / entry_price)
                         loss_pct = price_change_pct * 100 * effective_leverage
+                        print(f"LONG STOP LOSS - Price change: {price_change_pct*100:.2f}%, Leverage: {effective_leverage}x, Total: {-loss_pct:.2f}%")
                         return {
                             'outcome': 'STOP LOSS',
                             'outcome_pct': -loss_pct,
@@ -251,7 +255,7 @@ def add_to_csv(trade_details: Dict, outcome_details: Dict):
             trade_details['r_r_ratio'],
             trade_details['volume_strength'],
             outcome_details['outcome'],
-            round(outcome_details['outcome_pct'], 1),
+            round(outcome_details['outcome_pct'], 2),
             f"{trade_details['effective_leverage']}x",
             trade_details['position_size'] / trade_details['effective_leverage']
         ])
