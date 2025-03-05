@@ -22,14 +22,39 @@ def parse_single_trade(trade_section: str) -> Optional[Dict]:
         # Extract other details from the Order Summary section
         lines = trade_section.split('\n')
         position_size = None
-        leverage = None
+        initial_margin = None
+        raw_leverage = None
         side = 'SHORT' if 'SELL AT' in str(trade_json) else 'LONG'
         
+        # First pass to get initial margin and raw leverage
         for line in lines:
-            if 'Position Size:' in line:
-                position_size = float(line.split('$')[1].split()[0])
-            elif 'Leverage:' in line:
-                leverage = float(line.split('x')[0].split()[-1])
+            if 'Initial Margin:' in line:
+                initial_margin = float(line.split('$')[1].strip())
+            elif 'Leverage:' in line and 'Reducing' not in line:
+                # Extract leverage value, handling format like "Leverage: 10x"
+                lev_str = line.split(':')[1].strip()
+                raw_leverage = float(lev_str.replace('x', ''))
+            elif 'Required Margin:' in line and not initial_margin:
+                initial_margin = float(line.split('$')[1].strip())
+                
+        # Second pass to get position size and check for reduction
+        position_reduced = False
+        for line in lines:
+            if 'Reducing position size by' in line:
+                position_reduced = True
+            elif 'Position Size:' in line:
+                # Extract position size, handling both formats ($560.0 or $560.0 (≈0.0067 BTC))
+                pos_str = line.split('$')[1].strip()
+                position_size = float(pos_str.split()[0].strip())
+        
+        # Calculate effective leverage
+        if position_size and initial_margin:
+            effective_leverage = round(position_size / initial_margin, 1)
+        else:
+            effective_leverage = raw_leverage
+            
+        print(f"Trade details: Position Size=${position_size}, Initial Margin=${initial_margin}")
+        print(f"Raw Leverage={raw_leverage}x, Position Reduced={position_reduced}, Effective Leverage={effective_leverage}x")
         
         # Handle both BUY and SELL trades
         if side == 'LONG':
@@ -50,7 +75,9 @@ def parse_single_trade(trade_section: str) -> Optional[Dict]:
             'volume_strength': trade_json['VOLUME_STRENGTH'],
             'side': side,
             'position_size': position_size,
-            'leverage': leverage
+            'initial_margin': initial_margin,
+            'effective_leverage': effective_leverage,
+            'position_reduced': position_reduced
         }
     except Exception as e:
         print(f"Error parsing trade section: {e}")
@@ -98,9 +125,12 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
         take_profit = trade_details['take_profit']
         stop_loss = trade_details['stop_loss']
         is_short = trade_details['side'] == 'SHORT'
+        position_size = trade_details['position_size']
+        effective_leverage = trade_details['effective_leverage']
         
         print(f"Analyzing trade from {start_date} to {end_date}")
         print(f"Entry: {entry_price}, TP: {take_profit}, SL: {stop_loss}, Side: {'SHORT' if is_short else 'LONG'}")
+        print(f"Position Size: ${position_size}, Effective Leverage: {effective_leverage}x")
         
         for candle in candles:
             try:
@@ -111,7 +141,9 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
                 if is_short:
                     # For SHORT positions
                     if low_price <= take_profit:
-                        profit_pct = ((entry_price - take_profit) / entry_price) * 100
+                        # Calculate profit based on position size and effective leverage
+                        price_change_pct = ((entry_price - take_profit) / entry_price)
+                        profit_pct = price_change_pct * 100 * effective_leverage
                         return {
                             'outcome': 'SUCCESS',
                             'outcome_pct': profit_pct,
@@ -119,7 +151,9 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
                             'hit_time': candle_time
                         }
                     elif high_price >= stop_loss:
-                        loss_pct = ((stop_loss - entry_price) / entry_price) * 100
+                        # Calculate loss based on position size and effective leverage
+                        price_change_pct = ((stop_loss - entry_price) / entry_price)
+                        loss_pct = price_change_pct * 100 * effective_leverage
                         return {
                             'outcome': 'STOP LOSS',
                             'outcome_pct': -loss_pct,
@@ -129,7 +163,9 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
                 else:
                     # For LONG positions
                     if high_price >= take_profit:
-                        profit_pct = ((take_profit - entry_price) / entry_price) * 100
+                        # Calculate profit based on position size and effective leverage
+                        price_change_pct = ((take_profit - entry_price) / entry_price)
+                        profit_pct = price_change_pct * 100 * effective_leverage
                         return {
                             'outcome': 'SUCCESS',
                             'outcome_pct': profit_pct,
@@ -137,7 +173,9 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
                             'hit_time': candle_time
                         }
                     elif low_price <= stop_loss:
-                        loss_pct = ((entry_price - stop_loss) / entry_price) * 100
+                        # Calculate loss based on position size and effective leverage
+                        price_change_pct = ((entry_price - stop_loss) / entry_price)
+                        loss_pct = price_change_pct * 100 * effective_leverage
                         return {
                             'outcome': 'STOP LOSS',
                             'outcome_pct': -loss_pct,
@@ -214,8 +252,8 @@ def add_to_csv(trade_details: Dict, outcome_details: Dict):
             trade_details['volume_strength'],
             outcome_details['outcome'],
             round(outcome_details['outcome_pct'], 1),
-            f"{trade_details['leverage']}x",
-            trade_details['position_size'] / trade_details['leverage']
+            f"{trade_details['effective_leverage']}x",
+            trade_details['position_size'] / trade_details['effective_leverage']
         ])
 
 def main():
