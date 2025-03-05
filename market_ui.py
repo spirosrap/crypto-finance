@@ -551,7 +551,79 @@ class MarketAnalyzerUI:
             # Store current price update thread state
             was_updating = self.price_update_thread is not None and self.price_update_thread.is_alive()
             
-            # Construct command
+            # If granularity is lower than 1 hour and we're executing trades, check 1-hour timeframe first
+            hour_recommendation = None
+            if (granularity != 'ONE_HOUR' and 
+                self.execute_trades_var.get() and 
+                granularity in ['ONE_MINUTE', 'FIVE_MINUTE', 'FIFTEEN_MINUTE', 'THIRTY_MINUTE']):
+                
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                header = f"\n{'='*80}\n{timestamp} - Running 1-hour analysis for confirmation\n{'='*80}\n"
+                self.queue.put(("append", header))
+                
+                # Run 1-hour analysis first
+                hour_cmd = [
+                    "python",
+                    "prompt_market.py",
+                    "--product_id",
+                    self.product_var.get(),
+                    f"--use_{self.model_var.get()}",
+                    "--granularity",
+                    "ONE_HOUR"
+                ]
+                
+                hour_process = subprocess.Popen(
+                    hour_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                # Store the process
+                self.current_process = hour_process
+                
+                # Enable cancel button
+                self.queue.put(("enable_cancel", None))
+                
+                # Variables to track hour analysis output
+                hour_output = ""
+                
+                # Read output in real-time with non-blocking I/O
+                while True:
+                    reads = [hour_process.stdout.fileno(), hour_process.stderr.fileno()]
+                    ret = select.select(reads, [], [])
+                    for fd in ret[0]:
+                        if fd == hour_process.stdout.fileno():
+                            output = hour_process.stdout.readline()
+                            if output:
+                                hour_output += output
+                                self.queue.put(("append", output))
+                                
+                                # Check for trade recommendation in 1-hour analysis
+                                if "{\"BUY AT\":" in output:
+                                    hour_recommendation = "BUY"
+                                elif "{\"SELL AT\":" in output:
+                                    hour_recommendation = "SELL"
+                                
+                        if fd == hour_process.stderr.fileno():
+                            error = hour_process.stderr.readline()
+                            if error:
+                                self.queue.put(("append", f"\nErrors in 1-hour analysis:\n{error}"))
+                    if hour_process.poll() is not None:
+                        break
+                
+                # Get any remaining output
+                stdout, stderr = hour_process.communicate()
+                if stdout:
+                    hour_output += stdout
+                    self.queue.put(("append", stdout))
+                if stderr:
+                    self.queue.put(("append", f"\nErrors in 1-hour analysis:\n{stderr}"))
+                
+                # Clear current process
+                self.current_process = None
+            
+            # Construct command for original timeframe analysis
             model_flag = f"--use_{self.model_var.get()}"
             cmd = [
                 "python",
@@ -565,11 +637,26 @@ class MarketAnalyzerUI:
             
             # Add trading options if enabled
             if self.execute_trades_var.get():
-                cmd.append("--execute_trades")
-                cmd.extend(["--margin", self.margin_var.get()])
-                cmd.extend(["--leverage", str(self.leverage_var.get())])
-                if self.limit_order_var.get():
-                    cmd.append("--limit_order")
+                # Only add execute_trades flag if:
+                # 1. We're on 1-hour timeframe, OR
+                # 2. Lower timeframe matches 1-hour recommendation
+                should_execute = (
+                    granularity == 'ONE_HOUR' or 
+                    (hour_recommendation and current_recommendation and hour_recommendation == current_recommendation)
+                )
+                
+                if should_execute:
+                    cmd.append("--execute_trades")
+                    cmd.extend(["--margin", self.margin_var.get()])
+                    cmd.extend(["--leverage", str(self.leverage_var.get())])
+                    if self.limit_order_var.get():
+                        cmd.append("--limit_order")
+                else:
+                    # If recommendations don't match, show warning and don't execute trade
+                    warning = f"\n⚠️ WARNING: {granularity} recommendation ({current_recommendation}) "
+                    warning += f"does not match 1-hour analysis ({hour_recommendation}). "
+                    warning += "Trade execution prevented - waiting for timeframe alignment.\n"
+                    self.queue.put(("append", warning))
             
             # Run command and capture output
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -597,6 +684,7 @@ class MarketAnalyzerUI:
             trade_output_buffer = ""
             capturing_trade_output = False
             order_placed = False
+            current_recommendation = None
             
             # Read output in real-time with non-blocking I/O
             while True:
@@ -609,7 +697,12 @@ class MarketAnalyzerUI:
                             self.queue.put(("append", output))
                             
                             # Start capturing trade output when we see a JSON recommendation
-                            if "{\"BUY AT\":" in output or "{\"SELL AT\":" in output:
+                            if "{\"BUY AT\":" in output:
+                                current_recommendation = "BUY"
+                                capturing_trade_output = True
+                                trade_output_buffer = output
+                            elif "{\"SELL AT\":" in output:
+                                current_recommendation = "SELL"
                                 capturing_trade_output = True
                                 trade_output_buffer = output
                             # Continue capturing trade output
@@ -634,11 +727,21 @@ class MarketAnalyzerUI:
                     break
             
             # Get any remaining output
-            stdout, stderr = process.communicate(timeout=10)
+            stdout, stderr = process.communicate()
             if stdout:
                 self.queue.put(("append", stdout))
             if stderr:
                 self.queue.put(("append", f"\nErrors:\n{stderr}"))
+            
+            # If we have recommendations from both timeframes and they don't match, log a warning
+            if (granularity != 'ONE_HOUR' and 
+                hour_recommendation and 
+                current_recommendation and 
+                hour_recommendation != current_recommendation):
+                warning = f"\n⚠️ WARNING: {granularity} recommendation ({current_recommendation}) "
+                warning += f"does not match 1-hour analysis ({hour_recommendation}). "
+                warning += "Consider waiting for alignment before trading.\n"
+                self.queue.put(("append", warning))
             
             self.queue.put(("status", "Ready"))
             self.queue.put(("enable_buttons", None))
