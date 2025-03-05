@@ -1,10 +1,10 @@
 {
-  "margin": "30",
+  "margin": "60",
   "leverage": 10,
   "tp_sl": 0.2,
   "limit_order": true,
   "product": "BTC-USDC",
   "model": "o1_mini",
-  "granularity": "ONE_HOUR",
+  "granularity": "FIVE_MINUTE",
   "execute_trades": true
 }
