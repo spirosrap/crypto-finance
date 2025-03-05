@@ -25,11 +25,14 @@ class MarketAnalyzerUI:
         self.root.geometry("1460x1115")  # Larger default size (width x height)
         self.root.minsize(800, 600)    # Larger minimum window size
         
-        # Initialize granularity variable first
-        self.granularity_var = ctk.StringVar(value="ONE_HOUR")
-        
         # Queue for communication between threads
         self.queue = queue.Queue()
+        
+        # Load settings first
+        self.settings = self.load_settings()
+        
+        # Initialize granularity variable after loading settings
+        self.granularity_var = ctk.StringVar(value=self.settings["granularity"])
         
         # Model retraining tracking
         self.model_retrain_interval = 10 * 24 * 60 * 60  # 10 days in seconds
@@ -119,9 +122,14 @@ class MarketAnalyzerUI:
         
         # Product selection
         ctk.CTkLabel(sidebar_container, text="Select Product:").pack(pady=(0,2))
-        self.product_var = ctk.StringVar(value="BTC-USDC")
+        self.product_var = ctk.StringVar(value=self.settings["product"])
         products = ["BTC-USDC", "ETH-USDC", "DOGE-USDC", "SOL-USDC", "SHIB-USDC"]
-        product_menu = ctk.CTkOptionMenu(sidebar_container, values=products, variable=self.product_var)
+        product_menu = ctk.CTkOptionMenu(
+            sidebar_container, 
+            values=products, 
+            variable=self.product_var,
+            command=lambda x: self.save_settings()
+        )
         product_menu.pack(pady=(0,10))  # Reduced padding
         
         # Price display frame
@@ -147,7 +155,7 @@ class MarketAnalyzerUI:
         
         # Model selection with reduced padding
         ctk.CTkLabel(sidebar_container, text="Select Model:").pack(pady=(0,2))
-        self.model_var = ctk.StringVar(value="o1_mini")
+        self.model_var = ctk.StringVar(value=self.settings["model"])
         
         # Create model mapping for display names
         model_display_names = {
@@ -165,7 +173,10 @@ class MarketAnalyzerUI:
             sidebar_container,
             values=[model_display_names[m] for m in models],
             variable=self.model_var,
-            command=lambda x: self.model_var.set(next(k for k, v in model_display_names.items() if v == x))
+            command=lambda x: (
+                self.model_var.set(next(k for k, v in model_display_names.items() if v == x)),
+                self.save_settings()
+            )
         )
         model_menu.set(model_display_names[self.model_var.get()])
         model_menu.pack(pady=(0,10))
@@ -179,7 +190,7 @@ class MarketAnalyzerUI:
             sidebar_container,
             values=granularities,
             variable=self.granularity_var,
-            command=self.update_training_time
+            command=lambda x: (self.update_training_time(), self.save_settings())
         )
         granularity_menu.pack(pady=(0,5), padx=10, fill="x")
         
@@ -350,8 +361,8 @@ class MarketAnalyzerUI:
         tp_sl_frame.pack(fill="x", pady=5)
         
         ctk.CTkLabel(tp_sl_frame, text="TP/SL %:").pack(side="left", padx=5)
-        self.tp_sl_var = ctk.DoubleVar(value=0.2)
-        self.tp_sl_label = ctk.CTkLabel(tp_sl_frame, text="0.2%")
+        self.tp_sl_var = ctk.DoubleVar(value=self.settings["tp_sl"])
+        self.tp_sl_label = ctk.CTkLabel(tp_sl_frame, text=f"{self.settings['tp_sl']}%")
         self.tp_sl_label.pack(side="right", padx=5)
         
         self.tp_sl_slider = ctk.CTkSlider(
@@ -365,12 +376,12 @@ class MarketAnalyzerUI:
         self.tp_sl_slider.pack(pady=(0,5), padx=10, fill="x")
         
         # Execute trades checkbox
-        self.execute_trades_var = ctk.BooleanVar(value=False)
+        self.execute_trades_var = ctk.BooleanVar(value=self.settings["execute_trades"])
         self.execute_trades_cb = ctk.CTkCheckBox(
             trading_frame,
             text="Execute Trades",
             variable=self.execute_trades_var,
-            command=self.toggle_trading_options
+            command=lambda: (self.toggle_trading_options(), self.save_settings())
         )
         self.execute_trades_cb.pack(pady=5)
         
@@ -378,7 +389,7 @@ class MarketAnalyzerUI:
         margin_frame = ctk.CTkFrame(trading_frame)
         margin_frame.pack(fill="x", pady=5)
         ctk.CTkLabel(margin_frame, text="Margin ($):").pack(side="left", padx=5)
-        self.margin_var = ctk.StringVar(value="60")
+        self.margin_var = ctk.StringVar(value=self.settings["margin"])
         self.margin_entry = ctk.CTkEntry(
             margin_frame, 
             width=80,
@@ -386,9 +397,12 @@ class MarketAnalyzerUI:
         )
         self.margin_entry.pack(side="right", padx=5)
         
+        # Setup margin value tracking
+        self.setup_margin_tracking()
+        
         # Leverage slider
-        ctk.CTkLabel(trading_frame, text=f"Leverage: 10x").pack(pady=(5,0))
-        self.leverage_var = ctk.IntVar(value=10)
+        ctk.CTkLabel(trading_frame, text=f"Leverage: {self.settings['leverage']}x").pack(pady=(5,0))
+        self.leverage_var = ctk.IntVar(value=self.settings["leverage"])
         self.leverage_slider = ctk.CTkSlider(
             trading_frame,
             from_=1,
@@ -398,15 +412,16 @@ class MarketAnalyzerUI:
             command=self.update_leverage_label
         )
         self.leverage_slider.pack(pady=(0,5), padx=10, fill="x")
-        self.leverage_label = ctk.CTkLabel(trading_frame, text="10x")
+        self.leverage_label = ctk.CTkLabel(trading_frame, text=f"{self.settings['leverage']}x")
         self.leverage_label.pack()
         
         # Limit order checkbox
-        self.limit_order_var = ctk.BooleanVar(value=True)
+        self.limit_order_var = ctk.BooleanVar(value=self.settings["limit_order"])
         self.limit_order_cb = ctk.CTkCheckBox(
             trading_frame,
             text="Use Limit Orders",
-            variable=self.limit_order_var
+            variable=self.limit_order_var,
+            command=self.save_settings
         )
         self.limit_order_cb.pack(pady=5)
         
@@ -416,10 +431,16 @@ class MarketAnalyzerUI:
     def update_leverage_label(self, value):
         """Update the leverage label when slider moves"""
         self.leverage_label.configure(text=f"{int(value)}x")
+        self.save_settings()
 
     def update_tp_sl_label(self, value):
         """Update the TP/SL percentage label when slider moves"""
         self.tp_sl_label.configure(text=f"{value:.1f}%")
+        self.save_settings()
+
+    def setup_margin_tracking(self):
+        """Setup tracking for margin value changes"""
+        self.margin_var.trace_add("write", lambda *args: self.save_settings())
 
     def toggle_trading_options(self):
         """Enable/disable trading options based on execute trades checkbox"""
@@ -1767,6 +1788,55 @@ class MarketAnalyzerUI:
         """Update the risk level based on the current state"""
         # This method is no longer needed as risk management has been removed
         pass
+
+    def save_settings(self):
+        """Save UI settings to a JSON file"""
+        try:
+            settings = {
+                "margin": self.margin_var.get(),
+                "leverage": self.leverage_var.get(),
+                "tp_sl": self.tp_sl_var.get(),
+                "limit_order": self.limit_order_var.get(),
+                "product": self.product_var.get(),
+                "model": self.model_var.get(),
+                "granularity": self.granularity_var.get(),
+                "execute_trades": self.execute_trades_var.get()
+            }
+            
+            with open("ui_settings.json", "w") as f:
+                json.dump(settings, f, indent=2)
+                
+        except Exception as e:
+            self.queue.put(("append", f"\nError saving settings: {str(e)}\n"))
+
+    def load_settings(self):
+        """Load UI settings from JSON file"""
+        try:
+            if os.path.exists("ui_settings.json"):
+                with open("ui_settings.json", "r") as f:
+                    return json.load(f)
+            return {
+                "margin": "60",
+                "leverage": 10,
+                "tp_sl": 0.2,
+                "limit_order": True,
+                "product": "BTC-USDC",
+                "model": "o1_mini",
+                "granularity": "ONE_HOUR",
+                "execute_trades": False
+            }
+        except Exception as e:
+            self.queue.put(("append", f"\nError loading settings: {str(e)}\n"))
+            return {
+                "margin": "60",
+                "leverage": 10,
+                "tp_sl": 0.2,
+                "limit_order": True,
+                "product": "BTC-USDC",
+                "model": "o1_mini",
+                "granularity": "ONE_HOUR",
+                "execute_trades": False
+            }
 
     def run(self):
         try:
