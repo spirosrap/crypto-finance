@@ -5,6 +5,6 @@
   "limit_order": true,
   "product": "BTC-USDC",
   "model": "o1_mini",
-  "granularity": "FIVE_MINUTE",
+  "granularity": "ONE_HOUR",
   "execute_trades": true
 }
