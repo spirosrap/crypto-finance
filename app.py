@@ -8,6 +8,7 @@ import re
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, Response, stream_with_context
 from coinbaseservice import CoinbaseService
+import traceback
 
 app = Flask(__name__)
 
@@ -112,6 +113,20 @@ def detect_trade_result(output_text):
     elif "Error executing order" in output_text:
         return "failure"
     return None
+
+def save_trade_output(output_text):
+    """Save trade output to a file"""
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        formatted_output = f"\n\n====== 🤖 AI Trading Recommendation ({timestamp}) ======\n{output_text}"
+        
+        with open("trade_output.txt", "a") as f:
+            f.write(formatted_output)
+    except Exception as e:
+        analysis_queue.put({
+            "type": "error",
+            "message": f"Error saving trade output: {str(e)}"
+        })
 
 def start_price_updates():
     """Start price update thread"""
@@ -463,26 +478,54 @@ def toggle_auto_trading():
         
         return {"status": "Auto-trading stopped", "auto_trading": False}
 
+def is_trading_allowed():
+    """Check if trading is allowed based on current time"""
+    current_time = datetime.now()
+    
+    # Check if it's weekend (5 = Saturday, 6 = Sunday)
+    if current_time.weekday() >= 5:
+        return False
+        
+    current_hour = current_time.hour
+    current_minute = current_time.minute
+    current_time_float = current_hour + current_minute / 60.0
+    
+    # Trading is allowed from 17:00 (5 PM) to 11:30 AM
+    if current_time_float >= 11.5 and current_time_float < 17.0:  # 11:30 AM to 5:00 PM
+        return False
+    return True
+
 def _auto_trading_loop():
     """Background loop for auto-trading"""
-    global auto_trading
+    global auto_trading, current_process
     
     while auto_trading:
         try:
             # Check if trading is allowed based on time
             current_time = datetime.now()
-            current_hour = current_time.hour
-            current_minute = current_time.minute
-            current_time_float = current_hour + current_minute / 60.0
-            
-            # Trading is allowed from 17:00 (5 PM) to 7:20 AM
-            if current_time_float >= 7.35 and current_time_float < 17.0:  # 7:21 AM to 5:00 PM
-                analysis_queue.put({
-                    "type": "message",
-                    "message": "Trading paused: Current time is outside trading hours (5:00 PM - 7:20 AM)."
-                })
+            if not is_trading_allowed():
+                if not hasattr(_auto_trading_loop, '_trading_paused_logged'):
+                    if current_time.weekday() >= 5:
+                        analysis_queue.put({
+                            "type": "message",
+                            "message": "Trading paused: Weekend trading is not allowed. Will resume on Monday at 5:00 PM."
+                        })
+                    else:
+                        analysis_queue.put({
+                            "type": "message",
+                            "message": "Trading paused: Current time is outside trading hours (5:00 PM - 11:30 AM). Will resume at 5:00 PM."
+                        })
+                    _auto_trading_loop._trading_paused_logged = True
                 time.sleep(60)  # Check every minute
                 continue
+            else:
+                # Reset the logged flag when we're out of the pause period
+                if hasattr(_auto_trading_loop, '_trading_paused_logged'):
+                    del _auto_trading_loop._trading_paused_logged
+                    analysis_queue.put({
+                        "type": "message",
+                        "message": "Trading resumed: Current time is within trading hours (5:00 PM - 11:30 AM)."
+                    })
             
             # Check for open orders or positions
             has_open_orders, has_positions = check_open_orders_and_positions()
@@ -509,16 +552,14 @@ def _auto_trading_loop():
                 time.sleep(60)  # Check every minute
                 continue
             
-            # Get current granularity
-            granularity = config["granularity"]
-            
             # Run analysis with current granularity
+            granularity = config["granularity"]
             analysis_queue.put({
                 "type": "message",
                 "message": f"Running automated {granularity.lower().replace('_', ' ')} timeframe analysis..."
             })
             
-            # Create and run the analysis process
+            # Create command for analysis
             cmd = [
                 "python",
                 "prompt_market.py",
@@ -534,9 +575,10 @@ def _auto_trading_loop():
                 str(config["leverage"])
             ]
             
-            if config["limit_order"]:
+            if config.get("limit_order", False):
                 cmd.append("--limit_order")
             
+            # Start the process
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -546,27 +588,83 @@ def _auto_trading_loop():
                 universal_newlines=True
             )
             
+            current_process = process
+            
+            # Variables to track trade output
+            trade_output_buffer = ""
+            capturing_trade_output = False
+            order_placed = False
+            trade_completed = False
+            
             # Read output line by line
-            output_text = ""
             for line in iter(process.stdout.readline, ''):
                 # Strip ANSI codes
                 clean_line = _strip_ansi_codes(line)
                 if clean_line.strip():
-                    output_text += clean_line
                     analysis_queue.put({
                         "type": "message",
                         "message": clean_line
                     })
+                    
+                    # Start capturing trade output when we see a JSON recommendation
+                    if "{\"BUY AT\":" in line or "{\"SELL AT\":" in line:
+                        capturing_trade_output = True
+                        trade_output_buffer = line
+                    # Continue capturing trade output
+                    elif capturing_trade_output:
+                        trade_output_buffer += line
+                    
+                    # Check if a trade was executed
+                    if "Order placed successfully" in line:
+                        order_placed = True
+                        
+                        # Save the trade output to file
+                        if trade_output_buffer:
+                            save_trade_output(trade_output_buffer)
+                    
+                    # Check for trade completion indicators
+                    if "Take profit hit" in line or "TP hit" in line:
+                        trade_completed = True
+                        record_trade_result("win")
+                    elif "Stop loss hit" in line or "SL hit" in line:
+                        trade_completed = True
+                        record_trade_result("loss")
+                    elif "Position closed" in line:
+                        # Try to determine if it was a win or loss
+                        result = detect_trade_result(trade_output_buffer)
+                        if result:
+                            record_trade_result(result)
+                            trade_completed = True
             
-            # Wait for process to complete
-            process.wait()
+            # Get any remaining output
+            stdout, stderr = process.communicate()
+            if stdout:
+                clean_stdout = _strip_ansi_codes(stdout)
+                if clean_stdout.strip():
+                    analysis_queue.put({
+                        "type": "message",
+                        "message": clean_stdout
+                    })
+                    
+                    # Check for trade completion in final output if not already detected
+                    if not trade_completed and order_placed:
+                        result = detect_trade_result(stdout)
+                        if result:
+                            record_trade_result(result)
+                            trade_completed = True
             
-            # Detect and record trade result
-            result = detect_trade_result(output_text)
-            if result:
-                record_trade_result(result)
+            if stderr:
+                clean_stderr = _strip_ansi_codes(stderr)
+                if clean_stderr.strip():
+                    analysis_queue.put({
+                        "type": "error",
+                        "message": clean_stderr
+                    })
             
-            # Wait time based on granularity
+            # Clear current process
+            current_process = None
+            
+            # Wait based on granularity before next analysis
             wait_minutes = {
                 'ONE_MINUTE': 0.3,  # Check every 20 seconds
                 'FIVE_MINUTE': 2,   # Check every 2 minutes
@@ -575,15 +673,29 @@ def _auto_trading_loop():
                 'ONE_HOUR': 20      # Check every 20 minutes
             }.get(granularity, 20)  # Default to 20 minutes
             
-            # Sleep for the specified time
-            time.sleep(wait_minutes * 60)
-        
+            # For sub-minute intervals, adjust the sleep time
+            if wait_minutes < 1:
+                time.sleep(wait_minutes * 60)  # Convert to seconds
+            else:
+                # Wait in 1-minute intervals to allow for clean stopping
+                for _ in range(int(wait_minutes)):
+                    if not auto_trading:
+                        return
+                    time.sleep(60)  # 1 minute intervals
+                
+                # Handle any remaining partial minute
+                remaining_seconds = (wait_minutes - int(wait_minutes)) * 60
+                if remaining_seconds > 0:
+                    time.sleep(remaining_seconds)
+            
         except Exception as e:
             analysis_queue.put({
                 "type": "error",
-                "message": f"Error in auto-trading: {str(e)}"
+                "message": f"Error in auto-trading loop: {str(e)}\nTraceback:\n{traceback.format_exc()}"
             })
-            time.sleep(60)  # Wait a minute before retrying
+            # Don't exit the thread on error, just wait a bit and continue
+            time.sleep(60)  # Wait 1 minute before retrying on error
+            continue
 
 def _strip_ansi_codes(text):
     """Remove ANSI color codes from text"""
