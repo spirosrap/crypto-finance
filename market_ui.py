@@ -12,6 +12,7 @@ import traceback
 from coinbaseservice import CoinbaseService
 import select
 import tkinter.messagebox as messagebox
+from PIL import Image
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -24,6 +25,35 @@ class MarketAnalyzerUI:
         self.root.title("Crypto Market Analyzer")
         self.root.geometry("1460x1115")  # Larger default size (width x height)
         self.root.minsize(800, 600)    # Larger minimum window size
+        
+        # Generate and set the application icon
+        try:
+            from app_icon import create_icon
+            icon_path = create_icon()
+            if os.path.exists(icon_path):
+                if os.uname().sysname == 'Darwin':  # macOS
+                    # Load the PNG version for the window icon
+                    png_path = 'icons/market_analyzer_256x256.png'
+                    if os.path.exists(png_path):
+                        import tkinter as tk
+                        icon_image = tk.PhotoImage(file=png_path)
+                        self.root.iconphoto(True, icon_image)
+                        
+                        # Keep a reference to prevent garbage collection
+                        self._icon_image = icon_image
+                        
+                        # For dock icon on macOS, use a different approach
+                        try:
+                            from Foundation import NSImage
+                            from AppKit import NSApplication
+                            image = NSImage.alloc().initByReferencingFile_(os.path.abspath(png_path))
+                            NSApplication.sharedApplication().setApplicationIconImage_(image)
+                        except Exception as e:
+                            print(f"Warning: Could not set dock icon: {str(e)}")
+                else:  # Windows/Linux
+                    self.root.iconbitmap(icon_path)
+        except Exception as e:
+            print(f"Warning: Could not set application icon: {str(e)}\nTraceback: {traceback.format_exc()}")
         
         # Queue for communication between threads
         self.queue = queue.Queue()

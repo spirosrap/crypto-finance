@@ -20,3 +20,5 @@ tweepy
 flask
 timeout-decorator
 customtkinter
+Pillow>=10.0.0  # Required for icon generation
+pyobjc-framework-Cocoa>=11.0; sys_platform == 'darwin'  # Required for macOS icon support
