@@ -1123,9 +1123,9 @@ class MarketAnalyzerUI:
                 if not self.is_trading_allowed():
                     if not hasattr(self, '_trading_paused_logged'):
                         if current_time.weekday() >= 5:
-                            self.queue.put(("append", "\nTrading paused: Weekend trading is not allowed. Will resume on Monday at 5:00 PM.\n"))
+                            self.queue.put(("append", "\nTrading paused: Weekend trading is not allowed. Will resume on Monday at 5:00 PM (Greece time) / 10:00 AM (NYSE time).\n"))
                         else:
-                            self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (5:00 PM - 11:30 AM). Will resume at 5:00 PM.\n"))
+                            self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (5:00 PM - 11:30 AM Greece time) / (10:00 AM - 4:30 AM NYSE time). Will resume at 5:00 PM (Greece time) / 10:00 AM (NYSE time).\n"))
                         self._trading_paused_logged = True
                     time.sleep(60)  # Check every minute
                     continue
