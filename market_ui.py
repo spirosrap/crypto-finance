@@ -1109,8 +1109,8 @@ class MarketAnalyzerUI:
         current_minute = current_time.minute
         current_time_float = current_hour + current_minute / 60.0
         
-        # Trading is allowed from 17:00 (5 PM) to 14:30 (2:30 PM)
-        if current_time_float >= 14.5 and current_time_float < 17.0:  # 14:30 (2:30 PM) to 5:00 PM
+        # Trading is not allowed from 11:30 AM to 5:00 PM
+        if current_time_float >= 11.5 and current_time_float < 17.0:  # 11:30 AM to 5:00 PM
             return False
         return True
 
@@ -1125,7 +1125,7 @@ class MarketAnalyzerUI:
                         if current_time.weekday() >= 5:
                             self.queue.put(("append", "\nTrading paused: Weekend trading is not allowed. Will resume on Monday at 5:00 PM.\n"))
                         else:
-                            self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (5:00 PM - 14:30 PM). Will resume at 5:00 PM.\n"))
+                            self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (5:00 PM - 11:30 AM). Will resume at 5:00 PM.\n"))
                         self._trading_paused_logged = True
                     time.sleep(60)  # Check every minute
                     continue
@@ -1133,7 +1133,7 @@ class MarketAnalyzerUI:
                     # Reset the logged flag when we're out of the pause period
                     if hasattr(self, '_trading_paused_logged'):
                         del self._trading_paused_logged
-                        self.queue.put(("append", "\nTrading resumed: Current time is within trading hours (5:00 PM - 14:30 PM).\n"))
+                        self.queue.put(("append", "\nTrading resumed: Current time is within trading hours (5:00 PM - 11:30 AM).\n"))
 
                 # Check if model needs retraining
                 current_time = time.time()
