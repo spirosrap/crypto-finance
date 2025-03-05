@@ -1100,12 +1100,17 @@ class MarketAnalyzerUI:
     def is_trading_allowed(self):
         """Check if trading is allowed based on current time"""
         current_time = datetime.now()
+        
+        # Check if it's weekend (5 = Saturday, 6 = Sunday)
+        if current_time.weekday() >= 5:
+            return False
+            
         current_hour = current_time.hour
         current_minute = current_time.minute
         current_time_float = current_hour + current_minute / 60.0
         
-        # Trading is allowed from 17:00 (5 PM) to 7:20 AM
-        if current_time_float >= 7.35 and current_time_float < 17.0:  # 7:21 AM to 5:00 PM
+        # Trading is allowed from 17:00 (5 PM) to 11:30 AM
+        if current_time_float >= 11.5 and current_time_float < 17.0:  # 11:30 AM to 5:00 PM
             return False
         return True
 
@@ -1114,9 +1119,13 @@ class MarketAnalyzerUI:
         while self.auto_trading:
             try:
                 # Check if trading is allowed based on time
+                current_time = datetime.now()
                 if not self.is_trading_allowed():
                     if not hasattr(self, '_trading_paused_logged'):
-                        self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (5:00 PM - 7:20 AM). Will resume at 5:00 PM.\n"))
+                        if current_time.weekday() >= 5:
+                            self.queue.put(("append", "\nTrading paused: Weekend trading is not allowed. Will resume on Monday at 5:00 PM.\n"))
+                        else:
+                            self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (5:00 PM - 11:30 AM). Will resume at 5:00 PM.\n"))
                         self._trading_paused_logged = True
                     time.sleep(60)  # Check every minute
                     continue
@@ -1124,7 +1133,7 @@ class MarketAnalyzerUI:
                     # Reset the logged flag when we're out of the pause period
                     if hasattr(self, '_trading_paused_logged'):
                         del self._trading_paused_logged
-                        self.queue.put(("append", "\nTrading resumed: Current time is within trading hours (5:00 PM - 7:20 AM).\n"))
+                        self.queue.put(("append", "\nTrading resumed: Current time is within trading hours (5:00 PM - 11:30 AM).\n"))
 
                 # Check if model needs retraining
                 current_time = time.time()
