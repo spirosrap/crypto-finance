@@ -285,6 +285,13 @@ body {
     border-color: #444;
     height: 100%;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s, box-shadow 0.2s;
+    border-radius: 8px;
+}
+
+.card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
 }
 
 .card-header {
@@ -293,6 +300,50 @@ body {
     font-weight: 500;
     letter-spacing: 0.5px;
     padding: 12px 15px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+}
+
+/* Dashboard Stats Cards */
+.dashboard-stat {
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    color: white;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.dashboard-stat:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+.dashboard-stat-value {
+    font-size: 24px;
+    font-weight: bold;
+    margin: 10px 0;
+}
+
+.dashboard-stat-label {
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.stat-green {
+    background: linear-gradient(135deg, #28a745, #20c997);
+}
+
+.stat-blue {
+    background: linear-gradient(135deg, #007bff, #17a2b8);
+}
+
+.stat-orange {
+    background: linear-gradient(135deg, #fd7e14, #ffc107);
+}
+
+.stat-red {
+    background: linear-gradient(135deg, #dc3545, #f86032);
 }
 
 /* Trading Options Card Header */

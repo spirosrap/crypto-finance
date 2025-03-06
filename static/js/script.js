@@ -619,5 +619,272 @@ function fetchCurrentPrice() {
         });
 }
 
+// Price chart initialization
+function initPriceChart() {
+    const ctx = document.getElementById('price-chart').getContext('2d');
+    
+    // Initial empty chart
+    window.priceChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: config.product,
+                data: [],
+                borderColor: '#3498db',
+                borderWidth: 2,
+                pointRadius: 0,
+                pointHoverRadius: 5,
+                pointHoverBackgroundColor: '#3498db',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2,
+                tension: 0.1,
+                fill: {
+                    target: 'origin',
+                    above: 'rgba(52, 152, 219, 0.1)'
+                }
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: {
+                duration: 1000
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            let label = context.dataset.label || '';
+                            if (label) {
+                                label += ': ';
+                            }
+                            if (context.parsed.y !== null) {
+                                label += new Intl.NumberFormat('en-US', { 
+                                    style: 'currency', 
+                                    currency: 'USD' 
+                                }).format(context.parsed.y);
+                            }
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'hour',
+                        displayFormats: {
+                            hour: 'HH:mm'
+                        }
+                    },
+                    ticks: {
+                        color: '#e0e0e0'
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    }
+                },
+                y: {
+                    ticks: {
+                        color: '#e0e0e0',
+                        callback: function(value) {
+                            return '$' + value.toLocaleString();
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    }
+                }
+            }
+        }
+    });
+    
+    // Load initial data (1 day view)
+    updateChartTimeframe('1d');
+}
+
+// Handle timeframe button clicks
+function setupTimeframeButtons() {
+    const timeframeButtons = document.querySelectorAll('.timeframe-btn');
+    
+    timeframeButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            // Remove active class from all buttons
+            timeframeButtons.forEach(btn => btn.classList.remove('active'));
+            
+            // Add active class to clicked button
+            this.classList.add('active');
+            
+            // Get selected timeframe
+            const timeframe = this.getAttribute('data-timeframe');
+            
+            // Update chart with new timeframe
+            updateChartTimeframe(timeframe);
+        });
+    });
+}
+
+// Update chart timeframe
+function updateChartTimeframe(timeframe) {
+    // Set timeframe display formats
+    if (timeframe === '1h') {
+        window.priceChart.options.scales.x.time.unit = 'minute';
+        window.priceChart.options.scales.x.time.displayFormats = { minute: 'HH:mm' };
+    } else if (timeframe === '4h') {
+        window.priceChart.options.scales.x.time.unit = 'hour';
+        window.priceChart.options.scales.x.time.displayFormats = { hour: 'HH:mm' };
+    } else if (timeframe === '1d') {
+        window.priceChart.options.scales.x.time.unit = 'hour';
+        window.priceChart.options.scales.x.time.displayFormats = { hour: 'HH:mm' };
+    } else if (timeframe === '1w') {
+        window.priceChart.options.scales.x.time.unit = 'day';
+        window.priceChart.options.scales.x.time.displayFormats = { day: 'MMM d' };
+    }
+    
+    // Show loading state
+    window.priceChart.data.datasets[0].data = [];
+    window.priceChart.update();
+    
+    // Fetch price history data from API
+    fetch(`/api/price-history?timeframe=${timeframe}&product=${config.product}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                console.error('Error fetching price history:', data.error);
+                return;
+            }
+            
+            // Parse timestamps and prices
+            const labels = data.timestamps.map(ts => new Date(ts));
+            const prices = data.prices;
+            
+            // Update chart data
+            window.priceChart.data.labels = labels;
+            window.priceChart.data.datasets[0].data = prices;
+            window.priceChart.data.datasets[0].label = data.product;
+            window.priceChart.update();
+        })
+        .catch(error => {
+            console.error('Error fetching price history:', error);
+        });
+}
+
+// Update dashboard metrics
+function updateDashboardMetrics() {
+    // Update price
+    if (currentPrice.textContent !== '-.--') {
+        document.getElementById('current-btc-price').textContent = currentPrice.textContent;
+    }
+    
+    // Update win rate
+    document.getElementById('dashboard-win-rate').textContent = winRate.textContent;
+    
+    // Update total trades
+    const totalTrades = parseInt(winCount.textContent) + parseInt(lossCount.textContent);
+    document.getElementById('dashboard-trades').textContent = totalTrades;
+}
+
+// Set up refresh button
+function setupRefreshButton() {
+    document.getElementById('refresh-history').addEventListener('click', function() {
+        loadTradeHistory();
+    });
+}
+
+// Update system status
+function updateSystemStatus(status) {
+    const statusElement = document.getElementById('dashboard-status');
+    
+    switch(status) {
+        case 'Running analysis...':
+        case 'Analysis started':
+            statusElement.textContent = 'Analyzing';
+            statusElement.parentElement.classList.remove('stat-red', 'stat-green', 'stat-blue');
+            statusElement.parentElement.classList.add('stat-orange');
+            break;
+        case 'Analysis completed':
+            statusElement.textContent = 'Ready';
+            statusElement.parentElement.classList.remove('stat-red', 'stat-orange', 'stat-blue');
+            statusElement.parentElement.classList.add('stat-green');
+            break;
+        case 'Error':
+            statusElement.textContent = 'Error';
+            statusElement.parentElement.classList.remove('stat-green', 'stat-orange', 'stat-blue');
+            statusElement.parentElement.classList.add('stat-red');
+            break;
+        case 'Auto-trading ON':
+            statusElement.textContent = 'Bot Active';
+            statusElement.parentElement.classList.remove('stat-red', 'stat-orange', 'stat-blue');
+            statusElement.parentElement.classList.add('stat-green');
+            break;
+        case 'Auto-trading OFF':
+            statusElement.textContent = 'Idle';
+            statusElement.parentElement.classList.remove('stat-red', 'stat-green', 'stat-orange');
+            statusElement.parentElement.classList.add('stat-blue');
+            break;
+        default:
+            statusElement.textContent = 'Idle';
+            statusElement.parentElement.classList.remove('stat-red', 'stat-green', 'stat-orange');
+            statusElement.parentElement.classList.add('stat-blue');
+    }
+}
+
+// Enhanced init function
+function init() {
+    // Set up event listeners
+    setupEventListeners();
+    
+    // Load configuration
+    loadConfig();
+    
+    // Load trade history
+    loadTradeHistory();
+    
+    // Initialize charts
+    initTradeChart();
+    initPriceChart();
+    
+    // Setup timeframe buttons
+    setupTimeframeButtons();
+    
+    // Setup refresh button
+    setupRefreshButton();
+    
+    // Fetch current price immediately
+    fetchCurrentPrice();
+    
+    // Connect to server events
+    connectToEventSource();
+    
+    // Update dashboard metrics
+    setInterval(updateDashboardMetrics, 5000);
+}
+
+// Enhanced handleStatusUpdate function
+function handleStatusUpdate(status) {
+    // Update status indicator
+    updateStatus(status, 'bg-info');
+    
+    // Update dashboard system status
+    updateSystemStatus(status);
+    
+    // Re-enable buttons based on status
+    if (status === 'Analysis completed' || status === 'Analysis failed') {
+        analyzeBtn.disabled = false;
+    } else if (status === 'Order completed' || status === 'Order failed') {
+        longBtn.disabled = false;
+        shortBtn.disabled = false;
+    } else if (status.includes('positions')) {
+        closePositionsBtn.disabled = false;
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', init); 
