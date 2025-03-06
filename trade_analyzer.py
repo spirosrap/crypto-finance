@@ -186,6 +186,14 @@ class TradingAnalyzer:
             'Average Leverage': avg_leverage
         }
     
+    def get_current_drawdown(self) -> float:
+        """Calculate the current drawdown from the peak."""
+        cumulative_returns = (1 + self.df['Outcome %'] / 100).cumprod()
+        peak = cumulative_returns.max()
+        current_value = cumulative_returns.iloc[-1]
+        current_drawdown = ((current_value - peak) / peak) * 100
+        return current_drawdown
+    
     def generate_report(self) -> None:
         """Generate and print a comprehensive trading report."""
         basic_metrics = self.calculate_basic_metrics()
@@ -194,6 +202,7 @@ class TradingAnalyzer:
         sharpe_ratio = self.calculate_sharpe_ratio()
         max_drawdown, drawdown_periods = self.calculate_max_drawdown()
         risk_metrics = self.calculate_risk_metrics()
+        current_drawdown = self.get_current_drawdown()
         
         print("\n=== Trading Performance Report ===\n")
         
@@ -221,6 +230,7 @@ class TradingAnalyzer:
         print("\nRisk Metrics:")
         print(f"Sharpe Ratio (Annualized): {sharpe_ratio:.2f}")
         print(f"Maximum Drawdown: {max_drawdown:.2f}%")
+        print(f"Current Drawdown: {current_drawdown:.2f}%")
         print(f"Standard Deviation: {risk_metrics['Standard Deviation']:.2f}%")
         print(f"Average R/R Ratio: {risk_metrics['Average R/R Ratio']:.2f}")
         print(f"Average Trade Probability: {risk_metrics['Average Probability']:.2f}%")
@@ -235,4 +245,6 @@ class TradingAnalyzer:
 
 if __name__ == "__main__":
     analyzer = TradingAnalyzer("automated_trades.csv")
-    analyzer.generate_report() 
+    analyzer.generate_report()
+    current_drawdown = analyzer.get_current_drawdown()
+    print(f"Current Drawdown: {current_drawdown:.2f}%") 
