@@ -1106,7 +1106,7 @@ class MarketAnalyzerUI:
                     'FIVE_MINUTE': 2,   # Check every 2 minutes
                     'FIFTEEN_MINUTE': 2, # Check every 2 minutes (changed from 5)
                     'THIRTY_MINUTE': 10, # Check every 10 minutes
-                    'ONE_HOUR': 2      # Check every 2 minutes (changed from 5)
+                    'ONE_HOUR': 5      # Check every 5 minutes (changed from 20)
                 }.get(self.granularity_var.get(), 20)  # Default to 20 minutes
                 
                 # For sub-minute intervals, adjust the sleep time
@@ -1149,7 +1149,7 @@ class MarketAnalyzerUI:
                 'FIVE_MINUTE': 2,   # Check every 2 minutes
                 'FIFTEEN_MINUTE': 2, # Check every 2 minutes (changed from 5)
                 'THIRTY_MINUTE': 10, # Check every 10 minutes
-                'ONE_HOUR': 2      # Check every 2 minutes (changed from 5)
+                'ONE_HOUR': 5      # Check every 5 minutes (changed from 20)
             }.get(granularity, 20)  # Default to 20 minutes
             
             self.root.title(f"Crypto Market Analyzer [Auto-Trading ON - {granularity}]")
@@ -1345,7 +1345,7 @@ class MarketAnalyzerUI:
                     'FIVE_MINUTE': 2,   # Check every 2 minutes
                     'FIFTEEN_MINUTE': 2, # Check every 2 minutes (changed from 5)
                     'THIRTY_MINUTE': 10, # Check every 10 minutes
-                    'ONE_HOUR': 2      # Check every 2 minutes (changed from 5)
+                    'ONE_HOUR': 5      # Check every 5 minutes (changed from 20)
                 }.get(granularity, 20)  # Default to 20 minutes
                 
                 # For sub-minute intervals, adjust the sleep time

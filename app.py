@@ -670,7 +670,7 @@ def _auto_trading_loop():
                 'FIVE_MINUTE': 2,   # Check every 2 minutes
                 'FIFTEEN_MINUTE': 2, # Check every 2 minutes
                 'THIRTY_MINUTE': 10, # Check every 10 minutes
-                'ONE_HOUR': 2      # Check every 2 minutes (changed from 20)
+                'ONE_HOUR': 20      # Check every 20 minutes
             }.get(granularity, 20)  # Default to 20 minutes
             
             # For sub-minute intervals, adjust the sleep time
