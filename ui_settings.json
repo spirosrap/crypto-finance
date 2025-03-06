@@ -6,5 +6,6 @@
   "product": "BTC-USDC",
   "model": "o3_mini",
   "granularity": "FIVE_MINUTE",
-  "execute_trades": true
+  "execute_trades": false,
+  "alignment_enabled": false
 }
