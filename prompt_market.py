@@ -272,10 +272,10 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 
     SYSTEM_PROMPT = (
         "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
-        "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, "
+        "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY_0_TO_100>, "
         "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", "
         "\"MARKET_REGIME\": \"<MARKET_REGIME>\", \"REGIME_CONFIDENCE\": \"<REGIME_CONFIDENCE>\", \"IS_VALID\": <IS_VALID>} "
-        "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY>, "
+        "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY_0_TO_100>, "
         "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", "
         "\"MARKET_REGIME\": \"<MARKET_REGIME>\", \"REGIME_CONFIDENCE\": \"<REGIME_CONFIDENCE>\", \"IS_VALID\": <IS_VALID>}. "
 
@@ -295,11 +295,12 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         "Instruction 3: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
         "Instruction 4: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
         "Instruction 5: Volatility should be one of: 'Very Low', 'Low', 'Medium', 'High', 'Very High'. "
+        "Instruction 6: PROBABILITY should be a number between 0 and 100 representing the percentage probability of success. "
 
-        "Instruction 6: For a SELL signal, ensure that the STOP LOSS is strictly above the SELL AT price. "
+        "Instruction 7: For a SELL signal, ensure that the STOP LOSS is strictly above the SELL AT price. "
         "If STOP LOSS <= SELL AT, set IS_VALID to False (Default True). "
 
-        "Instruction 7: For a BUY signal, ensure that the STOP LOSS is strictly below the BUY AT price. "
+        "Instruction 8: For a BUY signal, ensure that the STOP LOSS is strictly below the BUY AT price. "
         "If STOP LOSS >= BUY AT, set IS_VALID to False (Default True)."
     )
         
