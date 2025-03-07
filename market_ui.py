@@ -119,8 +119,8 @@ class MarketAnalyzerUI:
             pool_maxsize=10
         ))
         
-        # ANSI escape sequence pattern
-        self.ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        # ANSI escape sequence pattern - enhanced version to catch more color codes
+        self.ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\(B|\[[;\d]*m)')
         
         # Add auto-trading variables
         self.auto_trading = False
@@ -211,9 +211,11 @@ class MarketAnalyzerUI:
         model_display_names = {
             "o1_mini": "o1_mini",
             "o3_mini": "o3_mini",
+            "o3_mini_effort": "o3_mini (medium effort)",
             "deepseek": "deepseek",
             "grok": "grok",
-            "gpt4o": "gpt4o"
+            "gpt4o": "gpt4o",
+            "hyperbolic": "hyperbolic"
         }
         
         models = list(model_display_names.keys())
@@ -243,6 +245,27 @@ class MarketAnalyzerUI:
             command=lambda x: (self.update_training_time(), self.save_settings())
         )
         granularity_menu.pack(pady=(0,5), padx=10, fill="x")
+        
+        # Add timeframe alignment option
+        self.timeframe_alignment_frame = ctk.CTkFrame(sidebar_container)
+        self.timeframe_alignment_frame.pack(pady=(5,5), padx=5, fill="x")
+        
+        ctk.CTkLabel(self.timeframe_alignment_frame, text="Timeframe Alignment", 
+                    font=ctk.CTkFont(size=12, weight="bold")).pack(pady=(5,0))
+        
+        # Add explanation
+        ctk.CTkLabel(self.timeframe_alignment_frame, text="Analyzes multiple timeframes\nfor stronger signals", 
+                    font=ctk.CTkFont(size=10)).pack(pady=(0,5))
+        
+        # Enable/disable timeframe alignment
+        self.alignment_var = ctk.BooleanVar(value=self.settings.get("alignment_enabled", False))
+        self.alignment_cb = ctk.CTkCheckBox(
+            self.timeframe_alignment_frame,
+            text="Enable Alignment",
+            variable=self.alignment_var,
+            command=self.save_settings
+        )
+        self.alignment_cb.pack(pady=(0,5))
         
         # Add training time frame
         self.training_frame = ctk.CTkFrame(sidebar_container)
@@ -551,10 +574,14 @@ class MarketAnalyzerUI:
             # Store current price update thread state
             was_updating = self.price_update_thread is not None and self.price_update_thread.is_alive()
             
+            # Use a simplified approach to directly run the command without dependencies on the UI
+            print("UI DEBUG: Starting direct command execution for analysis")
+            
             # Construct command for timeframe analysis
             model_flag = f"--use_{self.model_var.get()}"
             cmd = [
                 "python",
+                "-u",  # Unbuffered output
                 "prompt_market.py",
                 "--product_id",
                 self.product_var.get(),
@@ -562,6 +589,17 @@ class MarketAnalyzerUI:
                 "--granularity",
                 granularity
             ]
+            
+            # Add timeframe alignment if enabled
+            if self.alignment_var.get():
+                self.queue.put(("append", "Timeframe alignment enabled. Running multi-timeframe analysis...\n"))
+                # Run additional timeframes for alignment (only use ONE_HOUR, FIFTEEN_MINUTE, FIVE_MINUTE)
+                alignment_granularities = ["ONE_HOUR", "FIFTEEN_MINUTE", "FIVE_MINUTE"]
+                # Filter out current granularity if it's in the list
+                alignment_granularities = [g for g in alignment_granularities if g != granularity]
+                # Add remaining timeframes for alignment
+                for i, align_gran in enumerate(alignment_granularities):
+                    cmd.extend([f"--alignment_timeframe_{i+1}", align_gran])
             
             # Add trading options if enabled
             if self.execute_trades_var.get():
@@ -580,78 +618,173 @@ class MarketAnalyzerUI:
             header += f"{'='*80}\n"
             self.queue.put(("append", header))
             
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            # Store the process
-            self.current_process = process
+            print("UI DEBUG: Creating process...")
+            # Use a simplified approach for subprocess handling
+            # Add a beautiful header with timestamp
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.queue.put(("append", "\n\n" + "★" * 80 + "\n"))
+            self.queue.put(("append", f"   🚀 CRYPTO MARKET ANALYSIS - {self.product_var.get()} ({granularity}) - {current_time}\n"))
+            self.queue.put(("append", "★" * 80 + "\n\n"))
+            self.queue.put(("append", "Running AI-powered market analysis... please wait ⏳\n"))
             
             # Enable cancel button
             self.queue.put(("enable_cancel", None))
             
-            # Variables to track trade output
-            trade_output_buffer = ""
-            capturing_trade_output = False
-            order_placed = False
-            current_recommendation = None
-            
-            # Read output in real-time with non-blocking I/O
-            while True:
-                reads = [process.stdout.fileno(), process.stderr.fileno()]
-                ret = select.select(reads, [], [])
-                for fd in ret[0]:
-                    if fd == process.stdout.fileno():
-                        output = process.stdout.readline()
-                        if output:
-                            self.queue.put(("append", output))
+            # Run the process and capture output
+            try:
+                # Use direct process execution with stdout/stderr capture
+                print("UI DEBUG: Starting subprocess direct execution")
+                self.queue.put(("append", "Starting analysis subprocess...\n"))
+                
+                # Run subprocess directly
+                process = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                
+                # Process the output - filter and display the relevant parts
+                if process.stdout:
+                    print(f"UI DEBUG: Got stdout from subprocess: {len(process.stdout)} chars")
+                    
+                    # Skip displaying all raw output - focus on the formatted recommendation
+                    # self.queue.put(("append", "\n--- OUTPUT FROM ANALYSIS ---\n"))
+                    # self.queue.put(("append", process.stdout))
+                    
+                    # Check for specific information in the output
+                    if "Timeframe Alignment Analysis" in process.stdout:
+                        # Extract the alignment section
+                        alignment_start = process.stdout.find("Timeframe Alignment Analysis")
+                        alignment_end = process.stdout.find("\nContinuing with primary timeframe", alignment_start)
+                        
+                        if alignment_start >= 0 and alignment_end >= 0:
+                            alignment_info = process.stdout[alignment_start:alignment_end]
                             
-                            # Start capturing trade output when we see a JSON recommendation
-                            if "{\"BUY AT\":" in output:
-                                current_recommendation = "BUY"
-                                capturing_trade_output = True
-                                trade_output_buffer = output
-                            elif "{\"SELL AT\":" in output:
-                                current_recommendation = "SELL"
-                                capturing_trade_output = True
-                                trade_output_buffer = output
-                            # Continue capturing trade output
-                            elif capturing_trade_output:
-                                trade_output_buffer += output
+                            # Display alignment info in a nice format
+                            self.queue.put(("append", "\n\n" + "▓" * 60 + "\n"))
+                            self.queue.put(("append", "           🔄 TIMEFRAME ALIGNMENT ANALYSIS 🔄\n"))
+                            self.queue.put(("append", "▓" * 60 + "\n\n"))
                             
-                            # Check if a trade was executed
-                            if "Order placed successfully" in output:
-                                order_placed = True
+                            # Format the alignment info
+                            lines = alignment_info.strip().split('\n')
+                            for line in lines:
+                                if "Primary timeframe:" in line:
+                                    self.queue.put(("append", f"🕒 {line}\n"))
+                                elif "Alignment timeframes:" in line:
+                                    self.queue.put(("append", f"⏱️ {line}\n"))
+                                elif "ALIGNMENT SCORE:" in line:
+                                    score = line.split(':')[1].strip().split('/')[0]
+                                    self.queue.put(("append", f"📊 Alignment Score: {score}/100\n"))
+                                elif "EXCELLENT ALIGNMENT" in line:
+                                    self.queue.put(("append", f"✅✅✅ Excellent Alignment - Very Strong Signal\n"))
+                                elif "GOOD ALIGNMENT" in line:
+                                    self.queue.put(("append", f"✅✅ Good Alignment - Strong Signal\n"))
+                                elif "MODERATE ALIGNMENT" in line:
+                                    self.queue.put(("append", f"✅ Moderate Alignment - Decent Signal\n"))
+                                elif "POOR ALIGNMENT" in line:
+                                    self.queue.put(("append", f"❌ Poor Alignment - Weak/Conflicting Signals\n"))
+                            
+                            self.queue.put(("append", "\n" + "▓" * 60 + "\n\n"))
+                    
+                    # Also check for JSON in the stdout
+                    import re
+                    json_pattern = r'({.*?})'
+                    json_matches = re.findall(json_pattern, process.stdout, re.DOTALL)
+                    
+                    # Only display the first valid recommendation we find
+                    if json_matches:
+                        # Try to find a valid recommendation
+                        found_recommendation = False
+                        
+                        for json_str in json_matches:
+                            # Skip if we already found a valid recommendation
+                            if found_recommendation:
+                                break
                                 
-                                # Save the trade output to file
-                                if trade_output_buffer:
-                                    self.save_trade_output(trade_output_buffer)
-                                    trade_output_buffer = ""
-                                    capturing_trade_output = False
+                            try:
+                                import json
+                                json_obj = json.loads(json_str)
+                                
+                                # Check if this is a trading recommendation
+                                if ("SIGNAL_TYPE" in json_obj or "BUY AT" in json_obj or "SELL AT" in json_obj):
+                                    # Mark that we found a valid recommendation
+                                    found_recommendation = True
                                     
-                    if fd == process.stderr.fileno():
-                        error = process.stderr.readline()
-                        if error:
-                            self.queue.put(("append", f"\nErrors:\n{error}"))
-                if process.poll() is not None:
-                    break
-            
-            # Get any remaining output
-            stdout, stderr = process.communicate()
-            if stdout:
-                self.queue.put(("append", stdout))
-            if stderr:
-                self.queue.put(("append", f"\nErrors:\n{stderr}"))
-            
-            self.queue.put(("status", "Ready"))
-            self.queue.put(("enable_buttons", None))
-            self.queue.put(("disable_cancel", None))
-            
-            # Clear current process
-            self.current_process = None
+                                    # Get the signal type
+                                    signal_type = json_obj.get('SIGNAL_TYPE', 'UNKNOWN')
+                                    if signal_type == 'UNKNOWN':
+                                        if 'SELL AT' in json_obj:
+                                            signal_type = 'SELL'
+                                        elif 'BUY AT' in json_obj:
+                                            signal_type = 'BUY'
+                                        elif 'HOLD' in json_obj:
+                                            signal_type = 'HOLD'
+                                    
+                                    # Format based on signal type
+                                    if signal_type == 'BUY':
+                                        header_color = "🟢"  # Green
+                                    elif signal_type == 'SELL':
+                                        header_color = "🔴"  # Red
+                                    else:  # HOLD
+                                        header_color = "🟡"  # Yellow
+                                    
+                                    # Create a beautifully formatted recommendation
+                                    self.queue.put(("append", "\n\n" + "═" * 60 + "\n"))
+                                    self.queue.put(("append", f"   {header_color} {signal_type} RECOMMENDATION {header_color}\n"))
+                                    self.queue.put(("append", "═" * 60 + "\n\n"))
+                                    
+                                    # Display the formatted information
+                                    formatted_json = json.dumps(json_obj, indent=2)
+                                    
+                                    # Extract key information
+                                    price = json_obj.get('PRICE', json_obj.get('BUY AT', json_obj.get('SELL AT', 'N/A')))
+                                    probability = json_obj.get('PROBABILITY', 'N/A')
+                                    confidence = json_obj.get('CONFIDENCE', 'N/A')
+                                    r_r = json_obj.get('R/R_RATIO', 'N/A')
+                                    market_regime = json_obj.get('MARKET_REGIME', 'N/A')
+                                    reasoning = json_obj.get('REASONING', 'N/A')
+                                    
+                                    # Format the key info nicely
+                                    self.queue.put(("append", f"📈 Price: ${price}\n"))
+                                    self.queue.put(("append", f"📊 Probability: {probability}%\n"))
+                                    self.queue.put(("append", f"🔍 Confidence: {confidence}\n"))
+                                    
+                                    if signal_type != 'HOLD':
+                                        take_profit = json_obj.get('SELL BACK AT' if signal_type == 'BUY' else 'BUY BACK AT', 'N/A')
+                                        stop_loss = json_obj.get('STOP LOSS', 'N/A')
+                                        self.queue.put(("append", f"🎯 Take Profit: ${take_profit}\n"))
+                                        self.queue.put(("append", f"🛑 Stop Loss: ${stop_loss}\n"))
+                                        self.queue.put(("append", f"⚖️ Risk/Reward: {r_r}\n"))
+                                    
+                                    self.queue.put(("append", f"🌍 Market Regime: {market_regime}\n"))
+                                    self.queue.put(("append", f"💡 Analysis: {reasoning}\n"))
+                                    
+                                    # End with a simple separator
+                                    self.queue.put(("append", "\n" + "─" * 60 + "\n"))
+                            except Exception as e:
+                                print(f"UI DEBUG: Error parsing JSON: {str(e)}")
+                
+                if process.stderr:
+                    print(f"UI DEBUG: Got stderr from subprocess: {len(process.stderr)} chars")
+                    self.queue.put(("append", "\nErrors:\n"))
+                    self.queue.put(("append", process.stderr))
+                    
+                print(f"UI DEBUG: Process completed with return code: {process.returncode}")
+                
+                # Add an elegant completion message
+                self.queue.put(("append", "\n\n" + "✨" * 25 + "\n"))
+                self.queue.put(("append", "   🏁 Analysis completed successfully! 🏁\n"))
+                self.queue.put(("append", "✨" * 25 + "\n\n"))
+                
+                self.queue.put(("status", "Ready"))
+                self.queue.put(("enable_buttons", None))
+                self.queue.put(("disable_cancel", None))
+            except Exception as e:
+                self.queue.put(("append", f"\nError running subprocess: {str(e)}\n"))
+                self.queue.put(("status", "Error"))
+                self.queue.put(("enable_buttons", None))
+                self.queue.put(("disable_cancel", None))
             
             # Restart price updates if they were running before
             if was_updating and (self.price_update_thread is None or not self.price_update_thread.is_alive()):
@@ -834,7 +967,32 @@ class MarketAnalyzerUI:
 
     def _strip_ansi_codes(self, text):
         """Remove ANSI escape sequences from text"""
-        return self.ansi_escape.sub('', text)
+        # First ensure text is a string
+        if not isinstance(text, str):
+            try:
+                text = str(text)
+            except:
+                return "[Non-string content]"
+                
+        # Print to console for debugging
+        print(f"Raw output: {text}")
+        
+        # Make direct output more visible if it contains important information
+        if "DIRECT TRADING RECOMMENDATION OUTPUT" in text:
+            print("FOUND DIRECT TRADING RECOMMENDATION IN OUTPUT!")
+            
+        # Look for JSON content
+        if text.strip().startswith('{') and text.strip().endswith('}'):
+            print(f"Found JSON content: {text}")
+        
+        # Strip ANSI codes
+        clean_text = self.ansi_escape.sub('', text)
+        
+        # Debug
+        if clean_text.strip() and "AI Trading Recommendation" in clean_text:
+            print(f"Found recommendation. Length: {len(clean_text)}")
+            
+        return clean_text
 
     def process_queue(self):
         """Process messages from the queue"""
@@ -845,7 +1003,42 @@ class MarketAnalyzerUI:
                 if action == "append":
                     # Strip ANSI codes before displaying
                     clean_text = self._strip_ansi_codes(data)
-                    self.output_text.insert("end", clean_text)
+                    
+                    # Handle special sections - START/END recommendation content markers
+                    if "START RECOMMENDATION CONTENT" in clean_text:
+                        self.output_text.insert("end", "\n--- RECOMMENDATION STARTS HERE ---\n\n")
+                        continue  # Skip this marker line
+                    elif "END RECOMMENDATION CONTENT" in clean_text:
+                        self.output_text.insert("end", "\n--- RECOMMENDATION ENDS HERE ---\n\n")
+                        continue  # Skip this marker line
+                        
+                    # Special handling for direct recommendation output section
+                    elif "DIRECT TRADING RECOMMENDATION OUTPUT" in clean_text:
+                        self.output_text.insert("end", "\n" + "=" * 50 + "\n")
+                        self.output_text.insert("end", "RAW TRADING RECOMMENDATION:\n")
+                        self.output_text.insert("end", "=" * 50 + "\n")
+                        continue
+                    
+                    # Check for JSON content and try to format it nicely
+                    if clean_text.strip().startswith('{') and clean_text.strip().endswith('}'):
+                        try:
+                            # Parse JSON and pretty-print it
+                            json_obj = json.loads(clean_text.strip())
+                            formatted_json = json.dumps(json_obj, indent=2)
+                            self.output_text.insert("end", formatted_json + "\n")
+                            # Also output the JSON in a large, very visible section
+                            self.output_text.insert("end", "\n" + "#" * 50 + "\n")
+                            self.output_text.insert("end", "TRADING RECOMMENDATION:\n")
+                            self.output_text.insert("end", "#" * 50 + "\n")
+                            self.output_text.insert("end", formatted_json + "\n")
+                            self.output_text.insert("end", "#" * 50 + "\n\n")
+                        except json.JSONDecodeError:
+                            # If JSON parsing fails, just display the original text
+                            self.output_text.insert("end", clean_text)
+                    else:
+                        # Regular text
+                        self.output_text.insert("end", clean_text)
+                        
                     self.output_text.see("end")
                 elif action == "status":
                     self.status_var.set(data)
@@ -1257,6 +1450,17 @@ class MarketAnalyzerUI:
                     str(self.leverage_var.get())
                 ]
                 
+                # Add timeframe alignment if enabled
+                if self.alignment_var.get():
+                    self.queue.put(("append", "Timeframe alignment enabled. Running multi-timeframe analysis...\n"))
+                    # Run additional timeframes for alignment (only use ONE_HOUR, FIFTEEN_MINUTE, FIVE_MINUTE)
+                    alignment_granularities = ["ONE_HOUR", "FIFTEEN_MINUTE", "FIVE_MINUTE"]
+                    # Filter out current granularity if it's in the list
+                    alignment_granularities = [g for g in alignment_granularities if g != granularity]
+                    # Add remaining timeframes for alignment
+                    for i, align_gran in enumerate(alignment_granularities):
+                        cmd.extend([f"--alignment_timeframe_{i+1}", align_gran])
+                
                 if self.limit_order_var.get():
                     cmd.append("--limit_order")
                 
@@ -1283,10 +1487,37 @@ class MarketAnalyzerUI:
                         break
                     if line:
                         output += line
-                        self.queue.put(("append", line))
                         
-                        # Start capturing trade output when we see a JSON recommendation
-                        if "{\"BUY AT\":" in line or "{\"SELL AT\":" in line:
+                        # Check if this is a JSON line that needs to be fully captured
+                        if line.strip().startswith('{') and not line.strip().endswith('}'):
+                            # This might be the start of a multi-line JSON output
+                            json_buffer = line
+                            # Read more lines until we get a complete JSON object
+                            while not json_buffer.strip().endswith('}'):
+                                more = process.stdout.readline()
+                                if not more:
+                                    break
+                                json_buffer += more
+                                output += more
+                            # Send the complete JSON
+                            self.queue.put(("append", json_buffer))
+                        else:
+                            # Normal output
+                            self.queue.put(("append", line))
+                        
+                        # Highlight alignment information
+                        if "Timeframe Alignment Analysis:" in line:
+                            self.queue.put(("append", "\n--- TIMEFRAME ALIGNMENT INFORMATION ---\n"))
+                            capturing_trade_output = True
+                            trade_output_buffer = line
+                        # Start capturing trade output when we see a JSON recommendation (including new SIGNAL_TYPE format)
+                        elif "{\"SIGNAL_TYPE\": \"BUY\"" in line or "{\"BUY AT\":" in line:
+                            capturing_trade_output = True
+                            trade_output_buffer = line
+                        elif "{\"SIGNAL_TYPE\": \"SELL\"" in line or "{\"SELL AT\":" in line:
+                            capturing_trade_output = True
+                            trade_output_buffer = line
+                        elif "{\"SIGNAL_TYPE\": \"HOLD\"" in line:
                             capturing_trade_output = True
                             trade_output_buffer = line
                         # Continue capturing trade output
@@ -1749,11 +1980,21 @@ class MarketAnalyzerUI:
             self.auto_trading_thread = threading.Thread(target=self._auto_trading_loop)
             self.auto_trading_thread.daemon = True
             self.auto_trading_thread.start()
+            
+        # Periodically update trade statuses (every 5 minutes)
+        current_time = time.time()
+        if not hasattr(self, 'last_trade_status_update') or current_time - self.last_trade_status_update >= 300:
+            self.last_trade_status_update = current_time
+            # Run trade status update in a separate thread to avoid blocking the UI
+            thread = threading.Thread(target=self._update_trade_statuses_thread)
+            thread.daemon = True
+            thread.start()
+            
         # Schedule next check
         self.root.after(60000, self.monitor_threads)  # Check every minute
 
     def save_trade_output(self, output_text):
-        """Save trade output to a file"""
+        """Save trade output to a file and display enhanced signal information"""
         try:
             # Create a timestamp
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1767,10 +2008,163 @@ class MarketAnalyzerUI:
             # Append to the trade_output.txt file
             with open("trade_output.txt", "a") as f:
                 f.write(formatted_output)
+            
+            # Try to parse and display enhanced signal information
+            self.display_enhanced_signal_info(clean_text)
                 
             self.queue.put(("append", "\nTrade output saved to trade_output.txt\n"))
         except Exception as e:
             self.queue.put(("append", f"\nError saving trade output: {str(e)}\n"))
+    
+    def display_enhanced_signal_info(self, output_text):
+        """Parse the recommendation output and display enhanced information"""
+        try:
+            # Try to find and parse the JSON recommendation
+            import re
+            import json
+            
+            # Look for JSON object in the text (between { and })
+            json_match = re.search(r'({.*?})', output_text, re.DOTALL)
+            if not json_match:
+                return
+                
+            # Try to parse the JSON
+            try:
+                rec_dict = json.loads(json_match.group(1).replace("'", '"'))
+            except json.JSONDecodeError:
+                return
+                
+            # Get signal type (support both old and new format)
+            signal_type = rec_dict.get('SIGNAL_TYPE', 'UNKNOWN')
+            if signal_type == 'UNKNOWN':
+                if 'SELL AT' in rec_dict:
+                    signal_type = 'SELL'
+                elif 'BUY AT' in rec_dict:
+                    signal_type = 'BUY'
+                elif 'HOLD' in rec_dict:
+                    signal_type = 'HOLD'
+            
+            # Display enhanced signal summary in the UI
+            summary = f"\n{'='*80}\n"
+            summary += f"📊 ENHANCED SIGNAL INFORMATION\n"
+            summary += f"{'='*80}\n"
+            
+            # Signal type and confidence
+            if signal_type == 'BUY':
+                summary += f"Signal: 🟢 BUY\n"
+            elif signal_type == 'SELL':
+                summary += f"Signal: 🔴 SELL\n"
+            elif signal_type == 'HOLD':
+                summary += f"Signal: 🟡 HOLD\n"
+            else:
+                summary += f"Signal: Unknown\n"
+                
+            # Probability and confidence
+            prob = rec_dict.get('PROBABILITY', 'N/A')
+            confidence = rec_dict.get('CONFIDENCE', 'N/A')
+            summary += f"Probability: {prob}%\n"
+            summary += f"Confidence: {confidence}\n"
+            
+            # Market regime
+            market_regime = rec_dict.get('MARKET_REGIME', 'N/A')
+            regime_confidence = rec_dict.get('REGIME_CONFIDENCE', 'N/A')
+            summary += f"Market Regime: {market_regime} ({regime_confidence} confidence)\n"
+            
+            # Timeframe alignment (new feature)
+            if 'TIMEFRAME_ALIGNMENT' in rec_dict:
+                alignment = rec_dict['TIMEFRAME_ALIGNMENT']
+                summary += f"Timeframe Alignment: {alignment}/100"
+                
+                # Add visual indicator for alignment
+                if alignment >= 90:
+                    summary += " ⭐⭐⭐⭐⭐ (Excellent)\n"
+                elif alignment >= 80:
+                    summary += " ⭐⭐⭐⭐ (Very Good)\n"
+                elif alignment >= 70:
+                    summary += " ⭐⭐⭐ (Good)\n"
+                elif alignment >= 60:
+                    summary += " ⭐⭐ (Fair)\n"
+                elif alignment >= 50:
+                    summary += " ⭐ (Poor)\n"
+                else:
+                    summary += " ❌ (Conflicting signals)\n"
+            
+            # Reasoning (new feature)
+            if 'REASONING' in rec_dict and rec_dict['REASONING']:
+                summary += f"\nReasoning: {rec_dict['REASONING']}\n"
+            
+            # Risk metrics
+            summary += f"\nRisk Metrics:\n"
+            
+            if signal_type in ['BUY', 'SELL']:
+                # R/R ratio
+                if 'R/R_RATIO' in rec_dict:
+                    rr_ratio = float(rec_dict['R/R_RATIO'])
+                    summary += f"- R/R Ratio: {rr_ratio:.2f}\n"
+                
+                # Volume strength
+                if 'VOLUME_STRENGTH' in rec_dict:
+                    summary += f"- Volume: {rec_dict['VOLUME_STRENGTH']}\n"
+                
+                # Volatility
+                if 'VOLATILITY' in rec_dict:
+                    summary += f"- Volatility: {rec_dict['VOLATILITY']}\n"
+                
+                # Pricing (for BUY or SELL)
+                if signal_type == 'BUY':
+                    entry = rec_dict.get('BUY AT', 'N/A')
+                    target = rec_dict.get('SELL BACK AT', 'N/A')
+                    stop = rec_dict.get('STOP LOSS', 'N/A')
+                    summary += f"\nBUY at: ${entry}\n"
+                    summary += f"Target: ${target}\n"
+                    summary += f"Stop Loss: ${stop}\n"
+                    
+                    # Calculate percentages if prices are available
+                    try:
+                        entry_f = float(entry)
+                        target_f = float(target)
+                        stop_f = float(stop)
+                        profit_pct = ((target_f - entry_f) / entry_f) * 100
+                        loss_pct = ((entry_f - stop_f) / entry_f) * 100
+                        summary += f"Potential Gain: {profit_pct:.2f}%\n"
+                        summary += f"Potential Loss: {loss_pct:.2f}%\n"
+                    except (ValueError, TypeError):
+                        pass
+                    
+                elif signal_type == 'SELL':
+                    entry = rec_dict.get('SELL AT', 'N/A')
+                    target = rec_dict.get('BUY BACK AT', 'N/A')
+                    stop = rec_dict.get('STOP LOSS', 'N/A')
+                    summary += f"\nSELL at: ${entry}\n"
+                    summary += f"Target: ${target}\n"
+                    summary += f"Stop Loss: ${stop}\n"
+                    
+                    # Calculate percentages if prices are available
+                    try:
+                        entry_f = float(entry)
+                        target_f = float(target)
+                        stop_f = float(stop)
+                        profit_pct = ((entry_f - target_f) / entry_f) * 100
+                        loss_pct = ((stop_f - entry_f) / entry_f) * 100
+                        summary += f"Potential Gain: {profit_pct:.2f}%\n"
+                        summary += f"Potential Loss: {loss_pct:.2f}%\n"
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Add message about auto trading
+            if self.auto_trading:
+                summary += f"\n🤖 Auto-trading is ON. Trades will be executed automatically if conditions are met.\n"
+            elif self.execute_trades_var.get():
+                summary += f"\n🤖 Trade execution is enabled. This recommendation will be executed if conditions are met.\n"
+            else:
+                summary += f"\n📝 Trade execution is disabled. Use the Execute Trades checkbox to enable automatic trading.\n"
+            
+            # Add the summary to the output
+            self.queue.put(("append", summary))
+            
+        except Exception as e:
+            # Don't show error to user, just log it
+            print(f"Error displaying enhanced signal info: {str(e)}")
 
     def load_trade_history(self):
         """Load trade history from file"""
@@ -1840,6 +2234,226 @@ class MarketAnalyzerUI:
         # If no clear indicator, return None
         return None
 
+    def _update_trade_statuses_thread(self):
+        """Thread function to update trade statuses in trade_history.csv"""
+        try:
+            # Import the update function from update_trade_status module
+            # If the file doesn't exist or can't be imported, create a simplified version
+            try:
+                from update_trade_status import update_trade_statuses
+                self.queue.put(("status", "Updating trade statuses..."))
+                update_trade_statuses()
+                self.queue.put(("status", "Ready"))
+            except ImportError:
+                # Implement a simplified version if the module can't be imported
+                self.queue.put(("status", "Updating trade statuses..."))
+                self._simplified_update_trade_statuses()
+                self.queue.put(("status", "Ready"))
+        except Exception as e:
+            self.queue.put(("append", f"\nError updating trade statuses: {str(e)}\n"))
+            self.queue.put(("status", "Error updating trades"))
+
+    def _simplified_update_trade_statuses(self):
+        """Simplified version of trade status update if the module is not available"""
+        import csv
+        from datetime import datetime, timedelta
+        from coinbaseservice import CoinbaseService
+        from historicaldata import HistoricalData
+        
+        # Initialize services
+        try:
+            # Load API keys
+            api_key, api_secret = self.load_api_keys()
+            if not api_key or not api_secret:
+                self.queue.put(("append", "\nError: Failed to load API keys for trade status update\n"))
+                return
+                
+            # Initialize Coinbase service
+            service = CoinbaseService(api_key, api_secret)
+            historical_data = HistoricalData(service.client)
+            
+            # Check if trade_history.csv exists
+            if not os.path.exists('trade_history.csv'):
+                self.queue.put(("append", "\nNo trade_history.csv file found. Nothing to update.\n"))
+                return
+                
+            # Read trades from CSV
+            open_trades = []
+            with open('trade_history.csv', 'r', newline='') as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames
+                rows = list(reader)
+                
+                # Identify open trades
+                for row in rows:
+                    if row.get('Status', '').upper() == 'OPEN':
+                        try:
+                            # Get trade details
+                            timestamp = datetime.strptime(row['Timestamp'], '%Y-%m-%d %H:%M:%S')
+                            product_id = row['Product']
+                            side = row['Side']
+                            entry_price = float(row['Entry Price'])
+                            target_price = float(row['Target Price'])
+                            stop_loss = float(row['Stop Loss'])
+                            
+                            # Get historical data to check if trade completed
+                            start_date = timestamp
+                            end_date = datetime.now()
+                            
+                            # Get current price for verification
+                            current_price = None
+                            try:
+                                # Get current price for verification
+                                trades = service.client.get_market_trades(product_id=product_id, limit=1)
+                                if 'trades' in trades and len(trades['trades']) > 0:
+                                    current_price = float(trades['trades'][0]['price'])
+                                    self.queue.put(("append", f"\nCurrent {product_id} price: ${current_price}\n"))
+                            except Exception as e:
+                                self.queue.put(("append", f"\nError getting current price for {product_id}: {str(e)}\n"))
+                            
+                            # Verify based on current price
+                            if current_price:
+                                # For LONG/BUY positions
+                                if side.upper() in ['BUY', 'LONG']:
+                                    # Check if the price has actually hit the target
+                                    if target_price > current_price:
+                                        self.queue.put(("append", f"\nVERIFICATION FAILED: Target price (${target_price}) not yet reached. Current price is ${current_price}\n"))
+                                        continue  # Skip this trade
+                                # For SHORT/SELL positions
+                                elif side.upper() in ['SELL', 'SHORT']:
+                                    # Check if the price has actually hit the target
+                                    if target_price < current_price:
+                                        self.queue.put(("append", f"\nVERIFICATION FAILED: Target price (${target_price}) not yet reached. Current price is ${current_price}\n"))
+                                        continue  # Skip this trade
+                            
+                            # Get candles data
+                            candles = historical_data.get_historical_data(
+                                product_id=product_id.replace('-USDC', '-PERP-INTX'),  # Convert to perp format
+                                start_date=start_date,
+                                end_date=end_date,
+                                granularity='ONE_MINUTE'
+                            )
+                            
+                            # Check if trade hit take profit or stop loss
+                            outcome = None
+                            for candle in candles:
+                                low_price = float(candle['low'])
+                                high_price = float(candle['high'])
+                                
+                                if side.upper() == 'BUY' or side.upper() == 'LONG':
+                                    # Check for take profit hit
+                                    if high_price >= target_price:
+                                        outcome = 'SUCCESS'
+                                        # Calculate profit percentage (positive for success)
+                                        price_change_pct = ((target_price - entry_price) / entry_price)
+                                        # Assume effective leverage of 10x if not available
+                                        leverage = 10
+                                        if 'Leverage' in row:
+                                            try:
+                                                leverage_str = row['Leverage'].replace('x', '')
+                                                leverage = float(leverage_str)
+                                            except:
+                                                pass
+                                        profit_pct = price_change_pct * 100 * leverage
+                                        
+                                        # Add the outcome percentage to the row
+                                        row['Outcome %'] = f"{abs(profit_pct):.2f}"
+                                        break
+                                    # Check for stop loss hit
+                                    elif low_price <= stop_loss:
+                                        outcome = 'STOP LOSS'
+                                        # Calculate loss percentage (negative for stop loss)
+                                        price_change_pct = ((entry_price - stop_loss) / entry_price)
+                                        # Assume effective leverage of 10x if not available
+                                        leverage = 10
+                                        if 'Leverage' in row:
+                                            try:
+                                                leverage_str = row['Leverage'].replace('x', '')
+                                                leverage = float(leverage_str)
+                                            except:
+                                                pass
+                                        loss_pct = price_change_pct * 100 * leverage
+                                        
+                                        # Add the outcome percentage to the row
+                                        row['Outcome %'] = f"{-abs(loss_pct):.2f}"
+                                        break
+                                else:  # SELL or SHORT
+                                    # Check for take profit hit
+                                    if low_price <= target_price:
+                                        outcome = 'SUCCESS'
+                                        # Calculate profit percentage (positive for success)
+                                        price_change_pct = ((entry_price - target_price) / entry_price)
+                                        # Assume effective leverage of 10x if not available
+                                        leverage = 10
+                                        if 'Leverage' in row:
+                                            try:
+                                                leverage_str = row['Leverage'].replace('x', '')
+                                                leverage = float(leverage_str)
+                                            except:
+                                                pass
+                                        profit_pct = price_change_pct * 100 * leverage
+                                        
+                                        # Add the outcome percentage to the row
+                                        row['Outcome %'] = f"{abs(profit_pct):.2f}"
+                                        break
+                                    # Check for stop loss hit
+                                    elif high_price >= stop_loss:
+                                        outcome = 'STOP LOSS'
+                                        # Calculate loss percentage (negative for stop loss)
+                                        price_change_pct = ((stop_loss - entry_price) / entry_price)
+                                        # Assume effective leverage of 10x if not available
+                                        leverage = 10
+                                        if 'Leverage' in row:
+                                            try:
+                                                leverage_str = row['Leverage'].replace('x', '')
+                                                leverage = float(leverage_str)
+                                            except:
+                                                pass
+                                        loss_pct = price_change_pct * 100 * leverage
+                                        
+                                        # Add the outcome percentage to the row
+                                        row['Outcome %'] = f"{-abs(loss_pct):.2f}"
+                                        break
+                            
+                            # Update the row if outcome was determined
+                            if outcome:
+                                # Double-check SUCCESS outcomes with current price verification
+                                if outcome == 'SUCCESS' and current_price:
+                                    # For LONG/BUY positions
+                                    if side.upper() in ['BUY', 'LONG'] and target_price > current_price:
+                                        self.queue.put(("append", f"\nWARNING: Trade marked as SUCCESS but target (${target_price}) not yet reached. Current price is ${current_price}\n"))
+                                        self.queue.put(("append", "This appears to be a false positive. Skipping update.\n"))
+                                        continue
+                                    # For SHORT/SELL positions
+                                    elif side.upper() in ['SELL', 'SHORT'] and target_price < current_price:
+                                        self.queue.put(("append", f"\nWARNING: Trade marked as SUCCESS but target (${target_price}) not yet reached. Current price is ${current_price}\n"))
+                                        self.queue.put(("append", "This appears to be a false positive. Skipping update.\n"))
+                                        continue
+                                
+                                row['Status'] = outcome
+                                self.queue.put(("append", f"\nTrade updated: {timestamp} - {outcome} ({row.get('Outcome %', '0')}%)\n"))
+                                open_trades.append(row)
+                                
+                        except Exception as e:
+                            self.queue.put(("append", f"\nError analyzing trade: {str(e)}\n"))
+                
+            # Write updated CSV
+            if open_trades:
+                # Make sure "Outcome %" is in fieldnames
+                if "Outcome %" not in fieldnames:
+                    fieldnames.append("Outcome %")
+                
+                with open('trade_history.csv', 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(rows)
+                self.queue.put(("append", f"\nUpdated {len(open_trades)} trades in trade_history.csv\n"))
+            else:
+                self.queue.put(("append", "\nNo trades were updated\n"))
+                
+        except Exception as e:
+            self.queue.put(("append", f"\nError in simplified trade status update: {str(e)}\n"))
+    
     def update_risk_level(self):
         """Update the risk level based on the current state"""
         # This method is no longer needed as risk management has been removed
@@ -1856,7 +2470,8 @@ class MarketAnalyzerUI:
                 "product": self.product_var.get(),
                 "model": self.model_var.get(),
                 "granularity": self.granularity_var.get(),
-                "execute_trades": self.execute_trades_var.get()
+                "execute_trades": self.execute_trades_var.get(),
+                "alignment_enabled": self.alignment_var.get()
             }
             
             with open("ui_settings.json", "w") as f:
@@ -1879,7 +2494,8 @@ class MarketAnalyzerUI:
                 "product": "BTC-USDC",
                 "model": "o1_mini",
                 "granularity": "ONE_HOUR",
-                "execute_trades": False
+                "execute_trades": False,
+                "alignment_enabled": False
             }
         except Exception as e:
             self.queue.put(("append", f"\nError loading settings: {str(e)}\n"))
@@ -1891,7 +2507,8 @@ class MarketAnalyzerUI:
                 "product": "BTC-USDC",
                 "model": "o1_mini",
                 "granularity": "ONE_HOUR",
-                "execute_trades": False
+                "execute_trades": False,
+                "alignment_enabled": False
             }
 
     def run(self):

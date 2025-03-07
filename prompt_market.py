@@ -5,7 +5,8 @@ import argparse
 import json
 import time
 import requests
-from typing import Dict, Optional
+import csv
+from typing import Dict, Optional, Tuple, List, Union
 from datetime import datetime
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -71,11 +72,24 @@ COLORS = {
 def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False):
     global client
     try:
+        # Debug prints removed for cleaner output
+        # Logging can be used for any necessary debugging
+        logging.debug("Initializing client")
+        logging.debug(f"OPENAI_KEY exists: {bool(OPENAI_KEY)}")
+        logging.debug(f"DEEPSEEK_KEY exists: {bool(DEEPSEEK_KEY)}")
+        logging.debug(f"XAI_KEY exists: {bool(XAI_KEY)}")
+        logging.debug(f"OPENROUTER_API_KEY exists: {bool(OPENROUTER_API_KEY)}")
+        logging.debug(f"HYPERBOLIC_KEY exists: {bool(HYPERBOLIC_KEY)}")
+        logging.debug(f"API_KEY_PERPS exists: {bool(API_KEY_PERPS)}")
+        logging.debug(f"API_SECRET_PERPS exists: {bool(API_SECRET_PERPS)}")
+        
         if use_ollama:
+            logging.debug("Using Ollama - no client initialization needed")
             # For Ollama, we don't need to initialize a client
             return True
             
         if use_deepseek_r1:
+            logging.debug("Using DeepSeek R1 via OpenRouter")
             if not OPENROUTER_API_KEY:
                 logging.error("OpenRouter API key is not set in the configuration")
                 print(f"{COLORS['red']}Error: OpenRouter API key is not set. Please add it to your configuration.{COLORS['end']}")
@@ -88,10 +102,13 @@ def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, us
                     "X-Title": "Cursor AI Trading Bot"
                 }
             )
+            logging.debug("OpenRouter client initialized successfully")
             return True
             
         provider = 'X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI')
         api_key = XAI_KEY if use_grok else (DEEPSEEK_KEY if (use_deepseek or use_reasoner) else OPENAI_KEY)
+        
+        logging.debug(f"Using provider: {provider}")
         
         if not api_key:
             logging.error(f"{provider} API key is not set in the configuration")
@@ -104,11 +121,17 @@ def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, us
             return False
 
         if use_grok:
+            logging.debug("Initializing X AI client")
             client = OpenAI(api_key=XAI_KEY, base_url="https://api.x.ai/v1")
+            logging.debug("X AI client initialized successfully")
         elif use_deepseek or use_reasoner:
+            logging.debug("Initializing DeepSeek client")
             client = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
+            logging.debug("DeepSeek client initialized successfully")
         else:
+            logging.debug("Initializing OpenAI client")
             client = OpenAI(api_key=OPENAI_KEY)
+            logging.debug("OpenAI client initialized successfully")
         return True
     except Exception as e:
         error_msg = str(e).lower()
@@ -160,8 +183,34 @@ def validate_inputs(product_id: str, granularity: str) -> bool:
         return False
     return True
 
-def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
-    """Run market analysis and return the output as a dictionary."""
+def run_market_analysis(product_id: str, granularity: str, 
+                     alignment_timeframe_1: Optional[str] = None,
+                     alignment_timeframe_2: Optional[str] = None,
+                     alignment_timeframe_3: Optional[str] = None) -> Optional[Dict]:
+    """Run market analysis and return the output as a dictionary.
+    
+    Args:
+        product_id: Trading pair to analyze
+        granularity: Primary timeframe to analyze
+        alignment_timeframe_1: Optional additional timeframe for alignment
+        alignment_timeframe_2: Optional additional timeframe for alignment
+        alignment_timeframe_3: Optional additional timeframe for alignment
+    """
+    results = {}
+    
+    # Collect all timeframes to analyze
+    timeframes = [granularity]
+    if alignment_timeframe_1:
+        timeframes.append(alignment_timeframe_1)
+    if alignment_timeframe_2:
+        timeframes.append(alignment_timeframe_2)
+    if alignment_timeframe_3:
+        timeframes.append(alignment_timeframe_3)
+    
+    # Remove duplicates (if any)
+    timeframes = list(set(timeframes))
+    
+    # Run primary timeframe analysis first
     try:
         with open(os.devnull, 'w') as devnull:
             result = subprocess.check_output(
@@ -170,7 +219,37 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
                 stderr=devnull,
                 timeout=60  # 1 minute timeout
             )
-        return {'success': True, 'data': result}
+        results[granularity] = result
+        
+        # If alignment timeframes are provided, run analysis for each
+        for tf in timeframes:
+            if tf != granularity:  # Skip primary which was already analyzed
+                logging.info(f"Running alignment analysis for {tf} timeframe")
+                print(f"Running alignment analysis for {tf} timeframe...")
+                try:
+                    with open(os.devnull, 'w') as devnull:
+                        tf_result = subprocess.check_output(
+                            ['python', 'market_analyzer.py', '--product_id', product_id, '--granularity', tf, '--console_logging', 'false'],
+                            text=True,
+                            stderr=devnull,
+                            timeout=60  # 1 minute timeout
+                        )
+                    results[tf] = tf_result
+                except Exception as e:
+                    logging.warning(f"Error in alignment analysis for {tf}: {str(e)}")
+                    results[tf] = f"Error: {str(e)}"
+        
+        # Calculate timeframe alignment score if multiple timeframes
+        alignment_score = 100 if len(results) <= 1 else calculate_alignment_score(results)
+        
+        return {
+            'success': True, 
+            'data': results[granularity],  # Main timeframe result
+            'alignment_results': results,   # All results including alignment timeframes
+            'alignment_score': alignment_score,  # 0-100 score for alignment
+            'alignment_timeframes': timeframes  # List of all timeframes analyzed
+        }
+        
     except subprocess.TimeoutExpired:
         logging.error("Market analyzer timed out after 1 minute")
         return {'success': False, 'error': "Analysis timed out"}
@@ -180,6 +259,51 @@ def run_market_analysis(product_id: str, granularity: str) -> Optional[Dict]:
     except Exception as e:
         logging.error(f"Unexpected error in market analysis: {str(e)}")
         return {'success': False, 'error': f"Unexpected error: {str(e)}"}
+
+def calculate_alignment_score(results: Dict[str, str]) -> int:
+    """Calculate a timeframe alignment score based on multiple timeframe analyses.
+    
+    Scores range from 0 (completely misaligned) to 100 (perfect alignment)
+    """
+    try:
+        # Extract market conditions from each timeframe's result
+        directions = []
+        
+        for timeframe, result in results.items():
+            # Skip results with errors
+            if result.startswith("Error:"):
+                continue
+                
+            if "BULLISH" in result.upper():
+                directions.append(1)  # Bullish
+            elif "BEARISH" in result.upper():
+                directions.append(-1)  # Bearish
+            else:
+                directions.append(0)  # Neutral/Choppy
+        
+        # If we have no valid directions
+        if not directions:
+            return 50  # Default neutral score
+            
+        # Calculate alignment based on consistency of directions
+        unique_directions = set(directions)
+        
+        if len(unique_directions) == 1:
+            # All timeframes agree
+            return 100
+        elif len(unique_directions) == 2 and 0 in unique_directions:
+            # Some timeframes are neutral, but no conflicting directions
+            return 75
+        elif len(unique_directions) == 2:
+            # Some conflicting directions
+            return 50
+        else:
+            # Completely conflicting (has positive, negative, and neutral)
+            return 25
+            
+    except Exception as e:
+        logging.error(f"Error calculating alignment score: {str(e)}")
+        return 50  # Default to moderate score on error
 
 def get_ollama_response(prompt: str, model: str = "deepseek-r1:7b") -> Optional[str]:
     """Get response from Ollama API."""
@@ -260,7 +384,17 @@ def get_hyperbolic_response(messages: list, model: str = "deepseek-ai/DeepSeek-R
         f"Attempt {retry_state.attempt_number} failed, retrying in {retry_state.next_action.sleep} seconds..."
     )
 )
-def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_gpt45_preview: bool = False, use_o1: bool = False, use_o1_mini: bool = False, use_o3_mini: bool = False, use_o3_mini_effort: bool = False, use_gpt4o: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False, use_hyperbolic: bool = False) -> tuple[Optional[str], Optional[str]]:
+def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id: str, 
+                              use_deepseek: bool = False, use_reasoner: bool = False, 
+                              use_grok: bool = False, use_gpt45_preview: bool = False, 
+                              use_o1: bool = False, use_o1_mini: bool = False, 
+                              use_o3_mini: bool = False, use_o3_mini_effort: bool = False, 
+                              use_gpt4o: bool = False, use_deepseek_r1: bool = False, 
+                              use_ollama: bool = False, use_hyperbolic: bool = False,
+                              alignment_score: int = 50) -> tuple[Optional[str], Optional[str]]:
+    """Get trading recommendation with improved retry logic and debug output."""
+    # Debug output moved to logging
+    logging.debug("Starting trading recommendation request")
     """Get trading recommendation with improved retry logic."""
     if not (use_ollama or use_hyperbolic) and client is None:
         raise ValueError("API client not properly initialized")
@@ -271,60 +405,124 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     # Define provider at the start of the function
     provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
 
-    SYSTEM_PROMPT = (
-        "Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals: "
-        "For a SELL signal: {\"SELL AT\": <PRICE>, \"BUY BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY_0_TO_100>, "
-        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", "
-        "\"MARKET_REGIME\": \"<MARKET_REGIME>\", \"REGIME_CONFIDENCE\": \"<REGIME_CONFIDENCE>\", \"IS_VALID\": <IS_VALID>} "
-        "or for a BUY signal: {\"BUY AT\": <PRICE>, \"SELL BACK AT\": <PRICE>, \"STOP LOSS\": <PRICE>, \"PROBABILITY\": <PROBABILITY_0_TO_100>, "
-        "\"CONFIDENCE\": \"<CONFIDENCE>\", \"R/R_RATIO\": <R/R_RATIO>, \"VOLUME_STRENGTH\": \"<VOLUME_STRENGTH>\", \"VOLATILITY\": \"<VOLATILITY>\", "
-        "\"MARKET_REGIME\": \"<MARKET_REGIME>\", \"REGIME_CONFIDENCE\": \"<REGIME_CONFIDENCE>\", \"IS_VALID\": <IS_VALID>}. "
+    SYSTEM_PROMPT = """
+You are a professional crypto trading advisor with expertise in technical analysis and market psychology.
 
-        "Instruction 1: Market Regime Analysis - "
-        "• Identify the current market regime as one of: 'Strong Bullish', 'Bullish', 'Choppy Bullish', 'Choppy', 'Choppy Bearish', 'Bearish', 'Strong Bearish'. "
-        "• Set REGIME_CONFIDENCE as: 'Very High', 'High', 'Moderate', 'Low', 'Very Low'. "
-        "• Only generate BUY signals in Bullish or Strong Bullish regimes (unless there's a clear reversal pattern). "
-        "• Only generate SELL signals in Bearish or Strong Bearish regimes (unless there's a clear reversal pattern). "
-        "• In Choppy markets, require higher PROBABILITY and R/R_RATIO thresholds. "
-        "• Consider regime transitions and momentum shifts in your analysis. "
+Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals:
 
-        "Instruction 2: Use code to calculate the R/R ratio as follows: "
-        "• For a SELL signal: R/R_RATIO = (Target Price - SELL AT) / (SELL AT - STOP LOSS). "
-        "• For a BUY signal: R/R_RATIO = (BUY AT - Target Price) / (STOP LOSS - BUY AT). "
-        "Ensure the R/R ratio is positive and above an acceptable threshold. "
+For a SELL signal: 
+{
+    "SIGNAL_TYPE": "SELL",
+    "SELL AT": <PRICE>,
+    "BUY BACK AT": <PRICE>,
+    "STOP LOSS": <PRICE>,
+    "PROBABILITY": <PROBABILITY_0_TO_100>,
+    "CONFIDENCE": "<CONFIDENCE>",
+    "R/R_RATIO": <R/R_RATIO>,
+    "VOLUME_STRENGTH": "<VOLUME_STRENGTH>",
+    "VOLATILITY": "<VOLATILITY>",
+    "MARKET_REGIME": "<MARKET_REGIME>",
+    "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
+    "TIMEFRAME_ALIGNMENT": <TIMEFRAME_ALIGNMENT_SCORE>,
+    "REASONING": "<CONCISE_REASONING>",
+    "IS_VALID": <IS_VALID>
+}
 
-        "Instruction 3: Signal confidence should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
-        "Instruction 4: Volume strength should be one of: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'. "
-        "Instruction 5: Volatility should be one of: 'Very Low', 'Low', 'Medium', 'High', 'Very High'. "
-        "Instruction 6: PROBABILITY should be a number between 0 and 100 representing the percentage probability of success. "
+For a BUY signal:
+{
+    "SIGNAL_TYPE": "BUY", 
+    "BUY AT": <PRICE>,
+    "SELL BACK AT": <PRICE>,
+    "STOP LOSS": <PRICE>,
+    "PROBABILITY": <PROBABILITY_0_TO_100>,
+    "CONFIDENCE": "<CONFIDENCE>",
+    "R/R_RATIO": <R/R_RATIO>,
+    "VOLUME_STRENGTH": "<VOLUME_STRENGTH>",
+    "VOLATILITY": "<VOLATILITY>",
+    "MARKET_REGIME": "<MARKET_REGIME>",
+    "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
+    "TIMEFRAME_ALIGNMENT": <TIMEFRAME_ALIGNMENT_SCORE>,
+    "REASONING": "<CONCISE_REASONING>",
+    "IS_VALID": <IS_VALID>
+}
 
-        "Instruction 7: For a SELL signal, ensure that the STOP LOSS is strictly above the SELL AT price. "
-        "If STOP LOSS <= SELL AT, set IS_VALID to False (Default True). "
+For a HOLD recommendation when no trade is advisable:
+{
+    "SIGNAL_TYPE": "HOLD",
+    "PRICE": <CURRENT_PRICE>,
+    "PROBABILITY": <PROBABILITY_0_TO_100>,
+    "CONFIDENCE": "<CONFIDENCE>",
+    "MARKET_REGIME": "<MARKET_REGIME>",
+    "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
+    "REASONING": "<CONCISE_REASONING>",
+    "IS_VALID": true
+}
 
-        "Instruction 8: For a BUY signal, ensure that the STOP LOSS is strictly below the BUY AT price. "
-        "If STOP LOSS >= BUY AT, set IS_VALID to False (Default True)."
-    )
+## Market Analysis Requirements
+
+1. **Market Regime Analysis**
+   - Identify the current market regime as one of: 'Strong Bullish', 'Bullish', 'Choppy Bullish', 'Choppy', 'Choppy Bearish', 'Bearish', or 'Strong Bearish'
+   - Set REGIME_CONFIDENCE as: 'Very High', 'High', 'Moderate', 'Low', 'Very Low'
+   - Only generate BUY signals in Bullish or Strong Bullish regimes (unless there's a clear reversal pattern)
+   - Only generate SELL signals in Bearish or Strong Bearish regimes (unless there's a clear reversal pattern)
+   - In Choppy markets, require higher PROBABILITY and R/R_RATIO thresholds
+   - Look for signs of regime transitions and momentum shifts
+
+2. **Risk/Reward Calculation**
+   - For a SELL signal: R/R_RATIO = (SELL AT - BUY BACK AT) / (STOP LOSS - SELL AT)
+   - For a BUY signal: R/R_RATIO = (SELL BACK AT - BUY AT) / (BUY AT - STOP LOSS)
+   - Ensure the R/R ratio is positive and above 1.0 for most trades
+   - For choppy markets, require R/R ratio of 2.0 or higher
+
+3. **Timeframe Alignment** (new feature)
+   - Provide a TIMEFRAME_ALIGNMENT score between 0-100
+   - A score of 100 means all timeframes show the same signal direction
+   - A score of 0 means conflicting signals across timeframes
+   - This helps assess the strength of the signal across multiple timeframes
+
+4. **Validation Criteria**
+   - For a SELL signal: STOP LOSS must be above SELL AT price
+   - For a BUY signal: STOP LOSS must be below BUY AT price
+   - Set IS_VALID to false if these conditions are not met
+   - Provide a REASONING field with a brief explanation of the signal (30-50 words)
+
+5. **Rating System**
+   - Signal CONFIDENCE: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'
+   - VOLUME_STRENGTH: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'
+   - VOLATILITY: 'Very Low', 'Low', 'Medium', 'High', 'Very High'
+   - PROBABILITY: A number between 0-100 representing % likelihood of success
+
+Remember to maintain the exact JSON format specified above, with all fields included, and provide a concise REASONING that explains the rationale behind your recommendation.
+"""
         
     try:
+        logging.debug("Starting recommendation - checking model type")
         if use_hyperbolic:
+            logging.debug("Using Hyperbolic API")
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."}
+                {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nTimeframe alignment score: {alignment_score}/100\nBased on this analysis and the timeframe alignment score, provide a trading recommendation."}
             ]
+            logging.debug("Calling Hyperbolic API...")
             recommendation = get_hyperbolic_response(messages, MODEL_CONFIG['hyperbolic'])
+            logging.debug("Hyperbolic API response received")
             if recommendation is None:
                 raise Exception("Failed to get response from Hyperbolic API")
             return recommendation, None
             
         if use_ollama:
+            logging.debug("Using Ollama API")
             # Format prompt for Ollama
-            full_prompt = f"{SYSTEM_PROMPT}\n\nHere's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."
+            full_prompt = f"{SYSTEM_PROMPT}\n\nHere's the latest market analysis for {product_id}:\n{market_analysis}\nTimeframe alignment score: {alignment_score}/100\nBased on this analysis and the timeframe alignment score, provide a trading recommendation."
+            logging.debug("Calling Ollama API...")
             recommendation = get_ollama_response(full_prompt, MODEL_CONFIG['ollama'])
+            logging.debug("Ollama API response received")
             if recommendation is None:
                 raise Exception("Failed to get response from Ollama API")
             return recommendation, None
             
         # Simplified model selection
+        logging.debug("Using standard API model")
         model = MODEL_CONFIG['default']
         if use_grok:
             model = MODEL_CONFIG['grok']
@@ -347,11 +545,12 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         elif use_deepseek_r1:
             model = MODEL_CONFIG['deepseek-r1']
             
+        logging.debug(f"Selected model: {model} from provider: {provider}")
         logging.info(f"Using model: {model} from provider: {provider}")
         
         # For models that don't support system messages, combine with user message
         messages = []
-        user_content = f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nBased on this analysis, provide a trading recommendation."
+        user_content = f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nTimeframe alignment score: {alignment_score}/100\nBased on this analysis and the timeframe alignment score, provide a trading recommendation."
         
         if model in [MODEL_CONFIG['o1-mini'], MODEL_CONFIG['o3-mini'], MODEL_CONFIG['o3-mini-effort']]:  # Add o3-mini-effort to the list of models that need combined messages
             messages = [
@@ -363,6 +562,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                 {"role": "user", "content": user_content}
             ]
             
+        # Print what model and parameters we're using for diagnostics
         params = {
             "model": model,
             "messages": messages,
@@ -373,7 +573,22 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         if use_o3_mini_effort:
             params["reasoning_effort"] = "medium"
             
-        response = client.chat.completions.create(**params)
+        # Log debug info before API call
+        logging.debug(f"Making API request to {provider} with model {model}")
+        logging.debug(f"Request timeout: {TIMEOUT}s")
+        
+        # Make the API call with timing
+        import time
+        start_time = time.time()
+        logging.debug("Starting API call...")
+        
+        try:
+            response = client.chat.completions.create(**params)
+            end_time = time.time()
+            logging.debug(f"API call completed in {end_time - start_time:.2f} seconds")
+        except Exception as e:
+            logging.error(f"API call failed with error: {str(e)}")
+            raise
         if not response.choices:
             logging.error("API response contained no choices")
             return None, None
@@ -393,6 +608,12 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                 ("HOLD" in recommendation)):
             logging.error(f"Invalid recommendation format: {recommendation}")
             return None, None
+        # Move debug output to logging
+        logging.debug("FINISHED TRADING RECOMMENDATION REQUEST")
+        logging.debug(f"Recommendation type: {type(recommendation)}")
+        logging.debug(f"Recommendation length: {len(recommendation) if recommendation else 0}")
+        logging.debug(f"Recommendation content: {recommendation}")
+        
         return recommendation, reasoning
     except TimeoutError:
         error_msg = f"{COLORS['red']}Error: Request timed out after {TIMEOUT} seconds.{COLORS['end']}"
@@ -427,42 +648,215 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 
 def format_output(recommendation: str, analysis_result: Dict, reasoning: Optional[str] = None) -> None:
     """Format and print the trading recommendation with enhanced market insights."""
+    # Clear divider to separate from any previous output
+    print("\n\n")
+    
+    # Trade recommendation header
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"{COLORS['cyan']}====== 🤖 AI Trading Recommendation ({current_time}) ======{COLORS['end']}")
-    print(f"{COLORS['bold']}{recommendation}{COLORS['end']}")
+    print(f"{COLORS['cyan']}====== 🤖 AI TRADING RECOMMENDATION ({current_time}) ======{COLORS['end']}")
+    print(f"{COLORS['cyan']}{'=' * 60}{COLORS['end']}")
+    
+    try:
+        # Try to parse the recommendation as JSON for better formatting
+        rec_dict = json.loads(recommendation.replace("'", '"'))
+        
+        # Get signal type
+        signal_type = rec_dict.get('SIGNAL_TYPE', 'UNKNOWN')
+        if signal_type == 'UNKNOWN':
+            # Legacy format detection
+            if 'SELL AT' in rec_dict:
+                signal_type = 'SELL'
+            elif 'BUY AT' in rec_dict:
+                signal_type = 'BUY'
+            elif 'HOLD' in rec_dict:
+                signal_type = 'HOLD'
+                
+        # Color code based on signal type
+        if signal_type == 'BUY':
+            header_color = COLORS['green']
+        elif signal_type == 'SELL':
+            header_color = COLORS['red']
+        else:  # HOLD or other
+            header_color = COLORS['yellow']
+            
+        # Print signal header with extra visibility
+        if signal_type == 'HOLD':
+            print(f"\n{header_color}{'*' * 20}{COLORS['end']}")
+            print(f"{header_color}𝗦𝗜𝗚𝗡𝗔𝗟: {signal_type}{COLORS['end']}")
+            print(f"{header_color}{'*' * 20}{COLORS['end']}")
+        else:
+            print(f"\n{header_color}𝗦𝗜𝗚𝗡𝗔𝗟: {signal_type}{COLORS['end']}")
+        
+        # Print probability and confidence
+        if 'PROBABILITY' in rec_dict:
+            prob = float(rec_dict['PROBABILITY'])
+            confidence = rec_dict.get('CONFIDENCE', 'N/A')
+            print(f"{COLORS['bold']}Probability:{COLORS['end']} {prob:.1f}% | {COLORS['bold']}Confidence:{COLORS['end']} {confidence}")
+        
+        # Print pricing information based on signal type
+        if signal_type == 'BUY':
+            entry = float(rec_dict.get('BUY AT', 0))
+            target = float(rec_dict.get('SELL BACK AT', 0))
+            stop = float(rec_dict.get('STOP LOSS', 0))
+            print(f"{COLORS['bold']}Entry:{COLORS['end']} ${entry:.2f} | {COLORS['bold']}Target:{COLORS['end']} ${target:.2f} | {COLORS['bold']}Stop:{COLORS['end']} ${stop:.2f}")
+            
+            if entry > 0 and stop > 0:
+                risk_pct = abs((stop - entry) / entry * 100)
+                reward_pct = abs((target - entry) / entry * 100)
+                print(f"{COLORS['bold']}Risk:{COLORS['end']} {risk_pct:.2f}% | {COLORS['bold']}Reward:{COLORS['end']} {reward_pct:.2f}%")
+        
+        elif signal_type == 'SELL':
+            entry = float(rec_dict.get('SELL AT', 0))
+            target = float(rec_dict.get('BUY BACK AT', 0))
+            stop = float(rec_dict.get('STOP LOSS', 0))
+            print(f"{COLORS['bold']}Entry:{COLORS['end']} ${entry:.2f} | {COLORS['bold']}Target:{COLORS['end']} ${target:.2f} | {COLORS['bold']}Stop:{COLORS['end']} ${stop:.2f}")
+            
+            if entry > 0 and stop > 0:
+                risk_pct = abs((stop - entry) / entry * 100)
+                reward_pct = abs((target - entry) / entry * 100)
+                print(f"{COLORS['bold']}Risk:{COLORS['end']} {risk_pct:.2f}% | {COLORS['bold']}Reward:{COLORS['end']} {reward_pct:.2f}%")
+        
+        elif signal_type == 'HOLD':
+            price = rec_dict.get('PRICE', 'N/A')
+            print(f"{COLORS['bold']}Current Price:{COLORS['end']} ${price}")
+        
+        # Print market regime information
+        if 'MARKET_REGIME' in rec_dict:
+            regime = rec_dict['MARKET_REGIME']
+            regime_confidence = rec_dict.get('REGIME_CONFIDENCE', 'N/A')
+            print(f"{COLORS['bold']}Market Regime:{COLORS['end']} {regime} ({regime_confidence} confidence)")
+        
+        # Print additional metrics
+        metrics = []
+        if 'R/R_RATIO' in rec_dict:
+            rr_ratio = float(rec_dict['R/R_RATIO'])
+            metrics.append(f"R/R Ratio: {rr_ratio:.2f}")
+        
+        if 'VOLUME_STRENGTH' in rec_dict:
+            metrics.append(f"Volume: {rec_dict['VOLUME_STRENGTH']}")
+            
+        if 'VOLATILITY' in rec_dict:
+            metrics.append(f"Volatility: {rec_dict['VOLATILITY']}")
+            
+        if 'TIMEFRAME_ALIGNMENT' in rec_dict:
+            alignment = rec_dict['TIMEFRAME_ALIGNMENT']
+            metrics.append(f"Timeframe Alignment: {alignment}/100")
+            
+        if metrics:
+            print(f"{COLORS['bold']}Metrics:{COLORS['end']} {' | '.join(metrics)}")
+        
+        # Print reasoning if available in the structured response
+        if 'REASONING' in rec_dict and rec_dict['REASONING']:
+            print(f"\n{COLORS['cyan']}Reasoning:{COLORS['end']} {rec_dict['REASONING']}")
+    
+    except json.JSONDecodeError:
+        # If parsing fails, fall back to printing the raw recommendation
+        print(f"{COLORS['bold']}{recommendation}{COLORS['end']}")
 
+    # Print reasoning from the model if available (separate from structured response)
     if reasoning:
-        print(f"\n{COLORS['yellow']}====== 🧠 Reasoning ======{COLORS['end']}")
-        print(' '.join(reasoning.split()[:80]) + '...')  # Add ellipsis for truncation
+        print(f"\n{COLORS['yellow']}====== 🧠 Model Reasoning ======{COLORS['end']}")
+        # Format reasoning: limit to 100 words for conciseness
+        words = reasoning.split()
+        if len(words) > 100:
+            print(' '.join(words[:100]) + '...')  # Add ellipsis for truncation
+        else:
+            print(reasoning)
 
+    # Process and display market analysis data
     if 'data' in analysis_result:
         try:
             # Parse the market analysis data
             analysis_data = analysis_result['data']
+            
+            # Print market condition summary if available
+            if 'market_condition' in analysis_data:
+                condition = analysis_data['market_condition']
+                print(f"\n{COLORS['cyan']}====== 📊 Market Condition ======{COLORS['end']}")
+                print(f"• Trend: {condition.get('trend', 'N/A')}")
+                print(f"• Momentum: {condition.get('momentum', 'N/A')}")
+                print(f"• Volatility: {condition.get('volatility', 'N/A')}")
+            
             # Print market alerts if available
             if 'alerts' in analysis_data:
-                print("\n====== 🔔 Market Alerts ======")
                 alerts = analysis_data['alerts']
                 if alerts.get('triggered_alerts'):
+                    print(f"\n{COLORS['cyan']}====== 🔔 Market Alerts ======{COLORS['end']}")
                     print("\n🚨 Active Alerts:")
                     for alert in alerts['triggered_alerts']:
                         print(f"• [{alert['priority']}] {alert['type']}: {alert['message']}")
 
             # Print key levels if available
             if 'key_levels' in analysis_data:
-                print("\n====== 🎯 Key Price Levels ======")
+                print(f"\n{COLORS['cyan']}====== 🎯 Key Price Levels ======{COLORS['end']}")
                 levels = analysis_data['key_levels']
                 print(f"• Support: ${levels.get('support', 'N/A')}")
                 print(f"• Resistance: ${levels.get('resistance', 'N/A')}")
                 print(f"• Pivot: ${levels.get('pivot', 'N/A')}")
+                
+                # Print additional levels if available
+                if 'fibonacci_levels' in levels:
+                    print("\nFibonacci Levels:")
+                    for level, value in levels['fibonacci_levels'].items():
+                        print(f"  • {level}: ${value}")
 
             # Print risk metrics if available
             if 'risk_metrics' in analysis_data:
-                print("\n====== ⚠️ Risk Analysis ======")
+                print(f"\n{COLORS['cyan']}====== ⚠️ Risk Analysis ======{COLORS['end']}")
                 risk = analysis_data['risk_metrics']
                 print(f"• Risk Level: {risk.get('dynamic_risk', 0)*100:.1f}%")
                 print(f"• Volatility: {risk.get('volatility', 0)*100:.1f}%")
                 print(f"• Risk/Reward: {risk.get('risk_reward_ratio', 'N/A')}")
+                
+                if 'max_drawdown' in risk:
+                    print(f"• Max Drawdown: {risk['max_drawdown']*100:.1f}%")
+                    
+                if 'optimal_position_size' in risk:
+                    print(f"• Optimal Position: ${risk['optimal_position_size']:.2f}")
+            
+            # Print indicator values if available
+            if 'indicators' in analysis_data:
+                print(f"\n{COLORS['cyan']}====== 📈 Technical Indicators ======{COLORS['end']}")
+                indicators = analysis_data['indicators']
+                
+                # Group indicators by type
+                momentum_indicators = ['rsi', 'macd', 'stochastic', 'cci']
+                trend_indicators = ['sma', 'ema', 'adx', 'dmi', 'ichimoku']
+                volatility_indicators = ['bollinger_bands', 'atr', 'standard_deviation']
+                
+                # Print momentum indicators
+                momentum_vals = {k: v for k, v in indicators.items() if k in momentum_indicators and v is not None}
+                if momentum_vals:
+                    print("Momentum Indicators:")
+                    for name, value in momentum_vals.items():
+                        if isinstance(value, dict):
+                            # Handle complex indicators like MACD
+                            values_str = ", ".join([f"{subkey}: {subval}" for subkey, subval in value.items()])
+                            print(f"  • {name.upper()}: {values_str}")
+                        else:
+                            print(f"  • {name.upper()}: {value}")
+                
+                # Print trend indicators
+                trend_vals = {k: v for k, v in indicators.items() if k in trend_indicators and v is not None}
+                if trend_vals:
+                    print("\nTrend Indicators:")
+                    for name, value in trend_vals.items():
+                        if isinstance(value, dict):
+                            values_str = ", ".join([f"{subkey}: {subval}" for subkey, subval in value.items()])
+                            print(f"  • {name.upper()}: {values_str}")
+                        else:
+                            print(f"  • {name.upper()}: {value}")
+                
+                # Print volatility indicators
+                vol_vals = {k: v for k, v in indicators.items() if k in volatility_indicators and v is not None}
+                if vol_vals:
+                    print("\nVolatility Indicators:")
+                    for name, value in vol_vals.items():
+                        if isinstance(value, dict):
+                            values_str = ", ".join([f"{subkey}: {subval}" for subkey, subval in value.items()])
+                            print(f"  • {name.upper()}: {values_str}")
+                        else:
+                            print(f"  • {name.upper()}: {value}")
 
         except json.JSONDecodeError as e:
             logging.warning(f"Could not parse market analysis JSON data: {str(e)}")
@@ -517,26 +911,58 @@ def validate_model_availability(model: str, provider: str) -> bool:
         return True  # Default to True if check fails
 
 def execute_trade(recommendation: str, product_id: str, margin: float = 100, leverage: int = 20, use_limit_order: bool = False) -> None:
-    """Execute trade based on recommendation if probability > 30% and sets stop loss from recommendation"""
+    """
+    Execute trade based on model recommendation and advanced trade filters.
+    
+    Args:
+        recommendation: JSON string containing the trading recommendation
+        product_id: Trading pair to trade (e.g. BTC-USDC)
+        margin: Initial margin amount in USD
+        leverage: Leverage multiplier (1-20)
+        use_limit_order: Whether to use limit orders instead of market orders
+    """
     try:
         # Parse the JSON recommendation
         rec_dict = json.loads(recommendation.replace("'", '"'))  # Convert single quotes to double quotes
         
-        # Extract probability (now a float without % symbol)
+        # Check if it's a HOLD recommendation
+        if rec_dict.get('SIGNAL_TYPE') == 'HOLD':
+            print(f"{COLORS['yellow']}HOLD recommendation: {rec_dict.get('REASONING', 'No trade advised at this time.')}{COLORS['end']}")
+            return
+        
+        # Extract probability and signal type
         prob = float(rec_dict['PROBABILITY'])
+        side = rec_dict.get('SIGNAL_TYPE', 'UNKNOWN')
+        
+        if side == 'UNKNOWN':
+            # Legacy format compatibility
+            side = 'SELL' if 'SELL AT' in rec_dict else 'BUY'
+        
+        # Display reasoning if available
+        if 'REASONING' in rec_dict:
+            print(f"{COLORS['cyan']}Signal reasoning: {rec_dict['REASONING']}{COLORS['end']}")
+        
+        # Check validity flag
+        if rec_dict.get('IS_VALID', True) is False:
+            print(f"{COLORS['red']}Trade not executed: Model flagged recommendation as invalid{COLORS['end']}")
+            return
         
         # Check probability threshold
-        if prob <= 60:
-            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 60%{COLORS['end']}")
+        if prob < 65:
+            print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below threshold of 65%{COLORS['end']}")
             return
             
         # Check market regime conditions
-        market_regime = rec_dict.get('MARKET_REGIME', 'Choppy')  # Default to Choppy if not present
-        regime_confidence = rec_dict.get('REGIME_CONFIDENCE', 'Low')  # Default to Low if not present
+        market_regime = rec_dict.get('MARKET_REGIME', 'Choppy')
+        regime_confidence = rec_dict.get('REGIME_CONFIDENCE', 'Low')
         
+        # Check timeframe alignment if available
+        timeframe_alignment = rec_dict.get('TIMEFRAME_ALIGNMENT', 50)
+        if timeframe_alignment < 60:
+            print(f"{COLORS['yellow']}Trade not executed: Timeframe alignment score ({timeframe_alignment}) is below threshold of 60{COLORS['end']}")
+            return
+            
         # Validate trade direction against market regime
-        side = 'SELL' if 'SELL AT' in rec_dict else 'BUY'
-        
         if side == 'BUY' and market_regime in ['Bearish', 'Strong Bearish', 'Choppy Bearish']:
             if regime_confidence in ['High', 'Very High'] and prob < 85:
                 print(f"{COLORS['red']}Trade not executed: {side} signal in {market_regime} regime requires >85% probability (current: {prob:.1f}%){COLORS['end']}")
@@ -548,22 +974,31 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
                 
         # Adjust thresholds for choppy markets
         if 'Choppy' in market_regime:
-            if prob < 75:
-                print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below choppy market threshold of 75%{COLORS['end']}")
+            if prob < 80:
+                print(f"{COLORS['yellow']}Trade not executed: Probability {prob:.1f}% is below choppy market threshold of 80%{COLORS['end']}")
                 return
             if float(rec_dict['R/R_RATIO']) < 2.0:
                 print(f"{COLORS['yellow']}Trade not executed: R/R ratio {float(rec_dict['R/R_RATIO']):.2f} is below choppy market threshold of 2.0{COLORS['end']}")
                 return
+            
+            # Increase timeframe alignment requirement for choppy markets
+            if timeframe_alignment < 75:
+                print(f"{COLORS['yellow']}Trade not executed: Timeframe alignment score ({timeframe_alignment}) is below choppy market threshold of 75{COLORS['end']}")
+                return
         
         # Check volatility conditions
-        volatility = rec_dict.get('VOLATILITY', 'Medium')  # Default to Medium if not present
-        if volatility in ['Very High', 'Very Low']:
-            print(f"{COLORS['yellow']}Trade not executed: Market volatility '{volatility}' is not optimal for trading{COLORS['end']}")
+        volatility = rec_dict.get('VOLATILITY', 'Medium')
+        if volatility in ['Very High']:
+            if prob < 85:
+                print(f"{COLORS['yellow']}Trade not executed: Market volatility '{volatility}' requires probability >85% (current: {prob:.1f}%){COLORS['end']}")
+                return
+        elif volatility in ['Very Low']:
+            print(f"{COLORS['yellow']}Trade not executed: Market volatility '{volatility}' is too low for reliable execution{COLORS['end']}")
             return
         
         # Check volume strength
         volume_strength = rec_dict['VOLUME_STRENGTH']
-        if volume_strength == 'Very Weak':
+        if volume_strength in ['Very Weak']:
             print(f"{COLORS['red']}Trade not executed: Volume strength '{volume_strength}' is too low{COLORS['end']}")
             return
             
@@ -573,31 +1008,29 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['yellow']}Trade not executed: Signal confidence '{confidence}' is too low{COLORS['end']}")
             return
             
-        # Check R/R ratio threshold
+        # Check R/R ratio thresholds
         rr_ratio = float(rec_dict['R/R_RATIO'])
-        if rr_ratio < 0.5:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 0.5{COLORS['end']}")
+        if rr_ratio < 1.0:
+            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is below minimum threshold of 1.0{COLORS['end']}")
             return
         
-        if rr_ratio >= 2.52 and prob < 79:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 2.52 (for probability {prob:.1f}% below threshold of 79% and above 60%){COLORS['end']}")
-            return
-
-        if rr_ratio >= 5:
-            print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 5 (even with good probability above 79%){COLORS['end']}")
-            return
+        if rr_ratio > 5.0:
+            # Very high R/R ratios often indicate unrealistic targets
+            if prob < 85:
+                print(f"{COLORS['yellow']}Trade not executed: R/R ratio {rr_ratio:.3f} is above maximum threshold of 5.0 (requires probability >85%){COLORS['end']}")
+                return
             
         # Determine trade direction and prices
-        if 'SELL AT' in rec_dict:
+        if side == 'SELL':
             entry_price = float(rec_dict['SELL AT'])
             target_price = float(rec_dict['BUY BACK AT'])
             stop_loss = float(rec_dict['STOP LOSS'])
-        elif 'BUY AT' in rec_dict:
+        elif side == 'BUY':
             entry_price = float(rec_dict['BUY AT'])
             target_price = float(rec_dict['SELL BACK AT'])
             stop_loss = float(rec_dict['STOP LOSS'])
         else:
-            print(f"{COLORS['red']}Invalid recommendation format{COLORS['end']}")
+            print(f"{COLORS['red']}Invalid signal type: {side}{COLORS['end']}")
             return
 
         try:
@@ -613,22 +1046,40 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             
             # Determine whether to use market or limit order based on price conditions
             should_use_market = False
-            PRICE_THRESHOLD = 0.2  # 0.2% threshold for market orders
+            # Adaptive price threshold based on volatility
+            PRICE_THRESHOLD = 0.2  # Default 0.2% threshold
+            if volatility == 'High':
+                PRICE_THRESHOLD = 0.3  # Increase threshold to 0.3% for high volatility
+            elif volatility == 'Very High':
+                PRICE_THRESHOLD = 0.5  # Increase threshold to 0.5% for very high volatility
             
             if use_limit_order:
+                # For limit orders, check if price conditions are favorable
                 if side == 'SELL':
-                    if entry_price < current_price or (entry_price > current_price and price_deviation <= PRICE_THRESHOLD):
-                        print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is below or close to current price (${current_price:.2f}){COLORS['end']}")
+                    if entry_price < current_price:
+                        # Entry price is below current price, unfavorable for limit SELL
+                        print(f"{COLORS['yellow']}Switching to market order: Limit SELL price (${entry_price:.2f}) is below current price (${current_price:.2f}){COLORS['end']}")
+                        should_use_market = True
+                    elif price_deviation <= PRICE_THRESHOLD:
+                        # Entry price is very close to current price, use market for immediate execution
+                        print(f"{COLORS['yellow']}Switching to market order: Limit price deviation ({price_deviation:.2f}%) is below threshold ({PRICE_THRESHOLD}%){COLORS['end']}")
                         should_use_market = True
                 elif side == 'BUY':
-                    if entry_price > current_price or (entry_price < current_price and price_deviation <= PRICE_THRESHOLD):
-                        print(f"{COLORS['yellow']}Switching to market order: Limit price (${entry_price:.2f}) is above or close to current price (${current_price:.2f}){COLORS['end']}")
+                    if entry_price > current_price:
+                        # Entry price is above current price, unfavorable for limit BUY
+                        print(f"{COLORS['yellow']}Switching to market order: Limit BUY price (${entry_price:.2f}) is above current price (${current_price:.2f}){COLORS['end']}")
                         should_use_market = True
-                    
+                    elif price_deviation <= PRICE_THRESHOLD:
+                        # Entry price is very close to current price, use market for immediate execution
+                        print(f"{COLORS['yellow']}Switching to market order: Limit price deviation ({price_deviation:.2f}%) is below threshold ({PRICE_THRESHOLD}%){COLORS['end']}")
+                        should_use_market = True
+                
                 if should_use_market and price_deviation > PRICE_THRESHOLD:
+                    # If using market order but price deviation is too high, don't execute
                     print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds threshold ({PRICE_THRESHOLD}%){COLORS['end']}")
                     return
             else:
+                # If market order is specified, check if price deviation is acceptable
                 should_use_market = True
                 if price_deviation > PRICE_THRESHOLD:
                     print(f"{COLORS['red']}Market order not executed: Price deviation ({price_deviation:.2f}%) exceeds threshold ({PRICE_THRESHOLD}%){COLORS['end']}")
@@ -644,7 +1095,7 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         # Calculate potential profit percentage
         profit_pct = abs((target_price - entry_price) / entry_price * 100)
         
-        # Check if stop loss is less than 1.0%
+        # Check if stop loss is less than minimum threshold
         if stop_loss_pct < 1.0:
             print(f"{COLORS['red']}Trade not executed: Stop loss percentage ({stop_loss_pct:.2f}%) is less than minimum threshold of 1.0%{COLORS['end']}")
             return
@@ -670,24 +1121,58 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             print(f"{COLORS['red']}Invalid risk-reward: Stop loss distance ({stop_loss_pct:.2f}%) is larger than take profit distance ({profit_pct:.2f}%){COLORS['end']}")
             return
 
-        # Apply position sizing rules based on stop loss percentage
-        # Calculate base position size using margin and leverage
+        # Calculate position size with improved risk management
         base_size_usd = margin * leverage
-        size_usd = base_size_usd  # Default to full margin
-        
-        # Apply position sizing rules based on stop loss percentage
+        size_usd = base_size_usd  # Default starting position size
         position_sizing_message = ""
-        if stop_loss_pct <= 2.0:
-            # Standard position sizing (full margin)
-            position_sizing_message = f"{COLORS['green']}Using standard position sizing (full margin) - SL ≤ 2%{COLORS['end']}"
+        
+        # Advanced position sizing rules based on multiple factors
+        sizing_factor = 1.0  # Start with full position size
+        
+        # 1. Adjust based on stop loss percentage
+        if stop_loss_pct <= 1.5:
+            # Tight stop loss allows for full position
+            position_sizing_message = f"{COLORS['green']}Full position size - Tight stop loss ≤ 1.5%{COLORS['end']}"
+        elif stop_loss_pct <= 3.0:
+            # Medium stop loss - reduce by 20%
+            sizing_factor *= 0.8
+            position_sizing_message = f"{COLORS['yellow']}Reducing position by 20% - Medium stop loss ({stop_loss_pct:.2f}%){COLORS['end']}"
         else:
-            # # If SL > 2%, verify R/R ≥ 1.5 AND reduce position size by 50%
-            # if rr_ratio < 1.5:
-            #     print(f"{COLORS['red']}Trade not executed: For SL > 2% ({stop_loss_pct:.2f}%), R/R ratio must be ≥ 1.5 (current: {rr_ratio:.2f}){COLORS['end']}")
-            #     return            
-            # Reduce position size by 30%
-            size_usd = base_size_usd * 0.7
-            position_sizing_message = f"{COLORS['yellow']}Reducing position size by 30% - SL > 2% ({stop_loss_pct:.2f}%){COLORS['end']}"
+            # Wide stop loss - reduce by 40%
+            sizing_factor *= 0.6
+            position_sizing_message = f"{COLORS['yellow']}Reducing position by 40% - Wide stop loss ({stop_loss_pct:.2f}%){COLORS['end']}"
+            
+        # 2. Adjust based on market regime
+        if 'Choppy' in market_regime:
+            sizing_factor *= 0.8
+            position_sizing_message += f"\n{COLORS['yellow']}Additional 20% reduction due to choppy market{COLORS['end']}"
+        elif 'Strong' in market_regime:
+            if ('Bullish' in market_regime and side == 'BUY') or ('Bearish' in market_regime and side == 'SELL'):
+                # Strong trend in favorable direction - maintain position size
+                pass
+            else:
+                # Counter-trend trade in strong trend - reduce position
+                sizing_factor *= 0.7
+                position_sizing_message += f"\n{COLORS['yellow']}Counter-trend trade - reducing position by 30%{COLORS['end']}"
+                
+        # 3. Adjust based on timeframe alignment
+        if timeframe_alignment >= 90:
+            # Excellent alignment - can increase position slightly
+            sizing_factor *= 1.1
+            position_sizing_message += f"\n{COLORS['green']}Increasing position by 10% - High timeframe alignment ({timeframe_alignment}){COLORS['end']}"
+        elif timeframe_alignment < 70:
+            # Poor alignment - reduce position
+            sizing_factor *= 0.9
+            position_sizing_message += f"\n{COLORS['yellow']}Reducing position by 10% - Low timeframe alignment ({timeframe_alignment}){COLORS['end']}"
+            
+        # Apply total position sizing adjustment
+        size_usd = base_size_usd * sizing_factor
+        
+        # Cap position size at base size in case multiple positive adjustments exceed 100%
+        size_usd = min(size_usd, base_size_usd)
+        
+        # Ensure minimum position size (at least 30% of base size)
+        size_usd = max(size_usd, base_size_usd * 0.3)
 
         # Map product_id to perpetual format
         perp_product_map = {
@@ -707,10 +1192,10 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         profit_usd = size_usd * (profit_pct / 100)
         loss_usd = size_usd * (stop_loss_pct / 100)
         
-        # Round prices to integers for BTC trades in the command
-        cmd_target_price = int(target_price) if product_id == 'BTC-USDC' else target_price
-        cmd_stop_loss = int(stop_loss) if product_id == 'BTC-USDC' else stop_loss
-        cmd_entry_price = int(entry_price) if product_id == 'BTC-USDC' else entry_price
+        # Format prices according to asset precision
+        cmd_target_price = format_price_by_asset(target_price, product_id)
+        cmd_stop_loss = format_price_by_asset(stop_loss, product_id)
+        cmd_entry_price = format_price_by_asset(entry_price, product_id)
         
         # Execute trade using subprocess
         cmd = [
@@ -730,35 +1215,106 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         # Add no-confirm flag
         cmd.append('--no-confirm')
         
-        # Print trade details with additional information
-        print(f"\n{COLORS['cyan']}Executing trade with parameters:{COLORS['end']}")
-        print(f"Product: {perp_product}")
-        print(f"Side: {side}")
-        print(f"Market Regime: {market_regime}")
-        print(f"Regime Confidence: {regime_confidence}")
-        print(f"Initial Margin: ${margin}")
-        print(f"Leverage: {leverage}x")
-        print(position_sizing_message)
-        print(f"Position Size: ${size_usd:.2f}")
-        print(f"Entry Price: ${entry_price:.2f}")
-        print(f"Current Price: ${current_price:.2f}")
-        print(f"Price Deviation: {price_deviation:.2f}%")
-        print(f"Take Profit: ${target_price:.2f} ({profit_pct:.2f}% / ${profit_usd:.2f})")
-        print(f"Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}% / ${loss_usd:.2f})")
-        print(f"Probability: {prob:.1f}%")
-        print(f"Signal Confidence: {rec_dict['CONFIDENCE']}")
-        print(f"R/R Ratio: {rec_dict['R/R_RATIO']:.3f}")
-        print(f"Volume Strength: {rec_dict['VOLUME_STRENGTH']}")
-        print(f"Order Type: {'Limit' if (use_limit_order and not should_use_market) else 'Market'}")
+        # Print trade details with enhanced information
+        print(f"\n{COLORS['cyan']}===== Trade Execution Summary ====={COLORS['end']}")
+        print(f"{COLORS['bold']}Asset & Market:{COLORS['end']}")
+        print(f"  Product: {perp_product}")
+        print(f"  Market Regime: {market_regime} (Confidence: {regime_confidence})")
+        print(f"  Current Price: ${current_price:.2f}")
+        print(f"  Volatility: {volatility}")
         
+        print(f"\n{COLORS['bold']}Trade Parameters:{COLORS['end']}")
+        print(f"  Side: {side}")
+        print(f"  Entry Price: ${entry_price:.2f} (Deviation: {price_deviation:.2f}%)")
+        print(f"  Take Profit: ${target_price:.2f} ({profit_pct:.2f}% / ${profit_usd:.2f})")
+        print(f"  Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}% / ${loss_usd:.2f})")
+        print(f"  Order Type: {'Limit' if (use_limit_order and not should_use_market) else 'Market'}")
+        
+        print(f"\n{COLORS['bold']}Risk Management:{COLORS['end']}")
+        print(f"  Initial Margin: ${margin:.2f}")
+        print(f"  Leverage: {leverage}x")
+        print(f"  Position Size: ${size_usd:.2f} ({(sizing_factor * 100):.0f}% of max)")
+        print(position_sizing_message)
+        
+        print(f"\n{COLORS['bold']}Signal Metrics:{COLORS['end']}")
+        print(f"  Probability: {prob:.1f}%")
+        print(f"  R/R Ratio: {rr_ratio:.3f}")
+        print(f"  Signal Confidence: {confidence}")
+        print(f"  Volume Strength: {volume_strength}")
+        print(f"  Timeframe Alignment: {timeframe_alignment}/100")
+        
+        # Execute the trade
+        print(f"\n{COLORS['cyan']}Executing trade...{COLORS['end']}")
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0:
-            print(f"{COLORS['green']}Trade executed successfully!{COLORS['end']}")
+            print(f"\n{COLORS['green']}✅ Trade executed successfully!{COLORS['end']}")
+            
+            # Record trade to history file
+            record_trade_to_history(side, entry_price, target_price, stop_loss, 
+                                   prob, rr_ratio, product_id, market_regime)
+                                   
+            # Record trade to trade_output.txt with the requested format
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            execution_summary = ""
+            
+            # Add order execution information to the summary
+            if use_limit_order and not should_use_market:
+                execution_summary += f"Limit order placed at ${entry_price:.2f}\n"
+            else:
+                # Switching to market order messages for both BUY and SELL directions
+                if side == 'SELL':
+                    execution_summary += f"Switching to market order: Limit price (${entry_price:.2f}) is below or close to current price (${current_price:.2f})\n"
+                else:  # BUY
+                    execution_summary += f"Switching to market order: Limit price (${entry_price:.2f}) is above or close to current price (${current_price:.2f})\n"
+                
+            # Add execution parameters
+            execution_summary += f"\nExecuting trade with parameters:\n"
+            execution_summary += f"Product: {perp_product}\n"
+            execution_summary += f"Side: {side}\n"
+            execution_summary += f"Market Regime: {market_regime}\n"
+            execution_summary += f"Regime Confidence: {regime_confidence}\n"
+            execution_summary += f"Initial Margin: ${margin:.2f}\n"
+            execution_summary += f"Leverage: {leverage}x\n"
+            
+            # Add position sizing info
+            sizing_message = "Using standard position sizing (full margin)"
+            if stop_loss_pct <= 1.5:
+                sizing_message += " - SL ≤ 1.5%"
+            elif stop_loss_pct <= 3.0:
+                sizing_message += " - Medium SL"
+            else:
+                sizing_message += " - Wide SL"
+            execution_summary += f"{sizing_message}\n"
+            
+            # Add trade details
+            execution_summary += f"Position Size: ${size_usd:.2f}\n"
+            execution_summary += f"Entry Price: ${entry_price:.2f}\n"
+            execution_summary += f"Current Price: ${current_price:.2f}\n"
+            execution_summary += f"Price Deviation: {price_deviation:.2f}%\n"
+            execution_summary += f"Take Profit: ${target_price:.2f} ({profit_pct:.2f}% / ${profit_usd:.2f})\n"
+            execution_summary += f"Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}% / ${loss_usd:.2f})\n"
+            execution_summary += f"Probability: {prob:.1f}%\n"
+            execution_summary += f"Signal Confidence: {confidence}\n"
+            execution_summary += f"R/R Ratio: {rr_ratio:.3f}\n"
+            execution_summary += f"Volume Strength: {volume_strength}\n"
+            execution_summary += f"Order Type: {'Limit' if (use_limit_order and not should_use_market) else 'Market'}\n"
+            
+            # Add the order summary from the output
+            if result.stdout.strip():
+                execution_summary += f"\n{result.stdout.strip()}\n"
+                
+            # Add the order placed message
+            execution_summary += "\nOrder placed successfully!\n"
+            
+            # Record to trade_output.txt
+            record_trade_to_output_txt(recommendation, timestamp, execution_summary)
+            
+            # Print output to console as before
             if result.stdout.strip():
                 print(result.stdout)
         else:
-            print(f"{COLORS['red']}Error executing trade:{COLORS['end']}")
+            print(f"\n{COLORS['red']}❌ Error executing trade:{COLORS['end']}")
             if result.stderr.strip():
                 print(f"{COLORS['red']}{result.stderr.strip()}{COLORS['end']}")
             if result.stdout.strip():  # Sometimes error details are in stdout
@@ -779,6 +1335,79 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             logging.error(f"Command output: {e.output}")
         if hasattr(e, 'stderr'):
             logging.error(f"Command stderr: {e.stderr}")
+
+def format_price_by_asset(price: float, product_id: str) -> str:
+    """Format price according to asset precision rules"""
+    if product_id == 'BTC-USDC':
+        return str(int(price))  # BTC uses whole numbers
+    elif product_id == 'ETH-USDC':
+        return f"{price:.1f}"  # ETH uses 1 decimal place
+    elif product_id == 'SOL-USDC':
+        return f"{price:.2f}"  # SOL uses 2 decimal places
+    elif product_id in ['DOGE-USDC', 'SHIB-USDC']:
+        return f"{price:.6f}"  # DOGE and SHIB use 6 decimal places
+    else:
+        return str(price)  # Default formatting
+
+def record_trade_to_output_txt(recommendation: str, timestamp: str, execution_summary: str) -> None:
+    """
+    Record trade details to trade_output.txt in the requested format.
+    
+    Args:
+        recommendation: JSON string containing the trading recommendation
+        timestamp: Timestamp string in format YYYY-MM-DD HH:MM:SS
+        execution_summary: Order execution summary text
+    """
+    try:
+        with open('trade_output.txt', 'a') as file:
+            # Add the header and recommendation in the requested format
+            file.write(f"\n====== 🤖 AI Trading Recommendation ({timestamp}) ======\n")
+            file.write(f"{recommendation}\n")
+            file.write(execution_summary)
+            file.write("\n\n")
+        
+        logging.info(f"Trade recorded to trade_output.txt: {timestamp}")
+    except Exception as e:
+        logging.error(f"Error recording trade to trade_output.txt: {str(e)}")
+        # Don't raise the exception since this is a non-critical operation
+
+def record_trade_to_history(side: str, entry_price: float, target_price: float, 
+                           stop_loss: float, probability: float, rr_ratio: float,
+                           product_id: str, market_regime: str) -> None:
+    """Record trade details to a CSV history file for later analysis"""
+    try:
+        # Create a timestamp for the trade
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Create the CSV file if it doesn't exist
+        file_exists = os.path.isfile('trade_history.csv')
+        
+        with open('trade_history.csv', 'a', newline='') as file:
+            writer = csv.writer(file)
+            
+            # Write header if file doesn't exist
+            if not file_exists:
+                writer.writerow(['Timestamp', 'Product', 'Side', 'Entry Price', 'Target Price', 
+                                 'Stop Loss', 'Probability', 'R/R Ratio', 'Market Regime', 'Status'])
+            
+            # Write trade data
+            writer.writerow([
+                timestamp, 
+                product_id, 
+                side, 
+                f"{entry_price:.2f}", 
+                f"{target_price:.2f}", 
+                f"{stop_loss:.2f}", 
+                f"{probability:.1f}", 
+                f"{rr_ratio:.2f}", 
+                market_regime, 
+                'OPEN'  # Initial status is OPEN
+            ])
+            
+        logging.info(f"Trade recorded to history: {side} {product_id} at {entry_price:.2f}")
+    except Exception as e:
+        logging.error(f"Error recording trade to history: {str(e)}")
+        # Don't raise the exception since this is a non-critical operation
 
 def main():
     # Set up argument parser
@@ -839,6 +1468,15 @@ def main():
                         help='Use local Ollama model for offline analysis')
     model_group.add_argument('--use_hyperbolic', action='store_true',
                         help='Use Hyperbolic API for market analysis')
+                        
+    # Timeframe Alignment Options
+    alignment_group = parser.add_argument_group('Timeframe Alignment (optional)')
+    alignment_group.add_argument('--alignment_timeframe_1', type=str,
+                        help='Additional timeframe #1 for alignment (e.g., ONE_HOUR)')
+    alignment_group.add_argument('--alignment_timeframe_2', type=str,
+                        help='Additional timeframe #2 for alignment (e.g., FIFTEEN_MINUTE)')
+    alignment_group.add_argument('--alignment_timeframe_3', type=str,
+                        help='Additional timeframe #3 for alignment (e.g., FIVE_MINUTE)')
 
     args = parser.parse_args()
 
@@ -886,22 +1524,55 @@ def main():
             exit(1)
 
         # Run market analysis
-        analysis_result = run_market_analysis(args.product_id, args.granularity)
+        analysis_result = run_market_analysis(
+            args.product_id, 
+            args.granularity,
+            args.alignment_timeframe_1,
+            args.alignment_timeframe_2,
+            args.alignment_timeframe_3
+        )
         if not analysis_result['success']:
             print(f"Error running market analyzer: {analysis_result['error']}")
             exit(1)
+            
+        # Calculate alignment score but display it in a more concise format
+        if any([args.alignment_timeframe_1, args.alignment_timeframe_2, args.alignment_timeframe_3]):
+            alignment_score = analysis_result.get('alignment_score', 0)
+            timeframes = analysis_result.get('alignment_timeframes', [args.granularity])
+            
+            # Use a more concise format for alignment information
+            print("\n🔍 Timeframe Alignment:")
+            print(f"- Primary: {args.granularity}")
+            print(f"- Others: {', '.join([tf for tf in timeframes if tf != args.granularity])}")
+            print(f"- Score: {alignment_score}/100")
+            
+            # Interpret alignment score with symbols
+            if alignment_score >= 90:
+                print("✅ Excellent alignment (very strong signal)")
+            elif alignment_score >= 75:
+                print("✅ Good alignment (strong signal)")
+            elif alignment_score >= 50:
+                print("✓ Moderate alignment (decent signal)")
+            else:
+                print("⚠️ Poor alignment (weak/conflicting signals)")
+                
+            print("Continuing with analysis...\n")
 
         # Get trading recommendation
-        recommendation, reasoning = get_trading_recommendation(client, analysis_result['data'], args.product_id, 
-                                                            args.use_deepseek, args.use_reasoner, args.use_grok, 
-                                                            args.use_gpt45_preview, args.use_o1, args.use_o1_mini, 
-                                                            args.use_o3_mini, args.use_o3_mini_effort, args.use_gpt4o, 
-                                                            args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic)
+        alignment_score = analysis_result.get('alignment_score', 50)
+        recommendation, reasoning = get_trading_recommendation(
+            client, analysis_result['data'], args.product_id, 
+            args.use_deepseek, args.use_reasoner, args.use_grok, 
+            args.use_gpt45_preview, args.use_o1, args.use_o1_mini, 
+            args.use_o3_mini, args.use_o3_mini_effort, args.use_gpt4o, 
+            args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic,
+            alignment_score=alignment_score
+        )
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
 
-        # Format and display the output
+        # Format and display the output with recommendation
         format_output(recommendation, analysis_result, reasoning)
 
         # Execute trade only if --execute_trades flag is provided
