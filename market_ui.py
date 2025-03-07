@@ -2237,18 +2237,9 @@ class MarketAnalyzerUI:
     def _update_trade_statuses_thread(self):
         """Thread function to update trade statuses in trade_history.csv"""
         try:
-            # Import the update function from update_trade_status module
-            # If the file doesn't exist or can't be imported, create a simplified version
-            try:
-                from update_trade_status import update_trade_statuses
-                self.queue.put(("status", "Updating trade statuses..."))
-                update_trade_statuses()
-                self.queue.put(("status", "Ready"))
-            except ImportError:
-                # Implement a simplified version if the module can't be imported
-                self.queue.put(("status", "Updating trade statuses..."))
-                self._simplified_update_trade_statuses()
-                self.queue.put(("status", "Ready"))
+            self.queue.put(("status", "Updating trade statuses..."))
+            self._simplified_update_trade_statuses()
+            self.queue.put(("status", "Ready"))
         except Exception as e:
             self.queue.put(("append", f"\nError updating trade statuses: {str(e)}\n"))
             self.queue.put(("status", "Error updating trades"))
