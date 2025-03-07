@@ -13,6 +13,8 @@ from coinbaseservice import CoinbaseService
 import select
 import tkinter.messagebox as messagebox
 from PIL import Image
+from concurrent.futures import ThreadPoolExecutor
+import gc
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -25,6 +27,14 @@ class MarketAnalyzerUI:
         self.root.title("Crypto Market Analyzer")
         self.root.geometry("1460x1115")  # Larger default size (width x height)
         self.root.minsize(800, 600)    # Larger minimum window size
+        
+        # Thread management
+        self.thread_pool = ThreadPoolExecutor(max_workers=10)
+        self.active_futures = {}  # Track active tasks by name
+        self.thread_lock = threading.RLock()  # For thread-safety
+        
+        # Register app cleanup on exit
+        self.root.protocol("WM_DELETE_WINDOW", self.on_exit)
         
         # Generate and set the application icon
         try:
@@ -148,6 +158,9 @@ class MarketAnalyzerUI:
         
         # Load trade history if available
         self.load_trade_history()
+        
+        # Start periodic cleanup to prevent memory buildup
+        self.schedule_periodic_cleanup()
 
     def create_gui(self):
         # Create main container that fills the window
@@ -526,9 +539,21 @@ class MarketAnalyzerUI:
         self.tp_sl_slider.configure(state=state)
 
     def clear_output(self):
-        """Clear the output text area"""
-        self.output_text.delete("1.0", "end")
-        self.status_var.set("Ready")
+        """Clear the output text widget and free memory"""
+        try:
+            # Delete all content from the text widget
+            self.output_text.delete("1.0", "end")
+            
+            # Force garbage collection to free memory
+            gc.collect()
+            
+            # Update status
+            self.status_var.set("Output cleared")
+            
+            # Log the action
+            print("Output cleared and memory freed")
+        except Exception as e:
+            print(f"Error clearing output: {str(e)}")
 
     def run_analysis(self, granularity):
         """Run the market analysis with selected parameters"""
@@ -539,7 +564,7 @@ class MarketAnalyzerUI:
             self.queue.put(("status", "Model needs retraining"))
             return
         
-        # Check for open orders or positions
+        # Check for open orders or positions - this critical check must be done before running any analysis
         has_open_orders, has_positions = self.check_for_open_orders_and_positions()
         
         if has_open_orders or has_positions:
@@ -560,13 +585,12 @@ class MarketAnalyzerUI:
         
         self.status_var.set("Running analysis...")
         
-        # Create and start thread
-        thread = threading.Thread(
-            target=self._run_analysis_thread,
-            args=(granularity,)
+        # Submit the analysis task to the thread pool for better resource management
+        self.submit_task(
+            "market_analysis",
+            self._run_analysis_thread,
+            granularity
         )
-        thread.daemon = True
-        thread.start()
 
     def _run_analysis_thread(self, granularity):
         """Thread function to run the analysis"""
@@ -808,10 +832,8 @@ class MarketAnalyzerUI:
         self.status_var.set("Closing positions...")
         self.close_positions_btn.configure(state="disabled")
         
-        # Create and start thread
-        thread = threading.Thread(target=self._close_positions_thread)
-        thread.daemon = True
-        thread.start()
+        # Submit the close positions task to the thread pool
+        self.submit_task("close_positions", self._close_positions_thread)
         
     def _close_positions_thread(self):
         """Thread function to close positions"""
@@ -866,27 +888,38 @@ class MarketAnalyzerUI:
             self.current_process = None
 
     def start_price_updates(self):
-        """Start the price update thread"""
-        self.stop_price_updates = False
-        self.price_update_errors = 0  # Reset error counter
-        self.price_update_thread = threading.Thread(target=self._price_update_loop)
-        self.price_update_thread.daemon = True
-        self.price_update_thread.start()
+        """Start the price update task in the thread pool"""
+        with self.thread_lock:
+            self.stop_price_updates = False
+            self.price_update_errors = 0  # Reset error counter
+            
+            # Submit the task to the thread pool
+            self.submit_task("price_updates", self._price_update_loop)
+            self.queue.put(("status", "Price updates started"))
 
     def stop_price_update_thread(self):
-        """Stop the price update thread"""
-        self.stop_price_updates = True
-        if self.price_update_thread:
-            self.price_update_thread.join()
+        """Stop the price update task"""
+        with self.thread_lock:
+            self.stop_price_updates = True
+            
+            # Cancel the task if it exists
+            if "price_updates" in self.active_futures:
+                future = self.active_futures["price_updates"]
+                if not future.done():
+                    future.cancel()
+                    self.queue.put(("status", "Price updates stopped"))
 
     def _price_update_loop(self):
         """Background loop to update price"""
         retry_delay = 1  # Initial retry delay in seconds
         max_retry_delay = 30  # Maximum retry delay
         
+        # Use a session-level timeout to prevent hanging connections
+        self.session.request_timeout = 10  # 10 seconds timeout
+        
         while not self.stop_price_updates:
             try:
-                # Get current product from dropdown
+                # Get current product from dropdown (thread-safe access)
                 product = self.product_var.get()
                 
                 # Fetch price from Coinbase API with connection pooling
@@ -916,50 +949,60 @@ class MarketAnalyzerUI:
                     }))
                     
                     # Reset error counter and retry delay on successful update
-                    self.price_update_errors = 0
-                    retry_delay = 1
+                    with self.thread_lock:
+                        self.price_update_errors = 0
+                        retry_delay = 1
                     
                 else:
-                    self.price_update_errors += 1
+                    with self.thread_lock:
+                        self.price_update_errors += 1
+                        retry_delay = min(retry_delay * 2, max_retry_delay)
                     self.queue.put(("append", f"\nWarning: Invalid price data received for {product}"))
-                    retry_delay = min(retry_delay * 2, max_retry_delay)
                 
             except requests.exceptions.RequestException as e:
-                self.price_update_errors += 1
+                with self.thread_lock:
+                    self.price_update_errors += 1
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
                 self.queue.put(("append", f"\nWarning: Network error updating price: {str(e)}"))
-                retry_delay = min(retry_delay * 2, max_retry_delay)
                 self.queue.put(("append", f"\nRetrying in {retry_delay} seconds..."))
             except Exception as e:
-                self.price_update_errors += 1
+                with self.thread_lock:
+                    self.price_update_errors += 1
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
                 self.queue.put(("append", f"\nWarning: Error updating price: {str(e)}"))
-                retry_delay = min(retry_delay * 2, max_retry_delay)
             
             # Check if we need to restart due to too many errors
-            if self.price_update_errors >= self.max_price_update_errors:
+            with self.thread_lock:
+                too_many_errors = self.price_update_errors >= self.max_price_update_errors
+                
+            if too_many_errors:
                 self.queue.put(("append", "\nRestarting price updates due to multiple errors..."))
                 # Schedule a restart of price updates in the main thread
                 self.root.after(0, self.restart_price_updates)
                 break
             
             # Wait before next update, using the current retry delay
-            time.sleep(retry_delay)
+            # Use a more responsive approach with shorter sleep iterations
+            # Sleep for 2 seconds between price updates to reduce resource usage
+            sleep_interval = 0.5
+            for _ in range(int(max(2, retry_delay) / sleep_interval)):
+                if self.stop_price_updates:
+                    return
+                time.sleep(sleep_interval)
 
     def restart_price_updates(self):
-        """Safely restart the price update thread"""
+        """Safely restart the price update task"""
         try:
-            # Stop existing thread if running
-            if self.price_update_thread and self.price_update_thread.is_alive():
-                self.stop_price_updates = True
-                self.price_update_thread.join(timeout=2)
+            # Stop existing task if running
+            self.stop_price_update_thread()
             
             # Reset error counter and flags
-            self.price_update_errors = 0
-            self.stop_price_updates = False
+            with self.thread_lock:
+                self.price_update_errors = 0
+                self.stop_price_updates = False
             
-            # Start new thread
-            self.price_update_thread = threading.Thread(target=self._price_update_loop)
-            self.price_update_thread.daemon = True
-            self.price_update_thread.start()
+            # Start new task in thread pool
+            self.submit_task("price_updates", self._price_update_loop)
             
             self.queue.put(("append", "\nPrice updates successfully restarted"))
         except Exception as e:
@@ -997,8 +1040,13 @@ class MarketAnalyzerUI:
     def process_queue(self):
         """Process messages from the queue"""
         try:
-            while True:
+            # Process a limited number of messages per cycle to prevent UI freezing
+            message_count = 0
+            max_messages_per_cycle = 10
+            
+            while message_count < max_messages_per_cycle:
                 action, data = self.queue.get_nowait()
+                message_count += 1
                 
                 if action == "append":
                     # Strip ANSI codes before displaying
@@ -1038,6 +1086,13 @@ class MarketAnalyzerUI:
                     else:
                         # Regular text
                         self.output_text.insert("end", clean_text)
+                    
+                    # Limit text widget content to prevent memory bloat
+                    # Keep only the last ~100,000 characters (adjust as needed)
+                    content = self.output_text.get("1.0", "end")
+                    if len(content) > 100000:
+                        # Delete the oldest content, keeping the last 100,000 characters
+                        self.output_text.delete("1.0", f"end-{100000}c")
                         
                     self.output_text.see("end")
                 elif action == "status":
@@ -1056,23 +1111,45 @@ class MarketAnalyzerUI:
                     self.cancel_btn.configure(state="disabled")
                 
         except queue.Empty:
+            # Queue is empty, schedule next check
             pass
-        finally:
-            # Schedule next queue check
-            self.root.after(100, self.process_queue)
+        except Exception as e:
+            print(f"Error processing queue: {str(e)}")
+            traceback.print_exc()
+        
+        # Schedule next queue check with a small delay to prevent UI freezing
+        self.root.after(50, self.process_queue)
 
     def cancel_operation(self):
         """Cancel the current running operation"""
+        # First try to cancel the current subprocess if one exists
         if self.current_process and self.current_process.poll() is None:
             # Process is still running, terminate it
-            self.current_process.terminate()
-            self.queue.put(("append", "\nOperation cancelled by user.\n"))
-            self.queue.put(("status", "Operation cancelled"))
+            try:
+                self.current_process.terminate()
+                self.queue.put(("append", "\nSubprocess terminated by user.\n"))
+            except Exception as e:
+                self.queue.put(("append", f"\nError terminating subprocess: {str(e)}\n"))
+        
+        # Then cancel any running analysis or trading tasks in the thread pool
+        with self.thread_lock:
+            high_priority_tasks = ["market_analysis", "auto_trading"]
+            cancelled = False
             
-            # Re-enable buttons
-            self.queue.put(("enable_buttons", None))
-            self.queue.put(("enable_close_button", None))
-            self.cancel_btn.configure(state="disabled")
+            for task_name in high_priority_tasks:
+                if task_name in self.active_futures:
+                    future = self.active_futures[task_name]
+                    if not future.done():
+                        future.cancel()
+                        cancelled = True
+                        self.queue.put(("append", f"\n{task_name.replace('_', ' ').title()} task cancelled.\n"))
+            
+            if cancelled or (self.current_process and self.current_process.poll() is None):
+                # Re-enable buttons
+                self.queue.put(("status", "Operation cancelled"))
+                self.queue.put(("enable_buttons", None))
+                self.queue.put(("enable_close_button", None))
+                self.cancel_btn.configure(state="disabled")
 
     def place_quick_market_order(self, side: str):
         """Place a quick market order with configurable TP/SL percentage"""
@@ -1194,13 +1271,12 @@ class MarketAnalyzerUI:
             self.long_btn.configure(state="disabled")
             self.short_btn.configure(state="disabled")
             
-            # Create and start thread
-            thread = threading.Thread(
-                target=self._run_market_order_thread,
-                args=(cmd,)
+            # Submit the market order task to the thread pool
+            self.submit_task(
+                f"market_order_{side.lower()}",
+                self._run_market_order_thread,
+                cmd
             )
-            thread.daemon = True
-            thread.start()
             
         except Exception as e:
             self.queue.put(("append", f"\nError placing market order: {str(e)}"))
@@ -1349,10 +1425,8 @@ class MarketAnalyzerUI:
             self.queue.put(("append", f"\nAuto-trading started. Analyzing {granularity.lower().replace('_', ' ')} timeframe every {wait_minutes} minutes...\n"))
             self.queue.put(("append", "When an order is placed, auto-trading will pause until the order/position is closed, then resume automatically.\n"))
             
-            # Start the auto-trading thread
-            self.auto_trading_thread = threading.Thread(target=self._auto_trading_loop)
-            self.auto_trading_thread.daemon = True
-            self.auto_trading_thread.start()
+            # Start the auto-trading process using the thread pool
+            self.submit_task("auto_trading", self._auto_trading_loop)
         else:
             # Stop auto-trading
             self.auto_trading = False
@@ -1363,9 +1437,12 @@ class MarketAnalyzerUI:
             self.root.title("Crypto Market Analyzer")
             self.queue.put(("append", "\nAuto-trading stopped.\n"))
             
-            if self.auto_trading_thread:
-                self.auto_trading_thread.join(timeout=1)
-                self.auto_trading_thread = None
+            # Cancel the auto-trading task in the thread pool
+            with self.thread_lock:
+                if "auto_trading" in self.active_futures:
+                    future = self.active_futures["auto_trading"]
+                    if not future.done():
+                        future.cancel()
 
     def is_trading_allowed(self):
         """Check if trading is allowed based on current time"""
@@ -1847,10 +1924,8 @@ class MarketAnalyzerUI:
         self.status_var.set("Checking for open orders and positions...")
         self.check_orders_btn.configure(state="disabled")
         
-        # Create and start thread
-        thread = threading.Thread(target=self._check_orders_thread)
-        thread.daemon = True
-        thread.start()
+        # Submit the check orders task to the thread pool
+        self.submit_task("check_orders", self._check_orders_thread)
     
     def _check_orders_thread(self):
         """Thread function to check for open orders and positions"""
@@ -1971,27 +2046,50 @@ class MarketAnalyzerUI:
             self.root.after(0, lambda: self.check_orders_btn.configure(state="normal"))
 
     def monitor_threads(self):
-        """Monitor the health of threads and restart if necessary"""
-        if self.price_update_thread and not self.price_update_thread.is_alive():
-            self.queue.put(("append", "\nPrice update thread stopped unexpectedly. Restarting...\n"))
-            self.start_price_updates()
-        if self.auto_trading_thread and not self.auto_trading_thread.is_alive() and self.auto_trading:
-            self.queue.put(("append", "\nAuto-trading thread stopped unexpectedly. Restarting...\n"))
-            self.auto_trading_thread = threading.Thread(target=self._auto_trading_loop)
-            self.auto_trading_thread.daemon = True
-            self.auto_trading_thread.start()
+        """Monitor the health of tasks and restart if necessary"""
+        try:
+            with self.thread_lock:
+                # Check price updates task
+                price_updates_active = "price_updates" in self.active_futures and not self.active_futures["price_updates"].done()
+                if not price_updates_active and not self.stop_price_updates:
+                    self.queue.put(("append", "\nPrice update task stopped unexpectedly. Restarting...\n"))
+                    self.start_price_updates()
+                    
+                # Check auto-trading task
+                auto_trading_active = "auto_trading" in self.active_futures and not self.active_futures["auto_trading"].done()
+                if not auto_trading_active and self.auto_trading:
+                    self.queue.put(("append", "\nAuto-trading task stopped unexpectedly. Restarting...\n"))
+                    self.submit_task("auto_trading", self._auto_trading_loop)
+                
+                # Clean up completed futures to prevent memory leaks
+                for task_name in list(self.active_futures.keys()):
+                    future = self.active_futures[task_name]
+                    if future.done():
+                        # Check if there was an exception
+                        try:
+                            # This will re-raise any exception that occurred
+                            future.result(timeout=0)
+                        except Exception as e:
+                            # Log the exception but don't remove the future yet
+                            # as it might be handled elsewhere
+                            pass
+                        # Only remove futures that are truly done and processed
+                        if task_name not in ["price_updates", "auto_trading"]:
+                            del self.active_futures[task_name]
             
-        # Periodically update trade statuses (every 5 minutes)
-        current_time = time.time()
-        if not hasattr(self, 'last_trade_status_update') or current_time - self.last_trade_status_update >= 300:
-            self.last_trade_status_update = current_time
-            # Run trade status update in a separate thread to avoid blocking the UI
-            thread = threading.Thread(target=self._update_trade_statuses_thread)
-            thread.daemon = True
-            thread.start()
+            # Periodically update trade statuses (every 5 minutes)
+            current_time = time.time()
+            # if not hasattr(self, 'last_trade_status_update') or current_time - self.last_trade_status_update >= 300:
+            #     self.last_trade_status_update = current_time
+            #     # Run trade status update in thread pool to avoid blocking the UI
+            #     self.submit_task("update_trade_statuses", self._simplified_update_trade_statuses, verbose_errors=False)
+                
+        except Exception as e:
+            print(f"Error in thread monitor: {str(e)}")
+            traceback.print_exc()
             
-        # Schedule next check
-        self.root.after(60000, self.monitor_threads)  # Check every minute
+        # Schedule next monitoring check (every 30 seconds)
+        self.root.after(30000, self.monitor_threads)
 
     def save_trade_output(self, output_text):
         """Save trade output to a file and display enhanced signal information"""
@@ -2502,16 +2600,163 @@ class MarketAnalyzerUI:
                 "alignment_enabled": False
             }
 
-    def run(self):
+    def update_ui(self, update_type, data=None):
+        """
+        Thread-safe method to update the UI from any thread
+        
+        Args:
+            update_type: The type of update (append, status, etc.)
+            data: The data for the update
+        """
+        # Put the update in the queue for the main thread to process
+        self.queue.put((update_type, data))
+    
+    def submit_task(self, task_name, func, *args, **kwargs):
+        """
+        Submit a task to the thread pool with tracking and error handling
+        
+        Args:
+            task_name: Unique identifier for the task
+            func: Function to execute
+            *args, **kwargs: Arguments to pass to the function
+            
+        Returns:
+            Future object representing the task
+        """
+        with self.thread_lock:
+            # Cancel existing task with the same name if it exists
+            if task_name in self.active_futures:
+                future = self.active_futures[task_name]
+                if not future.done():
+                    future.cancel()
+                    self.update_ui("append", f"\nCancelled previous {task_name.replace('_', ' ')} task.\n")
+            
+            # Submit new task with error handling wrapper
+            def task_wrapper(*args, **kwargs):
+                try:
+                    self.update_ui("append", f"\nStarting {task_name.replace('_', ' ')} task...\n")
+                    result = func(*args, **kwargs)
+                    self.update_ui("append", f"\nCompleted {task_name.replace('_', ' ')} task.\n")
+                    return result
+                except Exception as e:
+                    # Log the error to the UI
+                    error_msg = f"\nError in {task_name}: {str(e)}\n"
+                    if kwargs.get('verbose_errors', True):
+                        error_msg += f"Traceback: {traceback.format_exc()}\n"
+                    self.update_ui("append", error_msg)
+                    self.update_ui("status", f"Error in {task_name}")
+                    # Re-raise for future.exception() to catch
+                    raise
+                finally:
+                    # Remove from active tasks when done
+                    with self.thread_lock:
+                        if task_name in self.active_futures:
+                            del self.active_futures[task_name]
+            
+            # Submit wrapped task
+            future = self.thread_pool.submit(task_wrapper, *args, **kwargs)
+            self.active_futures[task_name] = future
+            return future
+            
+    def cancel_all_tasks(self):
+        """Cancel all running tasks in the thread pool"""
+        with self.thread_lock:
+            for name, future in list(self.active_futures.items()):
+                if not future.done():
+                    self.queue.put(("append", f"\nCancelling task: {name}\n"))
+                    future.cancel()
+            self.active_futures.clear()
+            
+    def on_exit(self):
+        """Clean up resources and exit the application"""
         try:
-            self.root.mainloop()
-        finally:
+            # Inform user about shutting down
+            messagebox.showinfo("Shutting Down", "Cleaning up resources and shutting down...")
+            
+            # Save any pending settings
+            self.save_settings()
+            
             # Stop auto-trading if active
             if self.auto_trading:
                 self.toggle_auto_trading()
-            # Ensure price updates are stopped and session is closed when the app closes
-            self.stop_price_update_thread()
+                
+            # Cancel all tasks
+            self.cancel_all_tasks()
+            
+            # Stop price updates
+            self.stop_price_updates = True
+            
+            # Shutdown thread pool with a short timeout
+            self.thread_pool.shutdown(wait=True, cancel_futures=True)
+            
+            # Close network resources
             self.session.close()
+            
+            # Destroy the window
+            self.root.destroy()
+        except Exception as e:
+            print(f"Error during shutdown: {str(e)}")
+            # Force destroy the window if cleanup fails
+            self.root.destroy()
+    
+    def run(self):
+        """Run the application main loop"""
+        try:
+            self.root.mainloop()
+        except Exception as e:
+            print(f"Error in main loop: {str(e)}")
+        finally:
+            # Ensure cleanup if the mainloop exits without calling on_exit
+            try:
+                # Stop auto-trading if active
+                if self.auto_trading:
+                    self.toggle_auto_trading()
+                # Cancel all tasks and shutdown thread pool
+                self.cancel_all_tasks()
+                self.thread_pool.shutdown(wait=False)
+                # Ensure price updates are stopped and session is closed
+                self.stop_price_update_thread()
+                self.session.close()
+            except Exception as e:
+                print(f"Error during emergency cleanup: {str(e)}")
+
+    def schedule_periodic_cleanup(self):
+        """Schedule periodic cleanup to prevent memory buildup and UI lag"""
+        try:
+            # Perform memory cleanup
+            self.perform_memory_cleanup()
+            
+            # Schedule next cleanup (every 5 minutes)
+            self.root.after(300000, self.schedule_periodic_cleanup)
+        except Exception as e:
+            print(f"Error in periodic cleanup: {str(e)}")
+            # Ensure cleanup continues even if there's an error
+            self.root.after(300000, self.schedule_periodic_cleanup)
+    
+    def perform_memory_cleanup(self):
+        """Perform memory cleanup to prevent UI lag"""
+        try:
+            # Limit text widget content
+            content = self.output_text.get("1.0", "end")
+            if len(content) > 100000:
+                # Keep only the last 100,000 characters
+                self.output_text.delete("1.0", f"end-{100000}c")
+                print(f"Cleaned up text widget, removed {len(content) - 100000} characters")
+            
+            # Clean up completed futures
+            with self.thread_lock:
+                for task_name in list(self.active_futures.keys()):
+                    future = self.active_futures[task_name]
+                    if future.done() and task_name not in ["price_updates", "auto_trading"]:
+                        del self.active_futures[task_name]
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            print("Periodic memory cleanup completed")
+        except Exception as e:
+            print(f"Error during memory cleanup: {str(e)}")
 
 if __name__ == "__main__":
     app = MarketAnalyzerUI()
