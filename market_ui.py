@@ -1428,21 +1428,33 @@ class MarketAnalyzerUI:
             # Start the auto-trading process using the thread pool
             self.submit_task("auto_trading", self._auto_trading_loop)
         else:
-            # Stop auto-trading
+            # Stop auto-trading immediately
             self.auto_trading = False
+            
+            # Force stop any running process
+            if self.current_process and self.current_process.poll() is None:
+                try:
+                    self.current_process.terminate()
+                except:
+                    pass
+                self.current_process = None
+            
+            # Cancel the auto-trading task without waiting
+            with self.thread_lock:
+                if "auto_trading" in self.active_futures:
+                    future = self.active_futures["auto_trading"]
+                    if not future.done():
+                        future.cancel()
+                    del self.active_futures["auto_trading"]
+            
+            # Update UI immediately
             self.auto_trade_btn.configure(
                 text="Start Auto-Trading",
                 fg_color="#4B0082"  # Back to Indigo
             )
             self.root.title("Crypto Market Analyzer")
             self.queue.put(("append", "\nAuto-trading stopped.\n"))
-            
-            # Cancel the auto-trading task in the thread pool
-            with self.thread_lock:
-                if "auto_trading" in self.active_futures:
-                    future = self.active_futures["auto_trading"]
-                    if not future.done():
-                        future.cancel()
+            self.queue.put(("status", "Auto-trading stopped"))
 
     def is_trading_allowed(self):
         """Check if trading is allowed based on current time"""
@@ -2670,34 +2682,66 @@ class MarketAnalyzerUI:
     def on_exit(self):
         """Clean up resources and exit the application"""
         try:
-            # Inform user about shutting down
-            messagebox.showinfo("Shutting Down", "Cleaning up resources and shutting down...")
-            
-            # Save any pending settings
-            self.save_settings()
-            
-            # Stop auto-trading if active
-            if self.auto_trading:
-                self.toggle_auto_trading()
-                
-            # Cancel all tasks
-            self.cancel_all_tasks()
-            
-            # Stop price updates
+            # Stop price updates first (this is fast)
             self.stop_price_updates = True
             
-            # Shutdown thread pool with a short timeout
-            self.thread_pool.shutdown(wait=True, cancel_futures=True)
+            # Force stop auto-trading immediately if active
+            if self.auto_trading:
+                self.auto_trading = False
+                if self.current_process and self.current_process.poll() is None:
+                    try:
+                        self.current_process.terminate()
+                    except:
+                        pass
+                    self.current_process = None
             
-            # Close network resources
-            self.session.close()
+            # Cancel all tasks without waiting
+            with self.thread_lock:
+                for name, future in list(self.active_futures.items()):
+                    if not future.done():
+                        future.cancel()
+                self.active_futures.clear()
             
-            # Destroy the window
-            self.root.destroy()
+            # Force close the session
+            try:
+                self.session.close()
+            except:
+                pass
+            
+            # Shutdown thread pool with a very short timeout
+            try:
+                self.thread_pool.shutdown(wait=True, timeout=0.5, cancel_futures=True)
+            except:
+                # If shutdown times out, force shutdown without waiting
+                self.thread_pool.shutdown(wait=False, cancel_futures=True)
+            
+            # Save settings in a separate thread to prevent hanging
+            threading.Thread(target=self.save_settings, daemon=True).start()
+            
+            # Show shutdown message without waiting for response
+            try:
+                self.queue.put(("status", "Shutting down..."))
+                self.queue.put(("append", "\nApplication is shutting down...\n"))
+            except:
+                pass
+            
+            # Schedule the actual window destruction after a very short delay
+            self.root.after(100, self._force_exit)
+            
         except Exception as e:
             print(f"Error during shutdown: {str(e)}")
-            # Force destroy the window if cleanup fails
+            self._force_exit()
+    
+    def _force_exit(self):
+        """Force exit the application"""
+        try:
+            # Force destroy the window
+            self.root.quit()
             self.root.destroy()
+        except:
+            # If normal destroy fails, use os._exit as last resort
+            import os
+            os._exit(0)
     
     def run(self):
         """Run the application main loop"""
