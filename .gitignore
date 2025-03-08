@@ -79,3 +79,4 @@ test_imports.py
 .vscode/terminal.sh
 trade_output.txt
 icons/
+logs/trade_status_updates.log
