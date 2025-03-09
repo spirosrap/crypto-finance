@@ -161,8 +161,8 @@ class CoinbaseService:
             # Generate a unique client_order_id
             client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
-            # Set end time to 24 hours from now
-            end_time = (datetime.utcnow() + timedelta(hours=24)).isoformat() + "Z"
+            # Set end time to 30 days from now
+            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
 
             if side.upper() == "BUY":
                 order = orders.trigger_bracket_order_gtd_buy(
@@ -391,8 +391,8 @@ class CoinbaseService:
             # Generate client_order_id for bracket order
             bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
-            # Set end time to 24 hours from now for GTD orders
-            end_time = (datetime.utcnow() + timedelta(hours=24)).isoformat() + "Z"
+            # Set end time to 30 days from now for GTD orders
+            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
             
             # Place bracket order - use opposite side of market order
             bracket_side = "SELL" if side.upper() == "BUY" else "BUY"
@@ -583,8 +583,8 @@ class CoinbaseService:
             # Generate client_order_id for bracket order
             bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
-            # Set end time to 24 hours from now for GTD orders
-            end_time = (datetime.utcnow() + timedelta(hours=24)).isoformat() + "Z"
+            # Set end time to 30 days from now for GTD orders
+            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
             
             # Place bracket order - use opposite side of the filled limit order
             bracket_side = "SELL" if side == "BUY" else "BUY"
@@ -965,8 +965,8 @@ class CoinbaseService:
                     # Generate client_order_id for bracket order
                     bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
                     
-                    # Set end time to 24 hours from now for GTD orders
-                    end_time = (datetime.utcnow() + timedelta(hours=24)).isoformat() + "Z"
+                    # Set end time to 30 days from now for GTD orders
+                    end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
                     
                     # Place bracket order - use opposite side of the filled limit order
                     bracket_side = "SELL" if side == "BUY" else "BUY"
