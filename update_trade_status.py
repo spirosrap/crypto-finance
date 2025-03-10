@@ -20,7 +20,131 @@ import multiprocessing
 from multiprocessing import Process, Queue
 import random
 import requests
+import logging
+import sys
 
+def ensure_psutil_installed():
+    """
+    Check if psutil is installed and install it if needed.
+    """
+    try:
+        import psutil
+        return True
+    except ImportError:
+        try:
+            import subprocess
+            import sys
+            
+            print("psutil not found, attempting to install...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "psutil"])
+            
+            # Try importing again
+            import psutil
+            print("psutil installed successfully")
+            return True
+        except Exception as e:
+            print(f"Failed to install psutil: {str(e)}")
+            return False
+
+def setup_logging():
+    """
+    Set up logging configuration.
+    
+    If the script is being run from market_ui, only log to file.
+    Otherwise, log to both file and console.
+    
+    Uses a single log file for all runs instead of creating a new one each time.
+    """
+    log_dir = "logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    # Use a fixed log file name instead of a timestamped one
+    log_file = os.path.join(log_dir, "trade_status_updates.log")
+    
+    # Configure a basic logger first so we can log during detection
+    handlers = [logging.FileHandler(log_file)]
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
+    temp_logger = logging.getLogger()
+    
+    # Check if the script is being run from market_ui
+    from_ui = False
+    
+    # Check if MARKET_UI environment variable is set
+    if os.environ.get('MARKET_UI') == '1':
+        from_ui = True
+        temp_logger.info("Detected MARKET_UI environment variable")
+    else:
+        # Try to detect if we're being run as a subprocess
+        psutil_available = ensure_psutil_installed()
+        
+        if psutil_available:
+            try:
+                import psutil
+                current_process = psutil.Process()
+                parent = current_process.parent()
+                
+                if parent:
+                    parent_name = parent.name().lower()
+                    temp_logger.info(f"Parent process: {parent_name}")
+                    
+                    if 'python' in parent_name:
+                        # Check if any of the parent's command line arguments contain 'market_ui.py'
+                        cmdline = parent.cmdline()
+                        temp_logger.info(f"Parent command line: {cmdline}")
+                        
+                        if any('market_ui.py' in arg.lower() for arg in cmdline if isinstance(arg, str)):
+                            from_ui = True
+                            temp_logger.info("Detected running from market_ui.py based on parent process")
+            except Exception as e:
+                temp_logger.warning(f"Error checking parent process: {str(e)}")
+        
+        # Fallback method if psutil detection failed
+        if not from_ui:
+            try:
+                import sys
+                if not sys.stdin.isatty():
+                    from_ui = True
+                    temp_logger.info("Detected running as subprocess (stdin is not a TTY)")
+            except Exception as e:
+                temp_logger.warning(f"Error checking stdin: {str(e)}")
+    
+    # Reconfigure logger with appropriate handlers
+    handlers = [logging.FileHandler(log_file)]
+    if not from_ui:
+        handlers.append(logging.StreamHandler(sys.stdout))
+        
+    # Reset the root logger
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+        
+    # Configure root logger again with updated handlers
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=handlers
+    )
+    
+    logger = logging.getLogger()
+    
+    # Add a separator line to clearly mark the start of a new run
+    logger.info("=" * 80)
+    logger.info("STARTING NEW TRADE STATUS UPDATE RUN")
+    
+    # Log the detection result
+    if from_ui:
+        logger.info("Running from market_ui - console output disabled")
+    else:
+        logger.info("Running standalone - console output enabled")
+    
+    return logger
+
+# Global logger
+logger = setup_logging()
 
 def timeout_handler(signum, frame):
     raise TimeoutError("Function call timed out")
@@ -105,12 +229,13 @@ def process_wrapper(func, args, kwargs, result_queue):
 
 def run_with_process_timeout(func, timeout_seconds, *args, **kwargs):
     """
-    Run a function with a timeout using a separate process
+    Run a function with a timeout using multiprocessing.
     
     Args:
         func: The function to run
         timeout_seconds: The timeout in seconds
-        *args, **kwargs: Arguments to pass to the function
+        *args: Arguments to pass to the function
+        **kwargs: Keyword arguments to pass to the function
         
     Returns:
         The result of the function
@@ -133,11 +258,11 @@ def run_with_process_timeout(func, timeout_seconds, *args, **kwargs):
         
         # Check if the process is still alive (timed out)
         if process.is_alive():
-            print(f"Process for {func.__name__} timed out after {timeout_seconds} seconds, terminating...")
+            logger.warning(f"Process for {func.__name__} timed out after {timeout_seconds} seconds, terminating...")
             process.terminate()
             process.join(1)  # Give it a second to terminate
             if process.is_alive():
-                print(f"Process for {func.__name__} still alive after terminate, killing...")
+                logger.warning(f"Process for {func.__name__} still alive after terminate, killing...")
                 try:
                     process.kill()  # Force kill if terminate doesn't work
                 except:
@@ -214,11 +339,11 @@ def performance_monitor(func):
         try:
             result = func(self, *args, **kwargs)
             elapsed = time.time() - start_time
-            print(f"PERFORMANCE: {func.__name__} completed in {elapsed:.2f} seconds")
+            logger.info(f"PERFORMANCE: {func.__name__} completed in {elapsed:.2f} seconds")
             return result
         except Exception as e:
             elapsed = time.time() - start_time
-            print(f"PERFORMANCE: {func.__name__} failed after {elapsed:.2f} seconds with error: {str(e)}")
+            logger.error(f"PERFORMANCE: {func.__name__} failed after {elapsed:.2f} seconds with error: {str(e)}")
             raise
     return wrapper
 
@@ -228,25 +353,28 @@ def get_historical_data_with_retry_like_market_analyzer(client, product_id, star
     
     This function mimics the approach used in market_analyzer.py that works successfully
     """
-    print(f"Getting historical data for {product_id} from {start_date} to {end_date} with market_analyzer approach")
+    logger.info(f"Getting historical data for {product_id} from {start_date} to {end_date} with market_analyzer approach")
     
-    # Convert dates to timestamps
-    start = int(start_date.timestamp())
-    end = int(end_date.timestamp())
+    # Convert dates to ISO format if they are datetime objects
+    if isinstance(start_date, datetime):
+        start_date = start_date.isoformat()
+    if isinstance(end_date, datetime):
+        end_date = end_date.isoformat()
     
     # Track retry attempts
     attempt = 0
     last_error = None
+    backoff_delay = retry_delay
     
     while attempt <= max_retries:
         try:
-            print(f"Attempt {attempt + 1}/{max_retries + 1} for {product_id}")
+            logger.info(f"Attempt {attempt + 1}/{max_retries + 1} for {product_id}")
             
             # Use the public endpoint directly - this is likely what market_analyzer.py does
-            response = client.get_public_candles(
+            response = client.get_product_candles(
                 product_id=product_id,
-                start=str(start),
-                end=str(end),
+                start=start_date,
+                end=end_date,
                 granularity=granularity
             )
             
@@ -269,7 +397,7 @@ def get_historical_data_with_retry_like_market_analyzer(client, product_id, star
                         # It's already a dictionary
                         candles.append(candle)
             
-            print(f"Retrieved {len(candles)} candles from public endpoint")
+            logger.info(f"Retrieved {len(candles)} candles from public endpoint")
             
             # Sort candles by start time to ensure they are in chronological order
             # This is likely what market_analyzer.py does
@@ -278,16 +406,16 @@ def get_historical_data_with_retry_like_market_analyzer(client, product_id, star
             return candles
             
         except Exception as e:
-            attempt += 1
             last_error = e
+            attempt += 1
             
             if attempt <= max_retries:
                 # Calculate backoff delay with jitter to avoid thundering herd
                 jitter = random.uniform(0.5, 1.5)
                 backoff_delay = retry_delay * (2 ** (attempt - 1)) * jitter
                 
-                print(f"Error on attempt {attempt}/{max_retries + 1}: {str(e)}")
-                print(f"Retrying in {backoff_delay:.2f} seconds...")
+                logger.warning(f"Error on attempt {attempt}/{max_retries + 1}: {str(e)}")
+                logger.info(f"Retrying in {backoff_delay:.2f} seconds...")
                 
                 # Sleep with a small increment to allow for keyboard interrupt
                 sleep_start = time.time()
@@ -295,8 +423,8 @@ def get_historical_data_with_retry_like_market_analyzer(client, product_id, star
                     time.sleep(0.1)
                     
             else:
-                print(f"Failed after {max_retries + 1} attempts: {str(last_error)}")
-                print(f"Full traceback: {traceback.format_exc()}")
+                logger.error(f"Failed after {max_retries + 1} attempts: {str(last_error)}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
                 return []
     
     # This should never be reached, but just in case
@@ -315,96 +443,107 @@ def get_historical_data_from_coingecko(product_id, start_date, end_date, granula
     Returns:
         List of candle dictionaries
     """
-    print(f"Getting historical data from CoinGecko for {product_id} from {start_date} to {end_date}")
+    logger.info(f"Getting historical data from CoinGecko for {product_id} from {start_date} to {end_date}")
     
-    # Convert Coinbase product ID to CoinGecko format
-    # Example: BTC-USDC -> bitcoin
-    coin_map = {
-        'BTC': 'bitcoin',
-        'ETH': 'ethereum',
-        'SOL': 'solana',
-        'DOGE': 'dogecoin',
-        'XRP': 'ripple',
-        'ADA': 'cardano',
-        'AVAX': 'avalanche-2',
-        'DOT': 'polkadot',
-        'MATIC': 'matic-network',
-        'LINK': 'chainlink',
-        'UNI': 'uniswap',
-        'SHIB': 'shiba-inu',
-        'LTC': 'litecoin',
-        'ATOM': 'cosmos',
-        'BCH': 'bitcoin-cash',
-        'NEAR': 'near',
-        'ALGO': 'algorand',
-        'ICP': 'internet-computer',
-        'FIL': 'filecoin',
-        'APE': 'apecoin',
-        'MANA': 'decentraland',
-        'SAND': 'the-sandbox',
-        'AXS': 'axie-infinity',
-        'AAVE': 'aave',
-        'CRO': 'crypto-com-chain',
-        'EGLD': 'elrond-erd-2',
-        'EOS': 'eos',
-        'FLOW': 'flow',
-        'HBAR': 'hedera-hashgraph',
-        'VET': 'vechain',
-        'XTZ': 'tezos',
-        'ZEC': 'zcash',
-        'DASH': 'dash',
-        'XMR': 'monero',
-        'CAKE': 'pancakeswap-token',
-        'COMP': 'compound-governance-token',
-        'GRT': 'the-graph',
-        'MKR': 'maker',
-        'SNX': 'havven',
-        'SUSHI': 'sushi',
-        'YFI': 'yearn-finance',
-        'ZRX': '0x',
-        'BAT': 'basic-attention-token',
-        'ENJ': 'enjincoin',
-        'KSM': 'kusama',
-        'NEO': 'neo',
-        'THETA': 'theta-token',
-        'ZIL': 'zilliqa',
-        'ONE': 'harmony',
-        'ONT': 'ontology',
-        'QTUM': 'qtum',
-        'WAVES': 'waves',
-        'XLM': 'stellar',
-        'XTZ': 'tezos',
-        'ZRX': '0x'
-    }
+    # Convert product_id to CoinGecko format (e.g., BTC-USD -> bitcoin)
+    coin_id = None
+    if product_id.startswith("BTC"):
+        coin_id = "bitcoin"
+    elif product_id.startswith("ETH"):
+        coin_id = "ethereum"
+    elif product_id.startswith("SOL"):
+        coin_id = "solana"
+    elif product_id.startswith("DOGE"):
+        coin_id = "dogecoin"
+    elif product_id.startswith("SHIB"):
+        coin_id = "shiba-inu"
+    elif product_id.startswith("XRP"):
+        coin_id = "ripple"
+    elif product_id.startswith("ADA"):
+        coin_id = "cardano"
+    elif product_id.startswith("AVAX"):
+        coin_id = "avalanche-2"
+    elif product_id.startswith("DOT"):
+        coin_id = "polkadot"
+    elif product_id.startswith("MATIC"):
+        coin_id = "matic-network"
+    elif product_id.startswith("LINK"):
+        coin_id = "chainlink"
+    elif product_id.startswith("UNI"):
+        coin_id = "uniswap"
+    elif product_id.startswith("LTC"):
+        coin_id = "litecoin"
+    elif product_id.startswith("DAI"):
+        coin_id = "dai"
+    elif product_id.startswith("ATOM"):
+        coin_id = "cosmos"
+    elif product_id.startswith("TRX"):
+        coin_id = "tron"
+    elif product_id.startswith("ETC"):
+        coin_id = "ethereum-classic"
+    elif product_id.startswith("APE"):
+        coin_id = "apecoin"
+    elif product_id.startswith("NEAR"):
+        coin_id = "near"
+    elif product_id.startswith("ALGO"):
+        coin_id = "algorand"
+    elif product_id.startswith("FIL"):
+        coin_id = "filecoin"
+    elif product_id.startswith("ICP"):
+        coin_id = "internet-computer"
+    elif product_id.startswith("FLOW"):
+        coin_id = "flow"
+    elif product_id.startswith("VET"):
+        coin_id = "vechain"
+    elif product_id.startswith("SAND"):
+        coin_id = "the-sandbox"
+    elif product_id.startswith("MANA"):
+        coin_id = "decentraland"
+    elif product_id.startswith("AXS"):
+        coin_id = "axie-infinity"
+    elif product_id.startswith("PEPE"):
+        coin_id = "pepe"
     
-    # Extract the base currency from the product ID
-    base_currency = product_id.split('-')[0]
-    coin_id = coin_map.get(base_currency, base_currency.lower())
+    if not coin_id:
+        # Default to bitcoin if we can't map the product_id
+        coin_id = "bitcoin"
     
     # Convert dates to Unix timestamps (milliseconds)
+    if isinstance(start_date, str):
+        start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+    if isinstance(end_date, str):
+        end_date = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+    
     from_timestamp = int(start_date.timestamp())
     to_timestamp = int(end_date.timestamp())
     
-    # CoinGecko API endpoint for market chart
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range"
+    # Determine the appropriate interval based on granularity
+    days = (end_date - start_date).days
+    if days > 90:
+        # For long time ranges, use daily data
+        interval = "daily"
+    else:
+        # For shorter time ranges, use hourly data
+        interval = "hourly"
     
+    # Construct the API URL
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range"
     params = {
-        'vs_currency': 'usd',  # Always use USD as the quote currency
-        'from': from_timestamp,
-        'to': to_timestamp
+        "vs_currency": "usd",
+        "from": from_timestamp,
+        "to": to_timestamp
     }
     
     try:
-        print(f"Making CoinGecko API request for {coin_id}")
-        # Use a shorter timeout for the request itself
-        response = requests.get(url, params=params, timeout=10)
+        logger.info(f"Making CoinGecko API request for {coin_id}")
+        response = requests.get(url, params=params, timeout=30)
         
-        # Check for rate limiting (429 status code)
+        # Check for rate limiting
         if response.status_code == 429:
-            print("CoinGecko rate limit reached. Waiting 60 seconds...")
-            time.sleep(60)  # Wait for rate limit to reset
-            print("Retrying request...")
-            response = requests.get(url, params=params, timeout=10)
+            logger.warning("CoinGecko rate limit reached. Waiting 60 seconds...")
+            time.sleep(60)
+            logger.info("Retrying request...")
+            response = requests.get(url, params=params, timeout=30)
         
         response.raise_for_status()  # Raise exception for other 4XX/5XX responses
         
@@ -412,12 +551,12 @@ def get_historical_data_from_coingecko(product_id, start_date, end_date, granula
         try:
             data = response.json()
         except ValueError:
-            print(f"Invalid JSON response from CoinGecko: {response.text[:100]}...")
+            logger.error(f"Invalid JSON response from CoinGecko: {response.text[:100]}...")
             # Return mock data for testing
             return generate_mock_candles(start_date, end_date)
         
         if 'prices' not in data or not data['prices']:
-            print(f"No price data returned from CoinGecko for {coin_id}")
+            logger.warning(f"No price data returned from CoinGecko for {coin_id}")
             # Return mock data for testing
             return generate_mock_candles(start_date, end_date)
         
@@ -458,20 +597,20 @@ def get_historical_data_from_coingecko(product_id, start_date, end_date, granula
             
             candles.append(candle)
         
-        print(f"Retrieved {len(candles)} data points from CoinGecko")
+        logger.info(f"Retrieved {len(candles)} data points from CoinGecko")
         return candles
         
     except requests.exceptions.Timeout:
-        print("CoinGecko API request timed out")
+        logger.error("CoinGecko API request timed out")
         # Return mock data for testing
         return generate_mock_candles(start_date, end_date)
     except requests.exceptions.RequestException as e:
-        print(f"Error making CoinGecko API request: {str(e)}")
+        logger.error(f"Error making CoinGecko API request: {str(e)}")
         # Return mock data for testing
         return generate_mock_candles(start_date, end_date)
     except Exception as e:
-        print(f"Unexpected error with CoinGecko API: {str(e)}")
-        print(f"Full traceback: {traceback.format_exc()}")
+        logger.error(f"Unexpected error with CoinGecko API: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         # Return mock data for testing
         return generate_mock_candles(start_date, end_date)
 
@@ -486,7 +625,7 @@ def generate_mock_candles(start_date, end_date):
     Returns:
         List of mock candle dictionaries
     """
-    print("Generating mock candle data for testing")
+    logger.info("Generating mock candle data for testing")
     
     candles = []
     current_time = int(start_date.timestamp())
@@ -527,7 +666,7 @@ def generate_mock_candles(start_date, end_date):
         base_price = close_price
         current_time += interval
     
-    print(f"Generated {len(candles)} mock candles")
+    logger.info(f"Generated {len(candles)} mock candles")
     return candles
 
 @with_timeout(300)  # 5 minute timeout for the whole function
@@ -538,52 +677,52 @@ def update_trade_statuses():
     Checks historical data to determine if open trades have hit
     their take profit or stop loss levels and updates their status.
     """
-    print("Starting trade status update...")
+    logger.info("Starting trade status update...")
     
     try:
         # Set a global timeout for the entire function
         overall_timeout = 300  # 5 minutes
         start_time = time.time()
         
-        print("Loading API keys...")
+        logger.info("Loading API keys...")
         api_key, api_secret = load_api_keys()
         if not api_key or not api_secret:
-            print("Error: Failed to load API keys for trade status update")
+            logger.error("Error: Failed to load API keys for trade status update")
             return
-        print(f"API keys loaded successfully: {api_key[:5]}...")
+        logger.info(f"API keys loaded successfully: {api_key[:5]}...")
             
-        print("Initializing services...")
+        logger.info("Initializing services...")
         service = CoinbaseService(api_key, api_secret)
-        print("CoinbaseService initialized")
+        logger.info("CoinbaseService initialized")
         
-        print("Checking for trade_history.csv...")
+        logger.info("Checking for trade_history.csv...")
         if not os.path.exists('trade_history.csv'):
-            print("No trade_history.csv file found. Nothing to update.")
+            logger.warning("No trade_history.csv file found. Nothing to update.")
             return
-        print("Found trade_history.csv")
+        logger.info("Found trade_history.csv")
             
-        print("Reading trades from CSV...")
+        logger.info("Reading trades from CSV...")
         open_trades = []
         with open('trade_history.csv', 'r', newline='') as f:
             reader = csv.DictReader(f)
             fieldnames = reader.fieldnames
             rows = list(reader)
-        print(f"Read {len(rows)} total rows from CSV")
+        logger.info(f"Read {len(rows)} total rows from CSV")
             
-        print("Processing open trades...")
+        logger.info("Processing open trades...")
         open_count = 0
         for row in rows:
             # Check if overall timeout is approaching
             elapsed_time = time.time() - start_time
             if elapsed_time > overall_timeout - 30:  # Leave 30 seconds buffer
-                print(f"Overall timeout approaching ({elapsed_time:.1f}s elapsed), stopping processing")
+                logger.warning(f"Overall timeout approaching ({elapsed_time:.1f}s elapsed), stopping processing")
                 break
                 
             if row.get('Status', '').upper() == 'OPEN':
                 open_count += 1
                 try:
-                    print(f"\nProcessing open trade {open_count}:")
-                    print(f"Trade details: {row['Timestamp']} - {row['Product']} - {row['Side']}")
+                    logger.info(f"\nProcessing open trade {open_count}:")
+                    logger.info(f"Trade details: {row['Timestamp']} - {row['Product']} - {row['Side']}")
                     
                     # Get trade details
                     timestamp = datetime.strptime(row['Timestamp'], '%Y-%m-%d %H:%M:%S')
@@ -594,12 +733,12 @@ def update_trade_statuses():
                     stop_loss = float(row['Stop Loss'])
                     
                     # Get current price - try CoinGecko first, then fall back to Coinbase
-                    print(f"Getting current price for {product_id}...")
+                    logger.info(f"Getting current price for {product_id}...")
                     current_price = None
                     
                     # Try to get current price from CoinGecko first
                     try:
-                        print(f"Getting current price from CoinGecko at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
+                        logger.info(f"Getting current price from CoinGecko at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
                         # Get the most recent price from CoinGecko
                         now = datetime.now()
                         yesterday = now - timedelta(days=1)
@@ -617,17 +756,17 @@ def update_trade_statuses():
                             # Get the most recent candle
                             most_recent = sorted(recent_candles, key=lambda x: x['start'])[-1]
                             current_price = float(most_recent['close'])
-                            print(f"Current {product_id} price from CoinGecko: ${current_price}")
+                            logger.info(f"Current {product_id} price from CoinGecko: ${current_price}")
                         else:
-                            print("No current price data from CoinGecko, falling back to Coinbase")
+                            logger.warning("No current price data from CoinGecko, falling back to Coinbase")
                     except Exception as e:
-                        print(f"Error getting current price from CoinGecko: {str(e)}")
-                        print("Falling back to Coinbase for current price")
+                        logger.warning(f"Error getting current price from CoinGecko: {str(e)}")
+                        logger.warning("Falling back to Coinbase for current price")
                     
                     # If CoinGecko failed, try Coinbase
                     if not current_price:
                         try:
-                            print(f"Getting current price from Coinbase at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
+                            logger.info(f"Getting current price from Coinbase at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
                             trades = run_with_better_timeout(
                                 service.client.get_market_trades,
                                 15,  # 15 second timeout
@@ -637,29 +776,29 @@ def update_trade_statuses():
                             
                             if 'trades' in trades and len(trades['trades']) > 0:
                                 current_price = float(trades['trades'][0]['price'])
-                                print(f"Current {product_id} price from Coinbase: ${current_price}")
+                                logger.info(f"Current {product_id} price from Coinbase: ${current_price}")
                             else:
-                                print(f"Warning: No trades found in Coinbase response")
+                                logger.warning(f"Warning: No trades found in Coinbase response")
                                 # Use a mock price for testing
                                 current_price = entry_price * 1.01  # Assume 1% increase
-                                print(f"Using mock current price: ${current_price}")
+                                logger.warning(f"Using mock current price: ${current_price}")
                         except Exception as e:
-                            print(f"Error getting current price from Coinbase: {str(e)}")
+                            logger.error(f"Error getting current price from Coinbase: {str(e)}")
                             # Use a mock price for testing
                             current_price = entry_price * 1.01  # Assume 1% increase
-                            print(f"Using mock current price: ${current_price}")
+                            logger.warning(f"Using mock current price: ${current_price}")
                     
                     # Get historical data to check if trade completed
                     # Use a larger date range for CoinGecko since we're not worried about timeouts
                     start_date = timestamp
                     end_date = timestamp + timedelta(days=7)  # Look at next 7 days
-                    print(f"Using date range: {start_date} to {end_date}")
+                    logger.info(f"Using date range: {start_date} to {end_date}")
                     
-                    print("Getting historical data from CoinGecko...")
+                    logger.info("Getting historical data from CoinGecko...")
                     candles = None
                     
                     try:
-                        print(f"Starting CoinGecko API call at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
+                        logger.info(f"Starting CoinGecko API call at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
                         # Use CoinGecko with a shorter timeout
                         candles = run_with_better_timeout(
                             get_historical_data_from_coingecko,
@@ -668,25 +807,25 @@ def update_trade_statuses():
                             start_date=start_date,
                             end_date=end_date
                         )
-                        print(f"Completed CoinGecko API call at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
+                        logger.info(f"Completed CoinGecko API call at {datetime.now().strftime('%H:%M:%S.%f')[:-3]}")
                         
                         if candles:
-                            print(f"Retrieved {len(candles)} data points from CoinGecko")
+                            logger.info(f"Retrieved {len(candles)} data points from CoinGecko")
                         else:
-                            print("No data returned from CoinGecko")
+                            logger.warning("No data returned from CoinGecko")
                             continue
                         
                     except TimeoutError as te:
-                        print(f"Timeout getting data from CoinGecko: {str(te)}")
+                        logger.error(f"Timeout getting data from CoinGecko: {str(te)}")
                         continue
                     except Exception as e:
-                        print(f"Error getting data from CoinGecko: {str(e)}")
-                        print(f"Full traceback: {traceback.format_exc()}")
+                        logger.error(f"Error getting data from CoinGecko: {str(e)}")
+                        logger.error(f"Full traceback: {traceback.format_exc()}")
                         continue
                     
                     # If we got here, we have candles or we've continued to the next iteration
                     if not candles:
-                        print("No historical data found for this period")
+                        logger.warning("No historical data found for this period")
                         continue
                     
                     # Check if trade hit take profit or stop loss
@@ -776,24 +915,24 @@ def update_trade_statuses():
                         if outcome == 'SUCCESS' and current_price:
                             # For LONG/BUY positions
                             if side.upper() in ['BUY', 'LONG'] and target_price > current_price:
-                                print(f"WARNING: Trade marked as SUCCESS but target (${target_price}) not yet reached. Current price is ${current_price}")
-                                print("This appears to be a false positive. Skipping update.")
+                                logger.warning(f"WARNING: Trade marked as SUCCESS but target (${target_price}) not yet reached. Current price is ${current_price}")
+                                logger.warning("This appears to be a false positive. Skipping update.")
                                 continue
                             # For SHORT/SELL positions
                             elif side.upper() in ['SELL', 'SHORT'] and target_price < current_price:
-                                print(f"WARNING: Trade marked as SUCCESS but target (${target_price}) not yet reached. Current price is ${current_price}")
-                                print("This appears to be a false positive. Skipping update.")
+                                logger.warning(f"WARNING: Trade marked as SUCCESS but target (${target_price}) not yet reached. Current price is ${current_price}")
+                                logger.warning("This appears to be a false positive. Skipping update.")
                                 continue
                         
                         row['Status'] = outcome
-                        print(f"Trade updated: {timestamp} - {outcome} ({row.get('Outcome %', '0')}%)")
+                        logger.info(f"Trade updated: {timestamp} - {outcome} ({row.get('Outcome %', '0')}%)")
                         open_trades.append(row)
                         
                 except Exception as e:
-                    print(f"Error analyzing trade: {str(e)}")
-                    print(f"Traceback: {traceback.format_exc()}")
+                    logger.error(f"Error analyzing trade: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
         
-        print("\nFinished processing all trades")
+        logger.info("\nFinished processing all trades")
         # Write updated CSV
         if open_trades:
             # Make sure "Outcome %" is in fieldnames
@@ -804,13 +943,13 @@ def update_trade_statuses():
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(rows)
-            print(f"Updated {len(open_trades)} trades in trade_history.csv")
+            logger.info(f"Updated {len(open_trades)} trades in trade_history.csv")
         else:
-            print("No trades were updated")
+            logger.info("No trades were updated")
             
     except Exception as e:
-        print(f"Error in trade status update: {str(e)}")
-        print(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Error in trade status update: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
 
 
 def load_api_keys():
@@ -826,11 +965,13 @@ def load_api_keys():
         api_secret = os.getenv('API_SECRET_PERPS')
         
         if not (api_key and api_secret):
-            print("API keys not found. Please set API_KEY_PERPS and API_SECRET_PERPS in config.py or as environment variables.")
+            logger.error("API keys not found. Please set API_KEY_PERPS and API_SECRET_PERPS in config.py or as environment variables.")
             return None, None
             
         return api_key, api_secret
 
 
 if __name__ == "__main__":
+    logger.info("Starting update trade statuses task...")
     update_trade_statuses()
+    logger.info("Completed update trade statuses task.")

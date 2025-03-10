@@ -373,6 +373,28 @@ class MarketAnalyzerUI:
         )
         self.status_label.pack(pady=(5,0))
         
+        # Trade Status Frame - Add this new frame to display trade status information
+        self.trade_status_frame = ctk.CTkFrame(sidebar_container)
+        self.trade_status_frame.pack(pady=(10,5), padx=5, fill="x")
+        
+        ctk.CTkLabel(self.trade_status_frame, text="Trade Status", 
+                    font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(5,0))
+        
+        self.trade_status_label = ctk.CTkLabel(
+            self.trade_status_frame,
+            text="No updates",
+            font=ctk.CTkFont(size=12),
+            wraplength=180  # Ensure text wraps within the frame
+        )
+        self.trade_status_label.pack(pady=(0,5))
+        
+        self.trade_status_time = ctk.CTkLabel(
+            self.trade_status_frame,
+            text="Last update: Never",
+            font=ctk.CTkFont(size=10)
+        )
+        self.trade_status_time.pack(pady=(0,5))
+        
         # Create center content area with output text
         center_content = ctk.CTkFrame(main_container)
         center_content.pack(side="left", fill="both", expand=True, padx=5, pady=5)
@@ -1109,6 +1131,10 @@ class MarketAnalyzerUI:
                     self.cancel_btn.configure(state="normal")
                 elif action == "disable_cancel":
                     self.cancel_btn.configure(state="disabled")
+                # Add new action type for trade status updates
+                elif action == "update_trade_status":
+                    self.trade_status_label.configure(text=data['status'])
+                    self.trade_status_time.configure(text=data['time'])
                 
         except queue.Empty:
             # Queue is empty, schedule next check
@@ -1482,7 +1508,7 @@ class MarketAnalyzerUI:
                 if not self.is_trading_allowed():
                     if not hasattr(self, '_trading_paused_logged'):
                         if current_time.weekday() >= 5:
-                            self.queue.put(("append", "\nTrading paused: Weekend trading is not allowed. Will resume on Monday at 5:00 PM (Greece time) / 10:00 AM (NYSE time).\n"))
+                            self.queue.put(("append", "\nTrading paused: Weekend trading is not allowed. Will resume on Monday at 00:00 AM (Greece time) / 10:00 AM Sunday (NYSE time).\n"))
                         else:
                             self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (5:00 PM - 11:30 AM Greece time) / (10:00 AM - 4:30 AM NYSE time). Will resume at 5:00 PM (Greece time) / 10:00 AM (NYSE time).\n"))
                         self._trading_paused_logged = True
@@ -2091,10 +2117,10 @@ class MarketAnalyzerUI:
             
             # Periodically update trade statuses (every 5 minutes)
             current_time = time.time()
-            # if not hasattr(self, 'last_trade_status_update') or current_time - self.last_trade_status_update >= 300:
-            #     self.last_trade_status_update = current_time
-            #     # Run trade status update in thread pool to avoid blocking the UI
-            #     self.submit_task("update_trade_statuses", self._simplified_update_trade_statuses, verbose_errors=False)
+            if not hasattr(self, 'last_trade_status_update') or current_time - self.last_trade_status_update >= 300:
+                self.last_trade_status_update = current_time
+                # Run trade status update in thread pool to avoid blocking the UI
+                self.submit_task("update_trade_statuses", self._update_trade_statuses_thread)
                 
         except Exception as e:
             print(f"Error in thread monitor: {str(e)}")
@@ -2345,215 +2371,63 @@ class MarketAnalyzerUI:
         return None
 
     def _update_trade_statuses_thread(self):
-        """Thread function to update trade statuses in trade_history.csv"""
+        """Thread function to update trade statuses in trade_history.csv using update_trade_status.py"""
         try:
             self.queue.put(("status", "Updating trade statuses..."))
-            self._simplified_update_trade_statuses()
-            self.queue.put(("status", "Ready"))
+            
+            # Run update_trade_status.py as a separate process using subprocess
+            # This avoids the signal module issue in non-main threads
+            import subprocess
+            import os
+            import datetime
+            
+            # Set environment variable to indicate this is being run from market_ui
+            env = os.environ.copy()
+            env['MARKET_UI'] = '1'
+            
+            process = subprocess.Popen(
+                ["python", "update_trade_status.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env  # Pass the modified environment
+            )
+            
+            # Read output in real-time
+            while True:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    # We don't want to show the output in the UI text window
+                    # self.queue.put(("append", output))
+                    pass
+            
+            # Get any remaining output
+            stdout, stderr = process.communicate()
+            
+            # Only show errors in the UI
+            if stderr:
+                self.queue.put(("append", f"\nErrors from update_trade_status.py:\n{stderr}"))
+                if process.returncode != 0:
+                    raise Exception(f"update_trade_status.py failed with return code {process.returncode}")
+            
+            # Update the trade status frame instead of appending to console
+            if process.returncode == 0:
+                current_time = datetime.datetime.now().strftime("%H:%M:%S")
+                self.queue.put(("update_trade_status", {
+                    "status": "Trade statuses updated successfully",
+                    "time": f"Last update: {current_time}"
+                }))
+            
+            self.queue.put(("status", "Trade status update completed"))
         except Exception as e:
             self.queue.put(("append", f"\nError updating trade statuses: {str(e)}\n"))
             self.queue.put(("status", "Error updating trades"))
-
-    def _simplified_update_trade_statuses(self):
-        """Simplified version of trade status update if the module is not available"""
-        import csv
-        from datetime import datetime, timedelta
-        from coinbaseservice import CoinbaseService
-        from historicaldata import HistoricalData
-        
-        # Initialize services
-        try:
-            # Load API keys
-            api_key, api_secret = self.load_api_keys()
-            if not api_key or not api_secret:
-                self.queue.put(("append", "\nError: Failed to load API keys for trade status update\n"))
-                return
-                
-            # Initialize Coinbase service
-            service = CoinbaseService(api_key, api_secret)
-            historical_data = HistoricalData(service.client)
-            
-            # Check if trade_history.csv exists
-            if not os.path.exists('trade_history.csv'):
-                self.queue.put(("append", "\nNo trade_history.csv file found. Nothing to update.\n"))
-                return
-                
-            # Read trades from CSV
-            open_trades = []
-            with open('trade_history.csv', 'r', newline='') as f:
-                reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
-                rows = list(reader)
-                
-                # Identify open trades
-                for row in rows:
-                    if row.get('Status', '').upper() == 'OPEN':
-                        try:
-                            # Get trade details
-                            timestamp = datetime.strptime(row['Timestamp'], '%Y-%m-%d %H:%M:%S')
-                            product_id = row['Product']
-                            side = row['Side']
-                            entry_price = float(row['Entry Price'])
-                            target_price = float(row['Target Price'])
-                            stop_loss = float(row['Stop Loss'])
-                            
-                            # Get historical data to check if trade completed
-                            start_date = timestamp
-                            end_date = datetime.now()
-                            
-                            # Get current price for verification
-                            current_price = None
-                            try:
-                                # Get current price for verification
-                                trades = service.client.get_market_trades(product_id=product_id, limit=1)
-                                if 'trades' in trades and len(trades['trades']) > 0:
-                                    current_price = float(trades['trades'][0]['price'])
-                                    self.queue.put(("append", f"\nCurrent {product_id} price: ${current_price}\n"))
-                            except Exception as e:
-                                self.queue.put(("append", f"\nError getting current price for {product_id}: {str(e)}\n"))
-                            
-                            # Verify based on current price
-                            if current_price:
-                                # For LONG/BUY positions
-                                if side.upper() in ['BUY', 'LONG']:
-                                    # Check if the price has actually hit the target
-                                    if target_price > current_price:
-                                        self.queue.put(("append", f"\nVERIFICATION FAILED: Target price (${target_price}) not yet reached. Current price is ${current_price}\n"))
-                                        continue  # Skip this trade
-                                # For SHORT/SELL positions
-                                elif side.upper() in ['SELL', 'SHORT']:
-                                    # Check if the price has actually hit the target
-                                    if target_price < current_price:
-                                        self.queue.put(("append", f"\nVERIFICATION FAILED: Target price (${target_price}) not yet reached. Current price is ${current_price}\n"))
-                                        continue  # Skip this trade
-                            
-                            # Get candles data
-                            candles = historical_data.get_historical_data(
-                                product_id=product_id.replace('-USDC', '-PERP-INTX'),  # Convert to perp format
-                                start_date=start_date,
-                                end_date=end_date,
-                                granularity='ONE_MINUTE'
-                            )
-                            
-                            # Check if trade hit take profit or stop loss
-                            outcome = None
-                            for candle in candles:
-                                low_price = float(candle['low'])
-                                high_price = float(candle['high'])
-                                
-                                if side.upper() == 'BUY' or side.upper() == 'LONG':
-                                    # Check for take profit hit
-                                    if high_price >= target_price:
-                                        outcome = 'SUCCESS'
-                                        # Calculate profit percentage (positive for success)
-                                        price_change_pct = ((target_price - entry_price) / entry_price)
-                                        # Assume effective leverage of 10x if not available
-                                        leverage = 10
-                                        if 'Leverage' in row:
-                                            try:
-                                                leverage_str = row['Leverage'].replace('x', '')
-                                                leverage = float(leverage_str)
-                                            except:
-                                                pass
-                                        profit_pct = price_change_pct * 100 * leverage
-                                        
-                                        # Add the outcome percentage to the row
-                                        row['Outcome %'] = f"{abs(profit_pct):.2f}"
-                                        break
-                                    # Check for stop loss hit
-                                    elif low_price <= stop_loss:
-                                        outcome = 'STOP LOSS'
-                                        # Calculate loss percentage (negative for stop loss)
-                                        price_change_pct = ((entry_price - stop_loss) / entry_price)
-                                        # Assume effective leverage of 10x if not available
-                                        leverage = 10
-                                        if 'Leverage' in row:
-                                            try:
-                                                leverage_str = row['Leverage'].replace('x', '')
-                                                leverage = float(leverage_str)
-                                            except:
-                                                pass
-                                        loss_pct = price_change_pct * 100 * leverage
-                                        
-                                        # Add the outcome percentage to the row
-                                        row['Outcome %'] = f"{-abs(loss_pct):.2f}"
-                                        break
-                                else:  # SELL or SHORT
-                                    # Check for take profit hit
-                                    if low_price <= target_price:
-                                        outcome = 'SUCCESS'
-                                        # Calculate profit percentage (positive for success)
-                                        price_change_pct = ((entry_price - target_price) / entry_price)
-                                        # Assume effective leverage of 10x if not available
-                                        leverage = 10
-                                        if 'Leverage' in row:
-                                            try:
-                                                leverage_str = row['Leverage'].replace('x', '')
-                                                leverage = float(leverage_str)
-                                            except:
-                                                pass
-                                        profit_pct = price_change_pct * 100 * leverage
-                                        
-                                        # Add the outcome percentage to the row
-                                        row['Outcome %'] = f"{abs(profit_pct):.2f}"
-                                        break
-                                    # Check for stop loss hit
-                                    elif high_price >= stop_loss:
-                                        outcome = 'STOP LOSS'
-                                        # Calculate loss percentage (negative for stop loss)
-                                        price_change_pct = ((stop_loss - entry_price) / entry_price)
-                                        # Assume effective leverage of 10x if not available
-                                        leverage = 10
-                                        if 'Leverage' in row:
-                                            try:
-                                                leverage_str = row['Leverage'].replace('x', '')
-                                                leverage = float(leverage_str)
-                                            except:
-                                                pass
-                                        loss_pct = price_change_pct * 100 * leverage
-                                        
-                                        # Add the outcome percentage to the row
-                                        row['Outcome %'] = f"{-abs(loss_pct):.2f}"
-                                        break
-                            
-                            # Update the row if outcome was determined
-                            if outcome:
-                                # Double-check SUCCESS outcomes with current price verification
-                                if outcome == 'SUCCESS' and current_price:
-                                    # For LONG/BUY positions
-                                    if side.upper() in ['BUY', 'LONG'] and target_price > current_price:
-                                        self.queue.put(("append", f"\nWARNING: Trade marked as SUCCESS but target (${target_price}) not yet reached. Current price is ${current_price}\n"))
-                                        self.queue.put(("append", "This appears to be a false positive. Skipping update.\n"))
-                                        continue
-                                    # For SHORT/SELL positions
-                                    elif side.upper() in ['SELL', 'SHORT'] and target_price < current_price:
-                                        self.queue.put(("append", f"\nWARNING: Trade marked as SUCCESS but target (${target_price}) not yet reached. Current price is ${current_price}\n"))
-                                        self.queue.put(("append", "This appears to be a false positive. Skipping update.\n"))
-                                        continue
-                                
-                                row['Status'] = outcome
-                                self.queue.put(("append", f"\nTrade updated: {timestamp} - {outcome} ({row.get('Outcome %', '0')}%)\n"))
-                                open_trades.append(row)
-                                
-                        except Exception as e:
-                            self.queue.put(("append", f"\nError analyzing trade: {str(e)}\n"))
-                
-            # Write updated CSV
-            if open_trades:
-                # Make sure "Outcome %" is in fieldnames
-                if "Outcome %" not in fieldnames:
-                    fieldnames.append("Outcome %")
-                
-                with open('trade_history.csv', 'w', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(rows)
-                self.queue.put(("append", f"\nUpdated {len(open_trades)} trades in trade_history.csv\n"))
-            else:
-                self.queue.put(("append", "\nNo trades were updated\n"))
-                
-        except Exception as e:
-            self.queue.put(("append", f"\nError in simplified trade status update: {str(e)}\n"))
+            self.queue.put(("update_trade_status", {
+                "status": f"Error: {str(e)}",
+                "time": f"Last update: {datetime.datetime.now().strftime('%H:%M:%S')}"
+            }))
     
     def update_risk_level(self):
         """Update the risk level based on the current state"""
@@ -2624,37 +2498,48 @@ class MarketAnalyzerUI:
         self.queue.put((update_type, data))
     
     def submit_task(self, task_name, func, *args, **kwargs):
-        """
-        Submit a task to the thread pool with tracking and error handling
-        
-        Args:
-            task_name: Unique identifier for the task
-            func: Function to execute
-            *args, **kwargs: Arguments to pass to the function
-            
-        Returns:
-            Future object representing the task
-        """
+        """Submit a task to the thread pool with proper error handling"""
         with self.thread_lock:
-            # Cancel existing task with the same name if it exists
+            # Cancel any existing task with the same name
             if task_name in self.active_futures:
                 future = self.active_futures[task_name]
                 if not future.done():
                     future.cancel()
                     self.update_ui("append", f"\nCancelled previous {task_name.replace('_', ' ')} task.\n")
             
+            # If this is a trade status update task, update the trade status frame
+            if task_name == "update_trade_statuses":
+                import datetime
+                current_time = datetime.datetime.now().strftime("%H:%M:%S")
+                self.update_ui("update_trade_status", {
+                    "status": "Updating trade statuses...",
+                    "time": f"Started at: {current_time}"
+                })
+            
             # Submit new task with error handling wrapper
             def task_wrapper(*args, **kwargs):
                 try:
-                    self.update_ui("append", f"\nStarting {task_name.replace('_', ' ')} task...\n")
+                    # Check if this is a trade status update task
+                    is_trade_status_task = task_name == "update_trade_statuses"
+                    
+                    # Only append to console if not a trade status task
+                    if not is_trade_status_task:
+                        self.update_ui("append", f"\nStarting {task_name.replace('_', ' ')} task...\n")
+                    
                     result = func(*args, **kwargs)
-                    self.update_ui("append", f"\nCompleted {task_name.replace('_', ' ')} task.\n")
+                    
+                    # Only append to console if not a trade status task
+                    if not is_trade_status_task:
+                        self.update_ui("append", f"\nCompleted {task_name.replace('_', ' ')} task.\n")
+                    
                     return result
                 except Exception as e:
                     # Log the error to the UI
                     error_msg = f"\nError in {task_name}: {str(e)}\n"
                     if kwargs.get('verbose_errors', True):
                         error_msg += f"Traceback: {traceback.format_exc()}\n"
+                    
+                    # Always show errors in the console
                     self.update_ui("append", error_msg)
                     self.update_ui("status", f"Error in {task_name}")
                     # Re-raise for future.exception() to catch
