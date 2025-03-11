@@ -1,10 +1,10 @@
 import json
 import csv
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 from historicaldata import HistoricalData
 from coinbase.rest import RESTClient
-import os
 from config import API_KEY_PERPS, API_SECRET_PERPS
 
 def parse_single_trade(trade_section: str) -> Optional[Dict]:
@@ -24,7 +24,7 @@ def parse_single_trade(trade_section: str) -> Optional[Dict]:
         position_size = None
         initial_margin = None
         raw_leverage = None
-        side = 'SHORT' if 'SELL AT' in str(trade_json) else 'LONG'
+        side = 'SHORT' if 'SELL AT' in str(trade_json) or 'SIGNAL_TYPE": "SELL"' in str(trade_json) else 'LONG'
         
         # First pass to get initial margin and raw leverage
         for line in lines:
@@ -45,10 +45,13 @@ def parse_single_trade(trade_section: str) -> Optional[Dict]:
             elif 'Position Size:' in line:
                 # Extract position size, handling both formats ($560.0 or $560.0 (≈0.0067 BTC))
                 pos_str = line.split('$')[1].strip()
-                position_size = float(pos_str.split()[0].strip())
+                if '(' in pos_str:
+                    position_size = float(pos_str.split('(')[0].strip())
+                else:
+                    position_size = float(pos_str.split()[0].strip())
         
         # Calculate effective leverage
-        if position_size and initial_margin:
+        if position_size and initial_margin and initial_margin > 0:
             effective_leverage = round(position_size / initial_margin, 1)
         else:
             effective_leverage = raw_leverage
@@ -56,13 +59,21 @@ def parse_single_trade(trade_section: str) -> Optional[Dict]:
         print(f"Trade details: Position Size=${position_size}, Initial Margin=${initial_margin}")
         print(f"Raw Leverage={raw_leverage}x, Position Reduced={position_reduced}, Effective Leverage={effective_leverage}x")
         
-        # Handle both BUY and SELL trades
+        # Handle both BUY and SELL trades with different JSON formats
         if side == 'LONG':
-            entry_price = float(trade_json['BUY AT'])
-            take_profit = float(trade_json['SELL BACK AT'])
+            if 'BUY AT' in trade_json:
+                entry_price = float(trade_json['BUY AT'])
+                take_profit = float(trade_json['SELL BACK AT'])
+            elif 'SIGNAL_TYPE' in trade_json and trade_json['SIGNAL_TYPE'] == 'BUY':
+                entry_price = float(trade_json['BUY AT'])
+                take_profit = float(trade_json['SELL BACK AT'])
         else:
-            entry_price = float(trade_json['SELL AT'])
-            take_profit = float(trade_json['BUY BACK AT'])
+            if 'SELL AT' in trade_json:
+                entry_price = float(trade_json['SELL AT'])
+                take_profit = float(trade_json['BUY BACK AT'])
+            elif 'SIGNAL_TYPE' in trade_json and trade_json['SIGNAL_TYPE'] == 'SELL':
+                entry_price = float(trade_json['SELL AT'])
+                take_profit = float(trade_json['BUY BACK AT'])
             
         return {
             'timestamp': timestamp,
@@ -70,9 +81,9 @@ def parse_single_trade(trade_section: str) -> Optional[Dict]:
             'take_profit': take_profit,
             'stop_loss': float(trade_json['STOP LOSS']),
             'probability': float(trade_json['PROBABILITY']),
-            'confidence': trade_json['CONFIDENCE'],
+            'confidence': trade_json.get('CONFIDENCE', 'Moderate'),
             'r_r_ratio': float(trade_json['R/R_RATIO']),
-            'volume_strength': trade_json['VOLUME_STRENGTH'],
+            'volume_strength': trade_json.get('VOLUME_STRENGTH', 'Moderate'),
             'side': side,
             'position_size': position_size,
             'initial_margin': initial_margin,
@@ -107,7 +118,7 @@ def analyze_trade_outcome(trade_details: Dict, historical_data: HistoricalData) 
     try:
         # Use datetime objects directly
         start_date = trade_details['timestamp']
-        end_date = start_date + timedelta(hours=24)
+        end_date = start_date + timedelta(hours=48)  # Extend to 48 hours to catch more outcomes
         
         # Get historical data from trade timestamp onwards
         candles = historical_data.get_historical_data(
@@ -215,6 +226,43 @@ def is_trade_recorded(trade_details: Dict, csv_file: str) -> bool:
     
     return False
 
+def update_trade_history_csv(trade_details: Dict, outcome_details: Dict):
+    """Update the trade_history.csv file with the outcome details."""
+    csv_file = 'trade_history.csv'
+    
+    if not os.path.exists(csv_file):
+        print(f"Warning: {csv_file} does not exist. Cannot update.")
+        return
+        
+    # Read the current CSV
+    rows = []
+    with open(csv_file, 'r', newline='') as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames
+        
+        # Make sure "Outcome %" is in fieldnames
+        if "Outcome %" not in fieldnames:
+            fieldnames.append("Outcome %")
+            
+        for row in reader:
+            # Find the matching trade
+            trade_timestamp = trade_details['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+            trade_entry = str(trade_details['entry_price'])
+            
+            if row['Timestamp'] == trade_timestamp and float(row['Entry Price']) == float(trade_entry):
+                # Update the status and outcome
+                row['Status'] = outcome_details['outcome']
+                row['Outcome %'] = f"{outcome_details['outcome_pct']:.2f}"
+                print(f"Updated trade in trade_history.csv: {trade_timestamp} - {outcome_details['outcome']} ({outcome_details['outcome_pct']:.2f}%)")
+            
+            rows.append(row)
+    
+    # Write back the updated CSV
+    with open(csv_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
 def add_to_csv(trade_details: Dict, outcome_details: Dict):
     """Add the trade results to automated_trades.csv if not already present."""
     csv_file = 'automated_trades.csv'
@@ -259,6 +307,9 @@ def add_to_csv(trade_details: Dict, outcome_details: Dict):
             f"{trade_details['effective_leverage']}x",
             trade_details['position_size'] / trade_details['effective_leverage']
         ])
+    
+    # Also update the trade_history.csv file
+    update_trade_history_csv(trade_details, outcome_details)
 
 def main():
     # Initialize Coinbase client and historical data with API keys
