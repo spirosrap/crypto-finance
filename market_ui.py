@@ -589,16 +589,16 @@ class MarketAnalyzerUI:
         # Check for open orders or positions - this critical check must be done before running any analysis
         has_open_orders, has_positions = self.check_for_open_orders_and_positions()
         
-        if has_open_orders or has_positions:
-            # Log that we can't run analysis with open orders/positions
-            if has_open_orders and has_positions:
-                self.queue.put(("append", "\nCannot run analysis: Found open orders and positions. Please close them first.\n"))
-            elif has_open_orders:
-                self.queue.put(("append", "\nCannot run analysis: Found open orders. Please close them first.\n"))
-            else:
-                self.queue.put(("append", "\nCannot run analysis: Found open positions. Please close them first.\n"))
+        if has_positions:
+            # Block analysis if there are open positions
+            self.queue.put(("append", "\nCannot run analysis: Found open positions. Please close them first.\n"))
+            self.queue.put(("status", "Cannot run with open positions"))
+            return
             
-            self.queue.put(("status", "Cannot run with open orders/positions"))
+        if has_open_orders:
+            # For normal analysis, we should still block if there are limit orders
+            self.queue.put(("append", "\nCannot run analysis: Found open orders. Wait for bracket orders to be set or close existing orders first.\n"))
+            self.queue.put(("status", "Cannot run analysis with open orders"))
             return
             
         # Disable button during analysis
@@ -1183,17 +1183,17 @@ class MarketAnalyzerUI:
             # Check for open orders or positions
             has_open_orders, has_positions = self.check_for_open_orders_and_positions()
             
-            if has_open_orders or has_positions:
-                # Log that we can't place order with open orders/positions
-                if has_open_orders and has_positions:
-                    self.queue.put(("append", "\nCannot place order: Found open orders and positions. Please close them first.\n"))
-                elif has_open_orders:
-                    self.queue.put(("append", "\nCannot place order: Found open orders. Please close them first.\n"))
-                else:
-                    self.queue.put(("append", "\nCannot place order: Found open positions. Please close them first.\n"))
-                
-                self.queue.put(("status", "Cannot trade with open orders/positions"))
+            if has_positions:
+                # Only block if there are open positions
+                self.queue.put(("append", "\nCannot place order: Found open positions. Please close them first.\n"))
+                self.queue.put(("status", "Cannot trade with open positions"))
                 return
+                
+            if has_open_orders:
+                # Only warn about open orders but allow setting bracket orders
+                self.queue.put(("append", "\nWarning: Open orders detected. Proceeding with setting bracket order.\n"))
+                self.queue.put(("status", "Setting bracket order with open limit order"))
+                # Continue with the order placement
             
             # Get current price
             product = self.product_var.get()
@@ -1530,15 +1530,16 @@ class MarketAnalyzerUI:
                 # Check for open orders or positions
                 has_open_orders, has_positions = self.check_for_open_orders_and_positions()
                 
-                if has_open_orders or has_positions:
-                    # Log that we're waiting for orders to close
-                    if has_open_orders and has_positions:
-                        self.queue.put(("append", "\nFound open orders and positions. Waiting for them to close before continuing...\n"))
-                    elif has_open_orders:
-                        self.queue.put(("append", "\nFound open orders. Waiting for them to close before continuing...\n"))
-                    else:
-                        self.queue.put(("append", "\nFound open positions. Waiting for them to close before continuing...\n"))
+                if has_positions:
+                    # Wait when there are open positions
+                    self.queue.put(("append", "\nFound open positions. Waiting for them to close before continuing...\n"))
+                    # Wait for a shorter interval before checking again
+                    time.sleep(60)  # Check every minute
+                    continue
                     
+                if has_open_orders:
+                    # For auto-trading, we should wait if there are any open orders
+                    self.queue.put(("append", "\nFound open orders. Waiting for all orders to close before continuing...\n"))
                     # Wait for a shorter interval before checking again
                     time.sleep(60)  # Check every minute
                     continue
