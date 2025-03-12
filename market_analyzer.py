@@ -1266,8 +1266,81 @@ class MarketAnalyzer:
             # Update adaptive thresholds
             self.update_adaptive_thresholds()
             
+            # Get market bias information from _generate_recommendation
+            try:
+                # Parse the recommendation message to extract market bias information
+                recommendation_text = result['recommendation']
+                bias = "Neutral"
+                bias_category = "Neutral"
+                bias_strength = 0.0
+                
+                # Extract the bias information from the recommendation text
+                if "Bullish Bias" in recommendation_text:
+                    bias_parts = recommendation_text.split("Bullish Bias")[0].strip().split()
+                    if bias_parts:
+                        bias_category = bias_parts[-1]
+                    bias = f"{bias_category} Bullish Bias"
+                    # Find strength value (format like "Strength: 0.75") in the text
+                    if "Strength:" in recommendation_text:
+                        try:
+                            strength_parts = recommendation_text.split("Strength:")[1].split()
+                            if strength_parts:
+                                strength_str = strength_parts[0].strip("()")
+                                bias_strength = float(strength_str)
+                        except (ValueError, IndexError):
+                            bias_strength = 0.0
+                elif "Bearish Bias" in recommendation_text:
+                    bias_parts = recommendation_text.split("Bearish Bias")[0].strip().split()
+                    if bias_parts:
+                        bias_category = bias_parts[-1]
+                    bias = f"{bias_category} Bearish Bias"
+                    # Find strength value in the text
+                    if "Strength:" in recommendation_text:
+                        try:
+                            strength_parts = recommendation_text.split("Strength:")[1].split()
+                            if strength_parts:
+                                strength_str = strength_parts[0].strip("()")
+                                bias_strength = float(strength_str)
+                        except (ValueError, IndexError):
+                            bias_strength = 0.0
+            except Exception as e:
+                self.logger.error(f"Error extracting market bias: {str(e)}")
+                bias = "Neutral"
+                bias_category = "Neutral"
+                bias_strength = 0.0
+            
+            # Generate key levels using Bollinger Bands and support/resistance
+            try:
+                current_price = float(formatted_candles[-1]['close'])
+                indicators = result['indicators']
+                
+                # Get support/resistance from technical analysis
+                consolidation_info = self.technical_analysis.detect_consolidation(formatted_candles)
+                support_level = consolidation_info['lower_channel']
+                resistance_level = consolidation_info['upper_channel']
+                
+                # Create enhanced key levels using Bollinger Bands
+                bb_upper = indicators['bollinger_upper']
+                bb_middle = indicators['bollinger_middle']
+                bb_lower = indicators['bollinger_lower']
+                
+                key_levels = {
+                    'strong_resistance': max(resistance_level, bb_upper),
+                    'resistance': resistance_level,
+                    'weak_resistance': bb_middle + (bb_upper - bb_middle) * 0.5,
+                    'pivot': bb_middle,
+                    'weak_support': bb_middle - (bb_middle - bb_lower) * 0.5,
+                    'support': support_level,
+                    'strong_support': min(support_level, bb_lower)
+                }
+            except Exception as e:
+                self.logger.error(f"Error generating key levels: {str(e)}")
+                key_levels = {'support': 0, 'resistance': 0}
+            
             # Add enhanced analysis
             result.update({
+                'market_bias': bias,
+                'key_levels': key_levels,
                 'market_cycles': self.analyze_market_cycles(),
                 'order_flow': self.analyze_order_flow(),
                 'liquidity_zones': self.analyze_liquidity_zones(),
@@ -1383,14 +1456,45 @@ class MarketAnalyzer:
             consolidation_info = self.technical_analysis.detect_consolidation(self._current_candles)
             volume_info = self.technical_analysis.analyze_volume_confirmation(self._current_candles)
             
-            # Calculate market bias
+            # Calculate market bias with enhanced indicators
             rsi = self.technical_analysis.compute_rsi(self.product_id, self._current_candles)
             macd, signal, histogram = self.technical_analysis.compute_macd(self.product_id, self._current_candles)
             adx_value, trend_direction = self.technical_analysis.get_trend_strength(self._current_candles)
             
-            # Calculate price change
+            # Get additional indicators for better market view
+            stoch_k, stoch_d = self.technical_analysis.compute_stochastic(self._current_candles, 14, 3)
+            bb_upper, bb_middle, bb_lower = self.technical_analysis.compute_bollinger_bands(self._current_candles)
+            
+            # Calculate price change over different periods
             prices = self.technical_analysis.extract_prices(self._current_candles)
-            price_change = ((prices[-1] - prices[-2]) / prices[-2]) * 100 if len(prices) > 1 else 0.0
+            price_change_1d = ((prices[-1] - prices[-2]) / prices[-2]) * 100 if len(prices) > 1 else 0.0
+            price_change_1w = ((prices[-1] - prices[-7]) / prices[-7]) * 100 if len(prices) > 7 else 0.0
+            price_change_1m = ((prices[-1] - prices[-30]) / prices[-30]) * 100 if len(prices) > 30 else 0.0
+            
+            # Calculate price position within Bollinger Bands (0-100%)
+            if bb_upper != bb_lower:
+                bb_position = (current_price - bb_lower) / (bb_upper - bb_lower) * 100
+            else:
+                bb_position = 50
+            
+            # Calculate momentum strength from multiple indicators
+            momentum_strength = 0
+            if rsi > 50:
+                momentum_strength += (rsi - 50) / 50
+            else:
+                momentum_strength -= (50 - rsi) / 50
+                
+            if macd > signal:
+                momentum_strength += 0.25
+            else:
+                momentum_strength -= 0.25
+                
+            if stoch_k > stoch_d:
+                momentum_strength += 0.25
+            else:
+                momentum_strength -= 0.25
+                
+            momentum_strength = max(min(momentum_strength, 1.0), -1.0)  # Normalize to [-1, 1]
             
             # Calculate key levels
             stop_loss_atr = atr * self.ta_config.atr_multiplier
@@ -1398,47 +1502,101 @@ class MarketAnalyzer:
             take_profit_2r = stop_loss_atr * 2.0  # 2:1 reward-risk
             take_profit_3r = stop_loss_atr * 3.0  # 3:1 reward-risk
             
-            # Calculate support and resistance levels
+            # Enhanced support and resistance with additional levels
             resistance_level = consolidation_info['upper_channel']
             support_level = consolidation_info['lower_channel']
             
-            # Determine bias based on multiple indicators
+            # Add dynamic support/resistance from Bollinger Bands
+            key_levels = {
+                'Strong Resistance': max(resistance_level, bb_upper),
+                'Resistance': resistance_level,
+                'Weak Resistance': bb_middle + (bb_upper - bb_middle) * 0.5,
+                'Pivot': bb_middle,
+                'Weak Support': bb_middle - (bb_middle - bb_lower) * 0.5,
+                'Support': support_level,
+                'Strong Support': min(support_level, bb_lower)
+            }
+            
+            # Determine bias based on multiple indicators with enhanced weighting
             bias_factors = []
             
-            # RSI bias
-            if rsi > 50:
-                bias_factors.append(("Bullish", (rsi - 50) / 50))
+            # RSI bias with stronger weighting for extreme values
+            rsi_weight = (rsi - 50) / 50
+            if rsi > 70:  # Strongly overbought
+                bias_factors.append(("Bearish", 0.8))
+            elif rsi > 50:
+                bias_factors.append(("Bullish", rsi_weight))
+            elif rsi < 30:  # Strongly oversold
+                bias_factors.append(("Bullish", 0.8))
             else:
-                bias_factors.append(("Bearish", (50 - rsi) / 50))
+                bias_factors.append(("Bearish", -rsi_weight))
             
-            # MACD bias
-            if macd > signal:
-                bias_factors.append(("Bullish", abs(histogram / macd) if macd != 0 else 0.1))
-            else:
-                bias_factors.append(("Bearish", abs(histogram / macd) if macd != 0 else 0.1))
+            # MACD bias with trend confirmation
+            if macd > signal and histogram > 0:
+                bias_factors.append(("Bullish", min(1.0, abs(histogram / macd) if macd != 0 else 0.1)))
+            elif macd < signal and histogram < 0:
+                bias_factors.append(("Bearish", min(1.0, abs(histogram / macd) if macd != 0 else 0.1)))
             
-            # Trend direction bias
-            if trend_direction == "Uptrend":
-                bias_factors.append(("Bullish", adx_value / 100))
+            # Trend direction bias with ADX strength factor
+            trend_strength = adx_value / 100
+            if trend_direction == "Uptrend" and adx_value > 25:
+                bias_factors.append(("Bullish", trend_strength * 1.5))  # Strong trend gets higher weight
+            elif trend_direction == "Downtrend" and adx_value > 25:
+                bias_factors.append(("Bearish", trend_strength * 1.5))
+            elif trend_direction == "Uptrend":
+                bias_factors.append(("Bullish", trend_strength))
             elif trend_direction == "Downtrend":
-                bias_factors.append(("Bearish", adx_value / 100))
+                bias_factors.append(("Bearish", trend_strength))
             
-            # Volume trend bias
+            # Bollinger Band position bias
+            if bb_position > 80:  # Near upper band
+                bias_factors.append(("Bearish", (bb_position - 80) / 20))
+            elif bb_position < 20:  # Near lower band
+                bias_factors.append(("Bullish", (20 - bb_position) / 20))
+            
+            # Stochastic bias with crossover detection
+            if stoch_k > stoch_d and stoch_k < 20:  # Bullish crossover in oversold
+                bias_factors.append(("Bullish", 0.7))
+            elif stoch_k < stoch_d and stoch_k > 80:  # Bearish crossover in overbought
+                bias_factors.append(("Bearish", 0.7))
+            
+            # Volume trend bias with price confirmation
             if volume_info['volume_trend'] == "Increasing":
-                if price_change > 0:
-                    bias_factors.append(("Bullish", 0.3))
+                if price_change_1d > 0:
+                    bias_factors.append(("Bullish", min(1.0, 0.3 + abs(price_change_1d) / 10)))
                 else:
-                    bias_factors.append(("Bearish", 0.3))
+                    bias_factors.append(("Bearish", min(1.0, 0.3 + abs(price_change_1d) / 10)))
                 
-            # Calculate overall bias
+            # Calculate overall bias with weighted factors
             bullish_strength = sum(strength for direction, strength in bias_factors if direction == "Bullish")
             bearish_strength = sum(strength for direction, strength in bias_factors if direction == "Bearish")
             
-            # Determine dominant bias
-            if bullish_strength > bearish_strength:
-                bias = f"Neutral with Bullish Bias (Strength: {(bullish_strength - bearish_strength):.1f})"
-            elif bearish_strength > bullish_strength:
-                bias = f"Neutral with Bearish Bias (Strength: {(bearish_strength - bullish_strength):.1f})"
+            # Calculate total factors for normalized strength
+            total_factors = len(bias_factors)
+            if total_factors > 0:
+                normalized_bullish = bullish_strength / total_factors
+                normalized_bearish = bearish_strength / total_factors
+            else:
+                normalized_bullish = normalized_bearish = 0
+            
+            # Determine market bias category with strength indicator
+            bias_strength = abs(normalized_bullish - normalized_bearish)
+            if bias_strength < 0.2:
+                bias_category = "Neutral"
+            elif bias_strength < 0.4:
+                bias_category = "Slight"
+            elif bias_strength < 0.6:
+                bias_category = "Moderate"
+            elif bias_strength < 0.8:
+                bias_category = "Strong"
+            else:
+                bias_category = "Very Strong"
+            
+            # Determine dominant bias with detailed category
+            if normalized_bullish > normalized_bearish:
+                bias = f"{bias_category} Bullish Bias (Strength: {(normalized_bullish - normalized_bearish):.2f})"
+            elif normalized_bearish > normalized_bullish:
+                bias = f"{bias_category} Bearish Bias (Strength: {(normalized_bearish - normalized_bullish):.2f})"
             else:
                 bias = "Neutral with No Clear Bias"
             

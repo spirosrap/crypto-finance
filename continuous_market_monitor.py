@@ -140,77 +140,243 @@ class ContinuousMarketMonitor:
             
             self.signal_history.append(signal_record)
             
-            # Print the signal with scalping opportunities
-            print(f"\n=== Market Analysis & Scalping Opportunities ===")
-            print(f"Time: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"Price: ${analysis['current_price']:.4f}")
-            print(f"Signal: {analysis['signal']}")
-            print(f"Position: {analysis['position']}")
-            print(f"Confidence: {analysis['confidence']*100:.1f}%")
-            print(f"Market Condition: {analysis['market_condition']}")
+            # Get bias category and strength from analysis if available
+            bias_category = ""
+            bias_strength = 0.0
+            if 'market_bias' in analysis:
+                bias_parts = analysis['market_bias'].split()
+                if len(bias_parts) >= 2:
+                    bias_category = bias_parts[0]
+                    # Extract strength value from format like "Strength: 0.75"
+                    if 'Strength:' in analysis['market_bias']:
+                        try:
+                            strength_str = analysis['market_bias'].split('Strength:')[1].strip()
+                            if '(' in strength_str and ')' in strength_str:
+                                strength_str = strength_str.strip('()')
+                            bias_strength = float(strength_str)
+                        except (ValueError, IndexError):
+                            bias_strength = 0.0
+
+            # Enhanced market visualization with rich formatting
+            print("\n" + "="*70)
+            print(f"📊 MARKET ANALYSIS: {self.product_id} @ {self.candle_interval} 📊")
+            print("="*70)
+            
+            # Market Overview Section with timestamp and price information
+            print(f"\n🕒 {current_time.strftime('%Y-%m-%d %H:%M:%S')} | "
+                  f"💲 ${analysis['current_price']:.4f}")
+            
+            # Signal Strength Visualization
+            signal_icon = "🔴" if analysis['signal'] in ["SELL", "STRONG_SELL"] else "🟢" if analysis['signal'] in ["BUY", "STRONG_BUY"] else "⚪"
+            confidence_bars = "█" * int(analysis['confidence']*10) + "░" * (10 - int(analysis['confidence']*10))
+            
+            print(f"\n📡 SIGNAL: {signal_icon} {analysis['signal']} ({analysis['position']})")
+            print(f"🎯 CONFIDENCE: {confidence_bars} {analysis['confidence']*100:.1f}%")
+            
+            # Market Conditions
+            market_emoji = "🌊" if "Ranging" in analysis['market_condition'] else "📈" if "Uptrend" in analysis['market_condition'] else "📉" if "Downtrend" in analysis['market_condition'] else "🔄"
+            print(f"🔍 MARKET STATE: {market_emoji} {analysis['market_condition']}")
+            
+            # Market Bias
+            if 'market_bias' in analysis:
+                bias_emoji = "📈" if "Bullish" in analysis['market_bias'] else "📉" if "Bearish" in analysis['market_bias'] else "↔️"
+                print(f"⚖️  BIAS: {bias_emoji} {analysis['market_bias']}")
+            
+            # Key Levels Section
+            print("\n" + "-"*70)
+            print("🏔️  KEY PRICE LEVELS")
+            print("-"*70)
+            
+            # Get key levels from indicators if available
+            if 'indicators' in analysis:
+                indicators = analysis['indicators']
+                current_price = analysis['current_price']
+                
+                # Structure to hold all price levels for sorting
+                price_levels = []
+                
+                # Add Bollinger Bands
+                if all(k in indicators for k in ['bollinger_upper', 'bollinger_lower', 'bollinger_middle']):
+                    price_levels.append(("BBAND UPPER  ", indicators['bollinger_upper'], current_price < indicators['bollinger_upper']))
+                    price_levels.append(("BBAND MIDDLE ", indicators['bollinger_middle'], True))
+                    price_levels.append(("BBAND LOWER  ", indicators['bollinger_lower'], current_price > indicators['bollinger_lower']))
+                
+                # Add support/resistance
+                if 'key_levels' in analysis:
+                    if 'resistance' in analysis['key_levels']:
+                        price_levels.append(("RESISTANCE   ", analysis['key_levels']['resistance'], current_price < analysis['key_levels']['resistance']))
+                    if 'support' in analysis['key_levels']:
+                        price_levels.append(("SUPPORT      ", analysis['key_levels']['support'], current_price > analysis['key_levels']['support']))
+                
+                # Add moving averages
+                if 'ema_20' in indicators:
+                    price_levels.append(("EMA 20       ", indicators['ema_20'], True))
+                if 'ema_50' in indicators:
+                    price_levels.append(("EMA 50       ", indicators['ema_50'], True))
+                if 'ema_200' in indicators:
+                    price_levels.append(("EMA 200      ", indicators['ema_200'], True))
+                
+                # Sort price levels from highest to lowest
+                price_levels.sort(key=lambda x: x[1], reverse=True)
+                
+                # Find where current price fits in the sorted list
+                current_price_inserted = False
+                for i, (name, price, _) in enumerate(price_levels):
+                    if not current_price_inserted and current_price > price:
+                        # Insert current price marker
+                        print(f"           --> CURRENT PRICE: ${current_price:.4f} <--")
+                        current_price_inserted = True
+                    
+                    # Display price level with distance percentage
+                    distance_pct = abs(price - current_price) / current_price * 100
+                    trend_arrow = "🔼" if price > current_price else "🔽"
+                    print(f"{trend_arrow} {name}: ${price:.4f} ({distance_pct:.2f}% away)")
+                
+                # If price is below all levels, add it at the end
+                if not current_price_inserted:
+                    print(f"           --> CURRENT PRICE: ${current_price:.4f} <--")
+            
+            # Technical Indicators Section
+            print("\n" + "-"*70)
+            print("📊 TECHNICAL INDICATORS")
+            print("-"*70)
+            
+            if 'indicators' in analysis:
+                # Organize indicators in columns
+                col_width = 25
+                
+                # RSI with colored status
+                rsi_value = analysis['indicators'].get('rsi', 0)
+                if rsi_value > 70:
+                    rsi_status = "OVERBOUGHT 🔴"
+                elif rsi_value < 30:
+                    rsi_status = "OVERSOLD 🟢"
+                else:
+                    rsi_status = "NEUTRAL ⚪"
+                
+                # MACD status
+                macd = analysis['indicators'].get('macd', 0)
+                macd_signal = analysis['indicators'].get('macd_signal', 0)
+                if macd > macd_signal:
+                    macd_status = "BULLISH 🟢"
+                else:
+                    macd_status = "BEARISH 🔴"
+                
+                # Stochastic status
+                stoch_k = analysis['indicators'].get('stoch_k', 50)
+                stoch_d = analysis['indicators'].get('stoch_d', 50)
+                if stoch_k > stoch_d:
+                    stoch_status = "BULLISH 🟢"
+                else:
+                    stoch_status = "BEARISH 🔴"
+                
+                # Format indicators in columns
+                print(f"RSI:      {rsi_value:.2f} ({rsi_status})".ljust(col_width) + 
+                      f"ADX:      {analysis['indicators'].get('adx', 0):.2f}")
+                print(f"MACD:     {macd:.4f} ({macd_status})".ljust(col_width) + 
+                      f"MACD Signal: {macd_signal:.4f}")
+                print(f"Stoch K:  {stoch_k:.2f}".ljust(col_width) + 
+                      f"Stoch D:    {stoch_d:.2f} ({stoch_status})")
+                
+                # Volume analysis
+                vol_change = analysis.get('volume_analysis', {}).get('volume_change', 0)
+                vol_trend = analysis.get('volume_analysis', {}).get('volume_trend', 'Neutral')
+                vol_emoji = "🟢" if vol_trend == "Increasing" else "🔴" if vol_trend == "Decreasing" else "⚪"
+                
+                print(f"Volume:   {vol_trend} {vol_emoji} ({vol_change:.2f}%)".ljust(col_width) + 
+                      f"ATR:        {analysis['risk_metrics'].get('atr', 0):.4f}")
             
             # Add scalping-specific information
             if 'rejection_event' in analysis and analysis['rejection_event']:
                 rejection = analysis['rejection_event']
-                print(f"\nScalping Setup ({rejection['type'].upper()}):")
-                print(f"• Level: ${rejection['price_level']:.4f}")
-                print(f"• Stop Loss: ${(rejection['price_level'] + (analysis['risk_metrics']['atr'] * 0.5)):.4f}")
-                print(f"• Target: ${(rejection['price_level'] + (analysis['risk_metrics']['atr'] * 0.75)):.4f}")
-                print(f"• Volume Confirmation: {'Yes' if rejection['volume_confirmation'] else 'No'}")
-                print(f"• Confirming Candles: {rejection['confirming_candles']}")
+                
+                print("\n" + "-"*70)
+                print(f"🎯 SCALPING SETUP: {rejection['type'].upper()}")
+                print("-"*70)
+                
+                # Format this as a table
+                print(f"Level:      ${rejection['price_level']:.4f}")
+                print(f"Stop Loss:  ${(rejection['price_level'] + (analysis['risk_metrics']['atr'] * 0.5)):.4f}")
+                print(f"Target:     ${(rejection['price_level'] + (analysis['risk_metrics']['atr'] * 0.75)):.4f}")
+                print(f"Volume:     {'✅ Confirmed' if rejection['volume_confirmation'] else '❌ Not Confirmed'}")
+                print(f"Candles:    {rejection['confirming_candles']} confirming")
             
-            if 'indicators' in analysis:
-                print("\nKey Indicators:")
-                for name, value in analysis['indicators'].items():
-                    if isinstance(value, float):
-                        print(f"  {name}: {value:.4f}")
-                    else:
-                        print(f"  {name}: {value}")
+            # Trading Opportunities Section
+            print("\n" + "-"*70)
+            print("💰 TRADING OPPORTUNITIES")
+            print("-"*70)
             
-            if 'risk_metrics' in analysis:
-                print("\nScalping Parameters:")
-                print(f"• ATR: ${analysis['risk_metrics']['atr']:.4f}")
-                print(f"• Suggested Stop: ${(analysis['current_price'] - analysis['risk_metrics']['atr'] * 0.5):.4f}")
-                print(f"• Suggested Target: ${(analysis['current_price'] + analysis['risk_metrics']['atr'] * 0.75):.4f}")
-                print(f"• Risk/Reward: 1.5")
-            
-            # Add potential scalping opportunities based on conditions
-            print("\nScalping Opportunities:")
+            opportunities_found = False
             
             # RSI-based opportunities
             if 'indicators' in analysis and 'rsi' in analysis['indicators']:
                 rsi = analysis['indicators']['rsi']
                 if rsi <= 30:
-                    print("• Oversold Bounce Opportunity (LONG):")
-                    print(f"  - Entry: ${analysis['current_price']:.4f}")
-                    print(f"  - Stop: ${(analysis['current_price'] - analysis['risk_metrics']['atr'] * 0.5):.4f}")
-                    print(f"  - Target: ${(analysis['current_price'] + analysis['risk_metrics']['atr'] * 0.75):.4f}")
+                    opportunities_found = True
+                    print("🟢 Oversold Bounce (LONG):")
+                    print(f"  Entry:  ${analysis['current_price']:.4f}")
+                    print(f"  Stop:   ${(analysis['current_price'] - analysis['risk_metrics']['atr'] * 0.5):.4f}")
+                    print(f"  Target: ${(analysis['current_price'] + analysis['risk_metrics']['atr'] * 0.75):.4f}")
+                    print(f"  R/R:    1.5")
                 elif rsi >= 70:
-                    print("• Overbought Reversal Opportunity (SHORT):")
-                    print(f"  - Entry: ${analysis['current_price']:.4f}")
-                    print(f"  - Stop: ${(analysis['current_price'] + analysis['risk_metrics']['atr'] * 0.5):.4f}")
-                    print(f"  - Target: ${(analysis['current_price'] - analysis['risk_metrics']['atr'] * 0.75):.4f}")
+                    opportunities_found = True
+                    print("🔴 Overbought Reversal (SHORT):")
+                    print(f"  Entry:  ${analysis['current_price']:.4f}")
+                    print(f"  Stop:   ${(analysis['current_price'] + analysis['risk_metrics']['atr'] * 0.5):.4f}")
+                    print(f"  Target: ${(analysis['current_price'] - analysis['risk_metrics']['atr'] * 0.75):.4f}")
+                    print(f"  R/R:    1.5")
             
             # Bollinger Bands opportunities
-            if all(k in analysis['indicators'] for k in ['bollinger_upper', 'bollinger_lower']):
+            if all(k in analysis.get('indicators', {}) for k in ['bollinger_upper', 'bollinger_lower']):
                 if analysis['current_price'] <= analysis['indicators']['bollinger_lower']:
-                    print("• Bollinger Band Bounce (LONG):")
-                    print(f"  - Entry: ${analysis['current_price']:.4f}")
-                    print(f"  - Stop: ${(analysis['current_price'] - analysis['risk_metrics']['atr'] * 0.5):.4f}")
-                    print(f"  - Target: ${(analysis['current_price'] + analysis['risk_metrics']['atr']):.4f}")
+                    if opportunities_found:
+                        print("")  # Add space between opportunities
+                    opportunities_found = True
+                    print("🟢 Bollinger Band Bounce (LONG):")
+                    print(f"  Entry:  ${analysis['current_price']:.4f}")
+                    print(f"  Stop:   ${(analysis['current_price'] - analysis['risk_metrics']['atr'] * 0.5):.4f}")
+                    print(f"  Target: ${(analysis['current_price'] + analysis['risk_metrics']['atr']):.4f}")
+                    print(f"  R/R:    2.0")
                 elif analysis['current_price'] >= analysis['indicators']['bollinger_upper']:
-                    print("• Bollinger Band Reversal (SHORT):")
-                    print(f"  - Entry: ${analysis['current_price']:.4f}")
-                    print(f"  - Stop: ${(analysis['current_price'] + analysis['risk_metrics']['atr'] * 0.5):.4f}")
-                    print(f"  - Target: ${(analysis['current_price'] - analysis['risk_metrics']['atr']):.4f}")
+                    if opportunities_found:
+                        print("")  # Add space between opportunities
+                    opportunities_found = True
+                    print("🔴 Bollinger Band Reversal (SHORT):")
+                    print(f"  Entry:  ${analysis['current_price']:.4f}")
+                    print(f"  Stop:   ${(analysis['current_price'] + analysis['risk_metrics']['atr'] * 0.5):.4f}")
+                    print(f"  Target: ${(analysis['current_price'] - analysis['risk_metrics']['atr']):.4f}")
+                    print(f"  R/R:    2.0")
             
-            print("\nRisk Management:")
-            print(f"• Maximum Position Size: 1% of account")
-            print(f"• Required Volume > {analysis['risk_metrics'].get('required_volume', 0):.2f}")
-            print(f"• Maximum Hold Time: 15 minutes")
-            print("• Use Market Orders for Entry/Exit")
+            if not opportunities_found:
+                print("No high-probability trading opportunities currently detected.")
             
-            print("=" * 50)
+            # Risk Management Section
+            print("\n" + "-"*70)
+            print("⚠️  RISK MANAGEMENT")
+            print("-"*70)
+            
+            print(f"Max Position:   1% of account")
+            print(f"Min Volume:     >{analysis['risk_metrics'].get('required_volume', 0):.2f}")
+            print(f"Max Hold Time:  15 minutes")
+            print(f"Order Type:     Market Orders")
+            
+            # Pattern Analysis if available
+            if 'patterns' in analysis and analysis['patterns'].get('type') != 'None':
+                print("\n" + "-"*70)
+                print("📐 CHART PATTERN ANALYSIS")
+                print("-"*70)
+                
+                pattern_type = analysis['patterns'].get('type', 'None')
+                pattern_confidence = analysis['patterns'].get('confidence', 0)
+                pattern_target = analysis['patterns'].get('target', 0)
+                
+                print(f"Pattern:   {pattern_type}")
+                print(f"Confidence: {pattern_confidence:.2f}")
+                if pattern_target > 0:
+                    print(f"Target:    ${pattern_target:.4f}")
+            
+            # Bottom border
+            print("\n" + "="*70)
             
             # Update last signal
             self.last_signal = analysis
