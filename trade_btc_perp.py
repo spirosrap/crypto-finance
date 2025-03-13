@@ -201,12 +201,20 @@ def main():
                       help='Place bracket orders for an already filled limit order')
     parser.add_argument('--order-id', type=str,
                       help='Order ID of the filled limit order')
+    # Add option to use bracket orders or separate orders
+    parser.add_argument('--use-bracket-orders', action='store_true', default=True,
+                      help='Use bracket orders instead of separate orders (default: True)')
+    parser.add_argument('--use-separate-orders', action='store_true',
+                      help='Use separate orders instead of bracket orders')
 
     args = parser.parse_args()
 
     try:
         # Initialize CoinbaseService
         cb_service = setup_coinbase()
+        
+        # Determine whether to use bracket orders or separate orders
+        use_bracket_orders = args.use_bracket_orders and not args.use_separate_orders
         
         # Handle placing bracket orders after fill
         if args.place_bracket:
@@ -222,7 +230,8 @@ def main():
                 size=args.size,
                 take_profit_price=args.tp,
                 stop_loss_price=args.sl,
-                leverage=str(args.leverage) if args.leverage else None
+                leverage=str(args.leverage) if args.leverage else None,
+                try_bracket_orders=use_bracket_orders
             )
             
             if "error" in result:
@@ -239,8 +248,19 @@ def main():
                 
             logger.info("Bracket orders placed successfully")
             print("\nBracket orders placed successfully!")
+            
+            # Check if we used separate TP/SL orders
+            if "tp_order_id" in result and "sl_order_id" in result:
+                print("Used separate take profit and stop loss orders:")
+                print(f"Take Profit Order ID: {result['tp_order_id']}")
+                print(f"Stop Loss Order ID: {result['sl_order_id']}")
+            
             print(f"Take Profit Price: ${result['tp_price']}")
             print(f"Stop Loss Price: ${result['sl_price']}")
+            
+            # Print message if available
+            if "message" in result:
+                print(f"\n{result['message']}")
             return
         
         # Regular order placement flow
@@ -297,7 +317,8 @@ def main():
                 entry_price=args.limit,
                 take_profit_price=args.tp,
                 stop_loss_price=args.sl,
-                leverage=str(args.leverage)
+                leverage=str(args.leverage),
+                try_bracket_orders=use_bracket_orders
             )
             
             if "error" in result:
@@ -325,11 +346,23 @@ def main():
                 size=size,
                 take_profit_price=args.tp,
                 stop_loss_price=args.sl,
-                leverage=str(args.leverage)
+                leverage=str(args.leverage),
+                try_bracket_orders=use_bracket_orders
             )
             
             if monitor_result['status'] == 'success':
                 print(f"\n{monitor_result['message']}")
+                
+                # Check if we used bracket orders
+                if "bracket_order_id" in monitor_result:
+                    print("Used bracket orders:")
+                    print(f"Bracket Order ID: {monitor_result['bracket_order_id']}")
+                # Check if we used separate TP/SL orders
+                elif "tp_order_id" in monitor_result and "sl_order_id" in monitor_result:
+                    print("Used separate take profit and stop loss orders:")
+                    print(f"Take Profit Order ID: {monitor_result['tp_order_id']}")
+                    print(f"Stop Loss Order ID: {monitor_result['sl_order_id']}")
+                
                 print(f"Take Profit Price: ${monitor_result['tp_price']}")
                 print(f"Stop Loss Price: ${monitor_result['sl_price']}")
             else:
@@ -347,19 +380,57 @@ def main():
                 size=size,
                 take_profit_price=args.tp,
                 stop_loss_price=args.sl,
-                leverage=str(args.leverage)
+                leverage=str(args.leverage),
+                try_bracket_orders=use_bracket_orders
             )
             
             if "error" in result:
-                print(f"\nError placing order: {result['error']}")
-                if isinstance(result['error'], dict):
-                    print(f"Error details: {result['error'].get('message', 'No message')}")
-                    print(f"Preview failure reason: {result['error'].get('preview_failure_reason', 'Unknown')}")
+                print(f"\nError placing order: Failed to place take profit and stop loss orders")
+                
+                # Check if market order was successful
+                if "order_id" in result:
+                    print("\nMarket order was successful, but take profit and stop loss orders failed.")
+                    print(f"Order ID: {result['order_id']}")
+                    
+                    # Print the error details
+                    if "bracket_error" in result:
+                        print(f"Error details: {result['bracket_error']}")
+                    else:
+                        print(f"Error details: {result['error']}")
+                    
+                    # Print the message if available
+                    if "message" in result:
+                        print(f"\n{result['message']}")
+                        
+                    # Suggest manual placement of bracket orders
+                    print("\nYou can try to manually place take profit and stop loss orders using:")
+                    print(f"python trade_btc_perp.py --place-bracket --order-id {result.get('order_id', 'YOUR_ORDER_ID')} --product {args.product} --size {size} --tp {args.tp} --sl {args.sl} --leverage {args.leverage}")
+                else:
+                    # Full error for market order
+                    print(f"Error details: {result['error']}")
+                    if isinstance(result['error'], dict):
+                        print(f"Error message: {result['error'].get('message', 'No message')}")
+                        print(f"Preview failure reason: {result['error'].get('preview_failure_reason', 'Unknown')}")
             else:
                 print("\nOrder placed successfully!")
                 print(f"Order ID: {result['order_id']}")
+                
+                # Check if we used bracket orders
+                if "bracket_order_id" in result:
+                    print("Used bracket orders:")
+                    print(f"Bracket Order ID: {result['bracket_order_id']}")
+                # Check if we used separate TP/SL orders
+                elif "tp_order_id" in result and "sl_order_id" in result:
+                    print("Used separate take profit and stop loss orders:")
+                    print(f"Take Profit Order ID: {result['tp_order_id']}")
+                    print(f"Stop Loss Order ID: {result['sl_order_id']}")
+                
                 print(f"Take Profit Price: ${result['tp_price']}")
                 print(f"Stop Loss Price: ${result['sl_price']}")
+                
+                # Print message if available
+                if "message" in result:
+                    print(f"\n{result['message']}")
             
     except Exception as e:
         logger.error(f"An error occurred: {e}")

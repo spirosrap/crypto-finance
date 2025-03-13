@@ -8,6 +8,8 @@ from typing import Tuple, List
 from historicaldata import HistoricalData
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from concurrent.futures import wait
+import traceback
+import threading
 
 class CoinbaseService:
     def __init__(self, api_key, api_secret):
@@ -164,6 +166,14 @@ class CoinbaseService:
             # Set end time to 30 days from now
             end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
 
+            # For bracket orders, we need to determine which price is the stop trigger price
+            # For BUY orders, the stop loss is below the entry price
+            # For SELL orders, the stop loss is above the entry price
+            stop_trigger_price = stop_loss_price
+
+            self.logger.info(f"Placing bracket order for {product_id}, side: {side}, size: {size}")
+            self.logger.info(f"Entry price: {entry_price}, Stop loss: {stop_loss_price}")
+
             if side.upper() == "BUY":
                 order = orders.trigger_bracket_order_gtd_buy(
                     self.client,
@@ -171,8 +181,7 @@ class CoinbaseService:
                     product_id=product_id,
                     base_size=str(size),
                     limit_price=str(entry_price),
-                    stop_trigger_price=str(stop_loss_price),
-                    take_profit_price=str(take_profit_price),
+                    stop_trigger_price=str(stop_trigger_price),
                     end_time=end_time
                 )
             elif side.upper() == "SELL":
@@ -182,18 +191,207 @@ class CoinbaseService:
                     product_id=product_id,
                     base_size=str(size),
                     limit_price=str(entry_price),
-                    stop_trigger_price=str(stop_loss_price),
-                    take_profit_price=str(take_profit_price),
+                    stop_trigger_price=str(stop_trigger_price),
                     end_time=end_time
                 )
             else:
                 raise ValueError("Invalid side. Must be 'BUY' or 'SELL'.")
 
+            self.logger.info(f"Bracket order response: {order}")
             return order
         except Exception as e:
-            print(f"Error placing bracket order: {e}")
-            return None            
- 
+            self.logger.error(f"Error placing bracket order: {e}")
+            return None
+
+    def place_market_bracket_order(self, product_id: str, side: str, size: float, 
+                                 take_profit_price: float, stop_loss_price: float,
+                                 leverage: str = None) -> dict:
+        """
+        Place a market order first and then place a bracket order for take profit and stop loss.
+        
+        Args:
+            product_id (str): The trading pair
+            side (str): Order side ('BUY' or 'SELL')
+            size (float): Size of the order in base currency
+            take_profit_price (float): Price to take profit
+            stop_loss_price (float): Price to stop loss
+            leverage (str, optional): Leverage value for margin trading
+            
+        Returns:
+            dict: Order details including market order and bracket order information
+        """
+        try:
+            # First preview the market order
+            self.logger.info(f"Previewing market order for {product_id}, side: {side}, size: {size}, leverage: {leverage}")
+            preview = self.client.preview_market_order(
+                product_id=product_id,
+                side=side.upper(),
+                base_size=str(size),
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            self.logger.info(f"Order preview response: {preview}")
+            
+            # Check preview response
+            if hasattr(preview, 'error_response'):
+                self.logger.error(f"Order preview failed: {preview.error_response}")
+                return {"error": preview.error_response}
+                
+            # Generate a unique client_order_id
+            client_order_id = f"market_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            # Place the initial market order
+            self.logger.info(f"Placing market order with client_order_id: {client_order_id}")
+            market_order = self.client.market_order(
+                client_order_id=client_order_id,
+                product_id=product_id,
+                side=side.upper(),
+                base_size=str(size),
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            # Log the raw market order response for debugging
+            self.logger.info(f"Raw market order response: {market_order}")
+            
+            if hasattr(market_order, 'error_response'):
+                self.logger.error(f"Failed to place market order: {market_order.error_response}")
+                return {"error": market_order.error_response}
+            
+            self.logger.info(f"Market order placed: {market_order}")
+            
+            # Extract order ID
+            order_id = None
+            if isinstance(market_order, dict):
+                if 'success_response' in market_order and 'order_id' in market_order['success_response']:
+                    order_id = market_order['success_response']['order_id']
+            elif hasattr(market_order, 'success_response'):
+                success_response = getattr(market_order, 'success_response')
+                if isinstance(success_response, dict) and 'order_id' in success_response:
+                    order_id = success_response['order_id']
+            
+            if not order_id:
+                self.logger.error(f"Could not find order ID in response: {market_order}")
+                return {"error": "Could not find order ID", "market_order": str(market_order)}
+            
+            self.logger.info(f"Extracted order ID: {order_id}")
+            
+            # Wait for market order to fill
+            self.logger.info("Waiting 5 seconds for market order to fill...")
+            time.sleep(5)
+            
+            # Get the order status
+            self.logger.info(f"Checking order status for order_id: {order_id}")
+            order_status = self.client.get_order(order_id=order_id)
+            self.logger.info(f"Order status response: {order_status}")
+            
+            # Check if order is filled
+            is_filled = False
+            if isinstance(order_status, dict) and 'order' in order_status:
+                is_filled = order_status['order'].get('status') == 'FILLED'
+            elif hasattr(order_status, 'order'):
+                order = getattr(order_status, 'order')
+                is_filled = getattr(order, 'status', None) == 'FILLED'
+            
+            if not is_filled:
+                self.logger.error(f"Market order not filled: {order_status}")
+                return {"error": "Market order not filled", "market_order": str(market_order)}
+            
+            # Now place the bracket order
+            self.logger.info("Market order filled. Placing bracket order...")
+            
+            # Get the current price to use as entry price for the bracket order
+            current_price = None
+            
+            # First try to get the average filled price from the order status
+            if isinstance(order_status, dict) and 'order' in order_status:
+                if 'average_filled_price' in order_status['order']:
+                    current_price = float(order_status['order']['average_filled_price'])
+                    self.logger.info(f"Using average filled price from order status: {current_price}")
+            elif hasattr(order_status, 'order'):
+                order = getattr(order_status, 'order')
+                if hasattr(order, 'average_filled_price'):
+                    current_price = float(getattr(order, 'average_filled_price'))
+                    self.logger.info(f"Using average filled price from order status: {current_price}")
+            
+            # If we couldn't get the average filled price, try to get the current price from market trades
+            if not current_price:
+                try:
+                    trades = self.client.get_market_trades(product_id=product_id, limit=1)
+                    if isinstance(trades, dict) and 'trades' in trades and trades['trades']:
+                        current_price = float(trades['trades'][0]['price'])
+                        self.logger.info(f"Using current price from market trades: {current_price}")
+                except Exception as e:
+                    self.logger.error(f"Error getting market trades: {str(e)}")
+            
+            # If we still don't have a price, try to get the best bid/ask
+            if not current_price:
+                try:
+                    book = self.client.get_product_book(product_id=product_id, limit=1)
+                    if isinstance(book, dict) and 'bids' in book and 'asks' in book:
+                        if book['bids'] and book['asks']:
+                            bid = float(book['bids'][0][0])
+                            ask = float(book['asks'][0][0])
+                            current_price = (bid + ask) / 2
+                            self.logger.info(f"Using mid price from order book: {current_price}")
+                except Exception as e:
+                    self.logger.error(f"Error getting product book: {str(e)}")
+            
+            if not current_price:
+                self.logger.error("Could not get current price for bracket order")
+                return {
+                    "error": "Could not get current price for bracket order",
+                    "market_order": str(market_order),
+                    "order_id": order_id
+                }
+            
+            # Place the bracket order
+            bracket_order = self.place_bracket_order(
+                product_id=product_id,
+                side=side,
+                size=size,
+                entry_price=current_price,  # Use current price as entry price
+                take_profit_price=take_profit_price,
+                stop_loss_price=stop_loss_price
+            )
+            
+            if not bracket_order:
+                self.logger.error("Failed to place bracket order")
+                return {
+                    "error": "Failed to place bracket order",
+                    "market_order": str(market_order),
+                    "order_id": order_id,
+                    "message": "Market order was successful, but bracket order failed. You may need to manually set take profit and stop loss orders."
+                }
+            
+            self.logger.info(f"Bracket order placed: {bracket_order}")
+            
+            # Extract bracket order ID
+            bracket_order_id = None
+            if isinstance(bracket_order, dict):
+                if 'success_response' in bracket_order and 'order_id' in bracket_order['success_response']:
+                    bracket_order_id = bracket_order['success_response']['order_id']
+            elif hasattr(bracket_order, 'success_response'):
+                success_response = getattr(bracket_order, 'success_response')
+                if isinstance(success_response, dict) and 'order_id' in success_response:
+                    bracket_order_id = success_response['order_id']
+            
+            return {
+                "market_order": str(market_order),
+                "status": "success",
+                "order_id": order_id,
+                "bracket_order_id": bracket_order_id,
+                "tp_price": take_profit_price,
+                "sl_price": stop_loss_price,
+                "message": "Market order successful. Bracket order placed for take profit and stop loss."
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error placing market bracket order: {str(e)}")
+            self.logger.exception("Full exception details:")
+            return {"error": str(e)}
+
     def calculate_trade_amount_and_fee(self, balance: float, price: float, is_buy: bool) -> Tuple[float, float]:
         """
         Calculate the trade amount and fee for a given balance and price.
@@ -312,12 +510,97 @@ class CoinbaseService:
 
     def place_market_order_with_targets(self, product_id: str, side: str, size: float, 
                                       take_profit_price: float, stop_loss_price: float,
-                                      leverage: str = None) -> dict:
+                                      leverage: str = None, try_bracket_orders: bool = True) -> dict:
         """
-        Place a market order followed by a bracket order for take profit and stop loss.
+        Place a market order followed by take profit and stop loss orders.
+        
+        Args:
+            product_id (str): The trading pair
+            side (str): Order side ('BUY' or 'SELL')
+            size (float): Size of the order in base currency
+            take_profit_price (float): Price to take profit
+            stop_loss_price (float): Price to stop loss
+            leverage (str, optional): Leverage value for margin trading
+            try_bracket_orders (bool): Whether to try using bracket orders (True) or separate orders (False)
+            
+        Returns:
+            dict: Order details
         """
         try:
+            # Check if this is a perpetual product
+            is_perpetual = "-PERP-" in product_id
+            
+            # For perpetual products, always use separate orders as bracket orders are not supported
+            if is_perpetual:
+                try_bracket_orders = False
+                self.logger.info("Perpetual product detected. Using separate take profit and stop loss orders.")
+            
+            if try_bracket_orders:
+                self.logger.info("Attempting to use bracket orders for take profit and stop loss")
+                result = self.place_market_bracket_order(
+                    product_id=product_id,
+                    side=side,
+                    size=size,
+                    take_profit_price=take_profit_price,
+                    stop_loss_price=stop_loss_price,
+                    leverage=leverage
+                )
+                
+                # If bracket order was successful, return the result
+                if "error" not in result:
+                    return result
+                    
+                # If bracket order failed, log the error and fall back to separate orders
+                self.logger.warning(f"Bracket order failed: {result.get('error')}. Falling back to separate orders.")
+                
+                # Check if market order was successful
+                if "order_id" in result:
+                    # Market order was successful, but bracket order failed
+                    # Use the order_id from the market order for separate orders
+                    order_id = result["order_id"]
+                    
+                    # Skip to placing separate orders
+                    self.logger.info("Market order was successful. Placing separate TP/SL orders.")
+                    
+                    # Place separate TP/SL orders
+                    separate_orders_result = self.place_separate_tp_sl_orders(
+                        product_id=product_id,
+                        side=side,
+                        size=size,
+                        take_profit_price=take_profit_price,
+                        stop_loss_price=stop_loss_price,
+                        leverage=leverage
+                    )
+                    
+                    # Check if separate orders were successful
+                    if "error" not in separate_orders_result:
+                        self.logger.info("Successfully placed separate TP/SL orders")
+                        # Return success with separate order IDs
+                        return {
+                            "market_order": result.get("market_order", ""),
+                            "status": "success",
+                            "order_id": order_id,
+                            "tp_price": take_profit_price,
+                            "sl_price": stop_loss_price,
+                            "tp_order_id": separate_orders_result.get("tp_order_id"),
+                            "sl_order_id": separate_orders_result.get("sl_order_id"),
+                            "message": "Market order successful. Used separate TP/SL orders after bracket order failed. Monitoring TP/SL orders to cancel remaining order when one is filled."
+                        }
+                    else:
+                        # Both bracket and separate orders failed
+                        return {
+                            "error": f"Failed to place take profit and stop loss orders: {separate_orders_result.get('error')}",
+                            "market_order": result.get("market_order", ""),
+                            "order_id": order_id,
+                            "message": "Market order was successful, but both bracket and separate TP/SL orders failed. You may need to manually set take profit and stop loss orders."
+                        }
+                
+                # If market order failed, return the error
+                return result
+            
+            # If try_bracket_orders is False, use the original implementation with separate orders
             # First preview the market order
+            self.logger.info(f"Previewing market order for {product_id}, side: {side}, size: {size}, leverage: {leverage}")
             preview = self.client.preview_market_order(
                 product_id=product_id,
                 side=side.upper(),
@@ -337,6 +620,7 @@ class CoinbaseService:
             client_order_id = f"market_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
             # Place the initial market order
+            self.logger.info(f"Placing market order with client_order_id: {client_order_id}")
             market_order = self.client.market_order(
                 client_order_id=client_order_id,
                 product_id=product_id,
@@ -346,22 +630,30 @@ class CoinbaseService:
                 margin_type="CROSS" if leverage else None
             )
             
+            # Log the raw market order response for debugging
+            self.logger.info(f"Raw market order response: {market_order}")
+            
             if hasattr(market_order, 'error_response'):
                 self.logger.error(f"Failed to place market order: {market_order.error_response}")
                 return {"error": market_order.error_response}
             
             self.logger.info(f"Market order placed: {market_order}")
             
-            # Extract order ID - Updated this section
+            # Extract order ID - Updated this section with more detailed logging
             order_id = None
-            if (isinstance(market_order, dict) and 
-                'success_response' in market_order and 
-                'order_id' in market_order['success_response']):
-                order_id = market_order['success_response']['order_id']
+            if isinstance(market_order, dict):
+                self.logger.debug("Market order response is a dictionary")
+                if 'success_response' in market_order:
+                    self.logger.debug("Found success_response in dictionary")
+                    if 'order_id' in market_order['success_response']:
+                        order_id = market_order['success_response']['order_id']
+                        self.logger.debug(f"Extracted order_id from success_response: {order_id}")
             elif hasattr(market_order, 'success_response'):
+                self.logger.debug("Market order has success_response attribute")
                 success_response = getattr(market_order, 'success_response')
                 if isinstance(success_response, dict) and 'order_id' in success_response:
                     order_id = success_response['order_id']
+                    self.logger.debug(f"Extracted order_id from success_response attribute: {order_id}")
             
             if not order_id:
                 self.logger.error(f"Could not find order ID in response: {market_order}")
@@ -369,88 +661,76 @@ class CoinbaseService:
             
             self.logger.info(f"Extracted order ID: {order_id}")
             
-            # Wait briefly for market order to fill
-            time.sleep(2)
+            # Wait longer for market order to fill - increased from 2 to 5 seconds
+            self.logger.info("Waiting 5 seconds for market order to fill...")
+            time.sleep(5)
             
             # Get the order status
+            self.logger.info(f"Checking order status for order_id: {order_id}")
             order_status = self.client.get_order(order_id=order_id)
             self.logger.info(f"Order status response: {order_status}")
             
-            # Check if order is filled - Updated this section
+            # Check if order is filled - Updated this section with more detailed logging
             is_filled = False
-            if isinstance(order_status, dict) and 'order' in order_status:
-                is_filled = order_status['order'].get('status') == 'FILLED'
+            if isinstance(order_status, dict):
+                self.logger.debug("Order status response is a dictionary")
+                if 'order' in order_status:
+                    self.logger.debug("Found order in dictionary")
+                    status = order_status['order'].get('status')
+                    self.logger.debug(f"Order status: {status}")
+                    is_filled = status == 'FILLED'
             elif hasattr(order_status, 'order'):
+                self.logger.debug("Order status has order attribute")
                 order = getattr(order_status, 'order')
-                is_filled = getattr(order, 'status', None) == 'FILLED'
+                status = getattr(order, 'status', None)
+                self.logger.debug(f"Order status from attribute: {status}")
+                is_filled = status == 'FILLED'
             
             if not is_filled:
                 self.logger.error(f"Market order not filled: {order_status}")
                 return {"error": "Market order not filled", "market_order": str(market_order)}
 
-            # Generate client_order_id for bracket order
-            bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            # Using separate TP/SL orders
+            self.logger.info("Using separate take profit and stop loss orders")
             
-            # Set end time to 30 days from now for GTD orders
-            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+            # Place separate TP/SL orders
+            separate_orders_result = self.place_separate_tp_sl_orders(
+                product_id=product_id,
+                side=side,
+                size=size,
+                take_profit_price=take_profit_price,
+                stop_loss_price=stop_loss_price,
+                leverage=leverage
+            )
             
-            # Place bracket order - use opposite side of market order
-            bracket_side = "SELL" if side.upper() == "BUY" else "BUY"
-            
-            # Place the bracket order
-            try:
-                if bracket_side == "SELL":
-                    bracket_order = self.client.trigger_bracket_order_gtd_sell(
-                        client_order_id=bracket_client_order_id,
-                        product_id=product_id,
-                        base_size=str(size),
-                        limit_price=str(take_profit_price),
-                        stop_trigger_price=str(stop_loss_price),
-                        end_time=end_time,
-                        leverage=leverage,
-                        margin_type="CROSS" if leverage else None
-                    )
-                else:
-                    bracket_order = self.client.trigger_bracket_order_gtd_buy(
-                        client_order_id=bracket_client_order_id,
-                        product_id=product_id,
-                        base_size=str(size),
-                        limit_price=str(take_profit_price),
-                        stop_trigger_price=str(stop_loss_price),
-                        end_time=end_time,
-                        leverage=leverage,
-                        margin_type="CROSS" if leverage else None
-                    )
-                    
-                if hasattr(bracket_order, 'error_response'):
-                    self.logger.error(f"Failed to place bracket order: {bracket_order.error_response}")
-                    return {
-                        "error": "Failed to place bracket order",
-                        "market_order": str(market_order),
-                        "bracket_error": bracket_order.error_response
-                    }
-                    
-                self.logger.info(f"Bracket order placed: {bracket_order}")
-                
-                # Return all order details
+            # Check if separate orders were successful
+            if "error" not in separate_orders_result:
+                self.logger.info("Successfully placed separate TP/SL orders")
+                # Return success with separate order IDs
                 return {
                     "market_order": str(market_order),
-                    "bracket_order": str(bracket_order),
                     "status": "success",
                     "order_id": order_id,
                     "tp_price": take_profit_price,
-                    "sl_price": stop_loss_price
+                    "sl_price": stop_loss_price,
+                    "tp_order_id": separate_orders_result.get("tp_order_id"),
+                    "sl_order_id": separate_orders_result.get("sl_order_id"),
+                    "message": "Market order successful. Used separate TP/SL orders. Monitoring TP/SL orders to cancel remaining order when one is filled."
                 }
+            else:
+                # Separate orders failed
+                self.logger.error(f"Failed to place separate TP/SL orders: {separate_orders_result['error']}")
                 
-            except Exception as e:
-                self.logger.error(f"Error placing bracket order: {str(e)}")
                 return {
-                    "error": f"Failed to place bracket order: {str(e)}",
-                    "market_order": str(market_order)
+                    "error": f"Failed to place take profit and stop loss orders: {separate_orders_result.get('error')}",
+                    "market_order": str(market_order),
+                    "order_id": order_id,
+                    "message": "Market order was successful, but take profit and stop loss orders failed. You may need to manually set take profit and stop loss orders."
                 }
                 
         except Exception as e:
             self.logger.error(f"Error placing market order with targets: {str(e)}")
+            self.logger.exception("Full exception details:")
             return {"error": str(e)}
 
     def place_limit_order_with_targets(self, product_id: str, side: str, size: float, 
@@ -543,9 +823,9 @@ class CoinbaseService:
 
     def place_bracket_after_fill(self, product_id: str, order_id: str, size: float,
                                take_profit_price: float, stop_loss_price: float,
-                               leverage: str = None) -> dict:
+                               leverage: str = None, try_bracket_orders: bool = True) -> dict:
         """
-        Place bracket orders (take profit and stop loss) after a limit order has been filled.
+        Place take profit and stop loss orders after a limit order has been filled.
         
         Args:
             product_id (str): The trading pair
@@ -554,9 +834,10 @@ class CoinbaseService:
             take_profit_price (float): Price to take profit
             stop_loss_price (float): Price to stop loss
             leverage (str, optional): Leverage value for margin trading
+            try_bracket_orders (bool): Whether to try using bracket orders (True) or separate orders (False)
             
         Returns:
-            dict: Bracket order details
+            dict: Order details
         """
         try:
             # Check if the original order is filled
@@ -565,6 +846,7 @@ class CoinbaseService:
             
             # Check if order is filled
             is_filled = False
+            side = None
             if isinstance(order_status, dict) and 'order' in order_status:
                 is_filled = order_status['order'].get('status') == 'FILLED'
                 side = order_status['order'].get('side')
@@ -580,63 +862,136 @@ class CoinbaseService:
                     "order_id": order_id
                 }
             
-            # Generate client_order_id for bracket order
-            bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            # Check if this is a perpetual product
+            is_perpetual = "-PERP-" in product_id
             
-            # Set end time to 30 days from now for GTD orders
-            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+            # For perpetual products, always use separate orders as bracket orders are not supported
+            if is_perpetual:
+                try_bracket_orders = False
+                self.logger.info("Perpetual product detected. Using separate take profit and stop loss orders.")
             
-            # Place bracket order - use opposite side of the filled limit order
-            bracket_side = "SELL" if side == "BUY" else "BUY"
-            
-            # Place the bracket order
-            try:
-                if bracket_side == "SELL":
-                    bracket_order = self.client.trigger_bracket_order_gtd_sell(
-                        client_order_id=bracket_client_order_id,
-                        product_id=product_id,
-                        base_size=str(size),
-                        limit_price=str(take_profit_price),
-                        stop_trigger_price=str(stop_loss_price),
-                        end_time=end_time,
-                        leverage=leverage,
-                        margin_type="CROSS" if leverage else None
-                    )
-                else:
-                    bracket_order = self.client.trigger_bracket_order_gtd_buy(
-                        client_order_id=bracket_client_order_id,
-                        product_id=product_id,
-                        base_size=str(size),
-                        limit_price=str(take_profit_price),
-                        stop_trigger_price=str(stop_loss_price),
-                        end_time=end_time,
-                        leverage=leverage,
-                        margin_type="CROSS" if leverage else None
-                    )
-                    
-                if hasattr(bracket_order, 'error_response'):
-                    self.logger.error(f"Failed to place bracket order: {bracket_order.error_response}")
+            if try_bracket_orders:
+                self.logger.info("Attempting to use bracket orders for take profit and stop loss")
+                
+                # Get the current price to use as entry price for the bracket order
+                current_price = None
+                
+                # First try to get the average filled price from the order status
+                if isinstance(order_status, dict) and 'order' in order_status:
+                    if 'average_filled_price' in order_status['order']:
+                        current_price = float(order_status['order']['average_filled_price'])
+                        self.logger.info(f"Using average filled price from order status: {current_price}")
+                    elif hasattr(order_status, 'order'):
+                        order = getattr(order_status, 'order')
+                        if hasattr(order, 'average_filled_price'):
+                            current_price = float(getattr(order, 'average_filled_price'))
+                            self.logger.info(f"Using average filled price from order status: {current_price}")
+                
+                # If we couldn't get the average filled price, try to get the current price from market trades
+                if not current_price:
+                    try:
+                        trades = self.client.get_market_trades(product_id=product_id, limit=1)
+                        if isinstance(trades, dict) and 'trades' in trades and trades['trades']:
+                            current_price = float(trades['trades'][0]['price'])
+                            self.logger.info(f"Using current price from market trades: {current_price}")
+                    except Exception as e:
+                        self.logger.error(f"Error getting market trades: {str(e)}")
+                
+                # If we still don't have a price, try to get the best bid/ask
+                if not current_price:
+                    try:
+                        book = self.client.get_product_book(product_id=product_id, limit=1)
+                        if isinstance(book, dict) and 'bids' in book and 'asks' in book:
+                            if book['bids'] and book['asks']:
+                                bid = float(book['bids'][0][0])
+                                ask = float(book['asks'][0][0])
+                                current_price = (bid + ask) / 2
+                                self.logger.info(f"Using mid price from order book: {current_price}")
+                    except Exception as e:
+                        self.logger.error(f"Error getting product book: {str(e)}")
+                
+                if not current_price:
+                    self.logger.error("Could not get current price for bracket order")
                     return {
-                        "error": "Failed to place bracket order",
-                        "bracket_error": bracket_order.error_response
+                        "error": "Could not get current price for bracket order",
+                        "order_id": order_id
                     }
+                
+                # Place the bracket order
+                bracket_order = self.place_bracket_order(
+                    product_id=product_id,
+                    side=side,
+                    size=size,
+                    entry_price=current_price,  # Use current price as entry price
+                    take_profit_price=take_profit_price,
+                    stop_loss_price=stop_loss_price
+                )
+                
+                if bracket_order:
+                    self.logger.info(f"Bracket order placed: {bracket_order}")
                     
-                self.logger.info(f"Bracket order placed: {bracket_order}")
-                
-                # Return bracket order details
+                    # Extract bracket order ID
+                    bracket_order_id = None
+                    if isinstance(bracket_order, dict):
+                        if 'success_response' in bracket_order and 'order_id' in bracket_order['success_response']:
+                            bracket_order_id = bracket_order['success_response']['order_id']
+                    elif hasattr(bracket_order, 'success_response'):
+                        success_response = getattr(bracket_order, 'success_response')
+                        if isinstance(success_response, dict) and 'order_id' in success_response:
+                            bracket_order_id = success_response['order_id']
+                    
+                    return {
+                        "status": "success",
+                        "order_id": order_id,
+                        "bracket_order_id": bracket_order_id,
+                        "tp_price": take_profit_price,
+                        "sl_price": stop_loss_price,
+                        "message": "Bracket order placed for take profit and stop loss."
+                    }
+                else:
+                    self.logger.error("Failed to place bracket order")
+                    self.logger.info("Falling back to separate take profit and stop loss orders")
+            
+            # Use separate TP/SL orders
+            self.logger.info("Using separate take profit and stop loss orders")
+            
+            # Place separate TP/SL orders
+            separate_orders_result = self.place_separate_tp_sl_orders(
+                product_id=product_id,
+                side=side,
+                size=size,
+                take_profit_price=take_profit_price,
+                stop_loss_price=stop_loss_price,
+                leverage=leverage
+            )
+            
+            # Check if separate orders were successful
+            if "error" not in separate_orders_result:
+                self.logger.info("Successfully placed separate TP/SL orders")
+                # Return success with separate order IDs
                 return {
-                    "bracket_order": str(bracket_order),
                     "status": "success",
+                    "order_id": order_id,
                     "tp_price": take_profit_price,
-                    "sl_price": stop_loss_price
+                    "sl_price": stop_loss_price,
+                    "tp_order_id": separate_orders_result.get("tp_order_id"),
+                    "sl_order_id": separate_orders_result.get("sl_order_id"),
+                    "message": "Used separate take profit and stop loss orders. Monitoring TP/SL orders to cancel remaining order when one is filled."
                 }
+            else:
+                # Separate orders failed
+                self.logger.error(f"Failed to place separate TP/SL orders: {separate_orders_result['error']}")
                 
-            except Exception as e:
-                self.logger.error(f"Error placing bracket order: {str(e)}")
-                return {"error": f"Failed to place bracket order: {str(e)}"}
+                return {
+                    "error": f"Failed to place take profit and stop loss orders: {separate_orders_result.get('error')}",
+                    "status": "error",
+                    "order_id": order_id,
+                    "message": "Original order was filled, but take profit and stop loss orders failed. You may need to manually set take profit and stop loss orders."
+                }
                 
         except Exception as e:
             self.logger.error(f"Error checking order status: {str(e)}")
+            self.logger.exception("Full exception details:")
             return {"error": str(e)}
 
     def cancel_all_orders(self, product_id: str = None):
@@ -919,9 +1274,10 @@ class CoinbaseService:
 
     def monitor_limit_order_and_place_bracket(self, product_id: str, order_id: str, size: float,
                                           take_profit_price: float, stop_loss_price: float,
-                                          leverage: str = None, max_wait_time: int = 3600) -> dict:
+                                          leverage: str = None, max_wait_time: int = 3600,
+                                          try_bracket_orders: bool = True) -> dict:
         """
-        Monitor a limit order until it's filled, then place bracket orders.
+        Monitor a limit order until it's filled, then place take profit and stop loss orders.
         
         Args:
             product_id (str): The trading pair
@@ -931,9 +1287,10 @@ class CoinbaseService:
             stop_loss_price (float): Price to stop loss
             leverage (str, optional): Leverage value for margin trading
             max_wait_time (int): Maximum time to wait for fill in seconds (default 1 hour)
+            try_bracket_orders (bool): Whether to try using bracket orders (True) or separate orders (False)
             
         Returns:
-            dict: Order status and bracket order details if filled
+            dict: Order status and take profit/stop loss order details if filled
         """
         start_time = time.time()
         check_interval = 5  # Check every 5 seconds
@@ -960,65 +1317,130 @@ class CoinbaseService:
                 self.logger.info(f"Order status: {status}")
                 
                 if status == 'FILLED':
-                    self.logger.info("Limit order filled! Placing bracket orders...")
+                    self.logger.info("Limit order filled! Placing take profit and stop loss orders...")
                     
-                    # Generate client_order_id for bracket order
-                    bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+                    # Check if this is a perpetual product
+                    is_perpetual = "-PERP-" in product_id
                     
-                    # Set end time to 30 days from now for GTD orders
-                    end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+                    # For perpetual products, always use separate orders as bracket orders are not supported
+                    if is_perpetual:
+                        try_bracket_orders = False
+                        self.logger.info("Perpetual product detected. Using separate take profit and stop loss orders.")
                     
-                    # Place bracket order - use opposite side of the filled limit order
-                    bracket_side = "SELL" if side == "BUY" else "BUY"
-                    
-                    try:
-                        if bracket_side == "SELL":
-                            bracket_order = self.client.trigger_bracket_order_gtd_sell(
-                                client_order_id=bracket_client_order_id,
-                                product_id=product_id,
-                                base_size=str(size),
-                                limit_price=str(take_profit_price),
-                                stop_trigger_price=str(stop_loss_price),
-                                end_time=end_time,
-                                leverage=leverage,
-                                margin_type="CROSS" if leverage else None
-                            )
-                        else:
-                            bracket_order = self.client.trigger_bracket_order_gtd_buy(
-                                client_order_id=bracket_client_order_id,
-                                product_id=product_id,
-                                base_size=str(size),
-                                limit_price=str(take_profit_price),
-                                stop_trigger_price=str(stop_loss_price),
-                                end_time=end_time,
-                                leverage=leverage,
-                                margin_type="CROSS" if leverage else None
-                            )
-                            
-                        if hasattr(bracket_order, 'error_response'):
-                            self.logger.error(f"Failed to place bracket order: {bracket_order.error_response}")
+                    if try_bracket_orders:
+                        self.logger.info("Attempting to use bracket orders for take profit and stop loss")
+                        
+                        # Get the current price to use as entry price for the bracket order
+                        current_price = None
+                        
+                        # First try to get the average filled price from the order status
+                        if isinstance(order_status, dict) and 'order' in order_status:
+                            if 'average_filled_price' in order_status['order']:
+                                current_price = float(order_status['order']['average_filled_price'])
+                                self.logger.info(f"Using average filled price from order status: {current_price}")
+                            elif hasattr(order_status, 'order'):
+                                order = getattr(order_status, 'order')
+                                if hasattr(order, 'average_filled_price'):
+                                    current_price = float(getattr(order, 'average_filled_price'))
+                                    self.logger.info(f"Using average filled price from order status: {current_price}")
+                        
+                        # If we couldn't get the average filled price, try to get the current price from market trades
+                        if not current_price:
+                            try:
+                                trades = self.client.get_market_trades(product_id=product_id, limit=1)
+                                if isinstance(trades, dict) and 'trades' in trades and trades['trades']:
+                                    current_price = float(trades['trades'][0]['price'])
+                                    self.logger.info(f"Using current price from market trades: {current_price}")
+                            except Exception as e:
+                                self.logger.error(f"Error getting market trades: {str(e)}")
+                        
+                        # If we still don't have a price, try to get the best bid/ask
+                        if not current_price:
+                            try:
+                                book = self.client.get_product_book(product_id=product_id, limit=1)
+                                if isinstance(book, dict) and 'bids' in book and 'asks' in book:
+                                    if book['bids'] and book['asks']:
+                                        bid = float(book['bids'][0][0])
+                                        ask = float(book['asks'][0][0])
+                                        current_price = (bid + ask) / 2
+                                        self.logger.info(f"Using mid price from order book: {current_price}")
+                            except Exception as e:
+                                self.logger.error(f"Error getting product book: {str(e)}")
+                        
+                        if not current_price:
+                            self.logger.error("Could not get current price for bracket order")
                             return {
                                 "status": "error",
-                                "message": "Limit order filled but failed to place bracket orders",
-                                "error": bracket_order.error_response
+                                "message": "Could not get current price for bracket order"
                             }
+                        
+                        # Place the bracket order
+                        bracket_order = self.place_bracket_order(
+                            product_id=product_id,
+                            side=side,
+                            size=size,
+                            entry_price=current_price,  # Use current price as entry price
+                            take_profit_price=take_profit_price,
+                            stop_loss_price=stop_loss_price
+                        )
+                        
+                        if bracket_order:
+                            self.logger.info(f"Bracket order placed: {bracket_order}")
                             
-                        self.logger.info(f"Bracket order placed successfully: {bracket_order}")
+                            # Extract bracket order ID
+                            bracket_order_id = None
+                            if isinstance(bracket_order, dict):
+                                if 'success_response' in bracket_order and 'order_id' in bracket_order['success_response']:
+                                    bracket_order_id = bracket_order['success_response']['order_id']
+                            elif hasattr(bracket_order, 'success_response'):
+                                success_response = getattr(bracket_order, 'success_response')
+                                if isinstance(success_response, dict) and 'order_id' in success_response:
+                                    bracket_order_id = success_response['order_id']
+                            
+                            return {
+                                "status": "success",
+                                "message": "Limit order filled and bracket order placed",
+                                "bracket_order_id": bracket_order_id,
+                                "tp_price": take_profit_price,
+                                "sl_price": stop_loss_price
+                            }
+                        else:
+                            self.logger.error("Failed to place bracket order")
+                            self.logger.info("Falling back to separate take profit and stop loss orders")
+                    
+                    # Use separate TP/SL orders
+                    self.logger.info("Using separate take profit and stop loss orders")
+                    
+                    # Place separate TP/SL orders
+                    separate_orders_result = self.place_separate_tp_sl_orders(
+                        product_id=product_id,
+                        side=side,
+                        size=size,
+                        take_profit_price=take_profit_price,
+                        stop_loss_price=stop_loss_price,
+                        leverage=leverage
+                    )
+                    
+                    # Check if separate orders were successful
+                    if "error" not in separate_orders_result:
+                        self.logger.info("Successfully placed separate TP/SL orders")
                         
                         return {
                             "status": "success",
-                            "message": "Limit order filled and bracket orders placed",
-                            "bracket_order": str(bracket_order),
+                            "message": "Limit order filled and take profit/stop loss orders placed. Monitoring TP/SL orders to cancel remaining order when one is filled.",
                             "tp_price": take_profit_price,
-                            "sl_price": stop_loss_price
+                            "sl_price": stop_loss_price,
+                            "tp_order_id": separate_orders_result.get("tp_order_id"),
+                            "sl_order_id": separate_orders_result.get("sl_order_id")
                         }
+                    else:
+                        # Separate orders failed
+                        self.logger.error(f"Failed to place separate TP/SL orders: {separate_orders_result['error']}")
                         
-                    except Exception as e:
-                        self.logger.error(f"Error placing bracket order: {str(e)}")
                         return {
                             "status": "error",
-                            "message": "Limit order filled but failed to place bracket orders",
-                            "error": str(e)
+                            "message": "Limit order filled but failed to place take profit and stop loss orders",
+                            "error": separate_orders_result.get("error")
                         }
                 
                 elif status == 'CANCELLED' or status == 'EXPIRED' or status == 'FAILED':
@@ -1032,6 +1454,7 @@ class CoinbaseService:
                 
             except Exception as e:
                 self.logger.error(f"Error monitoring order: {str(e)}")
+                self.logger.exception("Full exception details:")
                 return {
                     "status": "error",
                     "message": "Error monitoring limit order",
@@ -1093,3 +1516,279 @@ class CoinbaseService:
         except Exception as e:
             self.logger.error(f"Error fetching recent trades: {str(e)}")
             return []
+
+    def place_separate_tp_sl_orders(self, product_id: str, side: str, size: float, 
+                                  take_profit_price: float, stop_loss_price: float,
+                                  leverage: str = None) -> dict:
+        """
+        Place separate take profit and stop loss orders instead of using the bracket order API.
+        This is a fallback method when the bracket order API fails.
+        
+        Args:
+            product_id (str): The trading pair
+            side (str): Original order side ('BUY' or 'SELL')
+            size (float): Size of the position
+            take_profit_price (float): Price to take profit
+            stop_loss_price (float): Price to stop loss
+            leverage (str, optional): Leverage value for margin trading
+            
+        Returns:
+            dict: Order details
+        """
+        try:
+            # Determine the side for the exit orders (opposite of entry)
+            exit_side = "SELL" if side.upper() == "BUY" else "BUY"
+            
+            # Generate unique client_order_ids
+            tp_client_order_id = f"tp_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            sl_client_order_id = f"sl_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+            
+            # Set end time to 30 days from now for GTD orders
+            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+            
+            # Log the parameters
+            self.logger.info(f"Placing separate TP/SL orders for {product_id}")
+            self.logger.info(f"  Exit side: {exit_side}")
+            self.logger.info(f"  Size: {size}")
+            self.logger.info(f"  Take profit price: {take_profit_price}")
+            self.logger.info(f"  Stop loss price: {stop_loss_price}")
+            
+            # Place take profit order (limit order)
+            self.logger.info("Placing take profit order...")
+            tp_order = self.client.limit_order_gtd(
+                client_order_id=tp_client_order_id,
+                product_id=product_id,
+                side=exit_side,
+                base_size=str(size),
+                limit_price=str(take_profit_price),
+                end_time=end_time,
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            self.logger.info(f"Take profit order response: {tp_order}")
+            
+            # Check for errors in TP order
+            if hasattr(tp_order, 'error_response'):
+                self.logger.error(f"Failed to place take profit order: {tp_order.error_response}")
+                return {
+                    "error": "Failed to place take profit order",
+                    "tp_error": tp_order.error_response
+                }
+            
+            # Extract TP order ID
+            tp_order_id = None
+            if isinstance(tp_order, dict) and 'success_response' in tp_order and 'order_id' in tp_order['success_response']:
+                tp_order_id = tp_order['success_response']['order_id']
+            elif hasattr(tp_order, 'success_response'):
+                success_response = getattr(tp_order, 'success_response')
+                if isinstance(success_response, dict) and 'order_id' in success_response:
+                    tp_order_id = success_response['order_id']
+            
+            if not tp_order_id:
+                self.logger.error(f"Could not find order ID in TP response: {tp_order}")
+                return {"error": "Could not find take profit order ID"}
+            
+            self.logger.info(f"Take profit order placed with ID: {tp_order_id}")
+            
+            # Place stop loss order (stop order)
+            self.logger.info("Placing stop loss order...")
+            
+            # For a BUY position, stop loss is triggered when price falls BELOW stop price
+            # For a SELL position, stop loss is triggered when price rises ABOVE stop price
+            stop_direction = "STOP_DIRECTION_STOP_DOWN" if side.upper() == "BUY" else "STOP_DIRECTION_STOP_UP"
+            self.logger.info(f"  Stop direction: {stop_direction}")
+            
+            sl_order = self.client.stop_limit_order_gtd(
+                client_order_id=sl_client_order_id,
+                product_id=product_id,
+                side=exit_side,
+                base_size=str(size),
+                limit_price=str(stop_loss_price),
+                stop_price=str(stop_loss_price),
+                stop_direction=stop_direction,
+                end_time=end_time,
+                leverage=leverage,
+                margin_type="CROSS" if leverage else None
+            )
+            
+            self.logger.info(f"Stop loss order response: {sl_order}")
+            
+            # Check for errors in SL order
+            if hasattr(sl_order, 'error_response'):
+                self.logger.error(f"Failed to place stop loss order: {sl_order.error_response}")
+                # Try to cancel the TP order since SL failed
+                try:
+                    self.client.cancel_orders(order_ids=[tp_order_id])
+                    self.logger.info(f"Cancelled take profit order {tp_order_id} due to stop loss order failure")
+                except Exception as e:
+                    self.logger.error(f"Error cancelling SL order: {str(e)}")
+                
+                return {
+                    "error": "Failed to place stop loss order",
+                    "sl_error": sl_order.error_response,
+                    "tp_order_id": tp_order_id
+                }
+            
+            # Extract SL order ID
+            sl_order_id = None
+            if isinstance(sl_order, dict) and 'success_response' in sl_order and 'order_id' in sl_order['success_response']:
+                sl_order_id = sl_order['success_response']['order_id']
+            elif hasattr(sl_order, 'success_response'):
+                success_response = getattr(sl_order, 'success_response')
+                if isinstance(success_response, dict) and 'order_id' in success_response:
+                    sl_order_id = success_response['order_id']
+            
+            if not sl_order_id:
+                self.logger.error(f"Could not find order ID in SL response: {sl_order}")
+                # Try to cancel the TP order
+                try:
+                    self.client.cancel_orders(order_ids=[tp_order_id])
+                    self.logger.info(f"Cancelled take profit order {tp_order_id} due to stop loss order ID extraction failure")
+                except Exception as e:
+                    self.logger.error(f"Error cancelling SL order: {str(e)}")
+                
+                return {"error": "Could not find stop loss order ID", "tp_order_id": tp_order_id}
+            
+            self.logger.info(f"Stop loss order placed with ID: {sl_order_id}")
+            
+            # Start monitoring thread to cancel the remaining order when one is filled
+            self.monitor_tp_sl_orders(product_id, tp_order_id, sl_order_id)
+            
+            # Return success with both order IDs
+            return {
+                "status": "success",
+                "tp_order_id": tp_order_id,
+                "sl_order_id": sl_order_id,
+                "tp_price": take_profit_price,
+                "sl_price": stop_loss_price,
+                "message": "Separate take profit and stop loss orders placed successfully"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error placing separate TP/SL orders: {str(e)}")
+            self.logger.exception("Full exception details:")
+            return {"error": f"Failed to place separate TP/SL orders: {str(e)}"}
+
+    def monitor_tp_sl_orders(self, product_id: str, tp_order_id: str, sl_order_id: str, 
+                           max_monitor_time: int = 86400, check_interval: int = 30) -> None:
+        """
+        Monitor take profit and stop loss orders and cancel the remaining order when one is filled.
+        
+        Args:
+            product_id (str): The trading pair
+            tp_order_id (str): The take profit order ID
+            sl_order_id (str): The stop loss order ID
+            max_monitor_time (int): Maximum time to monitor in seconds (default 24 hours)
+            check_interval (int): Time between checks in seconds (default 30 seconds)
+        """
+        self.logger.info(f"Starting to monitor TP/SL orders for {product_id}")
+        self.logger.info(f"Take profit order ID: {tp_order_id}")
+        self.logger.info(f"Stop loss order ID: {sl_order_id}")
+        
+        # Start monitoring in a separate thread
+        monitor_thread = threading.Thread(
+            target=self._monitor_tp_sl_orders_thread,
+            args=(product_id, tp_order_id, sl_order_id, max_monitor_time, check_interval),
+            daemon=True  # Make thread a daemon so it doesn't prevent program exit
+        )
+        monitor_thread.start()
+        self.logger.info(f"Monitoring thread started for TP/SL orders")
+        
+    def _monitor_tp_sl_orders_thread(self, product_id: str, tp_order_id: str, sl_order_id: str, 
+                                   max_monitor_time: int, check_interval: int) -> None:
+        """
+        Thread function to monitor TP/SL orders and cancel the remaining order when one is filled.
+        """
+        start_time = time.time()
+        
+        while time.time() - start_time < max_monitor_time:
+            try:
+                # Check if orders still exist
+                tp_order_exists = True
+                sl_order_exists = True
+                
+                # Check take profit order status
+                try:
+                    tp_order_status = self.client.get_order(order_id=tp_order_id)
+                    
+                    # Extract status
+                    tp_status = None
+                    if isinstance(tp_order_status, dict) and 'order' in tp_order_status:
+                        tp_status = tp_order_status['order'].get('status')
+                    elif hasattr(tp_order_status, 'order'):
+                        order = getattr(tp_order_status, 'order')
+                        tp_status = getattr(order, 'status', None)
+                    
+                    self.logger.debug(f"TP order status: {tp_status}")
+                    
+                    # If order is not found or is canceled/filled, mark as not existing
+                    if tp_status in ['FILLED', 'CANCELLED', 'EXPIRED', 'FAILED'] or tp_status is None:
+                        tp_order_exists = False
+                        
+                        # If order is filled, log it
+                        if tp_status == 'FILLED':
+                            self.logger.info(f"Take profit order {tp_order_id} has been filled!")
+                except Exception as e:
+                    self.logger.warning(f"Error checking TP order status: {str(e)}")
+                    tp_order_exists = False
+                
+                # Check stop loss order status
+                try:
+                    sl_order_status = self.client.get_order(order_id=sl_order_id)
+                    
+                    # Extract status
+                    sl_status = None
+                    if isinstance(sl_order_status, dict) and 'order' in sl_order_status:
+                        sl_status = sl_order_status['order'].get('status')
+                    elif hasattr(sl_order_status, 'order'):
+                        order = getattr(sl_order_status, 'order')
+                        sl_status = getattr(order, 'status', None)
+                    
+                    self.logger.debug(f"SL order status: {sl_status}")
+                    
+                    # If order is not found or is canceled/filled, mark as not existing
+                    if sl_status in ['FILLED', 'CANCELLED', 'EXPIRED', 'FAILED'] or sl_status is None:
+                        sl_order_exists = False
+                        
+                        # If order is filled, log it
+                        if sl_status == 'FILLED':
+                            self.logger.info(f"Stop loss order {sl_order_id} has been filled!")
+                except Exception as e:
+                    self.logger.warning(f"Error checking SL order status: {str(e)}")
+                    sl_order_exists = False
+                
+                # If take profit is filled or doesn't exist, cancel stop loss
+                if not tp_order_exists and sl_order_exists:
+                    self.logger.info(f"Take profit order completed. Cancelling stop loss order {sl_order_id}")
+                    try:
+                        result = self.client.cancel_orders(order_ids=[sl_order_id])
+                        self.logger.info(f"Cancel result for SL order: {result}")
+                        break  # Exit the monitoring loop
+                    except Exception as e:
+                        self.logger.error(f"Error cancelling SL order: {str(e)}")
+                
+                # If stop loss is filled or doesn't exist, cancel take profit
+                if not sl_order_exists and tp_order_exists:
+                    self.logger.info(f"Stop loss order completed. Cancelling take profit order {tp_order_id}")
+                    try:
+                        result = self.client.cancel_orders(order_ids=[tp_order_id])
+                        self.logger.info(f"Cancel result for TP order: {result}")
+                        break  # Exit the monitoring loop
+                    except Exception as e:
+                        self.logger.error(f"Error cancelling TP order: {str(e)}")
+                
+                # If both orders are gone, exit the loop
+                if not tp_order_exists and not sl_order_exists:
+                    self.logger.info("Both TP and SL orders are no longer active. Stopping monitoring.")
+                    break
+                
+                # Wait before next check
+                time.sleep(check_interval)
+                
+            except Exception as e:
+                self.logger.error(f"Error in TP/SL monitoring thread: {str(e)}")
+                self.logger.exception("Full exception details:")
+                time.sleep(check_interval)  # Wait before retrying
+        
+        self.logger.info(f"TP/SL monitoring for {product_id} completed or timed out")

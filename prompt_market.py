@@ -1205,7 +1205,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             '--size', str(size_usd),
             '--leverage', str(leverage),
             '--tp', str(cmd_target_price),
-            '--sl', str(cmd_stop_loss)
+            '--sl', str(cmd_stop_loss),
+            '--use-separate-orders'
         ]
         
         # Add limit price only if using limit order and conditions are met
