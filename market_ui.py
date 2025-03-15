@@ -1330,6 +1330,7 @@ class MarketAnalyzerUI:
             capturing_trade_output = False
             order_placed = False
             trade_completed = False
+            output = ""  # Initialize output variable
             
             # Read output in real-time with non-blocking I/O
             while True:
@@ -1337,20 +1338,21 @@ class MarketAnalyzerUI:
                 ret = select.select(reads, [], [])
                 for fd in ret[0]:
                     if fd == process.stdout.fileno():
-                        output = process.stdout.readline()
-                        if output:
-                            self.queue.put(("append", output))
+                        output_line = process.stdout.readline()
+                        if output_line:
+                            self.queue.put(("append", output_line))
+                            output += output_line  # Accumulate output
                             
                             # Start capturing trade output when we see a JSON recommendation or order summary
-                            if "{\"BUY AT\":" in output or "{\"SELL AT\":" in output or "=== Order Summary ===" in output:
+                            if "{\"BUY AT\":" in output_line or "{\"SELL AT\":" in output_line or "=== Order Summary ===" in output_line:
                                 capturing_trade_output = True
-                                trade_output_buffer = output
+                                trade_output_buffer = output_line
                             # Continue capturing trade output
                             elif capturing_trade_output:
-                                trade_output_buffer += output
+                                trade_output_buffer += output_line
                             
                             # Update status based on output
-                            if "Order placed successfully" in output:
+                            if "Order placed successfully" in output_line:
                                 self.queue.put(("status", "Order placed successfully"))
                                 order_placed = True
                                 
@@ -1359,17 +1361,17 @@ class MarketAnalyzerUI:
                                     self.save_trade_output(trade_output_buffer)
                         
                         # Check for trade completion indicators
-                        if "Take profit hit" in output or "TP hit" in output:
+                        if "Take profit hit" in output_line or "TP hit" in output_line:
                             self.queue.put(("status", "Trade completed - Take Profit hit"))
                             trade_completed = True
                             # Record as a win
                             self.record_trade_result("win")
-                        elif "Stop loss hit" in output or "SL hit" in output:
+                        elif "Stop loss hit" in output_line or "SL hit" in output_line:
                             self.queue.put(("status", "Trade completed - Stop Loss hit"))
                             trade_completed = True
                             # Record as a loss
                             self.record_trade_result("loss")
-                        elif "Position closed" in output:
+                        elif "Position closed" in output_line:
                             # Try to determine if it was a win or loss
                             result = self.detect_trade_result(trade_output_buffer)
                             if result:
