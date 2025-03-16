@@ -224,9 +224,9 @@ class MarketAnalyzerUI:
         model_display_names = {
             "o1_mini": "o1_mini",
             "o3_mini": "o3_mini",
-            "o3_mini_effort": "o3_mini (medium effort)",
+            "o3_mini_effort": "o3_mini_effort",
             "deepseek": "deepseek",
-            "reasoner": "deepseek-reasoner",
+            "reasoner": "reasoner",
             "grok": "grok",
             "gpt4o": "gpt4o",
             "hyperbolic": "hyperbolic"
