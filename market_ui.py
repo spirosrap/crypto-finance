@@ -191,7 +191,7 @@ class MarketAnalyzerUI:
             sidebar_container, 
             values=products, 
             variable=self.product_var,
-            command=lambda x: self.save_settings()
+            command=lambda x: (self.update_training_time(), self.save_settings())
         )
         product_menu.pack(pady=(0,10))  # Reduced padding
         
@@ -1856,14 +1856,16 @@ class MarketAnalyzerUI:
         try:
             cwd = os.getcwd()
             granularity_formatted = granularity.lower().replace('_', ' ')
+            product = self.product_var.get().lower().replace('-', '_')
             
             model_paths = [
-                f"models/ml_model_btc_usdc_{granularity_formatted.replace(' ', '_')}.joblib",
-                f"models/btc_usdc_{granularity_formatted.replace(' ', '_')}_prediction_model.joblib",
-                f"models/model_{granularity.lower()}.joblib",
-                f"models/model_{granularity}.joblib",
-                f"model_{granularity.lower()}.joblib",
-                f"model_{granularity}.joblib"
+                f"models/{product}_{granularity_formatted.replace(' ', '_')}.joblib",
+                f"models/ml_model_{product}_{granularity_formatted.replace(' ', '_')}.joblib",
+                f"models/{product}_{granularity_formatted.replace(' ', '_')}_prediction_model.joblib",
+                f"models/model_{product}_{granularity.lower()}.joblib",
+                f"models/model_{product}_{granularity}.joblib",
+                f"model_{product}_{granularity.lower()}.joblib",
+                f"model_{product}_{granularity}.joblib"
             ]
             
             # Create models directory if it doesn't exist
