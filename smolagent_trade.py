@@ -2,7 +2,14 @@ import os
 import subprocess
 from smolagents import CodeAgent, DuckDuckGoSearchTool, OpenAIServerModel
 import argparse
-from config import DEEPSEEK_KEY
+from config import DEEPSEEK_KEY, SERPAPI_KEY
+
+# Add SerpAPI search tool if available
+try:
+    from smolagents import SerpAPISearchTool
+    SERPAPI_AVAILABLE = True
+except ImportError:
+    SERPAPI_AVAILABLE = False
 
 # Retrieve API token from environment variables
 #hf_api_key = os.getenv("HUGGINGFACE_API_KEY")
@@ -45,7 +52,7 @@ model = get_model("o3-mini")
 
 
 
-def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR', model_name='o3-mini', use_web_search=True):
+def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR', model_name='o3-mini', search_tool='duckduckgo'):
     # Run market_analyzer.py as a subprocess
     with open(os.devnull, 'w') as devnull:
         try:
@@ -76,8 +83,18 @@ def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR', model_name='o3-m
     try:
         model = get_model(model_name)
         
-        # Set up agent with or without web search tool
-        tools = [DuckDuckGoSearchTool()] if use_web_search else []
+        # Set up agent with the selected search tool
+        tools = []
+        if search_tool != 'none':
+            if search_tool == 'serpapi' and SERPAPI_AVAILABLE and SERPAPI_KEY:
+                print("Using SerpAPI for web search")
+                tools = [SerpAPISearchTool(api_key=SERPAPI_KEY)]
+            elif search_tool == 'duckduckgo':
+                print("Using DuckDuckGo for web search")
+                tools = [DuckDuckGoSearchTool()]
+            else:
+                print(f"Search tool '{search_tool}' not available or configured. Running without web search.")
+        
         agent = CodeAgent(tools=tools, model=model, max_steps=10)
         
         # Run the agent with the prompt
@@ -85,12 +102,12 @@ def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR', model_name='o3-m
     except Exception as e:
         if model_name == "deepseek-reasoner":
             print(f"Error with deepseek-reasoner: {e}")
-            print("\nNote: deepseek-reasoner may have compatibility issues with DuckDuckGoSearchTool.")
-            print("You can try using --model deepseek-chat instead or use --no-web-search to disable web search.")
+            print("\nNote: deepseek-reasoner may have compatibility issues with web search tools.")
+            print("You can try using --model deepseek-chat instead or use --search-tool none to disable web search.")
         else:
             print(f"Error running analysis with {model_name}: {e}")
             if "DuckDuckGoSearchException" in str(e) or "Ratelimit" in str(e):
-                print("\nYou've hit DuckDuckGo rate limits. Try using --no-web-search to disable web search.")
+                print("\nYou've hit DuckDuckGo rate limits. Try using --search-tool serpapi or --search-tool none.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run market analysis for crypto trading')
@@ -101,8 +118,9 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default='o3-mini',
                       choices=['o3-mini', 'deepseek-chat', 'deepseek-reasoner'],
                       help='Model to use for analysis (default: o3-mini)')
-    parser.add_argument('--no-web-search', action='store_true',
-                      help='Disable web search to avoid DuckDuckGo rate limits')
+    parser.add_argument('--search-tool', type=str, default='duckduckgo',
+                      choices=['duckduckgo', 'serpapi', 'none'],
+                      help='Web search tool to use (default: duckduckgo)')
     
     args = parser.parse_args()
     
@@ -110,5 +128,5 @@ if __name__ == "__main__":
         product_id=args.product_id, 
         granularity=args.granularity, 
         model_name=args.model,
-        use_web_search=not args.no_web_search
+        search_tool=args.search_tool
     )
