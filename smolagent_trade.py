@@ -15,7 +15,7 @@ from config import DEEPSEEK_KEY
 
 
 model = OpenAIServerModel(
-    model_id="gpt-4o",
+    model_id="o3-mini",
     api_key=os.environ["OPENAI_API_KEY"],
     # custom_role_conversions={
     #     "system": "user",  # Convert system to user
