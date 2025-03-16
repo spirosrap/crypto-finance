@@ -1,5 +1,10 @@
 from openai import OpenAI
 from openai import APIError
+import sys
+import os
+
+# Add the parent directory to sys.path to import from config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import DEEPSEEK_KEY
 
 client = OpenAI(api_key=DEEPSEEK_KEY, base_url="https://api.deepseek.com")
@@ -38,3 +43,6 @@ if response:
     if response:
         print(reasoning_content)
         print(content)
+
+
+        
