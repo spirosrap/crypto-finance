@@ -226,6 +226,7 @@ class MarketAnalyzerUI:
             "o3_mini": "o3_mini",
             "o3_mini_effort": "o3_mini (medium effort)",
             "deepseek": "deepseek",
+            "reasoner": "deepseek-reasoner",
             "grok": "grok",
             "gpt4o": "gpt4o",
             "hyperbolic": "hyperbolic"
