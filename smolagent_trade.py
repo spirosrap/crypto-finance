@@ -13,15 +13,29 @@ from config import DEEPSEEK_KEY
 # Initialize the model with the API key
 #model = HfApiModel(model_id=model_id, token=hf_api_key)
 
+# Initialize model based on command line arguments
+def get_model(model_name):
+    if model_name == "o3-mini":
+        return OpenAIServerModel(
+            model_id="o3-mini",
+            api_key=os.environ["OPENAI_API_KEY"],
+        )
+    elif model_name == "deepseek-chat":
+        return OpenAIServerModel(
+            model_id="deepseek-chat",
+            api_base="https://api.deepseek.com",
+            api_key=DEEPSEEK_KEY,
+        )
+    elif model_name == "deepseek-reasoner":
+        return OpenAIServerModel(
+            model_id="deepseek-reasoner",
+            api_base="https://api.deepseek.com",
+            api_key=DEEPSEEK_KEY,
+        )
+    else:
+        raise ValueError(f"Unknown model: {model_name}")
 
-model = OpenAIServerModel(
-    model_id="o3-mini",
-    api_key=os.environ["OPENAI_API_KEY"],
-    # custom_role_conversions={
-    #     "system": "user",  # Convert system to user
-    #     "tool-response": "user",  # Convert tool-response to assistant instead of tool
-    # }
-)
+model = get_model("o3-mini")
 
 # model = OpenAIServerModel(
 #     model_id="deepseek-chat", # deepseek-reasoner
@@ -31,7 +45,7 @@ model = OpenAIServerModel(
 
 
 
-def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR'):
+def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR', model_name='o3-mini', use_web_search=True):
     # Run market_analyzer.py as a subprocess
     with open(os.devnull, 'w') as devnull:
         try:
@@ -58,11 +72,25 @@ def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR'):
     Show potential profit and loss and conservative/aggressive target prices.
     """
 
-    # Initialize the agent
-    agent = CodeAgent(tools=[DuckDuckGoSearchTool()], model=model, max_steps=10)
-
-    # Run the agent with the prompt
-    agent.run(prompt)
+    # Initialize the model and agent
+    try:
+        model = get_model(model_name)
+        
+        # Set up agent with or without web search tool
+        tools = [DuckDuckGoSearchTool()] if use_web_search else []
+        agent = CodeAgent(tools=tools, model=model, max_steps=10)
+        
+        # Run the agent with the prompt
+        agent.run(prompt)
+    except Exception as e:
+        if model_name == "deepseek-reasoner":
+            print(f"Error with deepseek-reasoner: {e}")
+            print("\nNote: deepseek-reasoner may have compatibility issues with DuckDuckGoSearchTool.")
+            print("You can try using --model deepseek-chat instead or use --no-web-search to disable web search.")
+        else:
+            print(f"Error running analysis with {model_name}: {e}")
+            if "DuckDuckGoSearchException" in str(e) or "Ratelimit" in str(e):
+                print("\nYou've hit DuckDuckGo rate limits. Try using --no-web-search to disable web search.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run market analysis for crypto trading')
@@ -70,7 +98,17 @@ if __name__ == "__main__":
                       help='Trading pair to analyze (default: BTC-USDC)')
     parser.add_argument('--granularity', type=str, default='ONE_HOUR',
                       help='Candle interval (default: ONE_HOUR)')
+    parser.add_argument('--model', type=str, default='o3-mini',
+                      choices=['o3-mini', 'deepseek-chat', 'deepseek-reasoner'],
+                      help='Model to use for analysis (default: o3-mini)')
+    parser.add_argument('--no-web-search', action='store_true',
+                      help='Disable web search to avoid DuckDuckGo rate limits')
     
     args = parser.parse_args()
     
-    run_analysis(product_id=args.product_id, granularity=args.granularity)
+    run_analysis(
+        product_id=args.product_id, 
+        granularity=args.granularity, 
+        model_name=args.model,
+        use_web_search=not args.no_web_search
+    )
