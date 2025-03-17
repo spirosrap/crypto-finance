@@ -400,7 +400,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         raise ValueError("API client not properly initialized")
 
     # Add timeout parameter for API calls
-    TIMEOUT = 30  # 30 seconds timeout
+    TIMEOUT = 90  # 90 seconds timeout
 
     # Define provider at the start of the function
     provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
@@ -473,6 +473,8 @@ For a HOLD recommendation when no trade is advisable:
    - For a BUY signal: R/R_RATIO = (SELL BACK AT - BUY AT) / (BUY AT - STOP LOSS)
    - Ensure the R/R ratio is positive and above 1.0 for most trades
    - For choppy markets, require R/R ratio of 2.0 or higher
+   - Use CONSERVATIVE profit targets - aim for 1.5-3% profit rather than 5%+ targets
+   - Prefer smaller, more achievable targets over ambitious ones
 
 3. **Timeframe Alignment** (new feature)
    - Provide a TIMEFRAME_ALIGNMENT score between 0-100
@@ -485,6 +487,8 @@ For a HOLD recommendation when no trade is advisable:
    - For a BUY signal: STOP LOSS must be below BUY AT price
    - Set IS_VALID to false if these conditions are not met
    - Provide a REASONING field with a brief explanation of the signal (30-50 words)
+   - For BUY signals, target price should be no more than 3-5% above entry in most market conditions
+   - For SELL signals, target price should be no more than 3-5% below entry in most market conditions
 
 5. **Rating System**
    - Signal CONFIDENCE: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'
@@ -1120,6 +1124,35 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         if stop_loss_pct > profit_pct:
             print(f"{COLORS['red']}Invalid risk-reward: Stop loss distance ({stop_loss_pct:.2f}%) is larger than take profit distance ({profit_pct:.2f}%){COLORS['end']}")
             return
+            
+        # NEW: Check for conservative targets (3-5% profit target maximum)
+        MAX_PROFIT_TARGET = 5.0  # Maximum 5% profit target
+        if profit_pct > MAX_PROFIT_TARGET:
+            # Calculate a more conservative target price
+            if side == 'BUY':
+                conservative_target = entry_price * (1 + (MAX_PROFIT_TARGET / 100))
+                print(f"{COLORS['yellow']}Adjusting to conservative target: Original target ${target_price:.2f} ({profit_pct:.2f}%) → ${conservative_target:.2f} ({MAX_PROFIT_TARGET:.2f}%){COLORS['end']}")
+                target_price = conservative_target
+            else:  # SELL
+                conservative_target = entry_price * (1 - (MAX_PROFIT_TARGET / 100))
+                print(f"{COLORS['yellow']}Adjusting to conservative target: Original target ${target_price:.2f} ({profit_pct:.2f}%) → ${conservative_target:.2f} ({MAX_PROFIT_TARGET:.2f}%){COLORS['end']}")
+                target_price = conservative_target
+            
+            # Recalculate profit percentage with conservative target
+            profit_pct = MAX_PROFIT_TARGET
+            
+            # Recalculate R/R ratio with new target
+            if side == 'BUY':
+                rr_ratio = (target_price - entry_price) / (entry_price - stop_loss)
+            else:  # SELL
+                rr_ratio = (entry_price - target_price) / (stop_loss - entry_price)
+                
+            print(f"{COLORS['yellow']}Updated R/R ratio with conservative target: {rr_ratio:.2f}{COLORS['end']}")
+            
+            # If new R/R ratio is too low, don't execute
+            if rr_ratio < 1.0:
+                print(f"{COLORS['red']}Trade not executed: Conservative target results in R/R ratio below 1.0{COLORS['end']}")
+                return
 
         # Calculate position size with improved risk management
         base_size_usd = margin * leverage
