@@ -4,7 +4,7 @@
   "tp_sl": 0.2,
   "limit_order": false,
   "product": "BTC-USDC",
-  "model": "o3_mini",
+  "model": "reasoner",
   "granularity": "ONE_HOUR",
   "execute_trades": true,
   "alignment_enabled": false
