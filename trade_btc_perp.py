@@ -283,8 +283,32 @@ def main():
         print(f"Current Price: ${current_price}")
         print(f"Take Profit Price: ${args.tp}")
         print(f"Stop Loss Price: ${args.sl}")
+        
+        # Calculate and display potential profit/loss in dollars
+        if args.side == 'BUY':
+            potential_profit = (args.tp - current_price) / current_price * args.size
+            potential_loss = (current_price - args.sl) / current_price * args.size
+        else:  # SELL
+            potential_profit = (current_price - args.tp) / current_price * args.size
+            potential_loss = (args.sl - current_price) / current_price * args.size
+            
+        print(f"Potential Profit: ${potential_profit:.2f}")
+        print(f"Potential Loss: ${potential_loss:.2f}")
+        print(f"Risk/Reward Ratio: 1:{(potential_profit/potential_loss):.2f}")
+        
         if args.limit:
             print(f"Limit Price: ${args.limit}")
+            # Recalculate potential profit/loss based on limit price
+            if args.side == 'BUY':
+                limit_potential_profit = (args.tp - args.limit) / args.limit * args.size
+                limit_potential_loss = (args.limit - args.sl) / args.limit * args.size
+            else:  # SELL
+                limit_potential_profit = (args.limit - args.tp) / args.limit * args.size
+                limit_potential_loss = (args.sl - args.limit) / args.limit * args.size
+                
+            print(f"Potential Profit (from limit): ${limit_potential_profit:.2f}")
+            print(f"Potential Loss (from limit): ${limit_potential_loss:.2f}")
+            print(f"Risk/Reward Ratio (from limit): 1:{(limit_potential_profit/limit_potential_loss):.2f}")
         else:
             print("Order Type: Market")
         
