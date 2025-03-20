@@ -6,7 +6,7 @@ import argparse
 import time
 
 # Set up logging with more detailed format
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.WARNING,
                    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
