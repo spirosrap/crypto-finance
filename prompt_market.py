@@ -1100,8 +1100,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         profit_pct = abs((target_price - entry_price) / entry_price * 100)
         
         # Check if stop loss is less than minimum threshold
-        if stop_loss_pct < 1.0:
-            print(f"{COLORS['red']}Trade not executed: Stop loss percentage ({stop_loss_pct:.2f}%) is less than minimum threshold of 1.0%{COLORS['end']}")
+        if stop_loss_pct < 0.5:
+            print(f"{COLORS['red']}Trade not executed: Stop loss percentage ({stop_loss_pct:.2f}%) is less than minimum threshold of 0.5%{COLORS['end']}")
             return
         
         # Validate stop loss direction based on trade direction
