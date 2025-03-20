@@ -534,10 +534,29 @@ def main():
         
     print(f"Overall Risk Level: {results.get('reversal_risk', 'Unknown')}")
     print(f"Risk Score: {results.get('risk_score', 0.0):.2f}")
-    print(f"Market Direction: {results.get('market_direction', 'Unknown')}")
     
-    if results.get('potential_reversal') and results.get('potential_reversal') != 'none':
-        print(f"Potential Reversal: {results.get('potential_reversal', 'None')}")
+    # Make current market direction more prominent
+    market_direction = results.get('market_direction', 'Unknown')
+    potential_reversal = results.get('potential_reversal', 'none')
+    
+    print(f"\nCurrent Market Direction: {market_direction.upper()}")
+    
+    if potential_reversal and potential_reversal != 'none':
+        print(f"Potential Reversal: {potential_reversal}")
+        
+        # Add directional arrow indicators
+        if "bearish" in potential_reversal:
+            print("Direction: ↑ → ↓ (Uptrend to Downtrend)")
+        elif "bullish" in potential_reversal:
+            print("Direction: ↓ → ↑ (Downtrend to Uptrend)")
+    else:
+        # Add continuation indicator
+        if market_direction == "uptrend":
+            print("Direction: ↗️ (Continuing Uptrend)")
+        elif market_direction == "downtrend":
+            print("Direction: ↘️ (Continuing Downtrend)")
+        else:
+            print("Direction: ↔️ (Sideways/Neutral)")
     
     print("\nRisk Factors:")
     factors = results.get('factors', {})
