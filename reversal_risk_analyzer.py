@@ -498,11 +498,11 @@ class ReversalRiskAnalyzer:
 def main():
     parser = argparse.ArgumentParser(description='Analyze market reversal risk')
     
-    parser.add_argument('--product', type=str, default='BTC-USDC',
+    parser.add_argument('--product_id', type=str, default='BTC-USDC',
                         choices=['BTC-USDC', 'ETH-USDC', 'SOL-USDC', 'DOGE-USDC', 'XRP-USDC'],
                         help='Trading product (default: BTC-USDC)')
     
-    parser.add_argument('--interval', type=str, default='ONE_HOUR',
+    parser.add_argument('--granularity', type=str, default='ONE_HOUR',
                         choices=['ONE_MINUTE', 'FIVE_MINUTE', 'FIFTEEN_MINUTE', 'ONE_HOUR', 'SIX_HOUR', 'ONE_DAY'],
                         help='Candle interval (default: ONE_HOUR)')
     
@@ -517,15 +517,15 @@ def main():
     
     # Create reversal risk analyzer
     analyzer = ReversalRiskAnalyzer(
-        product_id=args.product,
-        candle_interval=args.interval
+        product_id=args.product_id,
+        candle_interval=args.granularity
     )
     
     # Analyze reversal risk
     results = analyzer.analyze_reversal_risk()
     
     # Display results
-    print(f"\n=== Reversal Risk Analysis for {args.product} ({args.interval}) ===")
+    print(f"\n=== Reversal Risk Analysis for {args.product_id} ({args.granularity}) ===")
     print(f"Timestamp: {results.get('timestamp', 'N/A')}")
     
     if "error" in results:
