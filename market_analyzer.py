@@ -329,7 +329,7 @@ class MarketAnalyzer:
     using technical analysis indicators.
     """
 
-    def __init__(self, product_id: str = 'DOGE-USDC', candle_interval: str = 'ONE_HOUR', force_retrain: bool = False):
+    def __init__(self, product_id: str = 'BTC-USDC', candle_interval: str = 'ONE_HOUR', force_retrain: bool = False):
         self.product_id = product_id
         self.candle_interval = candle_interval
         self.force_retrain = force_retrain
@@ -4336,7 +4336,7 @@ def parse_arguments():
         '--product_id',
         type=str,
         choices=VALID_PRODUCTS,
-        default='DOGE-USDC',
+        default='BTC-USDC',
         help='Product ID to analyze (e.g., BTC-USDC, ETH-USDC)'
     )
     
