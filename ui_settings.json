@@ -1,5 +1,5 @@
 {
-  "margin": "60",
+  "margin": "100",
   "leverage": 10,
   "tp_sl": 0.2,
   "limit_order": false,
