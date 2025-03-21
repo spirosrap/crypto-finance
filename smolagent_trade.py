@@ -44,14 +44,6 @@ def get_model(model_name):
 
 model = get_model("o3-mini")
 
-# model = OpenAIServerModel(
-#     model_id="deepseek-chat", # deepseek-reasoner
-#     api_base="https://api.deepseek.com", # Leave this blank to query OpenAI servers.
-#     api_key=DEEPSEEK_KEY, # Switch to the API key for the server you're targeting.
-# )
-
-
-
 def run_analysis(product_id='BTC-USDC', granularity='ONE_HOUR', model_name='o3-mini', search_tool='duckduckgo'):
     # Run market_analyzer.py as a subprocess
     with open(os.devnull, 'w') as devnull:
