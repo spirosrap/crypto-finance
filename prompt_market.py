@@ -50,7 +50,13 @@ MODEL_CONFIG = {
     'gpt4o': 'gpt-4o',
     'deepseek-r1': 'deepseek/deepseek-r1',  # Add DeepSeek R1 model
     'ollama': 'deepseek-r1:7b',  # Add Ollama model
-    'hyperbolic': 'deepseek-ai/DeepSeek-R1'  # Add Hyperbolic model
+    'hyperbolic': 'deepseek-ai/DeepSeek-R1',  # Add Hyperbolic model
+    'ollama-1.5b': 'deepseek-r1:1.5b',  # Add DeepSeek R1 1.5B model
+    'ollama-8b': 'deepseek-r1:8b',  # Add DeepSeek R1 8B model
+    'ollama-14b': 'deepseek-r1:14b',  # Add DeepSeek R1 14B model
+    'ollama-32b': 'deepseek-r1:32b',  # Add DeepSeek R1 32B model
+    'ollama-70b': 'deepseek-r1:70b',  # Add DeepSeek R1 70B model
+    'ollama-671b': 'deepseek-r1:671b'  # Add DeepSeek R1 671B model
 }
 
 # Add Ollama API configuration
@@ -390,20 +396,27 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                               use_o1: bool = False, use_o1_mini: bool = False, 
                               use_o3_mini: bool = False, use_o3_mini_effort: bool = False, 
                               use_gpt4o: bool = False, use_deepseek_r1: bool = False, 
-                              use_ollama: bool = False, use_hyperbolic: bool = False,
+                              use_ollama: bool = False, use_ollama_1_5b: bool = False,
+                              use_ollama_8b: bool = False, use_ollama_14b: bool = False,
+                              use_ollama_32b: bool = False, use_ollama_70b: bool = False,
+                              use_ollama_671b: bool = False, use_hyperbolic: bool = False,
                               alignment_score: int = 50) -> tuple[Optional[str], Optional[str]]:
     """Get trading recommendation with improved retry logic and debug output."""
     # Debug output moved to logging
     logging.debug("Starting trading recommendation request")
     """Get trading recommendation with improved retry logic."""
-    if not (use_ollama or use_hyperbolic) and client is None:
+    if not (use_ollama or use_ollama_1_5b or use_ollama_8b or use_ollama_14b or 
+            use_ollama_32b or use_ollama_70b or use_ollama_671b or use_hyperbolic) and client is None:
         raise ValueError("API client not properly initialized")
 
     # Add timeout parameter for API calls
     TIMEOUT = 90  # 90 seconds timeout
 
     # Define provider at the start of the function
-    provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if use_ollama else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
+    provider = 'Hyperbolic' if use_hyperbolic else ('Ollama' if (use_ollama or use_ollama_1_5b or 
+              use_ollama_8b or use_ollama_14b or use_ollama_32b or use_ollama_70b or 
+              use_ollama_671b) else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else 
+              ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
 
     SYSTEM_PROMPT = """
 You are a professional crypto trading advisor with expertise in technical analysis and market psychology.
@@ -514,12 +527,28 @@ Remember to maintain the exact JSON format specified above, with all fields incl
                 raise Exception("Failed to get response from Hyperbolic API")
             return recommendation, None
             
-        if use_ollama:
+        if use_ollama or use_ollama_1_5b or use_ollama_8b or use_ollama_14b or use_ollama_32b or use_ollama_70b or use_ollama_671b:
             logging.debug("Using Ollama API")
             # Format prompt for Ollama
             full_prompt = f"{SYSTEM_PROMPT}\n\nHere's the latest market analysis for {product_id}:\n{market_analysis}\nTimeframe alignment score: {alignment_score}/100\nBased on this analysis and the timeframe alignment score, provide a trading recommendation."
             logging.debug("Calling Ollama API...")
-            recommendation = get_ollama_response(full_prompt, MODEL_CONFIG['ollama'])
+            
+            # Select the appropriate model size
+            model_key = 'ollama'  # default 7B
+            if use_ollama_1_5b:
+                model_key = 'ollama-1.5b'
+            elif use_ollama_8b:
+                model_key = 'ollama-8b'
+            elif use_ollama_14b:
+                model_key = 'ollama-14b'
+            elif use_ollama_32b:
+                model_key = 'ollama-32b'
+            elif use_ollama_70b:
+                model_key = 'ollama-70b'
+            elif use_ollama_671b:
+                model_key = 'ollama-671b'
+                
+            recommendation = get_ollama_response(full_prompt, MODEL_CONFIG[model_key])
             logging.debug("Ollama API response received")
             if recommendation is None:
                 raise Exception("Failed to get response from Ollama API")
@@ -1498,7 +1527,19 @@ def main():
     model_group.add_argument('--use_deepseek_r1', action='store_true',
                         help='Use DeepSeek R1 model via OpenRouter API')
     model_group.add_argument('--use_ollama', action='store_true',
-                        help='Use local Ollama model for offline analysis')
+                        help='Use local Ollama model (7B) for offline analysis')
+    model_group.add_argument('--use_ollama_1_5b', action='store_true',
+                        help='Use local Ollama DeepSeek R1 1.5B model')
+    model_group.add_argument('--use_ollama_8b', action='store_true',
+                        help='Use local Ollama DeepSeek R1 8B model')
+    model_group.add_argument('--use_ollama_14b', action='store_true',
+                        help='Use local Ollama DeepSeek R1 14B model')
+    model_group.add_argument('--use_ollama_32b', action='store_true',
+                        help='Use local Ollama DeepSeek R1 32B model')
+    model_group.add_argument('--use_ollama_70b', action='store_true',
+                        help='Use local Ollama DeepSeek R1 70B model')
+    model_group.add_argument('--use_ollama_671b', action='store_true',
+                        help='Use local Ollama DeepSeek R1 671B model')
     model_group.add_argument('--use_hyperbolic', action='store_true',
                         help='Use Hyperbolic API for market analysis')
                         
@@ -1513,8 +1554,15 @@ def main():
 
     args = parser.parse_args()
 
-    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_gpt45_preview, args.use_o1, args.use_o1_mini, args.use_o3_mini, args.use_o3_mini_effort, args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic]) > 1:
-        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_gpt45_preview, --use_o1, --use_o1_mini, --use_o3_mini, --use_o3_mini_effort, --use_gpt4o, --use_deepseek_r1, --use_ollama, or --use_hyperbolic.")
+    if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_gpt45_preview, 
+            args.use_o1, args.use_o1_mini, args.use_o3_mini, args.use_o3_mini_effort, 
+            args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
+            args.use_ollama_8b, args.use_ollama_14b, args.use_ollama_32b, args.use_ollama_70b,
+            args.use_ollama_671b, args.use_hyperbolic]) > 1:
+        print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_gpt45_preview, " +
+              "--use_o1, --use_o1_mini, --use_o3_mini, --use_o3_mini_effort, --use_gpt4o, " +
+              "--use_deepseek_r1, --use_ollama, --use_ollama_1_5b, --use_ollama_8b, " +
+              "--use_ollama_14b, --use_ollama_32b, --use_ollama_70b, --use_ollama_671b, or --use_hyperbolic.")
         exit(1)
 
     try:
@@ -1598,7 +1646,9 @@ def main():
             args.use_deepseek, args.use_reasoner, args.use_grok, 
             args.use_gpt45_preview, args.use_o1, args.use_o1_mini, 
             args.use_o3_mini, args.use_o3_mini_effort, args.use_gpt4o, 
-            args.use_deepseek_r1, args.use_ollama, args.use_hyperbolic,
+            args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
+            args.use_ollama_8b, args.use_ollama_14b, args.use_ollama_32b,
+            args.use_ollama_70b, args.use_ollama_671b, args.use_hyperbolic,
             alignment_score=alignment_score
         )
         if recommendation is None:
