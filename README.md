@@ -2,7 +2,7 @@
 
 ## Overview
 
-This Bitcoin Trading Bot implements a sophisticated trading strategy using traditional technical analysis signals, machine learning models (XGBoost), and advanced market analysis techniques for price prediction. It offers both backtesting capabilities and live trading simulations.
+This Bitcoin Trading Bot implements a sophisticated trading strategy using traditional technical analysis signals, machine learning models (XGBoost), and advanced market analysis techniques for price prediction. It offers both backtesting capabilities and live trading simulations, with support for high-frequency trading and AI-powered market analysis.
 
 ## Key Components
 
@@ -14,9 +14,14 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 6. **MLSignal**: Implements machine learning models for price prediction and signal generation.
 7. **BitcoinPredictionModel**: A specialized model for Bitcoin price prediction.
 8. **HighFrequencyStrategy**: Implements high-frequency trading strategies.
+9. **MarketAnalyzer**: Advanced market analysis with multi-timeframe support.
+10. **ScalpingAnalyzer**: Specialized tool for high-frequency trading.
+11. **MemeAnalyzer**: Tool for analyzing memecoin opportunities.
+12. **PerformanceAnalyzer**: Trading performance tracking and analysis.
 
 ## Features
 
+### Core Features
 - Backtesting over specified date ranges
 - Live (paper) trading simulations
 - Multiple technical indicators (RSI, MACD, Bollinger Bands, etc.)
@@ -28,6 +33,16 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 - Machine learning integration for enhanced prediction accuracy
 - High-frequency trading capabilities
 - Sentiment analysis integration
+
+### Advanced Features
+- AI-powered market analysis with multiple model support (GPT-4, DeepSeek, Grok)
+- Real-time scalping analysis with order book depth integration
+- Memecoin opportunity detection and analysis
+- Multi-timeframe pattern recognition
+- Advanced risk metrics (VaR, Sharpe Ratio, Sortino Ratio)
+- Comprehensive performance tracking and analysis
+- Graphical user interface for market analysis and trading
+- Automated trading with configurable parameters
 
 ## Prerequisites
 
@@ -41,10 +56,12 @@ conda activate myenv
 ### Required Libraries
 
 ```bash
-pip install coinbase-advanced-py statsmodels yfinance newsapi-python schedule hmmlearn scikit-learn scikit-fuzzy xgboost joblib scikit-optimize shap pandas numpy matplotlib tqdm requests talib
+pip install coinbase-advanced-py statsmodels yfinance newsapi-python schedule hmmlearn scikit-learn scikit-fuzzy xgboost joblib scikit-optimize shap pandas numpy matplotlib tqdm requests talib customtkinter tensorflow torch transformers openai deepseek-api openrouter-py hyperbolic-api
 ```
 
-### TA-Lib Installation
+### Additional Dependencies
+
+#### TA-Lib Installation
 
 TA-Lib is required for technical analysis calculations. Install it based on your operating system:
 
@@ -68,6 +85,12 @@ After installing TA-Lib, install the Python wrapper:
 pip install TA-Lib
 ```
 
+#### GUI Dependencies
+For the Market Analyzer UI:
+```bash
+pip install customtkinter pillow
+```
+
 ## Installation
 
 1. Clone the repository:
@@ -81,239 +104,250 @@ pip install TA-Lib
    pip install -r requirements.txt
    ```
 
-3. Create a `config.py` file in the root directory of the project with your API keys.
+3. Create a `config.py` file in the root directory with your API keys.
+
+4. (Optional) Install additional model weights:
+   ```bash
+   python setup_models.py
+   ```
 
 ## API Keys Configuration
 
 The bot requires several API keys for full functionality. Create a `config.py` file in the root directory with the following structure:
 
 ```python
-# Coinbase API credentials
-API_KEY = "your_coinbase_api_key"
-API_SECRET = "your_coinbase_api_secret"
+class Config:
+    # Required API Keys
+    COINBASE = {
+        'API_KEY': 'your_coinbase_api_key',
+        'API_SECRET': 'your_coinbase_api_secret'
+    }
 
-# News API for sentiment analysis
-NEWS_API_KEY = "your_news_api_key"
+    # Optional - For Enhanced Analysis
+    NEWS_API_KEY = 'your_news_api_key'  # For sentiment analysis
+    
+    # Optional - For Social Sentiment
+    TWITTER = {
+        'BEARER_TOKEN': 'your_twitter_bearer_token',
+        'CONSUMER_KEY': 'your_twitter_consumer_key',
+        'CONSUMER_SECRET': 'your_twitter_consumer_secret',
+        'ACCESS_TOKEN': 'your_twitter_access_token',
+        'ACCESS_TOKEN_SECRET': 'your_twitter_access_token_secret'
+    }
+    
+    # Optional - For AI-Enhanced Analysis
+    AI_MODELS = {
+        'OPENAI_KEY': 'your_openai_api_key',
+        'DEEPSEEK_KEY': 'your_deepseek_api_key',
+        'OPENROUTER_KEY': 'your_openrouter_api_key',
+        'XAI_KEY': 'your_xai_api_key',
+        'HYPERBOLIC_KEY': 'your_hyperbolic_api_key',
+        'GROK_KEY': 'your_grok_api_key'
+    }
 
-# Twitter API credentials (optional - for social sentiment analysis)
-BEARER_TOKEN = "your_twitter_bearer_token"
-CONSUMER_KEY = "your_twitter_consumer_key"
-CONSUMER_SECRET = "your_twitter_consumer_secret"
-ACCESS_TOKEN = "your_twitter_access_token"
-ACCESS_TOKEN_SECRET = "your_twitter_access_token_secret"
+    # Trading Parameters
+    TRADING = {
+        'DEFAULT_LEVERAGE': 1,
+        'MAX_LEVERAGE': 20,
+        'DEFAULT_STOP_LOSS_PCT': 1.0,
+        'DEFAULT_TAKE_PROFIT_PCT': 2.0,
+        'RISK_PER_TRADE': 0.01
+    }
 
-# AI Model API Keys (optional - for enhanced analysis)
-OPENAI_KEY = "your_openai_api_key"
-DEEPSEEK_KEY = "your_deepseek_api_key"
-OPENROUTER_API_KEY = "your_openrouter_api_key"
-XAI_KEY = "your_xai_api_key"
-HYPERBOLIC_KEY = "your_hyperbolic_api_key"
+    # Analysis Parameters
+    ANALYSIS = {
+        'DEFAULT_TIMEFRAMES': ['ONE_MINUTE', 'FIVE_MINUTE', 'ONE_HOUR'],
+        'SENTIMENT_ENABLED': True,
+        'AI_ANALYSIS_ENABLED': True,
+        'HFT_ENABLED': False
+    }
 ```
 
 ### Required API Keys
-- **Coinbase API**: Required for trading functionality
-  - Get your API credentials from [Coinbase Advanced Trade](https://www.coinbase.com/settings/api)
-  - Set `API_KEY` and `API_SECRET`
+1. **Coinbase API** (Required)
+   - Get your API credentials from [Coinbase Advanced Trade](https://www.coinbase.com/settings/api)
+   - Required for all trading functionality
+   - Set `COINBASE['API_KEY']` and `COINBASE['API_SECRET']`
 
 ### Optional API Keys
-- **News API**: For news sentiment analysis
-  - Get your API key from [NewsAPI](https://newsapi.org/)
-  - Set `NEWS_API_KEY`
+2. **News API** (Optional)
+   - Get your API key from [NewsAPI](https://newsapi.org/)
+   - Used for news sentiment analysis
+   - Set `NEWS_API_KEY`
 
-- **Twitter API**: For social sentiment analysis
-  - Get your credentials from [Twitter Developer Portal](https://developer.twitter.com/)
-  - Set all Twitter-related keys
+3. **Twitter API** (Optional)
+   - Get your credentials from [Twitter Developer Portal](https://developer.twitter.com/)
+   - Used for social sentiment analysis
+   - Configure all Twitter-related keys in the `TWITTER` dictionary
 
-- **AI Model Keys**: For enhanced market analysis
-  - OpenAI: Get from [OpenAI Platform](https://platform.openai.com/)
-  - DeepSeek: Get from DeepSeek's platform
-  - OpenRouter: Get from OpenRouter's platform
-  - XAI: Get from XAI's platform
-  - Hyperbolic: Get from Hyperbolic's platform
+4. **AI Model Keys** (Optional)
+   - Each key enables different AI analysis capabilities:
+     - OpenAI: Advanced market analysis ([Get Key](https://platform.openai.com/))
+     - DeepSeek: Pattern recognition ([Get Key](https://platform.deepseek.ai))
+     - OpenRouter: Multi-model analysis ([Get Key](https://openrouter.ai/))
+     - XAI: Explainable AI analysis ([Get Key](https://xai.com))
+     - Hyperbolic: Price prediction ([Get Key](https://hyperbolic.ai))
+     - Grok: Real-time market insights ([Get Key](https://grok.x.ai))
 
-### Security Notes
-- Never commit your `config.py` file to version control
-- Keep your API keys secure and rotate them periodically
-- Use environment variables in production environments
+### Configuration Notes
+- Store sensitive keys securely
+- Never commit `config.py` to version control
+- Use environment variables in production
 - Consider using a `.env` file for local development
+- Rotate API keys periodically
+- Monitor API usage and limits
+
+### Environment Variables
+You can also use environment variables instead of `config.py`:
+```bash
+export COINBASE_API_KEY="your_key"
+export COINBASE_API_SECRET="your_secret"
+# ... other environment variables
+```
 
 ## Usage
 
-The main program for the Bitcoin Trading Bot is `base.py`. Here are some common usage scenarios:
+The bot provides multiple tools and interfaces for different trading strategies and analysis needs.
 
-### Backtesting Options
+### Basic Trading Bot
 
-1. Specific date range:
-   ```bash
-   python base.py --start_date 2023-01-01 --end_date 2023-12-31
-   ```
-
-2. Bear market period:
-   ```bash
-   python base.py --bearmarket
-   ```
-
-3. Bull market period:
-   ```bash
-   python base.py --bullmarket
-   ```
-
-4. Year-to-date:
-   ```bash
-   python base.py --ytd
-   ```
-
-### Live Trading Simulation
-
-To run the program in live trading simulation mode:
+The main program (`base.py`) supports both backtesting and live trading:
 
 ```bash
+# Basic usage with default settings
 python base.py
+
+# Backtest with specific date range
+python base.py --start_date 2023-01-01 --end_date 2023-12-31
+
+# Live trading with specific product
+python base.py --product_id ETH-USD --live
+
+# High-frequency trading mode
+python base.py --hft --interval ONE_MINUTE
 ```
 
-### Additional Options
+### Market Analysis Tools
 
-- Skip backtesting:
-  ```bash
-  python base.py --skip_backtest
-  ```
-
-- Specify a different product ID (default is BTC-USDC):
-  ```bash
-  python base.py --product_id ETH-USD
-  ```
-
-- Change granularity:
-  ```bash
-  python base.py --granularity ONE_MINUTE
-  ```
-
-For a full list of options, run:
-```bash
-python base.py --help
-```
-
-## Advanced Usage
-
-### High-Frequency Trading
-
-To use the high-frequency trading strategy:
-
-```bash
-python high_frequency_strategy.py
-```
-
-### Running All Commands
-
-To run a series of backtests with different parameters:
-
-```bash
-python run_all_commands.py
-```
-
-### Continuous Backtesting
-
-For continuous backtesting:
-
-```bash
-python run_base.py
-```
-
-## Technical Analysis
-
-The `TechnicalAnalysis` class in `technicalanalysis.py` is a core component of our trading strategy. It implements various technical indicators and analysis methods to generate trading signals and assess market conditions.
-
-### Key Features
-
-- Multiple technical indicators (RSI, MACD, Bollinger Bands, Stochastic Oscillator, etc.)
-- Trend identification and analysis
-- Volume analysis and On-Balance Volume (OBV)
-- Market condition analysis (Bull/Bear market detection)
-- Dynamic support/resistance levels
-- Volatility analysis and ATR calculations
-- Fibonacci retracements
-- Ichimoku Cloud analysis
-
-## Machine Learning Integration
-
-The `MLSignal` class in `ml_model.py` integrates machine learning models to enhance prediction accuracy. It uses ensemble methods combining Random Forest, Gradient Boosting, and Logistic Regression models.
-
-## Contributing
-
-Contributions to improve the Bitcoin Trading Bot are welcome. Please follow these steps:
-
-1. Fork the repository
-2. Create a new branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
-## Disclaimer
-
-This Bitcoin Trading Bot is for educational and research purposes only. It is not intended to be used for actual trading. Always consult with a qualified financial advisor before making any investment decisions. The authors and contributors are not responsible for any financial losses incurred from using this software.
-
-## 🚀 Quick Start
-
-1. **Set up environment:**
+1. **Market Analyzer**
    ```bash
-   conda create -n btc-trader python=3.11
-   conda activate btc-trader
+   # Basic market analysis
+   python market_analyzer.py
+   
+   # Analysis with specific timeframe
+   python market_analyzer.py --interval FIFTEEN_MINUTE
+   
+   # Multi-timeframe analysis
+   python market_analyzer.py --timeframes ONE_MINUTE FIVE_MINUTE ONE_HOUR
    ```
 
-2. **Install dependencies:**
+2. **Scalping Analyzer**
    ```bash
-   pip install -r requirements.txt
+   # Real-time scalping analysis
+   python scalping_analyzer.py
+   
+   # Custom configuration
+   python scalping_analyzer.py --depth 10 --volume_threshold 1.5
    ```
 
-3. **Configure API keys:**
-   Create `config.py` with your API credentials:
-   ```python
-   API_KEY = "your_coinbase_api_key"
-   API_SECRET = "your_coinbase_api_secret"
-   NEWS_API_KEY = "your_news_api_key"  # Optional for sentiment analysis
-   ```
-
-   Replace `your_coinbase_api_key`, `your_coinbase_api_secret`, and `your_news_api_key` with your actual API keys from Coinbase and NewsAPI respectively.
-
-   Note: Keep your `config.py` file secure and never share it publicly or commit it to version control.
-
-4. **Run basic simulation:**
+3. **Memecoin Analyzer**
    ```bash
-   python base.py --ytd  # Backtest using year-to-date data
+   # Monitor memecoin opportunities
+   python memecoin_analyzer.py
+   
+   # Specific coin analysis
+   python memecoin_analyzer.py --coin DOGE
    ```
 
-## 📊 Trading Strategies
+### AI-Enhanced Analysis
 
-The bot combines multiple analysis methods for trading decisions:
+1. **AI Market Analysis**
+   ```bash
+   # Basic AI analysis
+   python prompt_market.py
+   
+   # Analysis with specific model
+   python prompt_market.py --model gpt4
+   ```
 
-1. **Technical Analysis**
-   - RSI (Relative Strength Index)
-   - MACD (Moving Average Convergence Divergence)
-   - Bollinger Bands
-   - Volume analysis
-   - Support/Resistance levels
-   - ATR (Average True Range)
+2. **Pattern Recognition**
+   ```bash
+   # Run pattern detection
+   python pattern_recognition.py
+   
+   # Save pattern analysis
+   python pattern_recognition.py --save_plots
+   ```
 
-2. **Machine Learning**
-   - XGBoost price prediction
-   - Random Forest classification
-   - Ensemble methods
-   - Feature engineering from technical indicators
+### Trading Tools
 
-3. **Market Analysis**
-   - Bull/Bear market detection
-   - Volatility tracking
-   - Trend analysis
-   - News sentiment integration
+1. **Trade BTC Perpetual**
+   ```bash
+   # Place a leveraged trade
+   python trade_btc_perp.py --side BUY --size 1000 --leverage 5 --tp 45000 --sl 43000
+   ```
 
-## 💻 Usage Examples
+2. **Position Management**
+   ```bash
+   # Close all positions
+   python close_positions.py
+   
+   # Cancel all orders
+   python cancel_orders.py
+   ```
 
-### Basic Backtesting
+3. **Trade Tracking**
+   ```bash
+   # View recent trades
+   python trade_tracker.py
+   
+   # Export trade history
+   python trade_tracker.py --days 30 --export CSV
+   ```
 
+### Graphical Interface
+
+Launch the Market Analyzer UI:
+```bash
+python market_ui.py
+```
+
+### Additional Tools
+
+1. **Performance Analysis**
+   ```bash
+   # Analyze trading performance
+   python trade_analyzer.py
+   
+   # Generate detailed report
+   python trade_analyzer.py --detailed --export PDF
+   ```
+
+2. **Data Management**
+   ```bash
+   # Convert trading data format
+   python convert_to_csv.py
+   
+   # Clean historical data
+   python clean_data.py
+   ```
+
+### Common Options
+
+Most tools support these common flags:
+- `--help`: Show help message
+- `--verbose`: Enable detailed logging
+- `--config`: Specify custom config file
+- `--output`: Set output directory
+- `--debug`: Enable debug mode
+
+### Environment Variables
+
+You can override config settings with environment variables:
+```bash
+export TRADING_MODE=live
+export RISK_LEVEL=conservative
+python base.py
 ```
 
 ## Market Analyzer
@@ -1314,3 +1348,166 @@ The script expects a markdown table with the following format:
 - Columns should be separated by pipes (|)
 - The first line of content should be the header
 - The second line should be the markdown separator (|----|)
+
+## Analysis Components
+
+### Technical Analysis
+
+The `TechnicalAnalysis` class implements various technical indicators and analysis methods:
+
+- Multiple technical indicators (RSI, MACD, Bollinger Bands, etc.)
+- Trend identification and analysis
+- Volume analysis and On-Balance Volume (OBV)
+- Market condition analysis (Bull/Bear market detection)
+- Dynamic support/resistance levels
+- Volatility analysis and ATR calculations
+- Fibonacci retracements
+- Ichimoku Cloud analysis
+
+### Machine Learning Integration
+
+The `MLSignal` class integrates machine learning models for enhanced prediction:
+
+- XGBoost price prediction
+- Random Forest classification
+- Ensemble methods
+- Feature engineering from technical indicators
+- Real-time model updates
+- Confidence scoring
+
+### AI-Enhanced Analysis
+
+The AI analysis components leverage multiple models for advanced insights:
+
+1. **Market Analysis Models**
+   - GPT-4: Advanced pattern recognition
+   - DeepSeek: Price prediction
+   - Grok: Real-time market insights
+   - Custom ensemble predictions
+
+2. **Pattern Recognition**
+   - Complex pattern detection
+   - Multi-timeframe confirmation
+   - Volume profile analysis
+   - Market regime detection
+
+3. **Sentiment Analysis**
+   - News sentiment scoring
+   - Social media analysis
+   - Market sentiment indicators
+   - Sentiment-based signals
+
+### High-Frequency Trading
+
+The HFT components provide tools for rapid trading:
+
+1. **Order Book Analysis**
+   - Real-time depth analysis
+   - Liquidity detection
+   - Spread analysis
+   - Order flow patterns
+
+2. **Execution Engine**
+   - Low-latency order placement
+   - Smart order routing
+   - Anti-gaming logic
+   - Execution quality analysis
+
+3. **Risk Management**
+   - Real-time position monitoring
+   - Dynamic stop-loss adjustment
+   - Exposure limits
+   - Risk metrics calculation
+
+## Trading Tools
+
+### Market Analyzer UI
+
+The graphical interface provides:
+
+1. **Real-Time Monitoring**
+   - Price and volume charts
+   - Technical indicators
+   - Order book visualization
+   - Position tracking
+
+2. **Trading Controls**
+   - Quick order entry
+   - Position management
+   - Risk parameter adjustment
+   - Strategy selection
+
+3. **Analysis Tools**
+   - Multiple timeframe analysis
+   - Pattern detection
+   - Sentiment indicators
+   - Risk metrics
+
+### Performance Analytics
+
+The performance tracking system offers:
+
+1. **Trade Analysis**
+   - Win/loss statistics
+   - Risk-adjusted returns
+   - Drawdown analysis
+   - Position sizing effectiveness
+
+2. **Risk Metrics**
+   - Sharpe ratio
+   - Sortino ratio
+   - Maximum drawdown
+   - Value at Risk (VaR)
+
+3. **Strategy Evaluation**
+   - Strategy performance comparison
+   - Market regime analysis
+   - Parameter optimization
+   - Backtest results
+
+## Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+### Development Guidelines
+
+1. **Code Style**
+   - Follow PEP 8 guidelines
+   - Use type hints
+   - Write comprehensive docstrings
+   - Maintain test coverage
+
+2. **Testing**
+   - Write unit tests for new features
+   - Include integration tests
+   - Test with different market conditions
+   - Verify performance impact
+
+3. **Documentation**
+   - Update README.md
+   - Add function/class documentation
+   - Include usage examples
+   - Document configuration options
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.
+
+## Disclaimer
+
+This Bitcoin Trading Bot is for educational and research purposes only. It is not intended to be used for actual trading. Always consult with a qualified financial advisor before making any investment decisions. The authors and contributors are not responsible for any financial losses incurred from using this software.
+
+### Risk Warning
+
+- Cryptocurrency trading involves substantial risk
+- High-frequency trading can result in significant losses
+- Always start with small amounts
+- Test strategies thoroughly before live trading
+- Monitor positions and risk levels continuously
+- Keep API keys secure and never share them
