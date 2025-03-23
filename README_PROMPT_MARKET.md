@@ -20,6 +20,7 @@ This tool:
   - OpenRouter (`OPENROUTER_API_KEY`)
   - Hyperbolic (`HYPERBOLIC_KEY`)
 - Coinbase Advanced API credentials (`API_KEY_PERPS` and `API_SECRET_PERPS`)
+- Ollama (optional, for local model inference)
 
 ## Installation
 
@@ -48,6 +49,13 @@ python prompt_market.py --use_grok  # Use X AI Grok model
 python prompt_market.py --use_gpt4o  # Use GPT-4o model
 python prompt_market.py --use_o1_mini  # Use Claude o1-mini model (faster)
 python prompt_market.py --use_o3_mini  # Use Claude o3-mini model (balanced)
+python prompt_market.py --use_ollama  # Use local Ollama DeepSeek R1 7B model
+python prompt_market.py --use_ollama_1_5b  # Use local Ollama DeepSeek R1 1.5B model
+python prompt_market.py --use_ollama_8b  # Use local Ollama DeepSeek R1 8B model
+python prompt_market.py --use_ollama_14b  # Use local Ollama DeepSeek R1 14B model
+python prompt_market.py --use_ollama_32b  # Use local Ollama DeepSeek R1 32B model
+python prompt_market.py --use_ollama_70b  # Use local Ollama DeepSeek R1 70B model
+python prompt_market.py --use_ollama_671b  # Use local Ollama DeepSeek R1 671B model
 ```
 
 ### Trade Execution
@@ -164,7 +172,8 @@ For executing trades, the tool:
 usage: prompt_market.py [-h] [--product_id PRODUCT_ID] [--granularity GRANULARITY] [--margin MARGIN] [--leverage LEVERAGE]
                         [--execute_trades] [--limit_order] [--use_deepseek] [--use_reasoner] [--use_grok] [--use_gpt45_preview]
                         [--use_o1] [--use_o1_mini] [--use_o3_mini] [--use_o3_mini_effort] [--use_gpt4o] [--use_deepseek_r1]
-                        [--use_ollama] [--use_hyperbolic]
+                        [--use_ollama] [--use_ollama_1_5b] [--use_ollama_8b] [--use_ollama_14b] [--use_ollama_32b] 
+                        [--use_ollama_70b] [--use_ollama_671b] [--use_hyperbolic]
 
 AI-Powered Crypto Market Analyzer and Trading Recommendation System
 
@@ -176,6 +185,7 @@ Example usage:
   python prompt_market.py --product_id BTC-USDC --granularity ONE_HOUR
   python prompt_market.py --use_deepseek --margin 200 --leverage 10
   python prompt_market.py --use_grok --execute_trades
+  python prompt_market.py --use_ollama_32b --product_id ETH-USDT  # Use local Ollama model
 ```
 
 ## Best Practices
