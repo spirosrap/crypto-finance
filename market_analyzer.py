@@ -1209,7 +1209,8 @@ class MarketAnalyzer:
                 'type': patterns['type'].value,
                 'confidence': patterns['confidence'],
                 'target': patterns['target'],
-                'stop_loss': patterns['stop_loss']
+                'stop_loss': patterns['stop_loss'],
+                'completion': patterns['completion']
             }
             
             # Add dynamic risk calculation
@@ -1370,6 +1371,9 @@ class MarketAnalyzer:
             except Exception as e:
                 self.logger.error(f"Error in liquidity analysis: {str(e)}")
                 result['liquidity_analysis'] = {'status': 'error', 'error': str(e)}
+                
+            # Apply conflict penalties to adjust confidence based on conflicting signals
+            result = self.apply_conflict_penalties(result, result['indicators'], patterns)
 
             # Check for alerts
             triggered_alerts = self.alert_system.check_alerts(result)
@@ -1875,6 +1879,63 @@ class MarketAnalyzer:
         except Exception as e:
             self.logger.error(f"Error calculating base signal: {str(e)}")
             return 0.0
+
+    def apply_conflict_penalties(self, result: Dict, indicators: Dict, patterns: Dict) -> Dict:
+        """
+        Adjust the confidence score based on conflicting signals and override signals when necessary.
+        
+        This function helps improve signal quality by penalizing contradictory market conditions:
+        1. If RSI is overbought (>70) but volume is declining (change < -50%), confidence is reduced by 10%
+        2. If market regime is bearish but a buy signal is generated, confidence is reduced by 15% 
+           when pattern completion or confidence is below 70%
+        3. If adjusted confidence falls below 50%, the signal is overridden to HOLD
+        
+        Args:
+            result: The result dictionary containing the current signal and confidence
+            indicators: Dictionary with technical indicators
+            patterns: Dictionary with pattern analysis
+            
+        Returns:
+            Dict: Updated result with adjusted confidence and potentially modified signal
+        """
+        try:
+            # Store original confidence for logging
+            original_confidence = result['confidence']
+            
+            # If RSI > 70 and volume_change_pct < -50 → subtract 10% from confidence
+            if indicators.get('rsi', 0) > 70 and result['volume_analysis'].get('change', 0) < -50:
+                result['confidence'] = result['confidence'] * 0.9
+                self.logger.info(f"Applied conflict penalty: RSI overbought with decreasing volume (-10%)")
+                
+            # If market_regime is "Bearish" or "Choppy Bearish" and signal is "BUY"
+            market_regime = result['regime_analysis']['regime']
+            if (market_regime in ["Bearish", "Choppy Bearish"]) and result['signal'] in ["BUY", "STRONG_BUY"]:
+                pattern_completion = result['patterns'].get('completion', 0)
+                pattern_confidence = result['patterns'].get('confidence', 0)
+                
+                # If pattern_completion < 70 or pattern_confidence < 70 → subtract 15%
+                if pattern_completion < 70 or pattern_confidence < 70:
+                    result['confidence'] = result['confidence'] * 0.85
+                    self.logger.info(f"Applied conflict penalty: Bearish regime with BUY signal and weak pattern (-15%)")
+                    
+            # Clamp confidence to [0, 100]
+            result['confidence'] = max(0, min(100, result['confidence']))
+            
+            # If adjusted confidence < 50%, override signal with HOLD
+            if result['confidence'] < 50:
+                original_signal = result['signal']
+                result['signal'] = "HOLD"
+                result['position'] = "NEUTRAL"
+                self.logger.info(f"Signal override: Changed from {original_signal} to HOLD (confidence: {result['confidence']}%)")
+                
+            # Log changes if any
+            if original_confidence != result['confidence']:
+                self.logger.info(f"Confidence adjusted from {original_confidence} to {result['confidence']} due to conflicting signals")
+                
+            return result
+        except Exception as e:
+            self.logger.error(f"Error applying conflict penalties: {str(e)}")
+            return result  # Return original result if there's an error
 
     def detect_chart_patterns(self, candles: List[Dict]) -> Dict:
         """
