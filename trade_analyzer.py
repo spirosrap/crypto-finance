@@ -204,44 +204,97 @@ class TradingAnalyzer:
         risk_metrics = self.calculate_risk_metrics()
         current_drawdown = self.get_current_drawdown()
         
-        print("\n=== Trading Performance Report ===\n")
+        # ANSI color codes
+        GREEN = '\033[92m'
+        RED = '\033[91m'
+        BLUE = '\033[94m'
+        YELLOW = '\033[93m'
+        BOLD = '\033[1m'
+        UNDERLINE = '\033[4m'
+        END = '\033[0m'
         
-        print("Basic Metrics:")
-        print(f"Total Trades: {basic_metrics['Total Trades']}")
-        print(f"Win Rate: {basic_metrics['Win Rate']:.2%}")
-        print(f"Win/Loss Ratio: {basic_metrics['Win/Loss Ratio']:.2f}")
-        print(f"Average Profit per Trade: {basic_metrics['Average Profit per Trade (%)']:.2f}%")
-        print(f"Total Profit: {basic_metrics['Total Profit (%)']:.2f}%")
+        # Calculate additional metrics
+        total_trades = basic_metrics['Total Trades']
+        win_rate = basic_metrics['Win Rate']
+        avg_profit = basic_metrics['Average Profit per Trade (%)']
+        total_profit = basic_metrics['Total Profit (%)']
         
-        print("\nDollar Profit Metrics (Without Leverage):")
-        print(f"Total Dollar Profit: ${dollar_profits['Total Dollar Profit']:.2f}")
-        print(f"Average Dollar Profit per Trade: ${dollar_profits['Average Dollar Profit per Trade']:.2f}")
-        print(f"Winning Trades Dollar Profit: ${dollar_profits['Winning Trades Dollar Profit']:.2f}")
-        print(f"Losing Trades Dollar Loss: ${dollar_profits['Losing Trades Dollar Loss']:.2f}")
-        print(f"Profit Factor (Gross Profit / Gross Loss): {dollar_profits['Profit Factor']:.2f}")
+        # Calculate expectancy
+        expectancy = (win_rate * avg_profit) + ((1 - win_rate) * -1)  # Assuming 1% loss on losing trades
         
-        print("\nLeveraged Dollar Profit Metrics:")
-        print(f"Total Leveraged Dollar Profit: ${leveraged_profits['Total Leveraged Dollar Profit']:.2f}")
-        print(f"Average Leveraged Dollar Profit per Trade: ${leveraged_profits['Average Leveraged Dollar Profit per Trade']:.2f}")
-        print(f"Winning Trades Leveraged Profit: ${leveraged_profits['Winning Trades Leveraged Profit']:.2f}")
-        print(f"Losing Trades Leveraged Loss: ${leveraged_profits['Losing Trades Leveraged Loss']:.2f}")
-        print(f"Leveraged Profit Factor: {leveraged_profits['Leveraged Profit Factor']:.2f}")
+        # Calculate average trade duration
+        self.df['Duration'] = pd.to_datetime(self.df['Timestamp']).diff()
+        avg_duration = self.df['Duration'].mean()
         
-        print("\nRisk Metrics:")
-        print(f"Sharpe Ratio (Annualized): {sharpe_ratio:.2f}")
-        print(f"Maximum Drawdown: {max_drawdown:.2f}%")
-        print(f"Current Drawdown: {current_drawdown:.2f}%")
-        print(f"Standard Deviation: {risk_metrics['Standard Deviation']:.2f}%")
-        print(f"Average R/R Ratio: {risk_metrics['Average R/R Ratio']:.2f}")
-        print(f"Average Trade Probability: {risk_metrics['Average Probability']:.2f}%")
+        # Format duration in minutes
+        avg_duration_minutes = avg_duration.total_seconds() / 60 if pd.notna(avg_duration) else 0
+        
+        print(f"\n{BOLD}{UNDERLINE}📊 Trading Performance Report{END}\n")
+        
+        # Summary Section
+        print(f"{BOLD}📈 Summary{END}")
+        print(f"{'=' * 50}")
+        print(f"Period: {self.df['Timestamp'].min().date()} to {self.df['Timestamp'].max().date()}")
+        print(f"Total Trades: {GREEN}{total_trades}{END}")
+        print(f"Win Rate: {GREEN if win_rate >= 0.5 else RED}{win_rate:.2%}{END}")
+        print(f"Total Profit: {GREEN if total_profit >= 0 else RED}{total_profit:.2f}%{END}")
+        print(f"Average Trade Duration: {avg_duration_minutes:.0f} minutes")
+        print(f"{'=' * 50}\n")
+        
+        # Performance Metrics
+        print(f"{BOLD}🎯 Performance Metrics{END}")
+        print(f"{'=' * 50}")
+        print(f"Average Profit per Trade: {GREEN if avg_profit >= 0 else RED}{avg_profit:.2f}%{END}")
+        print(f"Win/Loss Ratio: {GREEN}{basic_metrics['Win/Loss Ratio']:.2f}{END}")
+        print(f"Expectancy: {GREEN if expectancy >= 0 else RED}{expectancy:.2f}%{END}")
+        print(f"Sharpe Ratio: {GREEN if sharpe_ratio >= 1 else YELLOW if sharpe_ratio >= 0 else RED}{sharpe_ratio:.2f}{END}")
+        print(f"{'=' * 50}\n")
+        
+        # Risk Metrics
+        print(f"{BOLD}⚠️ Risk Metrics{END}")
+        print(f"{'=' * 50}")
+        print(f"Maximum Drawdown: {RED}{max_drawdown:.2f}%{END}")
+        print(f"Current Drawdown: {RED if current_drawdown < 0 else GREEN}{current_drawdown:.2f}%{END}")
+        print(f"Standard Deviation: {YELLOW}{risk_metrics['Standard Deviation']:.2f}%{END}")
+        print(f"Average R/R Ratio: {BLUE}{risk_metrics['Average R/R Ratio']:.2f}{END}")
+        print(f"Average Trade Probability: {BLUE}{risk_metrics['Average Probability']:.2f}%{END}")
         if risk_metrics['Average Leverage'] > 0:
-            print(f"Average Leverage: {risk_metrics['Average Leverage']:.2f}x")
-        else:
-            print("Average Leverage: N/A")
+            print(f"Average Leverage: {YELLOW}{risk_metrics['Average Leverage']:.2f}x{END}")
+        print(f"{'=' * 50}\n")
         
-        print("\nLargest Drawdown Periods:")
-        for period in drawdown_periods:
-            print(f"From {period['start_date'].date()} to {period['end_date'].date()}: {period['drawdown']:.2f}%")
+        # Dollar Performance
+        print(f"{BOLD}💰 Dollar Performance{END}")
+        print(f"{'=' * 50}")
+        print(f"Total Dollar Profit: {GREEN if dollar_profits['Total Dollar Profit'] >= 0 else RED}${dollar_profits['Total Dollar Profit']:.2f}{END}")
+        print(f"Average Dollar Profit per Trade: {GREEN if dollar_profits['Average Dollar Profit per Trade'] >= 0 else RED}${dollar_profits['Average Dollar Profit per Trade']:.2f}{END}")
+        print(f"Profit Factor: {GREEN if dollar_profits['Profit Factor'] >= 1.5 else YELLOW if dollar_profits['Profit Factor'] >= 1 else RED}{dollar_profits['Profit Factor']:.2f}{END}")
+        print(f"{'=' * 50}\n")
+        
+        # Leveraged Performance
+        print(f"{BOLD}⚡ Leveraged Performance{END}")
+        print(f"{'=' * 50}")
+        print(f"Total Leveraged Profit: {GREEN if leveraged_profits['Total Leveraged Dollar Profit'] >= 0 else RED}${leveraged_profits['Total Leveraged Dollar Profit']:.2f}{END}")
+        print(f"Average Leveraged Profit per Trade: {GREEN if leveraged_profits['Average Leveraged Dollar Profit per Trade'] >= 0 else RED}${leveraged_profits['Average Leveraged Dollar Profit per Trade']:.2f}{END}")
+        print(f"Leveraged Profit Factor: {GREEN if leveraged_profits['Leveraged Profit Factor'] >= 1.5 else YELLOW if leveraged_profits['Leveraged Profit Factor'] >= 1 else RED}{leveraged_profits['Leveraged Profit Factor']:.2f}{END}")
+        print(f"{'=' * 50}\n")
+        
+        # Drawdown Analysis
+        if drawdown_periods:
+            print(f"{BOLD}📉 Largest Drawdown Periods{END}")
+            print(f"{'=' * 50}")
+            for period in drawdown_periods[:3]:  # Show top 3 drawdowns
+                print(f"From {period['start_date'].date()} to {period['end_date'].date()}: {RED}{period['drawdown']:.2f}%{END}")
+            print(f"{'=' * 50}\n")
+        
+        # Trading Style Analysis
+        print(f"{BOLD}🎨 Trading Style Analysis{END}")
+        print(f"{'=' * 50}")
+        avg_prob = risk_metrics['Average Probability']
+        avg_rr = risk_metrics['Average R/R Ratio']
+        print(f"Average Trade Probability: {BLUE}{avg_prob:.2f}%{END}")
+        print(f"Average Risk/Reward: {BLUE}{avg_rr:.2f}{END}")
+        print(f"Trading Style: {BLUE}{'Conservative' if avg_prob > 70 else 'Moderate' if avg_prob > 50 else 'Aggressive'}{END}")
+        print(f"{'=' * 50}\n")
 
 if __name__ == "__main__":
     analyzer = TradingAnalyzer("automated_trades.csv")
