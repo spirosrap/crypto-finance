@@ -144,6 +144,11 @@ class MarketAnalyzerUI:
         # Add trade history variable
         self.trade_history = []  # List of trade results (win/loss)
         
+        # Add simplified trading variables
+        self.simplified_trading = False
+        self.simplified_trading_thread = None
+        self.last_simplified_check = None
+        
         # Create main container with padding
         self.create_gui()
         
@@ -438,6 +443,17 @@ class MarketAnalyzerUI:
             height=32
         )
         self.auto_trade_btn.pack(pady=(0, 5), padx=10, fill="x")
+        
+        # Add Simplified Trading Button
+        self.simplified_trade_btn = ctk.CTkButton(
+            trading_frame,
+            text="Start Simplified Trading",
+            command=self.toggle_simplified_trading,
+            fg_color="#2E8B57",  # Sea Green
+            hover_color="#1B4D3E",  # Dark Sea Green
+            height=32
+        )
+        self.simplified_trade_btn.pack(pady=(0, 5), padx=10, fill="x")
         
         # Quick Market Order Buttons
         market_buttons_frame = ctk.CTkFrame(trading_frame)
@@ -2576,15 +2592,18 @@ class MarketAnalyzerUI:
             # Stop price updates first (this is fast)
             self.stop_price_updates = True
             
-            # Force stop auto-trading immediately if active
+            # Force stop auto-trading and simplified trading immediately if active
             if self.auto_trading:
                 self.auto_trading = False
-                if self.current_process and self.current_process.poll() is None:
-                    try:
-                        self.current_process.terminate()
-                    except:
-                        pass
-                    self.current_process = None
+            if self.simplified_trading:
+                self.simplified_trading = False
+                
+            if self.current_process and self.current_process.poll() is None:
+                try:
+                    self.current_process.terminate()
+                except:
+                    pass
+                self.current_process = None
             
             # Cancel all tasks without waiting
             with self.thread_lock:
@@ -2692,6 +2711,193 @@ class MarketAnalyzerUI:
             print("Periodic memory cleanup completed")
         except Exception as e:
             print(f"Error during memory cleanup: {str(e)}")
+
+    def toggle_simplified_trading(self):
+        """Toggle simplified trading on/off"""
+        if not self.simplified_trading:
+            # Start simplified trading
+            self.simplified_trading = True
+            self.simplified_trade_btn.configure(
+                text="Stop Simplified Trading",
+                fg_color="#B22222"  # Fire Brick Red
+            )
+            self.root.title("Crypto Market Analyzer [Simplified Trading ON]")
+            self.queue.put(("append", "\nSimplified trading started. Using FIVE_MINUTE timeframe with 2-minute checks...\n"))
+            self.queue.put(("append", "Strategy: RSI + EMA + Volume analysis\n"))
+            self.queue.put(("append", "Will not trade if there are open positions or orders.\n"))
+            
+            # Start the simplified trading process using the thread pool
+            self.submit_task("simplified_trading", self._simplified_trading_loop)
+        else:
+            # Stop simplified trading immediately
+            self.simplified_trading = False
+            
+            # Force stop any running process
+            if self.current_process and self.current_process.poll() is None:
+                try:
+                    self.current_process.terminate()
+                except:
+                    pass
+                self.current_process = None
+            
+            # Cancel the simplified trading task without waiting
+            with self.thread_lock:
+                if "simplified_trading" in self.active_futures:
+                    future = self.active_futures["simplified_trading"]
+                    if not future.done():
+                        future.cancel()
+                    del self.active_futures["simplified_trading"]
+            
+            # Update UI immediately
+            self.simplified_trade_btn.configure(
+                text="Start Simplified Trading",
+                fg_color="#2E8B57"  # Back to Sea Green
+            )
+            self.root.title("Crypto Market Analyzer")
+            self.queue.put(("append", "\nSimplified trading stopped.\n"))
+            self.queue.put(("status", "Simplified trading stopped"))
+
+    def _simplified_trading_loop(self):
+        """Background loop for simplified trading"""
+        while self.simplified_trading:
+            try:
+                # Check if trading is allowed based on time
+                current_time = datetime.now()
+                if not self.is_trading_allowed():
+                    if not hasattr(self, '_simplified_trading_paused_logged'):
+                        if current_time.weekday() >= 5:
+                            self.queue.put(("append", "\nTrading paused: Weekend trading is not allowed. Will resume on Monday at 00:00 AM (Greece time) / 10:00 AM Sunday (NYSE time).\n"))
+                        else:
+                            self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (2:00 PM - 6:00 PM Greece time). Will resume at 6:00 PM (Greece time).\n"))
+                        self._simplified_trading_paused_logged = True
+                    time.sleep(60)  # Check every minute
+                    continue
+                else:
+                    # Reset the logged flag when we're out of the pause period
+                    if hasattr(self, '_simplified_trading_paused_logged'):
+                        del self._simplified_trading_paused_logged
+                        self.queue.put(("append", "\nTrading resumed: Current time is within trading hours (6:00 PM - 2:00 PM).\n"))
+
+                # Check for open orders or positions
+                has_open_orders, has_positions = self.check_for_open_orders_and_positions()
+                
+                if has_positions:
+                    # Wait when there are open positions
+                    self.queue.put(("append", "\nFound open positions. Waiting for them to close before continuing...\n"))
+                    time.sleep(60)  # Check every minute
+                    continue
+                    
+                if has_open_orders:
+                    # Wait if there are any open orders
+                    self.queue.put(("append", "\nFound open orders. Waiting for all orders to close before continuing...\n"))
+                    time.sleep(60)  # Check every minute
+                    continue
+                
+                # Run simplified trading bot
+                self.queue.put(("append", "\nRunning simplified trading analysis...\n"))
+                
+                # Create and run the simplified trading process
+                cmd = [
+                    "python",
+                    "simplified_trading_bot.py",
+                    "--product_id",
+                    self.product_var.get(),
+                    "--margin",
+                    self.margin_var.get(),
+                    "--leverage",
+                    str(self.leverage_var.get())
+                ]
+                
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                # Store the process
+                self.current_process = process
+                
+                # Read output and check for trade execution
+                output = ""
+                order_placed = False
+                trade_output_buffer = ""
+                capturing_trade_output = False
+                trade_completed = False
+                
+                while True:
+                    line = process.stdout.readline()
+                    if line == '' and process.poll() is not None:
+                        break
+                    if line:
+                        output += line
+                        self.queue.put(("append", line))
+                        
+                        # Start capturing trade output when we see a signal
+                        if "[SIGNAL]" in line:
+                            capturing_trade_output = True
+                            trade_output_buffer = line
+                        # Continue capturing trade output
+                        elif capturing_trade_output:
+                            trade_output_buffer += line
+                        
+                        # Check if a trade was executed
+                        if "Order placed successfully" in line:
+                            self.queue.put(("append", "\nTrade executed! Waiting for order to close before continuing...\n"))
+                            order_placed = True
+                            
+                            # Save the trade output to file
+                            if trade_output_buffer:
+                                self.save_trade_output(trade_output_buffer)
+                        
+                        # Check for trade completion indicators
+                        if "Take profit hit" in line or "TP hit" in line:
+                            self.queue.put(("status", "Trade completed - Take Profit hit"))
+                            trade_completed = True
+                            # Record as a win
+                            self.record_trade_result("win")
+                        elif "Stop loss hit" in line or "SL hit" in line:
+                            self.queue.put(("status", "Trade completed - Stop Loss hit"))
+                            trade_completed = True
+                            # Record as a loss
+                            self.record_trade_result("loss")
+                        elif "Position closed" in line:
+                            # Try to determine if it was a win or loss
+                            result = self.detect_trade_result(trade_output_buffer)
+                            if result:
+                                self.record_trade_result(result)
+                                trade_completed = True
+                
+                # Get any remaining output
+                stdout, stderr = process.communicate()
+                if stdout:
+                    output += stdout
+                    self.queue.put(("append", stdout))
+                    
+                    # Check for trade completion in final output if not already detected
+                    if not trade_completed and order_placed:
+                        result = self.detect_trade_result(output)
+                        if result:
+                            self.record_trade_result(result)
+                            trade_completed = True
+                            
+                if stderr:
+                    self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                
+                # Clear current process
+                self.current_process = None
+                
+                # Wait 2 minutes before next check
+                for _ in range(2):
+                    if not self.simplified_trading:
+                        return
+                    time.sleep(60)  # 1 minute intervals
+                
+            except Exception as e:
+                self.queue.put(("append", f"\nError in simplified trading loop: {str(e)}\nTraceback:\n{traceback.format_exc()}\n"))
+                # Don't exit the thread on error, just wait a bit and continue
+                time.sleep(60)  # Wait 1 minute before retrying on error
+                continue
 
 if __name__ == "__main__":
     app = MarketAnalyzerUI()
