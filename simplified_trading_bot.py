@@ -68,7 +68,7 @@ def get_price_precision(product_id):
 
 def fetch_candles(cb, product_id):
     now = datetime.now(UTC)
-    start = now - timedelta(minutes=5 * 200)
+    start = now - timedelta(minutes=5 * 8000)
     df = cb.historical_data.get_historical_data(product_id, start, now, GRANULARITY)
     df = pd.DataFrame(df)
     
@@ -175,6 +175,8 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                     'profit': profit,
                     'type': 'TP'
                 })
+                if len(trades) >= 50:
+                    break                
                 current_trade = None
                 position = 0
                 
@@ -190,6 +192,8 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                     'profit': loss,
                     'type': 'SL'
                 })
+                if len(trades) >= 50:
+                    break                
                 current_trade = None
                 position = 0
         
