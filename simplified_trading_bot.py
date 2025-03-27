@@ -69,13 +69,28 @@ def get_price_precision(product_id):
 def fetch_candles(cb, product_id):
     now = datetime.now(UTC)
     start = now - timedelta(minutes=5 * 8000)
-    df = cb.historical_data.get_historical_data(product_id, start, now, GRANULARITY)
-    df = pd.DataFrame(df)
+    raw_data = cb.historical_data.get_historical_data(product_id, start, now, GRANULARITY)
+    
+    
+    df = pd.DataFrame(raw_data)
     
     # Convert string columns to numeric
     numeric_columns = ['open', 'high', 'low', 'close', 'volume']
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    
+    # Handle timestamp - convert Unix timestamp to datetime
+    if 'start' in df.columns:
+        df['start'] = pd.to_datetime(pd.to_numeric(df['start']), unit='s', utc=True)        
+        df.set_index('start', inplace=True)
+    elif 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s', utc=True)
+        df.set_index('timestamp', inplace=True)
+    elif 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
+        df.set_index('time', inplace=True)
+    
     
     return df
 
@@ -108,8 +123,23 @@ def execute_trade(cb, entry_price: float, product_id: str, position_size: float,
         perp_product = get_perp_product(product_id)
         price_precision = get_price_precision(perp_product)
         
-        # Calculate take profit and stop loss prices
-        tp_price = round(entry_price * (1 + TP_PERCENT), price_precision)
+        # Calculate ATR for volatility check
+        candles = cb.historical_data.get_historical_data(product_id, datetime.now(UTC) - timedelta(minutes=5 * 100), datetime.now(UTC), GRANULARITY)
+        ta = TechnicalAnalysis(cb)
+        atr = ta.compute_atr(candles)
+        
+        # Determine TP mode based on ATR volatility
+        atr_percent = (atr / entry_price) * 100
+        if atr_percent > 0.5:
+            # High volatility: Use fixed TP
+            tp_mode = "FIXED"
+            tp_price = round(entry_price * (1 + TP_PERCENT), price_precision)  # 1.5% fixed TP
+        else:
+            # Low volatility: Use adaptive TP
+            tp_mode = "ADAPTIVE"
+            tp_price = round(entry_price + (2 * atr), price_precision)  # 2×ATR adaptive TP
+        
+        # Fixed stop loss
         sl_price = round(entry_price * (1 - SL_PERCENT), price_precision)
         
         # Get current market price
@@ -118,6 +148,12 @@ def execute_trade(cb, entry_price: float, product_id: str, position_size: float,
         
         # Calculate base size
         size = position_size / current_price
+        
+        # Log trade setup information
+        logger.info(f"ATR: {atr:.2f} ({atr_percent:.2f}% of entry price)")
+        logger.info(f"TP Mode: {tp_mode}")
+        logger.info(f"Take Profit: ${tp_price:.2f}")
+        logger.info(f"Stop Loss: ${sl_price:.2f}")
         
         # Place market order with targets
         result = cb.place_market_order_with_targets(
@@ -137,6 +173,49 @@ def execute_trade(cb, entry_price: float, product_id: str, position_size: float,
         logger.info(f"Order ID: {result['order_id']}")
         logger.info(f"Take Profit Price: ${result['tp_price']}")
         logger.info(f"Stop Loss Price: ${result['sl_price']}")
+
+        # Log trade to automated_trades.csv
+        try:
+            # Read existing trades to get the next trade number
+            trades_df = pd.read_csv('automated_trades.csv')
+            next_trade_no = len(trades_df) + 1
+            
+            # Calculate R/R ratio
+            rr_ratio = (tp_price - entry_price) / (entry_price - sl_price)
+            
+            # Determine volume strength based on ATR percentage
+            if atr_percent > 1.0:
+                volume_strength = "Strong"
+            elif atr_percent > 0.5:
+                volume_strength = "Moderate"
+            else:
+                volume_strength = "Weak"
+            
+            # Create new trade entry
+            new_trade = pd.DataFrame([{
+                'No.': next_trade_no,
+                'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'SIDE': 'LONG',
+                'ENTRY': entry_price,
+                'Take Profit': tp_price,
+                'Stop Loss': sl_price,
+                'Probability': '70.0%',  # Default value since we don't calculate probability
+                'Confidence': 'Moderate',  # Default value
+                'R/R Ratio': round(rr_ratio, 2),
+                'Volume Strength': volume_strength,
+                'Outcome': 'PENDING',
+                'Outcome %': 0.0,
+                'Leverage': f"{leverage}x",
+                'Margin': position_size
+            }])
+            
+            # Append new trade to CSV
+            new_trade.to_csv('automated_trades.csv', mode='a', header=False, index=False)
+            logger.info("Trade logged to automated_trades.csv")
+            
+        except Exception as e:
+            logger.error(f"Error logging trade to automated_trades.csv: {e}")
+        
         return True
         
     except Exception as e:
@@ -153,6 +232,20 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
     trades = []
     current_trade = None
     
+    # Create timestamp for unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_filename = f"backtest_trades_{product_id}_{timestamp}.csv"
+    
+    # Debug log DataFrame info at start of backtest
+    logger.info(f"DataFrame index type: {type(df.index)}")
+    logger.info(f"First few timestamps in backtest: {df.index[:3]}")
+    
+    # Ensure df index is datetime and in UTC
+    if not isinstance(df.index, pd.DatetimeIndex):
+        df.index = pd.to_datetime(df.index, utc=True)
+    elif df.index.tz is None:
+        df.index = df.index.tz_localize('UTC')
+    
     for i in range(50, len(df)):  # Start after EMA period
         # Get historical data up to current point
         historical_df = df.iloc[:i+1]
@@ -162,20 +255,37 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
         if current_trade:
             current_price = df.iloc[i]['close']
             
+            # Calculate ATR for volatility check
+            atr = ta.compute_atr(historical_df.to_dict('records'))
+            atr_percent = (atr / current_trade['entry_price']) * 100
+            
+            # Determine TP mode based on ATR volatility
+            if atr_percent > 0.5:
+                # High volatility: Use fixed TP
+                tp_mode = "FIXED"
+                tp_price = current_trade['entry_price'] * (1 + TP_PERCENT)  # 1.5% fixed TP
+            else:
+                # Low volatility: Use adaptive TP
+                tp_mode = "ADAPTIVE"
+                tp_price = current_trade['entry_price'] + (2 * atr)  # 2×ATR adaptive TP
+            
             # Check if take profit or stop loss is hit
-            if current_price >= current_trade['tp_price']:
+            if current_price >= tp_price:
                 # Take profit hit
-                profit = (current_trade['tp_price'] - current_trade['entry_price']) * current_trade['size'] * leverage
+                profit = (tp_price - current_trade['entry_price']) * current_trade['size'] * leverage
                 balance += profit
                 trades.append({
-                    'entry_time': current_trade['entry_time'],
-                    'exit_time': df.index[i],
+                    'entry_time': current_trade['entry_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'exit_time': df.index[i].strftime('%Y-%m-%d %H:%M:%S'),
                     'entry_price': current_trade['entry_price'],
-                    'exit_price': current_trade['tp_price'],
+                    'exit_price': tp_price,
                     'profit': profit,
-                    'type': 'TP'
+                    'type': 'TP',
+                    'atr': atr,
+                    'atr_percent': atr_percent,
+                    'tp_mode': tp_mode
                 })
-                if len(trades) >= 50:
+                if len(trades) >= 120:
                     break                
                 current_trade = None
                 position = 0
@@ -185,14 +295,17 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                 loss = (current_trade['sl_price'] - current_trade['entry_price']) * current_trade['size'] * leverage
                 balance += loss
                 trades.append({
-                    'entry_time': current_trade['entry_time'],
-                    'exit_time': df.index[i],
+                    'entry_time': current_trade['entry_time'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'exit_time': df.index[i].strftime('%Y-%m-%d %H:%M:%S'),
                     'entry_price': current_trade['entry_price'],
                     'exit_price': current_trade['sl_price'],
                     'profit': loss,
-                    'type': 'SL'
+                    'type': 'SL',
+                    'atr': atr,
+                    'atr_percent': atr_percent,
+                    'tp_mode': tp_mode
                 })
-                if len(trades) >= 50:
+                if len(trades) >= 120:
                     break                
                 current_trade = None
                 position = 0
@@ -200,19 +313,41 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
         # If no position and signal, enter trade
         elif signal and not current_trade:
             current_price = df.iloc[i]['close']
-            tp_price = round(current_price * (1 + TP_PERCENT), get_price_precision(get_perp_product(product_id)))
+            
+            # Calculate ATR for volatility check
+            atr = ta.compute_atr(historical_df.to_dict('records'))
+            atr_percent = (atr / current_price) * 100
+            
+            # Determine TP mode based on ATR volatility
+            if atr_percent > 0.5:
+                # High volatility: Use fixed TP
+                tp_mode = "FIXED"
+                tp_price = round(current_price * (1 + TP_PERCENT), get_price_precision(get_perp_product(product_id)))
+            else:
+                # Low volatility: Use adaptive TP
+                tp_mode = "ADAPTIVE"
+                tp_price = round(current_price + (2 * atr), get_price_precision(get_perp_product(product_id)))
+            
+            # Fixed stop loss
             sl_price = round(current_price * (1 - SL_PERCENT), get_price_precision(get_perp_product(product_id)))
             
             # Calculate position size
             position_size = balance * 0.1  # Use 10% of balance per trade
             size = position_size / current_price
             
+            # Log trade setup information
+            logger.info(f"ATR: {atr:.2f} ({atr_percent:.2f}% of entry price)")
+            logger.info(f"TP Mode: {tp_mode}")
+            logger.info(f"Take Profit: ${tp_price:.2f}")
+            logger.info(f"Stop Loss: ${sl_price:.2f}")
+            
             current_trade = {
                 'entry_time': df.index[i],
                 'entry_price': current_price,
                 'size': size,
                 'tp_price': tp_price,
-                'sl_price': sl_price
+                'sl_price': sl_price,
+                'tp_mode': tp_mode
             }
             position = size
     
@@ -226,6 +361,51 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
         profit_factor = abs(sum(t['profit'] for t in trades if t['profit'] > 0) / 
                           sum(t['profit'] for t in trades if t['profit'] < 0)) if losing_trades > 0 else float('inf')
         
+        # Calculate metrics by TP mode
+        fixed_tp_trades = [t for t in trades if t['tp_mode'] == "FIXED"]
+        adaptive_tp_trades = [t for t in trades if t['tp_mode'] == "ADAPTIVE"]
+        
+        fixed_tp_win_rate = (len([t for t in fixed_tp_trades if t['profit'] > 0]) / len(fixed_tp_trades) * 100) if fixed_tp_trades else 0
+        adaptive_tp_win_rate = (len([t for t in adaptive_tp_trades if t['profit'] > 0]) / len(adaptive_tp_trades) * 100) if adaptive_tp_trades else 0
+        
+        # Calculate average ATR for winning vs losing trades
+        winning_trades_atr = [t['atr'] for t in trades if t['profit'] > 0]
+        losing_trades_atr = [t['atr'] for t in trades if t['profit'] < 0]
+        avg_winning_atr = sum(winning_trades_atr) / len(winning_trades_atr) if winning_trades_atr else 0
+        avg_losing_atr = sum(losing_trades_atr) / len(losing_trades_atr) if losing_trades_atr else 0
+        
+        # Export trades to CSV
+        try:
+            # Convert trades to DataFrame
+            trades_df = pd.DataFrame(trades)
+            
+            # Reorder columns for better readability
+            columns = [
+                'entry_time', 'exit_time', 'entry_price', 'exit_price',
+                'profit', 'type', 'tp_mode', 'atr', 'atr_percent'
+            ]
+            trades_df = trades_df[columns]
+            
+            # Rename columns for clarity
+            trades_df.columns = [
+                'Entry Time', 'Exit Time', 'Entry Price', 'Exit Price',
+                'Profit', 'Exit Type', 'TP Mode', 'ATR', 'ATR %'
+            ]
+            
+            # Format numeric columns
+            trades_df['Entry Price'] = trades_df['Entry Price'].round(2)
+            trades_df['Exit Price'] = trades_df['Exit Price'].round(2)
+            trades_df['Profit'] = trades_df['Profit'].round(2)
+            trades_df['ATR'] = trades_df['ATR'].round(2)
+            trades_df['ATR %'] = trades_df['ATR %'].round(2)
+            
+            # Save to CSV
+            trades_df.to_csv(csv_filename, index=False)
+            logger.info(f"\nTrade history exported to: {csv_filename}")
+            
+        except Exception as e:
+            logger.error(f"Error exporting trades to CSV: {e}")
+        
         return {
             'initial_balance': initial_balance,
             'final_balance': balance,
@@ -235,7 +415,14 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             'win_rate': win_rate,
             'total_profit': total_profit,
             'profit_factor': profit_factor,
-            'trades': trades
+            'avg_winning_atr': avg_winning_atr,
+            'avg_losing_atr': avg_losing_atr,
+            'fixed_tp_trades': len(fixed_tp_trades),
+            'adaptive_tp_trades': len(adaptive_tp_trades),
+            'fixed_tp_win_rate': fixed_tp_win_rate,
+            'adaptive_tp_win_rate': adaptive_tp_win_rate,
+            'trades': trades,
+            'csv_filename': csv_filename
         }
     else:
         return {
@@ -247,7 +434,14 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             'win_rate': 0,
             'total_profit': 0,
             'profit_factor': 0,
-            'trades': []
+            'avg_winning_atr': 0,
+            'avg_losing_atr': 0,
+            'fixed_tp_trades': 0,
+            'adaptive_tp_trades': 0,
+            'fixed_tp_win_rate': 0,
+            'adaptive_tp_win_rate': 0,
+            'trades': [],
+            'csv_filename': None
         }
 
 def main():
@@ -275,6 +469,14 @@ def main():
             logger.info(f"Losing Trades: {results['losing_trades']}")
             logger.info(f"Win Rate: {results['win_rate']:.2f}%")
             logger.info(f"Profit Factor: {results['profit_factor']:.2f}")
+            logger.info(f"\nTP Mode Statistics:")
+            logger.info(f"Fixed TP Trades: {results['fixed_tp_trades']}")
+            logger.info(f"Fixed TP Win Rate: {results['fixed_tp_win_rate']:.2f}%")
+            logger.info(f"Adaptive TP Trades: {results['adaptive_tp_trades']}")
+            logger.info(f"Adaptive TP Win Rate: {results['adaptive_tp_win_rate']:.2f}%")
+            
+            if results['csv_filename']:
+                logger.info(f"\nDetailed trade history saved to: {results['csv_filename']}")
             
             # Print trade history
             logger.info("\nTrade History:")
@@ -282,6 +484,7 @@ def main():
                 logger.info(f"Entry: {trade['entry_time']} @ ${trade['entry_price']:.2f}")
                 logger.info(f"Exit: {trade['exit_time']} @ ${trade['exit_price']:.2f}")
                 logger.info(f"Profit: ${trade['profit']:.2f} ({trade['type']})")
+                logger.info(f"TP Mode: {trade['tp_mode']} (ATR: {trade['atr']:.2f}, {trade['atr_percent']:.2f}%)")
                 logger.info("---")
         else:
             # Live trading mode
