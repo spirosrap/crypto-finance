@@ -7,14 +7,28 @@ from technicalanalysis import TechnicalAnalysis
 from datetime import datetime, timedelta, UTC
 import pandas as pd
 from config import API_KEY_PERPS, API_SECRET_PERPS
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO,
+                   format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Suppress logs from other modules
+logging.getLogger('technicalanalysis').setLevel(logging.WARNING)
+logging.getLogger('historicaldata').setLevel(logging.WARNING)
+logging.getLogger('bitcoinpredictionmodel').setLevel(logging.WARNING)
+logging.getLogger('ml_model').setLevel(logging.WARNING)
 
 # Parameters
-PAIR = "BTC-USDC"
+PAIR = "BTC-PERP-INTX"  # Changed to perpetual futures pair
 GRANULARITY = "FIVE_MINUTE"
 RSI_THRESHOLD = 30
 VOLUME_LOOKBACK = 20
 TP_PERCENT = 0.015
 SL_PERCENT = 0.007
+LEVERAGE = 5  # Conservative leverage
+POSITION_SIZE_USD = 100  # Position size in USD
 
 # Services
 cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
@@ -57,13 +71,56 @@ def analyze(df: pd.DataFrame):
         return True, current["close"]
     return False, None
 
+def execute_trade(entry_price: float):
+    """Execute the trade using trade_btc_perp.py functions"""
+    try:
+        # Calculate take profit and stop loss prices
+        tp_price = entry_price * (1 + TP_PERCENT)
+        sl_price = entry_price * (1 - SL_PERCENT)
+        
+        # Get current market price
+        trades = cb.client.get_market_trades(product_id=PAIR, limit=1)
+        current_price = float(trades['trades'][0]['price'])
+        
+        # Calculate base size
+        size = POSITION_SIZE_USD / current_price
+        
+        # Place market order with targets
+        result = cb.place_market_order_with_targets(
+            product_id=PAIR,
+            side="BUY",
+            size=size,
+            take_profit_price=tp_price,
+            stop_loss_price=sl_price,
+            leverage=str(LEVERAGE)
+        )
+        
+        if "error" in result:
+            logger.error(f"Error placing order: {result['error']}")
+            return False
+            
+        logger.info("Order placed successfully!")
+        logger.info(f"Order ID: {result['order_id']}")
+        logger.info(f"Take Profit Price: ${result['tp_price']}")
+        logger.info(f"Stop Loss Price: ${result['sl_price']}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error executing trade: {e}")
+        return False
+
 # Execute logic
 if __name__ == "__main__":
-    candles = fetch_candles()
-    signal, entry = analyze(candles)
-    if signal:
-        tp = entry * (1 + TP_PERCENT)
-        sl = entry * (1 - SL_PERCENT)
-        print(f"[SIGNAL] BUY {PAIR} at {entry:.2f} | TP: {tp:.2f}, SL: {sl:.2f}")
-    else:
-        print("[NO SIGNAL] Conditions not met.")
+    try:
+        candles = fetch_candles()
+        signal, entry = analyze(candles)
+        if signal:
+            logger.info(f"[SIGNAL] BUY {PAIR} at {entry:.2f}")
+            if execute_trade(entry):
+                logger.info("Trade executed successfully!")
+            else:
+                logger.error("Failed to execute trade")
+        else:
+            logger.info("[NO SIGNAL] Conditions not met.")
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
