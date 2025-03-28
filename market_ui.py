@@ -2407,6 +2407,7 @@ class MarketAnalyzerUI:
             env = os.environ.copy()
             env['MARKET_UI'] = '1'
             
+            # First run update_trade_status.py
             process = subprocess.Popen(
                 ["python", "update_trade_status.py"],
                 stdout=subprocess.PIPE,
@@ -2434,11 +2435,54 @@ class MarketAnalyzerUI:
                 if process.returncode != 0:
                     raise Exception(f"update_trade_status.py failed with return code {process.returncode}")
             
+            # Now run update_pending_trades.py
+            self.queue.put(("status", "Updating pending trades..."))
+            
+            pending_process = subprocess.Popen(
+                ["python", "update_pending_trades.py"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env  # Pass the modified environment
+            )
+            
+            # Read output in real-time
+            while True:
+                output = pending_process.stdout.readline()
+                if output == '' and pending_process.poll() is not None:
+                    break
+                if output:
+                    # We don't want to show the output in the UI text window
+                    # self.queue.put(("append", output))
+                    pass
+            
+            # Get any remaining output
+            pending_stdout, pending_stderr = pending_process.communicate()
+            
+            # Only show actual errors in the UI, filter out INFO logs
+            if pending_stderr:
+                # Check if stderr contains actual errors or just INFO logs
+                stderr_lines = pending_stderr.decode('utf-8') if isinstance(pending_stderr, bytes) else pending_stderr
+                error_lines = []
+                
+                for line in stderr_lines.splitlines():
+                    # Skip INFO level log messages
+                    if " - INFO - " in line:
+                        continue
+                    error_lines.append(line)
+                
+                # Only display if there are actual error lines
+                if error_lines:
+                    error_text = "\n".join(error_lines)
+                    self.queue.put(("append", f"\nErrors from update_pending_trades.py:\n{error_text}"))
+                    if pending_process.returncode != 0:
+                        raise Exception(f"update_pending_trades.py failed with return code {pending_process.returncode}")
+            
             # Update the trade status frame instead of appending to console
-            if process.returncode == 0:
+            if process.returncode == 0 and pending_process.returncode == 0:
                 current_time = datetime.datetime.now().strftime("%H:%M:%S")
                 self.queue.put(("update_trade_status", {
-                    "status": "Trade statuses updated successfully",
+                    "status": "Trade statuses and pending trades updated successfully",
                     "time": f"Last update: {current_time}"
                 }))
             
