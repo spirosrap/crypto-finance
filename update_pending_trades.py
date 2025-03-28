@@ -61,37 +61,41 @@ def update_pending_trades():
             reader = csv.DictReader(f)
             trades = list(reader)
         
-        # Update pending trades
+        # Update all trades
         updated = False
         for trade in trades:
+            entry_price = float(trade['ENTRY'])
+            margin = float(trade['Margin'])
+            leverage = float(trade['Leverage'].replace('x', ''))
+            
+            # Calculate position size in BTC
+            position_size_usd = margin * leverage
+            position_size_btc = position_size_usd / entry_price
+            
+            # Calculate current value
+            current_value = position_size_btc * current_price
+            
+            # Calculate profit/loss in USD
+            if trade['SIDE'] == 'LONG':
+                profit_loss_usd = current_value - position_size_usd
+            else:  # SHORT
+                profit_loss_usd = position_size_usd - current_value
+            
+            # Calculate profit/loss percentage based on margin
+            profit_loss_percentage = (profit_loss_usd / margin) * 100
+            
+            # Update outcome if pending
             if trade['Outcome'] == 'PENDING':
-                entry_price = float(trade['ENTRY'])
-                take_profit = float(trade['Take Profit'])
-                stop_loss = float(trade['Stop Loss'])
-                
-                # Check if price has hit take profit or stop loss
-                if trade['SIDE'] == 'LONG':
-                    if current_price >= take_profit:
-                        trade['Outcome'] = 'SUCCESS'
-                        trade['Outcome %'] = str(round(((take_profit - entry_price) / entry_price) * 100, 2))
-                        updated = True
-                        logger.info(f"Trade {trade['No.']} hit take profit at {current_price}")
-                    elif current_price <= stop_loss:
-                        trade['Outcome'] = 'STOP LOSS'
-                        trade['Outcome %'] = str(round(((stop_loss - entry_price) / entry_price) * 100, 2))
-                        updated = True
-                        logger.info(f"Trade {trade['No.']} hit stop loss at {current_price}")
-                else:  # SHORT
-                    if current_price <= take_profit:
-                        trade['Outcome'] = 'SUCCESS'
-                        trade['Outcome %'] = str(round(((entry_price - take_profit) / entry_price) * 100, 2))
-                        updated = True
-                        logger.info(f"Trade {trade['No.']} hit take profit at {current_price}")
-                    elif current_price >= stop_loss:
-                        trade['Outcome'] = 'STOP LOSS'
-                        trade['Outcome %'] = str(round(((entry_price - stop_loss) / entry_price) * 100, 2))
-                        updated = True
-                        logger.info(f"Trade {trade['No.']} hit stop loss at {current_price}")
+                if profit_loss_percentage > 0:
+                    trade['Outcome'] = 'SUCCESS'
+                    logger.info(f"Trade {trade['No.']} marked as SUCCESS with {profit_loss_percentage:.2f}% profit on margin")
+                else:
+                    trade['Outcome'] = 'STOP LOSS'
+                    logger.info(f"Trade {trade['No.']} marked as STOP LOSS with {profit_loss_percentage:.2f}% loss on margin")
+            
+            # Always update the outcome percentage
+            trade['Outcome %'] = str(round(profit_loss_percentage, 2))
+            updated = True
         
         # Write updated trades back to CSV if any changes were made
         if updated:
@@ -101,10 +105,10 @@ def update_pending_trades():
                 writer.writerows(trades)
             logger.info("Updated trades saved to automated_trades.csv")
         else:
-            logger.info("No pending trades needed updating")
+            logger.info("No trades needed updating")
             
     except Exception as e:
-        logger.error(f"Error updating pending trades: {str(e)}")
+        logger.error(f"Error updating trades: {str(e)}")
         raise
 
 if __name__ == "__main__":
