@@ -85,7 +85,7 @@ def fetch_candles(cb, product_id, start_date=None, end_date=None):
         end = now
     
     raw_data = cb.historical_data.get_historical_data(product_id, start, end, GRANULARITY)
-    print(len(raw_data))
+    print(raw_data[:2])
     df = pd.DataFrame(raw_data)
     
     # Convert string columns to numeric
