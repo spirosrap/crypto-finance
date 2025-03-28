@@ -119,6 +119,27 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
         return True, current["close"]
     return False, None
 
+def determine_tp_mode(entry_price: float, atr: float, price_precision: float = None) -> tuple[str, float]:
+    """
+    Determine take profit mode and price based on ATR volatility.
+    Returns a tuple of (tp_mode, tp_price)
+    """
+    atr_percent = (atr / entry_price) * 100
+    if atr_percent > 0.7:
+        # High volatility → Use adaptive TP (2.5x ATR handles volatility better)
+        tp_mode = "ADAPTIVE"
+        tp_price = entry_price + (2.5 * atr)  # 2.5×ATR adaptive TP
+    else:
+        # Low volatility → Use fixed TP (market less likely to run, so %-based makes sense)
+        tp_mode = "FIXED"
+        tp_price = entry_price * (1 + TP_PERCENT)  # 1.5% fixed TP
+    
+    # Round the price if precision is provided
+    if price_precision is not None:
+        tp_price = round(tp_price, price_precision)
+    
+    return tp_mode, tp_price
+
 def execute_trade(cb, entry_price: float, product_id: str, margin: float, leverage: int):
     """Execute the trade using trade_btc_perp.py functions"""
     try:
@@ -131,16 +152,8 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         ta = TechnicalAnalysis(cb)
         atr = ta.compute_atr(candles)
         
-        # Determine TP mode based on ATR volatility
-        atr_percent = (atr / entry_price) * 100
-        if atr_percent > 0.5:
-            # High volatility: Use fixed TP
-            tp_mode = "FIXED"
-            tp_price = round(entry_price * (1 + TP_PERCENT), price_precision)  # 1.5% fixed TP
-        else:
-            # Low volatility: Use adaptive TP
-            tp_mode = "ADAPTIVE"
-            tp_price = round(entry_price + (2 * atr), price_precision)  # 2×ATR adaptive TP
+        # Determine TP mode and price using centralized function
+        tp_mode, tp_price = determine_tp_mode(entry_price, atr, price_precision)
         
         # Fixed stop loss
         sl_price = round(entry_price * (1 - SL_PERCENT), price_precision)
@@ -153,7 +166,7 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         size_usd = margin * leverage
         
         # Log trade setup information
-        logger.info(f"ATR: {atr:.2f} ({atr_percent:.2f}% of entry price)")
+        # logger.info(f"ATR: {atr:.2f} ({atr_percent:.2f}% of entry price)")
         logger.info(f"TP Mode: {tp_mode}")
         logger.info(f"Take Profit: ${tp_price:.2f}")
         logger.info(f"Stop Loss: ${sl_price:.2f}")
@@ -191,6 +204,7 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             rr_ratio = (tp_price - entry_price) / (entry_price - sl_price)
             
             # Determine volume strength based on ATR percentage
+            atr_percent = (atr / entry_price) * 100
             if atr_percent > 1.0:
                 volume_strength = "Strong"
             elif atr_percent > 0.5:
@@ -264,17 +278,9 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             
             # Calculate ATR for volatility check
             atr = ta.compute_atr(historical_df.to_dict('records'))
-            atr_percent = (atr / current_trade['entry_price']) * 100
             
-            # Determine TP mode based on ATR volatility
-            if atr_percent > 0.5:
-                # High volatility: Use fixed TP
-                tp_mode = "FIXED"
-                tp_price = current_trade['entry_price'] * (1 + TP_PERCENT)  # 1.5% fixed TP
-            else:
-                # Low volatility: Use adaptive TP
-                tp_mode = "ADAPTIVE"
-                tp_price = current_trade['entry_price'] + (2 * atr)  # 2×ATR adaptive TP
+            # Determine TP mode and price using centralized function
+            tp_mode, tp_price = determine_tp_mode(current_trade['entry_price'], atr)
             
             # Check if take profit or stop loss is hit
             if current_price >= tp_price:
@@ -289,7 +295,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                     'profit': profit,
                     'type': 'TP',
                     'atr': atr,
-                    'atr_percent': atr_percent,
+                    'atr_percent': (atr / current_trade['entry_price']) * 100,
                     'tp_mode': tp_mode
                 })
                 if len(trades) >= 120:
@@ -309,7 +315,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                     'profit': loss,
                     'type': 'SL',
                     'atr': atr,
-                    'atr_percent': atr_percent,
+                    'atr_percent': (atr / current_trade['entry_price']) * 100,
                     'tp_mode': tp_mode
                 })
                 if len(trades) >= 120:
@@ -323,17 +329,9 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             
             # Calculate ATR for volatility check
             atr = ta.compute_atr(historical_df.to_dict('records'))
-            atr_percent = (atr / current_price) * 100
             
-            # Determine TP mode based on ATR volatility
-            if atr_percent > 0.5:
-                # High volatility: Use fixed TP
-                tp_mode = "FIXED"
-                tp_price = round(current_price * (1 + TP_PERCENT), get_price_precision(get_perp_product(product_id)))
-            else:
-                # Low volatility: Use adaptive TP
-                tp_mode = "ADAPTIVE"
-                tp_price = round(current_price + (2 * atr), get_price_precision(get_perp_product(product_id)))
+            # Determine TP mode and price using centralized function
+            tp_mode, tp_price = determine_tp_mode(current_price, atr, get_price_precision(get_perp_product(product_id)))
             
             # Fixed stop loss
             sl_price = round(current_price * (1 - SL_PERCENT), get_price_precision(get_perp_product(product_id)))
@@ -343,6 +341,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             size = position_size / current_price
             
             # Log trade setup information
+            atr_percent = (atr / current_price) * 100
             logger.info(f"ATR: {atr:.2f} ({atr_percent:.2f}% of entry price)")
             logger.info(f"TP Mode: {tp_mode}")
             logger.info(f"Take Profit: ${tp_price:.2f}")
