@@ -1503,19 +1503,19 @@ class MarketAnalyzerUI:
 
     def is_trading_allowed(self):
         """Check if trading is allowed based on current time"""
-        current_time = datetime.now()
+        # current_time = datetime.now()
         
-        # Check if it's weekend (5 = Saturday, 6 = Sunday)
-        if current_time.weekday() >= 5:
-            return False
+        # # Check if it's weekend (5 = Saturday, 6 = Sunday)
+        # if current_time.weekday() >= 5:
+        #     return False
             
-        current_hour = current_time.hour
-        current_minute = current_time.minute
-        current_time_float = current_hour + current_minute / 60.0
+        # current_hour = current_time.hour
+        # current_minute = current_time.minute
+        # current_time_float = current_hour + current_minute / 60.0
         
-        # Trading is not allowed from 14:00 AM to 6:00 PM
-        if current_time_float >= 14.0 and current_time_float < 18.0:  # 11:30 AM to 5:00 PM
-            return False
+        # # Trading is not allowed from 14:00 AM to 6:00 PM
+        # if current_time_float >= 14.0 and current_time_float < 18.0:  # 11:30 AM to 5:00 PM
+        #     return False
         return True
 
     def _auto_trading_loop(self):
