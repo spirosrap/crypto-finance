@@ -43,6 +43,10 @@ def parse_args():
                       help='Run in backtest mode')
     parser.add_argument('--initial_balance', type=float, default=10000,
                       help='Initial balance for backtesting')
+    parser.add_argument('--start_date', type=str, default=None,
+                      help='Start date for backtest (format: YYYY-MM-DD)')
+    parser.add_argument('--end_date', type=str, default=None,
+                      help='End date for backtest (format: YYYY-MM-DD)')
     parser.add_argument('--test', action='store_true',
                       help='Run execute_trade tests')
     return parser.parse_args()
@@ -69,19 +73,25 @@ def get_price_precision(product_id):
     }
     return precision_map.get(product_id, 1)
 
-def fetch_candles(cb, product_id):
-    now = datetime.now(UTC)
-    start = now - timedelta(minutes=5 * 8000)
-    raw_data = cb.historical_data.get_historical_data(product_id, start, now, GRANULARITY)
+def fetch_candles(cb, product_id, start_date=None, end_date=None):
+    if start_date and end_date:
+        # Convert string dates to datetime objects
+        start = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+        end = datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=UTC)
+    else:
+        # Default to last 8000 5-minute candles if no dates specified
+        now = datetime.now(UTC)
+        start = now - timedelta(minutes=5 * 8000)
+        end = now
     
-    
+    raw_data = cb.historical_data.get_historical_data(product_id, start, end, GRANULARITY)
+    print(len(raw_data))
     df = pd.DataFrame(raw_data)
     
     # Convert string columns to numeric
     numeric_columns = ['open', 'high', 'low', 'close', 'volume']
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-    
     
     # Handle timestamp - convert Unix timestamp to datetime
     if 'start' in df.columns:
@@ -93,7 +103,6 @@ def fetch_candles(cb, product_id):
     elif 'time' in df.columns:
         df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
         df.set_index('time', inplace=True)
-    
     
     return df
 
@@ -459,11 +468,16 @@ def main():
     ta = TechnicalAnalysis(cb)
     
     try:
-        # Fetch historical data
-        df = fetch_candles(cb, args.product_id)
+        # Fetch historical data with optional date range
+        df = fetch_candles(cb, args.product_id, args.start_date, args.end_date)
         
         if args.backtest:
             logger.info("Starting backtest...")
+            if args.start_date and args.end_date:
+                logger.info(f"Backtest period: {args.start_date} to {args.end_date}")
+            else:
+                logger.info("Using default period (last 8000 5-minute candles)")
+            
             results = backtest(df, ta, args.product_id, args.initial_balance, args.leverage)
             
             # Print backtest results
@@ -510,19 +524,4 @@ def main():
         logger.error(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    # Add test argument to command line options
-    parser = argparse.ArgumentParser(description='Simplified Trading Bot')
-    parser.add_argument('--product_id', type=str, default='BTC-USDC',
-                      help='Product ID to trade (e.g., BTC-USDC)')
-    parser.add_argument('--margin', type=float, default=100,
-                      help='Position size in USD')
-    parser.add_argument('--leverage', type=int, default=5,
-                      help='Trading leverage')
-    parser.add_argument('--backtest', action='store_true',
-                      help='Run in backtest mode')
-    parser.add_argument('--initial_balance', type=float, default=10000,
-                      help='Initial balance for backtesting')
-    
-    args = parser.parse_args()
-    
     main()
