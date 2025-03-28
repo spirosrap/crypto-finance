@@ -451,52 +451,6 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             'csv_filename': None
         }
 
-def test_execute_trade():
-    """Test the execute_trade function with different scenarios"""
-    try:
-        # Initialize services
-        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
-        
-        # Test parameters
-        test_cases = [
-            {
-                'name': 'Standard BTC trade',
-                'product_id': 'BTC-USDC',
-                'entry_price': 85581.0,
-                'margin': 40,
-                'leverage': 5
-            },
-        ]
-        
-        logger.info("\nStarting execute_trade tests...")
-        
-        for test_case in test_cases:
-            logger.info(f"\nTesting: {test_case['name']}")
-            logger.info(f"Parameters: {test_case}")
-            
-            try:
-                # Execute trade
-                result = execute_trade(
-                    cb=cb,
-                    entry_price=test_case['entry_price'],
-                    product_id=test_case['product_id'],
-                    margin=test_case['margin'],
-                    leverage=test_case['leverage']
-                )
-                
-                # Log results
-                if result:
-                    logger.info(f"✅ Test passed: {test_case['name']}")
-                else:
-                    logger.error(f"❌ Test failed: {test_case['name']}")
-                    
-            except Exception as e:
-                logger.error(f"❌ Test error in {test_case['name']}: {str(e)}")
-        
-        logger.info("\nTest execution completed.")
-        
-    except Exception as e:
-        logger.error(f"Test setup error: {str(e)}")
 
 def main():
     args = parse_args()
@@ -569,12 +523,7 @@ if __name__ == "__main__":
                       help='Run in backtest mode')
     parser.add_argument('--initial_balance', type=float, default=10000,
                       help='Initial balance for backtesting')
-    parser.add_argument('--test', action='store_true',
-                      help='Run execute_trade tests')
     
     args = parser.parse_args()
     
-    if args.test:
-        test_execute_trade()
-    else:
-        main()
+    main()
