@@ -82,3 +82,4 @@ icons/
 logs/trade_status_updates.log
 market_analyzer.log.2
 enhanced_market_analysis.log
+logs/pending_trades_updates.log
