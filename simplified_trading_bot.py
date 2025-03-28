@@ -9,6 +9,7 @@ import pandas as pd
 from config import API_KEY_PERPS, API_SECRET_PERPS
 import logging
 import argparse
+import subprocess
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -42,6 +43,8 @@ def parse_args():
                       help='Run in backtest mode')
     parser.add_argument('--initial_balance', type=float, default=10000,
                       help='Initial balance for backtesting')
+    parser.add_argument('--test', action='store_true',
+                      help='Run execute_trade tests')
     return parser.parse_args()
 
 def get_perp_product(product_id):
@@ -116,7 +119,7 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
         return True, current["close"]
     return False, None
 
-def execute_trade(cb, entry_price: float, product_id: str, position_size: float, leverage: int):
+def execute_trade(cb, entry_price: float, product_id: str, margin: float, leverage: int):
     """Execute the trade using trade_btc_perp.py functions"""
     try:
         # Convert to perpetual futures product ID
@@ -146,33 +149,37 @@ def execute_trade(cb, entry_price: float, product_id: str, position_size: float,
         trades = cb.client.get_market_trades(product_id=perp_product, limit=1)
         current_price = float(trades['trades'][0]['price'])
         
-        # Calculate base size
-        size = position_size / current_price
+        # Calculate size in USD
+        size_usd = margin * leverage
         
         # Log trade setup information
         logger.info(f"ATR: {atr:.2f} ({atr_percent:.2f}% of entry price)")
         logger.info(f"TP Mode: {tp_mode}")
         logger.info(f"Take Profit: ${tp_price:.2f}")
         logger.info(f"Stop Loss: ${sl_price:.2f}")
+        logger.info(f"Size: ${size_usd:.2f}")
+
+        # Prepare command for trade_btc_perp.py
+        cmd = [
+            'python', 'trade_btc_perp.py',
+            '--product', perp_product,
+            '--side', 'BUY',
+            '--size', str(size_usd),
+            '--leverage', str(leverage),
+            '--tp', str(tp_price),
+            '--sl', str(sl_price),
+            '--no-confirm'
+        ]
         
-        # Place market order with targets
-        result = cb.place_market_order_with_targets(
-            product_id=perp_product,
-            side="BUY",
-            size=size,
-            take_profit_price=tp_price,
-            stop_loss_price=sl_price,
-            leverage=str(leverage)
-        )
+        # Execute the command
+        result = subprocess.run(cmd, capture_output=True, text=True)
         
-        if "error" in result:
-            logger.error(f"Error placing order: {result['error']}")
+        if result.returncode != 0:
+            logger.error(f"Error placing order: {result.stderr}")
             return False
             
         logger.info("Order placed successfully!")
-        logger.info(f"Order ID: {result['order_id']}")
-        logger.info(f"Take Profit Price: ${result['tp_price']}")
-        logger.info(f"Stop Loss Price: ${result['sl_price']}")
+        logger.info(f"Command output: {result.stdout}")
 
         # Log trade to automated_trades.csv
         try:
@@ -206,7 +213,7 @@ def execute_trade(cb, entry_price: float, product_id: str, position_size: float,
                 'Outcome': 'PENDING',
                 'Outcome %': 0.0,
                 'Leverage': f"{leverage}x",
-                'Margin': position_size
+                'Margin': margin
             }])
             
             # Append new trade to CSV
@@ -444,6 +451,53 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             'csv_filename': None
         }
 
+def test_execute_trade():
+    """Test the execute_trade function with different scenarios"""
+    try:
+        # Initialize services
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+        
+        # Test parameters
+        test_cases = [
+            {
+                'name': 'Standard BTC trade',
+                'product_id': 'BTC-USDC',
+                'entry_price': 85581.0,
+                'margin': 40,
+                'leverage': 5
+            },
+        ]
+        
+        logger.info("\nStarting execute_trade tests...")
+        
+        for test_case in test_cases:
+            logger.info(f"\nTesting: {test_case['name']}")
+            logger.info(f"Parameters: {test_case}")
+            
+            try:
+                # Execute trade
+                result = execute_trade(
+                    cb=cb,
+                    entry_price=test_case['entry_price'],
+                    product_id=test_case['product_id'],
+                    margin=test_case['margin'],
+                    leverage=test_case['leverage']
+                )
+                
+                # Log results
+                if result:
+                    logger.info(f"✅ Test passed: {test_case['name']}")
+                else:
+                    logger.error(f"❌ Test failed: {test_case['name']}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Test error in {test_case['name']}: {str(e)}")
+        
+        logger.info("\nTest execution completed.")
+        
+    except Exception as e:
+        logger.error(f"Test setup error: {str(e)}")
+
 def main():
     args = parse_args()
     
@@ -503,4 +557,24 @@ def main():
         logger.error(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    main()
+    # Add test argument to command line options
+    parser = argparse.ArgumentParser(description='Simplified Trading Bot')
+    parser.add_argument('--product_id', type=str, default='BTC-USDC',
+                      help='Product ID to trade (e.g., BTC-USDC)')
+    parser.add_argument('--margin', type=float, default=100,
+                      help='Position size in USD')
+    parser.add_argument('--leverage', type=int, default=5,
+                      help='Trading leverage')
+    parser.add_argument('--backtest', action='store_true',
+                      help='Run in backtest mode')
+    parser.add_argument('--initial_balance', type=float, default=10000,
+                      help='Initial balance for backtesting')
+    parser.add_argument('--test', action='store_true',
+                      help='Run execute_trade tests')
+    
+    args = parser.parse_args()
+    
+    if args.test:
+        test_execute_trade()
+    else:
+        main()
