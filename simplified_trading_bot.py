@@ -85,7 +85,7 @@ def fetch_candles(cb, product_id, start_date=None, end_date=None):
         end = now
     
     raw_data = cb.historical_data.get_historical_data(product_id, start, end, GRANULARITY)
-    print(raw_data[:2])
+    # print(raw_data[:2])
     df = pd.DataFrame(raw_data)
     
     # Convert string columns to numeric
@@ -174,12 +174,29 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         # Calculate size in USD
         size_usd = margin * leverage
         
+        # Determine trading session based on current UTC time
+        current_hour = datetime.now(UTC).hour
+        if 0 <= current_hour < 9:
+            session = "Asia"
+        elif 9 <= current_hour < 17:
+            session = "EU"
+        else:
+            session = "US"            
+        
+        # Calculate ATR percentage
+        atr_percent = (atr / entry_price) * 100
+        
+        # Determine setup type based on entry conditions
+        setup_type = "RSI Dip"  # Default since we're using RSI strategy
+        
         # Log trade setup information
-        # logger.info(f"ATR: {atr:.2f} ({atr_percent:.2f}% of entry price)")
         logger.info(f"TP Mode: {tp_mode}")
         logger.info(f"Take Profit: ${tp_price:.2f}")
         logger.info(f"Stop Loss: ${sl_price:.2f}")
         logger.info(f"Size: ${size_usd:.2f}")
+        logger.info(f"Session: {session}")
+        logger.info(f"ATR %: {atr_percent:.2f}")
+        logger.info(f"Setup Type: {setup_type}")
 
         # Prepare command for trade_btc_perp.py
         cmd = [
@@ -212,8 +229,7 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             # Calculate R/R ratio
             rr_ratio = (tp_price - entry_price) / (entry_price - sl_price)
             
-            # Determine volume strength based on ATR percentage
-            atr_percent = (atr / entry_price) * 100
+            # Determine volume strength based on ATR percentage - THIS IS VOLATILITY LEVEL
             if atr_percent > 1.0:
                 volume_strength = "Strong"
             elif atr_percent > 0.5:
@@ -221,7 +237,7 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             else:
                 volume_strength = "Weak"
             
-            # Create new trade entry
+            # Create new trade entry with additional metrics
             new_trade = pd.DataFrame([{
                 'No.': next_trade_no,
                 'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -232,11 +248,15 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
                 'Probability': '70.0%',  # Default value since we don't calculate probability
                 'Confidence': 'Moderate',  # Default value
                 'R/R Ratio': round(rr_ratio, 2),
-                'Volume Strength': volume_strength,
+                'Volatility Level': volume_strength,
                 'Outcome': 'PENDING',
                 'Outcome %': 0.0,
                 'Leverage': f"{leverage}x",
-                'Margin': margin
+                'Margin': margin,
+                'Session': session,
+                'TP Mode': tp_mode,
+                'ATR %': round(atr_percent, 2),
+                'Setup Type': setup_type
             }])
             
             # Append new trade to CSV
@@ -261,6 +281,13 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
     position = 0
     trades = []
     current_trade = None
+    
+    # Track balance history for drawdown calculation
+    balance_history = [initial_balance]
+    peak_balance = initial_balance
+    max_drawdown = 0
+    max_drawdown_duration = 0
+    current_drawdown_start = None
     
     # Create timestamp for unique filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -307,7 +334,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                     'atr_percent': (atr / current_trade['entry_price']) * 100,
                     'tp_mode': tp_mode
                 })
-                if len(trades) >= 120:
+                if len(trades) >= 200:
                     break                
                 current_trade = None
                 position = 0
@@ -327,7 +354,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                     'atr_percent': (atr / current_trade['entry_price']) * 100,
                     'tp_mode': tp_mode
                 })
-                if len(trades) >= 120:
+                if len(trades) >= 200:
                     break                
                 current_trade = None
                 position = 0
@@ -365,6 +392,23 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                 'tp_mode': tp_mode
             }
             position = size
+        
+        # Update balance history and calculate drawdown
+        balance_history.append(balance)
+        if balance > peak_balance:
+            peak_balance = balance
+            # If we were in a drawdown, calculate its duration
+            if current_drawdown_start is not None:
+                drawdown_duration = (df.index[i] - current_drawdown_start).total_seconds() / 3600  # Convert to hours
+                max_drawdown_duration = max(max_drawdown_duration, drawdown_duration)
+                current_drawdown_start = None
+        else:
+            # Calculate current drawdown
+            current_drawdown = (peak_balance - balance) / peak_balance
+            max_drawdown = max(max_drawdown, current_drawdown)
+            # If this is the start of a new drawdown
+            if current_drawdown_start is None:
+                current_drawdown_start = df.index[i]
     
     # Calculate performance metrics
     if trades:
@@ -407,12 +451,27 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
                 'Profit', 'Exit Type', 'TP Mode', 'ATR', 'ATR %'
             ]
             
+            # Add additional columns
+            trades_df['Session'] = trades_df['Entry Time'].apply(lambda x: 
+                'Asia' if 0 <= pd.to_datetime(x).hour < 9 else 
+                'EU' if 9 <= pd.to_datetime(x).hour < 17 else 'US')
+            trades_df['Setup Type'] = 'RSI Dip'  # Since we're using RSI strategy
+            
+            # Add Outcome column based on Exit Type
+            trades_df['Outcome'] = trades_df['Exit Type'].apply(lambda x: 'SUCCESS' if x == 'TP' else 'FAILURE')
+            
             # Format numeric columns
             trades_df['Entry Price'] = trades_df['Entry Price'].round(2)
             trades_df['Exit Price'] = trades_df['Exit Price'].round(2)
             trades_df['Profit'] = trades_df['Profit'].round(2)
             trades_df['ATR'] = trades_df['ATR'].round(2)
             trades_df['ATR %'] = trades_df['ATR %'].round(2)
+            
+            # Reorder columns to match the desired order
+            trades_df = trades_df[[
+                'Entry Time', 'Exit Time', 'Entry Price', 'Exit Price',
+                'Profit', 'Exit Type', 'Session', 'TP Mode', 'ATR %', 'Setup Type', 'Outcome'
+            ]]
             
             # Save to CSV
             trades_df.to_csv(csv_filename, index=False)
@@ -436,6 +495,8 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             'adaptive_tp_trades': len(adaptive_tp_trades),
             'fixed_tp_win_rate': fixed_tp_win_rate,
             'adaptive_tp_win_rate': adaptive_tp_win_rate,
+            'max_drawdown': max_drawdown * 100,  # Convert to percentage
+            'max_drawdown_duration': max_drawdown_duration,  # In hours
             'trades': trades,
             'csv_filename': csv_filename
         }
@@ -455,10 +516,11 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str, initial_b
             'adaptive_tp_trades': 0,
             'fixed_tp_win_rate': 0,
             'adaptive_tp_win_rate': 0,
+            'max_drawdown': 0,
+            'max_drawdown_duration': 0,
             'trades': [],
             'csv_filename': None
         }
-
 
 def main():
     args = parse_args()
@@ -495,6 +557,9 @@ def main():
             logger.info(f"Fixed TP Win Rate: {results['fixed_tp_win_rate']:.2f}%")
             logger.info(f"Adaptive TP Trades: {results['adaptive_tp_trades']}")
             logger.info(f"Adaptive TP Win Rate: {results['adaptive_tp_win_rate']:.2f}%")
+            logger.info(f"\nRisk Metrics:")
+            logger.info(f"Maximum Drawdown: {results['max_drawdown']:.2f}%")
+            logger.info(f"Maximum Drawdown Duration: {results['max_drawdown_duration']:.2f} hours")
             
             if results['csv_filename']:
                 logger.info(f"\nDetailed trade history saved to: {results['csv_filename']}")
