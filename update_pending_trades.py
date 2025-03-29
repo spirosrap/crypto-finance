@@ -66,37 +66,66 @@ def update_pending_trades():
         for trade in trades:
             # Only process pending trades
             if trade['Outcome'] == 'PENDING':
-                entry_price = float(trade['ENTRY'])
-                margin = float(trade['Margin'])
-                leverage = float(trade['Leverage'].replace('x', ''))
-                
-                # Calculate position size in BTC
-                position_size_usd = margin * leverage
-                position_size_btc = position_size_usd / entry_price
-                
-                # Calculate current value
-                current_value = position_size_btc * current_price
-                
-                # Calculate profit/loss in USD
-                if trade['SIDE'] == 'LONG':
-                    profit_loss_usd = current_value - position_size_usd
-                else:  # SHORT
-                    profit_loss_usd = position_size_usd - current_value
-                
-                # Calculate profit/loss percentage based on margin
-                profit_loss_percentage = (profit_loss_usd / margin) * 100
-                
-                # Update outcome based on profit/loss
-                if profit_loss_percentage > 0:
-                    trade['Outcome'] = 'SUCCESS'
-                    logger.info(f"Trade {trade['No.']} marked as SUCCESS with {profit_loss_percentage:.2f}% profit on margin")
-                else:
-                    trade['Outcome'] = 'STOP LOSS'
-                    logger.info(f"Trade {trade['No.']} marked as STOP LOSS with {profit_loss_percentage:.2f}% loss on margin")
-                
-                # Update outcome percentage
-                trade['Outcome %'] = str(round(profit_loss_percentage, 2))
-                updated = True
+                try:
+                    entry_price = float(trade['ENTRY'])
+                    take_profit = trade['Take Profit']
+                    stop_loss = trade['Stop Loss']
+                    
+                    # Validate take profit and stop loss values
+                    if not take_profit or not stop_loss:
+                        logger.warning(f"Trade {trade['No.']} has missing Take Profit or Stop Loss values. Skipping update.")
+                        continue
+                        
+                    take_profit = float(take_profit)
+                    stop_loss = float(stop_loss)
+                    
+                    # Log trade details for debugging
+                    logger.info(f"Processing Trade {trade['No.']}:")
+                    logger.info(f"Entry: {entry_price}, Take Profit: {take_profit}, Stop Loss: {stop_loss}")
+                    logger.info(f"Current Price: {current_price}")
+                    
+                    margin = float(trade['Margin'])
+                    leverage = float(trade['Leverage'].replace('x', ''))
+                    
+                    # Calculate position size in BTC
+                    position_size_usd = margin * leverage
+                    position_size_btc = position_size_usd / entry_price
+                    
+                    # Calculate current value
+                    current_value = position_size_btc * current_price
+                    
+                    # Calculate profit/loss in USD
+                    if trade['SIDE'] == 'LONG':
+                        profit_loss_usd = current_value - position_size_usd
+                        # Check if price has hit take profit or stop loss
+                        if current_price >= take_profit:
+                            trade['Outcome'] = 'SUCCESS'
+                            logger.info(f"Trade {trade['No.']} marked as SUCCESS - Take Profit hit at {current_price}")
+                        elif current_price <= stop_loss:
+                            trade['Outcome'] = 'STOP LOSS'
+                            logger.info(f"Trade {trade['No.']} marked as STOP LOSS - Stop Loss hit at {current_price}")
+                        else:
+                            logger.info(f"Trade {trade['No.']} still pending - Price {current_price} between TP {take_profit} and SL {stop_loss}")
+                    else:  # SHORT
+                        profit_loss_usd = position_size_usd - current_value
+                        # Check if price has hit take profit or stop loss
+                        if current_price <= take_profit:
+                            trade['Outcome'] = 'SUCCESS'
+                            logger.info(f"Trade {trade['No.']} marked as SUCCESS - Take Profit hit at {current_price}")
+                        elif current_price >= stop_loss:
+                            trade['Outcome'] = 'STOP LOSS'
+                            logger.info(f"Trade {trade['No.']} marked as STOP LOSS - Stop Loss hit at {current_price}")
+                        else:
+                            logger.info(f"Trade {trade['No.']} still pending - Price {current_price} between TP {take_profit} and SL {stop_loss}")
+                    
+                    # Only update outcome percentage if trade is closed
+                    if trade['Outcome'] != 'PENDING':
+                        profit_loss_percentage = (profit_loss_usd / margin) * 100
+                        trade['Outcome %'] = str(round(profit_loss_percentage, 2))
+                        updated = True
+                except ValueError as e:
+                    logger.error(f"Error processing trade {trade['No.']}: {str(e)}")
+                    continue
         
         # Write updated trades back to CSV if any changes were made
         if updated:
