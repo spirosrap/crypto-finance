@@ -186,6 +186,26 @@ class TradingAnalyzer:
             'Average Leverage': avg_leverage
         }
     
+    def calculate_trade_duration_stats(self) -> dict:
+        """Calculate detailed statistics about trade durations."""
+        # Calculate duration between trades
+        self.df['Duration'] = pd.to_datetime(self.df['Timestamp']).diff()
+        
+        # Convert duration to minutes
+        durations_minutes = self.df['Duration'].dt.total_seconds() / 60
+        
+        # Calculate statistics
+        stats = {
+            'Average Duration (minutes)': durations_minutes.mean(),
+            'Median Duration (minutes)': durations_minutes.median(),
+            'Min Duration (minutes)': durations_minutes.min(),
+            'Max Duration (minutes)': durations_minutes.max(),
+            'Duration Std Dev (minutes)': durations_minutes.std(),
+            'Trades per Day': len(self.df) / ((self.df['Timestamp'].max() - self.df['Timestamp'].min()).days + 1)
+        }
+        
+        return stats
+    
     def get_current_drawdown(self) -> float:
         """Calculate the current drawdown from the peak."""
         cumulative_returns = (1 + self.df['Outcome %'] / 100).cumprod()
@@ -203,6 +223,7 @@ class TradingAnalyzer:
         max_drawdown, drawdown_periods = self.calculate_max_drawdown()
         risk_metrics = self.calculate_risk_metrics()
         current_drawdown = self.get_current_drawdown()
+        duration_stats = self.calculate_trade_duration_stats()
         
         # ANSI color codes
         GREEN = '\033[92m'
@@ -222,13 +243,6 @@ class TradingAnalyzer:
         # Calculate expectancy
         expectancy = (win_rate * avg_profit) + ((1 - win_rate) * -1)  # Assuming 1% loss on losing trades
         
-        # Calculate average trade duration
-        self.df['Duration'] = pd.to_datetime(self.df['Timestamp']).diff()
-        avg_duration = self.df['Duration'].mean()
-        
-        # Format duration in minutes
-        avg_duration_minutes = avg_duration.total_seconds() / 60 if pd.notna(avg_duration) else 0
-        
         print(f"\n{BOLD}{UNDERLINE}📊 Trading Performance Report{END}\n")
         
         # Summary Section
@@ -238,7 +252,8 @@ class TradingAnalyzer:
         print(f"Total Trades: {GREEN}{total_trades}{END}")
         print(f"Win Rate: {GREEN if win_rate >= 0.5 else RED}{win_rate:.2%}{END}")
         print(f"Total Profit: {GREEN if total_profit >= 0 else RED}{total_profit:.2f}%{END}")
-        print(f"Average Trade Duration: {avg_duration_minutes:.0f} minutes")
+        print(f"Average Trade Duration: {duration_stats['Average Duration (minutes)']:.0f} minutes")
+        print(f"Trades per Day: {BLUE}{duration_stats['Trades per Day']:.1f}{END}")
         print(f"{'=' * 50}\n")
         
         # Performance Metrics
