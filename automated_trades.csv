@@ -1,2 +1,7 @@
-No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,Probability,Confidence,R/R Ratio,Volume Strength,Outcome,Outcome %,Leverage,Margin
-1,2025-03-28 16:14:01,LONG,84335.39,85600.4,83745.0,70.0%,Moderate,2.14,Weak,STOP LOSS,-3.82,5x,50.0
+No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,Probability,Confidence,R/R Ratio,Volatility Level,Outcome,Outcome %,Leverage,Margin,Session,TP Mode,ATR %,Setup Type
+1,2025-03-28 16:14:01,LONG,84335.39,85600.4,83745.0,70.0%,Moderate,2.14,Weak,STOP LOSS,-3.82,5x,50.0,EU,,,
+2,2025-03-29 04:59:41,LONG,83824.69,85082.1,83237.9,70.0%,Moderate,2.14,Weak,STOP LOSS,-3.73,5x,50.0,Asia,FIXED,0.13,RSI Dip
+3,2025-03-29 11:46:12,LONG,83382.65,84633.4,82799.0,70.0%,Moderate,2.14,Weak,STOP LOSS,-4.3,5x,50.0,EU,FIXED,0.13,RSI Dip
+4,2025-03-29 12:57:31,LONG,82860.7,84103.6,82280.7,70.0%,Moderate,2.14,Weak,STOP LOSS,-4.04,5x,50.0,EU,FIXED,0.17,RSI Dip
+5,2025-03-29 13:34:36,LONG,82264.66,83498.6,81688.8,70.0%,Moderate,2.14,Weak,STOP LOSS,-3.9,5x,50.0,EU,FIXED,0.23,RSI Dip
+6,2025-03-29 19:16:37,LONG,81711.11,82936.8,81139.1,70.0%,Moderate,2.14,Weak,SUCCESS,7.65,5x,50.0,US,FIXED,0.17,RSI Dip
