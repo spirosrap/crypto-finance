@@ -350,6 +350,56 @@ export RISK_LEVEL=conservative
 python base.py
 ```
 
+### Simplified Trading Bot
+
+```bash
+# Basic usage with default settings
+python simplified_trading_bot.py
+
+# Custom configuration
+python simplified_trading_bot.py --product_id BTC-USDC --margin 100 --leverage 5
+```
+
+The simplified trading bot provides a streamlined trading experience with:
+- Single coin trading (BTC-USDC by default)
+- Fixed 5-minute timeframe analysis
+- Simple strategy combining RSI, EMA, and volume indicators
+- Automated trade execution with configurable TP/SL
+- Risk management with position sizing and leverage control
+- No AI/ML components for faster execution
+
+### Market UI
+
+```bash
+# Launch the graphical user interface
+python market_ui.py
+```
+
+The Market UI provides a comprehensive graphical interface for:
+- Real-time price monitoring and market analysis
+- Multiple trading modes (Auto-Trading, Simplified Trading)
+- Configurable trading parameters (margin, leverage, TP/SL)
+- Trade history and performance tracking
+- Multi-timeframe analysis with alignment detection
+- Order management and position monitoring
+- Risk management controls
+- Support for multiple trading pairs (BTC, ETH, DOGE, SOL, SHIB)
+
+Key Features:
+- **Auto-Trading Mode**: AI-powered trading with multiple timeframe analysis
+- **Simplified Trading Mode**: Fast execution using basic technical indicators
+- **Quick Market Orders**: One-click long/short positions with preset parameters
+- **Trade Status Monitoring**: Real-time updates on open positions and orders
+- **Risk Controls**: Configurable leverage, margin, and TP/SL levels
+- **Market Analysis**: Support for multiple AI models and timeframe alignment
+- **Performance Tracking**: Trade history with win/loss statistics
+
+Configuration:
+- Uses the same `config.py` file for API keys
+- Supports both market and limit orders
+- Customizable timeframes and analysis parameters
+- Persistent settings saved between sessions
+
 ## Market Analyzer
 
 The Market Analyzer is a sophisticated tool for analyzing cryptocurrency markets and generating trading signals based on technical analysis. It provides comprehensive market analysis including:
