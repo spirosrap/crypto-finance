@@ -52,7 +52,6 @@ class TradingAnalyzer:
         win_loss_ratio = winning_trades / losing_trades if losing_trades > 0 else float('inf')
         
         avg_profit = self.df['Outcome %'].mean()
-        total_profit = self.df['Outcome %'].sum()
         
         return {
             'Total Trades': total_trades,
@@ -60,8 +59,7 @@ class TradingAnalyzer:
             'Losing Trades': losing_trades,
             'Win Rate': win_rate,
             'Win/Loss Ratio': win_loss_ratio,
-            'Average Profit per Trade (%)': avg_profit,
-            'Total Profit (%)': total_profit
+            'Average Profit per Trade (%)': avg_profit
         }
     
     def calculate_dollar_profits(self) -> dict:
@@ -238,7 +236,6 @@ class TradingAnalyzer:
         total_trades = basic_metrics['Total Trades']
         win_rate = basic_metrics['Win Rate']
         avg_profit = basic_metrics['Average Profit per Trade (%)']
-        total_profit = basic_metrics['Total Profit (%)']
         
         # Calculate expectancy
         expectancy = (win_rate * avg_profit) + ((1 - win_rate) * -1)  # Assuming 1% loss on losing trades
@@ -251,7 +248,7 @@ class TradingAnalyzer:
         print(f"Period: {self.df['Timestamp'].min().date()} to {self.df['Timestamp'].max().date()}")
         print(f"Total Trades: {GREEN}{total_trades}{END}")
         print(f"Win Rate: {GREEN if win_rate >= 0.5 else RED}{win_rate:.2%}{END}")
-        print(f"Total Profit: {GREEN if total_profit >= 0 else RED}{total_profit:.2f}%{END}")
+        print(f"Total Dollar Profit: {GREEN if dollar_profits['Total Dollar Profit'] >= 0 else RED}${dollar_profits['Total Dollar Profit']:.2f}{END}")
         print(f"Average Trade Duration: {duration_stats['Average Duration (minutes)']:.0f} minutes")
         print(f"Trades per Day: {BLUE}{duration_stats['Trades per Day']:.1f}{END}")
         print(f"{'=' * 50}\n")
@@ -259,7 +256,8 @@ class TradingAnalyzer:
         # Performance Metrics
         print(f"{BOLD}🎯 Performance Metrics{END}")
         print(f"{'=' * 50}")
-        print(f"Average Profit per Trade: {GREEN if avg_profit >= 0 else RED}{avg_profit:.2f}%{END}")
+        print(f"Average % Return per Trade: {GREEN if avg_profit >= 0 else RED}{avg_profit:.2f}%{END} (Not Cumulative)")
+        print(f"Sum of Outcome %s: {GREEN if self.df['Outcome %'].sum() >= 0 else RED}{self.df['Outcome %'].sum():.2f}%{END} (Not Actual Profit)")
         print(f"Win/Loss Ratio: {GREEN}{basic_metrics['Win/Loss Ratio']:.2f}{END}")
         print(f"Expectancy: {GREEN if expectancy >= 0 else RED}{expectancy:.2f}%{END}")
         print(f"Sharpe Ratio: {GREEN if sharpe_ratio >= 1 else YELLOW if sharpe_ratio >= 0 else RED}{sharpe_ratio:.2f}{END}")
