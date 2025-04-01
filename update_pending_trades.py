@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from coinbaseservice import CoinbaseService
 from dotenv import load_dotenv
 from config import API_KEY_PERPS, API_SECRET_PERPS
-
+import time
 # Constants
 STATE_FILE_PATH = 'data/trade_state_tracker.json'
 CSV_FILE_PATH = 'automated_trades.csv'
