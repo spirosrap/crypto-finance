@@ -84,3 +84,4 @@ market_analyzer.log.2
 enhanced_market_analysis.log
 logs/pending_trades_updates.log
 data/trade_state_tracker.json
+logs/backfill_exit_trade.log
