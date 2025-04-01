@@ -141,6 +141,27 @@ def reset_state_for_trade(unique_id, trade_state, entry_price, side, leverage):
     logger.info(f"Reset state for trade {unique_id} to recalculate from entry")
     return trade_state
 
+def update_mae_mfe(trade, current_price, trade_state):
+    entry = float(trade["ENTRY"])
+    prev_mae = float(trade_state.get("mae_pct", 0.0))
+    prev_mfe = float(trade_state.get("mfe_pct", 0.0))
+    trade_id = trade.get("ID", "UNKNOWN")
+
+    price_delta = (current_price - entry) / entry * 100
+
+    if price_delta < 0:  # Adverse movement
+        current_mae = abs(price_delta)
+        if current_mae > prev_mae:
+            trade_state["mae_pct"] = current_mae
+            logger.info(f"[LIVE MAE SPIKE] Trade {trade_id}: MAE updated from {prev_mae:.2f}% to {current_mae:.2f}%")
+            assert current_mae >= prev_mae, f"MAE regressed in trade {trade_id}"
+    else:  # Favorable movement
+        current_mfe = price_delta
+        if current_mfe > prev_mfe:
+            trade_state["mfe_pct"] = current_mfe
+            logger.info(f"[LIVE MFE SPIKE] Trade {trade_id}: MFE updated from {prev_mfe:.2f}% to {current_mfe:.2f}%")
+            assert current_mfe >= prev_mfe, f"MFE regressed in trade {trade_id}"
+
 def update_pending_trades():
     """Update pending trades based on current price"""
     try:
@@ -347,9 +368,12 @@ def update_pending_trades():
                     min_price = trade_state['min_price']
                     max_price = trade_state['max_price']
                     
+                    # Update MAE/MFE based on current price
+                    update_mae_mfe(trade, current_price, trade_state)
+                    
                     # Initialize MAE and MFE variables
-                    mae_pct = 0.0
-                    mfe_pct = 0.0
+                    mae_pct = trade_state['mae_pct']
+                    mfe_pct = trade_state['mfe_pct']
                     
                     # Check if we have meaningful candle data
                     if not candles:
