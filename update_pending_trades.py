@@ -10,24 +10,44 @@ import json
 import hashlib
 from datetime import datetime
 import logging
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass
 from coinbaseservice import CoinbaseService
 from dotenv import load_dotenv
 from config import API_KEY_PERPS, API_SECRET_PERPS
-# Set up logging
+
+# Constants
+STATE_FILE_PATH = 'data/trade_state_tracker.json'
+CSV_FILE_PATH = 'automated_trades.csv'
+LOG_FILE_PATH = 'logs/pending_trades_updates.log'
+DEFAULT_GRANULARITY = "FIVE_MINUTE"
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # seconds
+
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/pending_trades_updates.log'),
+        logging.FileHandler(LOG_FILE_PATH),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Path for state tracking file
-STATE_FILE_PATH = 'data/trade_state_tracker.json'
+@dataclass
+class TradeState:
+    """Data class to hold trade state information"""
+    entry_price: float
+    side: str
+    min_price: float
+    max_price: float
+    mae_pct: float
+    mfe_pct: float
+    leverage: float
+    initialized: bool = True
 
-def load_api_keys():
+def load_api_keys() -> Tuple[str, str]:
     """Load API keys from .env file"""
     load_dotenv()
     api_key = API_KEY_PERPS
@@ -36,72 +56,76 @@ def load_api_keys():
         raise ValueError("API keys not found in .env file")
     return api_key, api_secret
 
-def get_current_btc_price(client):
-    """Get current BTC price from Coinbase"""
-    try:
-        prices = client.get_btc_prices()
-        if 'BTC-USDC' in prices:
-            return float(prices['BTC-USDC']['ask'])
-        elif 'BTC-EUR' in prices:
-            return float(prices['BTC-EUR']['ask'])
-        else:
-            raise ValueError("No BTC price found in available pairs")
-    except Exception as e:
-        logger.error(f"Error getting current BTC price: {str(e)}")
-        raise
+def get_current_btc_price(client: CoinbaseService) -> float:
+    """Get current BTC price from Coinbase with retry logic"""
+    for attempt in range(MAX_RETRIES):
+        try:
+            prices = client.get_btc_prices()
+            if 'BTC-USDC' in prices:
+                return float(prices['BTC-USDC']['ask'])
+            elif 'BTC-EUR' in prices:
+                return float(prices['BTC-EUR']['ask'])
+            else:
+                raise ValueError("No BTC price found in available pairs")
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f"Error getting current BTC price after {MAX_RETRIES} attempts: {str(e)}")
+                raise
+            logger.warning(f"Attempt {attempt + 1} failed to get BTC price: {str(e)}")
+            time.sleep(RETRY_DELAY)
 
-def get_historical_candles(client, start_timestamp, end_timestamp, granularity="FIVE_MINUTE"):
-    """Get historical candles for calculating MAE and MFE"""
-    try:
-        product_id = "BTC-USDC"
-        # Convert timestamps to datetime objects
-        start_date = datetime.fromtimestamp(start_timestamp)
-        end_date = datetime.fromtimestamp(end_timestamp)
-        
-        logger.info(f"Fetching historical candles from {start_date} to {end_date}")
-        
-        # Use the historical_data service to get candles
-        candles = client.historical_data.get_historical_data(
-            product_id, 
-            start_date, 
-            end_date, 
-            granularity
-        )
-        
-        logger.info(f"Retrieved {len(candles)} candles")
-        return candles
-    except Exception as e:
-        logger.error(f"Error getting historical candles: {str(e)}")
-        return []
+def get_historical_candles(
+    client: CoinbaseService,
+    start_timestamp: int,
+    end_timestamp: int,
+    granularity: str = DEFAULT_GRANULARITY
+) -> List[Dict[str, Any]]:
+    """Get historical candles for calculating MAE and MFE with retry logic"""
+    for attempt in range(MAX_RETRIES):
+        try:
+            product_id = "BTC-USDC"
+            start_date = datetime.fromtimestamp(start_timestamp)
+            end_date = datetime.fromtimestamp(end_timestamp)
+            
+            logger.info(f"Fetching historical candles from {start_date} to {end_date}")
+            
+            candles = client.historical_data.get_historical_data(
+                product_id, 
+                start_date, 
+                end_date, 
+                granularity
+            )
+            
+            logger.info(f"Retrieved {len(candles)} candles")
+            return candles
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:
+                logger.error(f"Error getting historical candles after {MAX_RETRIES} attempts: {str(e)}")
+                return []
+            logger.warning(f"Attempt {attempt + 1} failed to get historical candles: {str(e)}")
+            time.sleep(RETRY_DELAY)
 
-def generate_unique_trade_id(trade):
+def generate_unique_trade_id(trade: Dict[str, Any]) -> str:
     """Generate a unique ID for each trade to avoid duplicates in state tracker"""
     try:
-        # Use trade number if available as primary key
         if 'No.' in trade and trade['No.']:
             return str(trade['No.'])
         
-        # As fallback, generate a hash from timestamp + entry + side
         timestamp = trade.get('Timestamp', '')
         entry = trade.get('ENTRY', '0')
         side = trade.get('SIDE', '')
         leverage = trade.get('Leverage', '1x')
         
-        # Create a unique string combining key trade elements
         unique_str = f"{timestamp}_{entry}_{side}_{leverage}"
-        
-        # Generate a hash to use as ID
         hash_obj = hashlib.md5(unique_str.encode())
-        return hash_obj.hexdigest()[:12]  # Use first 12 chars of hash as ID
+        return hash_obj.hexdigest()[:12]
     except Exception as e:
         logger.error(f"Error generating unique trade ID: {str(e)}")
-        # Last resort fallback
         return datetime.now().strftime("%Y%m%d%H%M%S")
 
-def load_state_tracker():
+def load_state_tracker() -> Dict[str, Dict[str, Any]]:
     """Load the persistent state tracker for MAE/MFE"""
     try:
-        # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
         
         if os.path.exists(STATE_FILE_PATH):
@@ -116,10 +140,9 @@ def load_state_tracker():
         logger.error(f"Error loading state tracker: {str(e)}")
         return {}
 
-def save_state_tracker(state_data):
+def save_state_tracker(state_data: Dict[str, Dict[str, Any]]) -> None:
     """Save the persistent state tracker for MAE/MFE"""
     try:
-        # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(STATE_FILE_PATH), exist_ok=True)
         
         with open(STATE_FILE_PATH, 'w') as f:
@@ -128,7 +151,13 @@ def save_state_tracker(state_data):
     except Exception as e:
         logger.error(f"Error saving state tracker: {str(e)}")
 
-def reset_state_for_trade(unique_id, trade_state, entry_price, side, leverage):
+def reset_state_for_trade(
+    unique_id: str,
+    trade_state: Dict[str, Any],
+    entry_price: float,
+    side: str,
+    leverage: float
+) -> Dict[str, Any]:
     """Reset the state for a trade to recalculate MAE/MFE from scratch"""
     trade_state['entry_price'] = entry_price
     trade_state['side'] = side
@@ -141,7 +170,12 @@ def reset_state_for_trade(unique_id, trade_state, entry_price, side, leverage):
     logger.info(f"Reset state for trade {unique_id} to recalculate from entry")
     return trade_state
 
-def update_mae_mfe(trade, current_price, trade_state):
+def update_mae_mfe(
+    trade: Dict[str, Any],
+    current_price: float,
+    trade_state: Dict[str, Any]
+) -> None:
+    """Update MAE and MFE values for a trade"""
     entry = float(trade["ENTRY"])
     prev_mae = float(trade_state.get("mae_pct", 0.0))
     prev_mfe = float(trade_state.get("mfe_pct", 0.0))
@@ -162,7 +196,174 @@ def update_mae_mfe(trade, current_price, trade_state):
             logger.info(f"[LIVE MFE SPIKE] Trade {trade_id}: MFE updated from {prev_mfe:.2f}% to {current_mfe:.2f}%")
             assert current_mfe >= prev_mfe, f"MFE regressed in trade {trade_id}"
 
-def update_pending_trades():
+def process_closed_trade(
+    trade: Dict[str, Any],
+    client: CoinbaseService,
+    entry_timestamp: int,
+    exit_timestamp: int
+) -> Dict[str, Any]:
+    """Process a closed trade to calculate final MAE and MFE"""
+    try:
+        trade_no = trade['No.']
+        entry_price = float(trade['ENTRY'])
+        side = trade['SIDE']
+        leverage = float(trade['Leverage'].replace('x', ''))
+        
+        logger.info(f"Processing closed trade {trade_no} from {trade['Timestamp']} to {trade['Exit Trade']}")
+        
+        candles = get_historical_candles(client, entry_timestamp, exit_timestamp)
+        
+        if not candles:
+            logger.warning(f"No candle data available for closed trade {trade_no}. Skipping.")
+            return trade
+        
+        min_price = entry_price
+        max_price = entry_price
+        
+        for candle in candles:
+            candle_low = float(candle['low'])
+            candle_high = float(candle['high'])
+            
+            if side == 'LONG':
+                if candle_low < min_price:
+                    min_price = candle_low
+                if candle_high > max_price:
+                    max_price = candle_high
+            else:  # SHORT
+                if candle_high > max_price:
+                    max_price = candle_high
+                if candle_low < min_price:
+                    min_price = candle_low
+        
+        if side == 'LONG':
+            mae_price_diff = entry_price - min_price
+            mae_pct = (mae_price_diff / entry_price) * 100
+            mfe_price_diff = max_price - entry_price
+            mfe_pct = (mfe_price_diff / entry_price) * 100
+        else:  # SHORT
+            mae_price_diff = max_price - entry_price
+            mae_pct = (mae_price_diff / entry_price) * 100 * -1
+            mfe_price_diff = entry_price - min_price
+            mfe_pct = (mfe_price_diff / entry_price) * 100
+        
+        trade['MAE'] = str(round(abs(mae_pct), 2))
+        trade['MFE'] = str(round(mfe_pct, 2))
+        
+        logger.info(f"Updated closed trade {trade_no} with MAE={trade['MAE']}%, MFE={trade['MFE']}%")
+        return trade
+        
+    except Exception as e:
+        logger.error(f"Error processing closed trade {trade.get('No.', 'unknown')}: {str(e)}")
+        return trade
+
+def process_pending_trade(
+    trade: Dict[str, Any],
+    current_price: float,
+    trade_state: Dict[str, Any],
+    client: CoinbaseService,
+    take_profit: float,
+    stop_loss: float
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Process a pending trade to update its state and check for exit conditions"""
+    try:
+        trade_no = trade['No.']
+        entry_price = float(trade['ENTRY'])
+        side = trade['SIDE']
+        leverage = float(trade['Leverage'].replace('x', ''))
+        
+        # Check if entry price changed, if so reset state
+        if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
+            trade_state = reset_state_for_trade(trade_no, trade_state, entry_price, side, leverage)
+        
+        # Get historical candles from entry time to present
+        trade_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
+        current_time = int(datetime.now().timestamp())
+        candles = get_historical_candles(client, trade_timestamp, current_time)
+        
+        # Update MAE/MFE based on current price
+        update_mae_mfe(trade, current_price, trade_state)
+        
+        # Initialize MAE and MFE variables
+        mae_pct = trade_state['mae_pct']
+        mfe_pct = trade_state['mfe_pct']
+        
+        # Process candles if available
+        if candles:
+            logger.info(f"Processing {len(candles)} candles for trade {trade_no}")
+            
+            if not trade_state.get('initialized', False):
+                trade_state['min_price'] = entry_price
+                trade_state['max_price'] = entry_price
+            
+            for candle in candles:
+                candle_low = float(candle['low'])
+                candle_high = float(candle['high'])
+                
+                if side == 'LONG':
+                    if candle_low < trade_state['min_price']:
+                        trade_state['min_price'] = candle_low
+                    if candle_high > trade_state['max_price']:
+                        trade_state['max_price'] = candle_high
+                else:  # SHORT
+                    if candle_high > trade_state['max_price']:
+                        trade_state['max_price'] = candle_high
+                    if candle_low < trade_state['min_price']:
+                        trade_state['min_price'] = candle_low
+        
+        # Check if current price creates new min/max
+        if current_price < trade_state['min_price']:
+            trade_state['min_price'] = current_price
+        if current_price > trade_state['max_price']:
+            trade_state['max_price'] = current_price
+        
+        # Calculate final MAE and MFE
+        if side == 'LONG':
+            mae_price_diff = entry_price - trade_state['min_price']
+            mae_pct = (mae_price_diff / entry_price) * 100
+            mfe_price_diff = trade_state['max_price'] - entry_price
+            mfe_pct = (mfe_price_diff / entry_price) * 100
+        else:  # SHORT
+            mae_price_diff = trade_state['max_price'] - entry_price
+            mae_pct = (mae_price_diff / entry_price) * 100 * -1
+            mfe_price_diff = entry_price - trade_state['min_price']
+            mfe_pct = (mfe_price_diff / entry_price) * 100
+        
+        # Update trade with calculated values
+        trade['MAE'] = str(round(abs(mae_pct), 2))
+        trade['MFE'] = str(round(mfe_pct, 2))
+        
+        # Check for exit conditions
+        if side == 'LONG':
+            if current_price >= take_profit:
+                trade['Outcome'] = 'SUCCESS'
+                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
+            elif current_price <= stop_loss:
+                trade['Outcome'] = 'STOP LOSS'
+                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
+        else:  # SHORT
+            if current_price <= take_profit:
+                trade['Outcome'] = 'SUCCESS'
+                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
+            elif current_price >= stop_loss:
+                trade['Outcome'] = 'STOP LOSS'
+                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
+        
+        # Calculate outcome percentage if trade is closed
+        if trade['Outcome'] != 'PENDING':
+            outcome_percentage = ((take_profit - entry_price) / entry_price) * leverage * 100 if trade['Outcome'] == 'SUCCESS' else ((entry_price - stop_loss) / entry_price) * leverage * -100
+            trade['Outcome %'] = str(round(outcome_percentage, 2))
+        
+        return trade, trade_state
+        
+    except Exception as e:
+        logger.error(f"Error processing pending trade {trade.get('No.', 'unknown')}: {str(e)}")
+        return trade, trade_state
+
+def update_pending_trades() -> None:
     """Update pending trades based on current price"""
     try:
         # Load API keys and initialize Coinbase client
@@ -173,39 +374,26 @@ def update_pending_trades():
         current_price = get_current_btc_price(client)
         logger.info(f"Current BTC price: {current_price}")
         
-        # Get current time
-        current_time = int(datetime.now().timestamp())
-        
         # Load persistent state tracker
         state_tracker = load_state_tracker()
         
         # Read the CSV file
         trades = []
-        csv_file_path = 'automated_trades.csv'
-        
-        # Check if file exists and read headers
-        file_exists = os.path.isfile(csv_file_path)
+        file_exists = os.path.isfile(CSV_FILE_PATH)
         headers = []
         
         if file_exists:
-            with open(csv_file_path, 'r') as f:
+            with open(CSV_FILE_PATH, 'r') as f:
                 reader = csv.reader(f)
                 headers = next(reader)
         
-        # Check if MAE and MFE columns exist, if not, need to add them
-        mae_index = -1
-        mfe_index = -1
-        exit_trade_index = -1
-        
-        if 'MAE' in headers:
-            mae_index = headers.index('MAE')
-        if 'MFE' in headers:
-            mfe_index = headers.index('MFE')
-        if 'Exit Trade' in headers:
-            exit_trade_index = headers.index('Exit Trade')
+        # Check if MAE and MFE columns exist
+        mae_index = headers.index('MAE') if 'MAE' in headers else -1
+        mfe_index = headers.index('MFE') if 'MFE' in headers else -1
+        exit_trade_index = headers.index('Exit Trade') if 'Exit Trade' in headers else -1
         
         # Read the trades
-        with open(csv_file_path, 'r') as f:
+        with open(CSV_FILE_PATH, 'r') as f:
             reader = csv.DictReader(f)
             trades = list(reader)
         
@@ -224,65 +412,14 @@ def update_pending_trades():
         for trade in trades:
             if trade['Outcome'] in ['SUCCESS', 'STOP LOSS'] and trade['Exit Trade']:
                 try:
-                    # Skip if MAE and MFE are already calculated (not zero or missing)
+                    # Skip if MAE and MFE are already calculated
                     if trade['MAE'] and trade['MAE'] != '0.0' and trade['MFE'] and trade['MFE'] != '0.0':
                         continue
 
-                    trade_no = trade['No.']
-                    entry_price = float(trade['ENTRY'])
-                    side = trade['SIDE']
-                    leverage = float(trade['Leverage'].replace('x', ''))
-                    
-                    # Get entry and exit timestamps
                     entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
                     exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S").timestamp())
                     
-                    logger.info(f"Processing closed trade {trade_no} from {trade['Timestamp']} to {trade['Exit Trade']}")
-                    
-                    # Get historical candles for the trade period
-                    candles = get_historical_candles(client, entry_timestamp, exit_timestamp)
-                    
-                    if not candles:
-                        logger.warning(f"No candle data available for closed trade {trade_no}. Skipping.")
-                        continue
-                    
-                    # Initialize min and max prices with entry price
-                    min_price = entry_price
-                    max_price = entry_price
-                    
-                    # Process candles to find min and max prices
-                    for candle in candles:
-                        candle_low = float(candle['low'])
-                        candle_high = float(candle['high'])
-                        
-                        if side == 'LONG':
-                            if candle_low < min_price:
-                                min_price = candle_low
-                            if candle_high > max_price:
-                                max_price = candle_high
-                        else:  # SHORT
-                            if candle_high > max_price:
-                                max_price = candle_high
-                            if candle_low < min_price:
-                                min_price = candle_low
-                    
-                    # Calculate MAE and MFE based on trade direction
-                    if side == 'LONG':
-                        mae_price_diff = entry_price - min_price
-                        mae_pct = (mae_price_diff / entry_price) * 100
-                        mfe_price_diff = max_price - entry_price
-                        mfe_pct = (mfe_price_diff / entry_price) * 100
-                    else:  # SHORT
-                        mae_price_diff = max_price - entry_price
-                        mae_pct = (mae_price_diff / entry_price) * 100 * -1
-                        mfe_price_diff = entry_price - min_price
-                        mfe_pct = (mfe_price_diff / entry_price) * 100
-                    
-                    # Update trade with calculated values
-                    trade['MAE'] = str(round(abs(mae_pct), 2))
-                    trade['MFE'] = str(round(mfe_pct, 2))
-                    
-                    logger.info(f"Updated closed trade {trade_no} with MAE={trade['MAE']}%, MFE={trade['MFE']}%")
+                    trade = process_closed_trade(trade, client, entry_timestamp, exit_timestamp)
                     updated = True
                     
                 except Exception as e:
@@ -304,265 +441,54 @@ def update_pending_trades():
         
         # Update only pending trades
         for trade in trades:
-            # Only process pending trades
             if trade['Outcome'] == 'PENDING':
                 try:
                     trade_no = trade['No.']
                     unique_id = trade_to_unique_id[trade_no]
-                    entry_price = float(trade['ENTRY'])
-                    take_profit = trade['Take Profit']
-                    stop_loss = trade['Stop Loss']
+                    take_profit = float(trade['Take Profit'])
+                    stop_loss = float(trade['Stop Loss'])
                     
-                    # Validate take profit and stop loss values
                     if not take_profit or not stop_loss:
                         logger.warning(f"Trade {trade_no} (ID: {unique_id}) has missing Take Profit or Stop Loss values. Skipping update.")
                         continue
-                        
-                    take_profit = float(take_profit)
-                    stop_loss = float(stop_loss)
-                    
-                    # Log trade details for debugging
-                    logger.info(f"Processing Trade {trade_no} (ID: {unique_id}):")
-                    logger.info(f"Entry: {entry_price}, Take Profit: {take_profit}, Stop Loss: {stop_loss}")
-                    logger.info(f"Current Price: {current_price}")
-                    
-                    margin = float(trade['Margin'])
-                    leverage = float(trade['Leverage'].replace('x', ''))
-                    side = trade['SIDE']
-                    
-                    # Get timestamp from the trade (entry time)
-                    trade_timestamp_str = trade['Timestamp']
-                    trade_timestamp = int(datetime.strptime(trade_timestamp_str, "%Y-%m-%d %H:%M:%S").timestamp())
                     
                     # Initialize or get state tracking for this trade
                     if unique_id not in state_tracker:
                         state_tracker[unique_id] = {
-                            'entry_price': entry_price,
-                            'side': side,
-                            'min_price': entry_price,  # Track actual min price
-                            'max_price': entry_price,  # Track actual max price
-                            'mae_pct': 0.0,  # Percentage
-                            'mfe_pct': 0.0,  # Percentage
-                            'leverage': leverage,
-                            'initialized': True  # Flag to indicate we've fully initialized the trade
+                            'entry_price': float(trade['ENTRY']),
+                            'side': trade['SIDE'],
+                            'min_price': float(trade['ENTRY']),
+                            'max_price': float(trade['ENTRY']),
+                            'mae_pct': 0.0,
+                            'mfe_pct': 0.0,
+                            'leverage': float(trade['Leverage'].replace('x', '')),
+                            'initialized': True
                         }
                     
-                    trade_state = state_tracker[unique_id]
+                    trade, state_tracker[unique_id] = process_pending_trade(
+                        trade,
+                        current_price,
+                        state_tracker[unique_id],
+                        client,
+                        take_profit,
+                        stop_loss
+                    )
+                    updated = True
                     
-                    # Check if entry price changed, if so reset state
-                    if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
-                        trade_state = reset_state_for_trade(unique_id, trade_state, entry_price, side, leverage)
-                    
-                    # Always get historical candles from entry time to present
-                    # This ensures we capture all price movement since trade began
-                    candles = get_historical_candles(client, trade_timestamp, current_time)
-                    
-                    # Calculate position size in BTC
-                    position_size_usd = margin * leverage
-                    position_size_btc = position_size_usd / entry_price
-                    
-                    # Calculate current value
-                    current_value = position_size_btc * current_price
-                    
-                    # Get current min and max prices from state
-                    min_price = trade_state['min_price']
-                    max_price = trade_state['max_price']
-                    
-                    # Update MAE/MFE based on current price
-                    update_mae_mfe(trade, current_price, trade_state)
-                    
-                    # Initialize MAE and MFE variables
-                    mae_pct = trade_state['mae_pct']
-                    mfe_pct = trade_state['mfe_pct']
-                    
-                    # Check if we have meaningful candle data
-                    if not candles:
-                        logger.warning(f"No candle data available for trade {trade_no}. Using current price only.")
-                        # If no candles, just use current price to update extremes
-                        if current_price < min_price:
-                            min_price = current_price
-                        if current_price > max_price:
-                            max_price = current_price
-                    else:
-                        logger.info(f"Processing {len(candles)} candles for trade {trade_no}")
-                        
-                        # Reset min/max only if we're refetching all data
-                        if not trade_state.get('initialized', False):
-                            min_price = entry_price
-                            max_price = entry_price
-                        
-                        # Process based on trade direction
-                        if side == 'LONG':
-                            # Update min and max based on candles
-                            for candle in candles:
-                                candle_low = float(candle['low'])
-                                candle_high = float(candle['high'])
-                                
-                                # Log candle data for debugging
-                                logger.debug(f"Candle: Low={candle_low}, High={candle_high}")
-                                
-                                # Check for new minimum price (worst case for LONG)
-                                if candle_low < min_price:
-                                    min_price = candle_low
-                                    logger.debug(f"New min price: {min_price}")
-                                
-                                # Check for new maximum price (best case for LONG)
-                                if candle_high > max_price:
-                                    max_price = candle_high
-                                    logger.debug(f"New max price: {max_price}")
-                            
-                            # Check if current price creates new min/max
-                            if current_price < min_price:
-                                min_price = current_price
-                                logger.debug(f"Current price creates new min: {min_price}")
-                            if current_price > max_price:
-                                max_price = current_price
-                                logger.debug(f"Current price creates new max: {max_price}")
-                            
-                            # Calculate MAE and MFE based on price differences first, then convert to percentages
-                            # MAE - Maximum Adverse Excursion (worst drawdown)
-                            mae_price_diff = entry_price - min_price  # Positive value means price went below entry
-                            mae_pct = (mae_price_diff / entry_price) * 100
-                            
-                            # MFE - Maximum Favorable Excursion (highest point reached)
-                            mfe_price_diff = max_price - entry_price  # Positive value means price went above entry
-                            mfe_pct = (mfe_price_diff / entry_price) * 100
-                                
-                            # Check if price has hit take profit or stop loss
-                            if current_price >= take_profit:
-                                # Calculate final MAE and MFE before marking as closed
-                                mae_price_diff = entry_price - min_price
-                                mae_pct = (mae_price_diff / entry_price) * 100
-                                mfe_price_diff = max_price - entry_price
-                                mfe_pct = (mfe_price_diff / entry_price) * 100
-                                
-                                # Update final values in trade dict
-                                trade['MAE'] = str(round(abs(mae_pct), 2))
-                                trade['MFE'] = str(round(mfe_pct, 2))
-                                
-                                trade['Outcome'] = 'SUCCESS'
-                                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as SUCCESS - Take Profit hit at {current_price}")
-                            elif current_price <= stop_loss:
-                                # Calculate final MAE and MFE before marking as closed
-                                mae_price_diff = entry_price - min_price
-                                mae_pct = (mae_price_diff / entry_price) * 100
-                                mfe_price_diff = max_price - entry_price
-                                mfe_pct = (mfe_price_diff / entry_price) * 100
-                                
-                                # Update final values in trade dict
-                                trade['MAE'] = str(round(abs(mae_pct), 2))
-                                trade['MFE'] = str(round(mfe_pct, 2))
-                                
-                                trade['Outcome'] = 'STOP LOSS'
-                                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as STOP LOSS - Stop Loss hit at {current_price}")
-                            else:
-                                logger.info(f"Trade {trade_no} (ID: {unique_id}) still pending - Price {current_price} between TP {take_profit} and SL {stop_loss}")
-                        else:  # SHORT
-                            # Update min and max based on candles
-                            for candle in candles:
-                                candle_low = float(candle['low'])
-                                candle_high = float(candle['high'])
-                                
-                                # Log candle data for debugging
-                                logger.debug(f"Candle: Low={candle_low}, High={candle_high}")
-                                
-                                # For shorts, high prices are bad (worst case)
-                                if candle_high > max_price:
-                                    max_price = candle_high
-                                    logger.debug(f"New max price: {max_price}")
-                                
-                                # For shorts, low prices are good (best case)
-                                if candle_low < min_price:
-                                    min_price = candle_low
-                                    logger.debug(f"New min price: {min_price}")
-                            
-                            # Check if current price creates new min/max
-                            if current_price < min_price:
-                                min_price = current_price
-                                logger.debug(f"Current price creates new min: {min_price}")
-                            if current_price > max_price:
-                                max_price = current_price
-                                logger.debug(f"Current price creates new max: {max_price}")
-                            
-                            # Calculate MAE and MFE based on price differences first, then convert to percentages
-                            # For shorts, MAE is when price goes above entry
-                            mae_price_diff = max_price - entry_price  # Positive value means price went above entry (bad for shorts)
-                            mae_pct = (mae_price_diff / entry_price) * 100 * -1  # Negative percentage for shorts
-                            
-                            # For shorts, MFE is when price goes below entry
-                            mfe_price_diff = entry_price - min_price  # Positive value means price went below entry (good for shorts)
-                            mfe_pct = (mfe_price_diff / entry_price) * 100
-                            
-                            # Check if price has hit take profit or stop loss
-                            if current_price <= take_profit:
-                                # Calculate final MAE and MFE before marking as closed
-                                mae_price_diff = max_price - entry_price
-                                mae_pct = (mae_price_diff / entry_price) * 100 * -1
-                                mfe_price_diff = entry_price - min_price
-                                mfe_pct = (mfe_price_diff / entry_price) * 100
-                                
-                                # Update final values in trade dict
-                                trade['MAE'] = str(round(abs(mae_pct), 2))
-                                trade['MFE'] = str(round(mfe_pct, 2))
-                                
-                                trade['Outcome'] = 'SUCCESS'
-                                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as SUCCESS - Take Profit hit at {current_price}")
-                            elif current_price >= stop_loss:
-                                # Calculate final MAE and MFE before marking as closed
-                                mae_price_diff = max_price - entry_price
-                                mae_pct = (mae_price_diff / entry_price) * 100 * -1
-                                mfe_price_diff = entry_price - min_price
-                                mfe_pct = (mfe_price_diff / entry_price) * 100
-                                
-                                # Update final values in trade dict
-                                trade['MAE'] = str(round(abs(mae_pct), 2))
-                                trade['MFE'] = str(round(mfe_pct, 2))
-                                
-                                trade['Outcome'] = 'STOP LOSS'
-                                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as STOP LOSS - Stop Loss hit at {current_price}")
-                            else:
-                                logger.info(f"Trade {trade_no} (ID: {unique_id}) still pending - Price {current_price} between TP {take_profit} and SL {stop_loss}")
-                    
-                    # Log the MAE/MFE values being calculated
-                    logger.info(f"Trade {trade_no}: Min Price={min_price}, Max Price={max_price}")
-                    logger.info(f"Trade {trade_no}: MAE={mae_pct:.2f}%, MFE={mfe_pct:.2f}%")
-                    
-                    # Update state tracker with new values
-                    trade_state['min_price'] = min_price
-                    trade_state['max_price'] = max_price
-                    trade_state['mae_pct'] = mae_pct
-                    trade_state['mfe_pct'] = mfe_pct
-                    
-                    # Update MAE and MFE values in the trade dict (rounded for display)
-                    # Convert to absolute value for display clarity
-                    trade['MAE'] = str(round(abs(mae_pct), 2))
-                    trade['MFE'] = str(round(mfe_pct, 2))
-                    
-                    # Only update outcome percentage if trade is closed
-                    if trade['Outcome'] != 'PENDING':
-                        # Calculate Outcome % based on the new formula
-                        outcome_percentage = ((take_profit - entry_price) / entry_price) * leverage * 100 if trade['Outcome'] == 'SUCCESS' else ((entry_price - stop_loss) / entry_price) * leverage * -100
-                        trade['Outcome %'] = str(round(outcome_percentage, 2))
-                   
-                except ValueError as e:
-                    logger.error(f"Error processing trade {trade.get('No.', 'unknown')}: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Error processing pending trade {trade.get('No.', 'unknown')}: {str(e)}")
                     continue
         
-        # Write updated trades back to CSV with new headers if needed
+        # Write updated trades back to CSV
         if updated:
-            # Update headers if MAE or MFE columns were added
             if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1:
                 all_fields = list(trades[0].keys())
-                with open(csv_file_path, 'w', newline='') as f:
+                with open(CSV_FILE_PATH, 'w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=all_fields)
                     writer.writeheader()
                     writer.writerows(trades)
             else:
-                with open(csv_file_path, 'w', newline='') as f:
+                with open(CSV_FILE_PATH, 'w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=trades[0].keys())
                     writer.writeheader()
                     writer.writerows(trades)
