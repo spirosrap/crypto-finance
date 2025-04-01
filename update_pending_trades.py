@@ -198,6 +198,76 @@ def update_pending_trades():
                 if 'Exit Trade' not in trade:
                     trade['Exit Trade'] = ''
         
+        # Process closed trades first
+        updated = False
+        for trade in trades:
+            if trade['Outcome'] in ['SUCCESS', 'STOP LOSS'] and trade['Exit Trade']:
+                try:
+                    # Skip if MAE and MFE are already calculated (not zero or missing)
+                    if trade['MAE'] and trade['MAE'] != '0.0' and trade['MFE'] and trade['MFE'] != '0.0':
+                        continue
+
+                    trade_no = trade['No.']
+                    entry_price = float(trade['ENTRY'])
+                    side = trade['SIDE']
+                    leverage = float(trade['Leverage'].replace('x', ''))
+                    
+                    # Get entry and exit timestamps
+                    entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
+                    exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S").timestamp())
+                    
+                    logger.info(f"Processing closed trade {trade_no} from {trade['Timestamp']} to {trade['Exit Trade']}")
+                    
+                    # Get historical candles for the trade period
+                    candles = get_historical_candles(client, entry_timestamp, exit_timestamp)
+                    
+                    if not candles:
+                        logger.warning(f"No candle data available for closed trade {trade_no}. Skipping.")
+                        continue
+                    
+                    # Initialize min and max prices with entry price
+                    min_price = entry_price
+                    max_price = entry_price
+                    
+                    # Process candles to find min and max prices
+                    for candle in candles:
+                        candle_low = float(candle['low'])
+                        candle_high = float(candle['high'])
+                        
+                        if side == 'LONG':
+                            if candle_low < min_price:
+                                min_price = candle_low
+                            if candle_high > max_price:
+                                max_price = candle_high
+                        else:  # SHORT
+                            if candle_high > max_price:
+                                max_price = candle_high
+                            if candle_low < min_price:
+                                min_price = candle_low
+                    
+                    # Calculate MAE and MFE based on trade direction
+                    if side == 'LONG':
+                        mae_price_diff = entry_price - min_price
+                        mae_pct = (mae_price_diff / entry_price) * 100
+                        mfe_price_diff = max_price - entry_price
+                        mfe_pct = (mfe_price_diff / entry_price) * 100
+                    else:  # SHORT
+                        mae_price_diff = max_price - entry_price
+                        mae_pct = (mae_price_diff / entry_price) * 100 * -1
+                        mfe_price_diff = entry_price - min_price
+                        mfe_pct = (mfe_price_diff / entry_price) * 100
+                    
+                    # Update trade with calculated values
+                    trade['MAE'] = str(round(abs(mae_pct), 2))
+                    trade['MFE'] = str(round(mfe_pct, 2))
+                    
+                    logger.info(f"Updated closed trade {trade_no} with MAE={trade['MAE']}%, MFE={trade['MFE']}%")
+                    updated = True
+                    
+                except Exception as e:
+                    logger.error(f"Error processing closed trade {trade.get('No.', 'unknown')}: {str(e)}")
+                    continue
+
         # Generate unique IDs for all trades
         trade_to_unique_id = {}
         for trade in trades:
@@ -212,8 +282,6 @@ def update_pending_trades():
             logger.info(f"Removed closed trade {trade_id} from state tracker")
         
         # Update only pending trades
-        updated = False
-        
         for trade in trades:
             # Only process pending trades
             if trade['Outcome'] == 'PENDING':
@@ -279,6 +347,10 @@ def update_pending_trades():
                     min_price = trade_state['min_price']
                     max_price = trade_state['max_price']
                     
+                    # Initialize MAE and MFE variables
+                    mae_pct = 0.0
+                    mfe_pct = 0.0
+                    
                     # Check if we have meaningful candle data
                     if not candles:
                         logger.warning(f"No candle data available for trade {trade_no}. Using current price only.")
@@ -334,10 +406,30 @@ def update_pending_trades():
                                 
                             # Check if price has hit take profit or stop loss
                             if current_price >= take_profit:
+                                # Calculate final MAE and MFE before marking as closed
+                                mae_price_diff = entry_price - min_price
+                                mae_pct = (mae_price_diff / entry_price) * 100
+                                mfe_price_diff = max_price - entry_price
+                                mfe_pct = (mfe_price_diff / entry_price) * 100
+                                
+                                # Update final values in trade dict
+                                trade['MAE'] = str(round(abs(mae_pct), 2))
+                                trade['MFE'] = str(round(mfe_pct, 2))
+                                
                                 trade['Outcome'] = 'SUCCESS'
                                 trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as SUCCESS - Take Profit hit at {current_price}")
                             elif current_price <= stop_loss:
+                                # Calculate final MAE and MFE before marking as closed
+                                mae_price_diff = entry_price - min_price
+                                mae_pct = (mae_price_diff / entry_price) * 100
+                                mfe_price_diff = max_price - entry_price
+                                mfe_pct = (mfe_price_diff / entry_price) * 100
+                                
+                                # Update final values in trade dict
+                                trade['MAE'] = str(round(abs(mae_pct), 2))
+                                trade['MFE'] = str(round(mfe_pct, 2))
+                                
                                 trade['Outcome'] = 'STOP LOSS'
                                 trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as STOP LOSS - Stop Loss hit at {current_price}")
@@ -381,10 +473,30 @@ def update_pending_trades():
                             
                             # Check if price has hit take profit or stop loss
                             if current_price <= take_profit:
+                                # Calculate final MAE and MFE before marking as closed
+                                mae_price_diff = max_price - entry_price
+                                mae_pct = (mae_price_diff / entry_price) * 100 * -1
+                                mfe_price_diff = entry_price - min_price
+                                mfe_pct = (mfe_price_diff / entry_price) * 100
+                                
+                                # Update final values in trade dict
+                                trade['MAE'] = str(round(abs(mae_pct), 2))
+                                trade['MFE'] = str(round(mfe_pct, 2))
+                                
                                 trade['Outcome'] = 'SUCCESS'
                                 trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as SUCCESS - Take Profit hit at {current_price}")
                             elif current_price >= stop_loss:
+                                # Calculate final MAE and MFE before marking as closed
+                                mae_price_diff = max_price - entry_price
+                                mae_pct = (mae_price_diff / entry_price) * 100 * -1
+                                mfe_price_diff = entry_price - min_price
+                                mfe_pct = (mfe_price_diff / entry_price) * 100
+                                
+                                # Update final values in trade dict
+                                trade['MAE'] = str(round(abs(mae_pct), 2))
+                                trade['MFE'] = str(round(mfe_pct, 2))
+                                
                                 trade['Outcome'] = 'STOP LOSS'
                                 trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as STOP LOSS - Stop Loss hit at {current_price}")
@@ -405,7 +517,6 @@ def update_pending_trades():
                     # Convert to absolute value for display clarity
                     trade['MAE'] = str(round(abs(mae_pct), 2))
                     trade['MFE'] = str(round(mfe_pct, 2))
-                    updated = True
                     
                     # Only update outcome percentage if trade is closed
                     if trade['Outcome'] != 'PENDING':
