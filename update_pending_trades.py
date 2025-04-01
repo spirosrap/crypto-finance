@@ -174,11 +174,14 @@ def update_pending_trades():
         # Check if MAE and MFE columns exist, if not, need to add them
         mae_index = -1
         mfe_index = -1
+        exit_trade_index = -1
         
         if 'MAE' in headers:
             mae_index = headers.index('MAE')
         if 'MFE' in headers:
             mfe_index = headers.index('MFE')
+        if 'Exit Trade' in headers:
+            exit_trade_index = headers.index('Exit Trade')
         
         # Read the trades
         with open(csv_file_path, 'r') as f:
@@ -186,12 +189,14 @@ def update_pending_trades():
             trades = list(reader)
         
         # Add MAE and MFE fields if they don't exist
-        if mae_index == -1 or mfe_index == -1:
+        if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1:
             for trade in trades:
                 if 'MAE' not in trade:
                     trade['MAE'] = '0.0'
                 if 'MFE' not in trade:
                     trade['MFE'] = '0.0'
+                if 'Exit Trade' not in trade:
+                    trade['Exit Trade'] = ''
         
         # Generate unique IDs for all trades
         trade_to_unique_id = {}
@@ -330,9 +335,11 @@ def update_pending_trades():
                             # Check if price has hit take profit or stop loss
                             if current_price >= take_profit:
                                 trade['Outcome'] = 'SUCCESS'
+                                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as SUCCESS - Take Profit hit at {current_price}")
                             elif current_price <= stop_loss:
                                 trade['Outcome'] = 'STOP LOSS'
+                                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as STOP LOSS - Stop Loss hit at {current_price}")
                             else:
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) still pending - Price {current_price} between TP {take_profit} and SL {stop_loss}")
@@ -375,9 +382,11 @@ def update_pending_trades():
                             # Check if price has hit take profit or stop loss
                             if current_price <= take_profit:
                                 trade['Outcome'] = 'SUCCESS'
+                                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as SUCCESS - Take Profit hit at {current_price}")
                             elif current_price >= stop_loss:
                                 trade['Outcome'] = 'STOP LOSS'
+                                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) marked as STOP LOSS - Stop Loss hit at {current_price}")
                             else:
                                 logger.info(f"Trade {trade_no} (ID: {unique_id}) still pending - Price {current_price} between TP {take_profit} and SL {stop_loss}")
@@ -411,7 +420,7 @@ def update_pending_trades():
         # Write updated trades back to CSV with new headers if needed
         if updated:
             # Update headers if MAE or MFE columns were added
-            if mae_index == -1 or mfe_index == -1:
+            if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1:
                 all_fields = list(trades[0].keys())
                 with open(csv_file_path, 'w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=all_fields)
