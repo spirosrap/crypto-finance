@@ -409,9 +409,9 @@ def update_pending_trades():
                     
                     # Only update outcome percentage if trade is closed
                     if trade['Outcome'] != 'PENDING':
-                        profit_loss_usd = current_value - position_size_usd if side == 'LONG' else position_size_usd - current_value
-                        profit_loss_percentage = (profit_loss_usd / margin) * 100
-                        trade['Outcome %'] = str(round(profit_loss_percentage, 2))
+                        # Calculate Outcome % based on the new formula
+                        outcome_percentage = ((take_profit - entry_price) / entry_price) * leverage * 100 if trade['Outcome'] == 'SUCCESS' else ((entry_price - stop_loss) / entry_price) * leverage * -100
+                        trade['Outcome %'] = str(round(outcome_percentage, 2))
                    
                 except ValueError as e:
                     logger.error(f"Error processing trade {trade.get('No.', 'unknown')}: {str(e)}")
