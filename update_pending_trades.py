@@ -16,6 +16,8 @@ from coinbaseservice import CoinbaseService
 from dotenv import load_dotenv
 from config import API_KEY_PERPS, API_SECRET_PERPS
 import time
+import numpy as np
+import talib
 # Constants
 STATE_FILE_PATH = 'data/trade_state_tracker.json'
 CSV_FILE_PATH = 'automated_trades.csv'
@@ -104,6 +106,23 @@ def get_historical_candles(
                 return []
             logger.warning(f"Attempt {attempt + 1} failed to get historical candles: {str(e)}")
             time.sleep(RETRY_DELAY)
+
+def calculate_ema200(candles: List[Dict[str, Any]]) -> float:
+    """Calculate EMA200 from candle data"""
+    try:
+        prices = [float(candle['close']) for candle in candles]
+        ema200 = talib.EMA(np.array(prices), timeperiod=200)
+        return ema200[-1]
+    except Exception as e:
+        logger.error(f"Error calculating EMA200: {str(e)}")
+        return 0.0
+
+def determine_trend_regime(current_price: float, ema200: float) -> str:
+    """Determine trend regime based on price vs EMA200"""
+    if current_price > ema200:
+        return "Bullish"
+    else:
+        return "Bearish"
 
 def generate_unique_trade_id(trade: Dict[str, Any]) -> str:
     """Generate a unique ID for each trade to avoid duplicates in state tracker"""
@@ -271,14 +290,19 @@ def process_pending_trade(
         side = trade['SIDE']
         leverage = float(trade['Leverage'].replace('x', ''))
         
-        # Check if entry price changed, if so reset state
-        if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
-            trade_state = reset_state_for_trade(trade_no, trade_state, entry_price, side, leverage)
-        
-        # Get historical candles from entry time to present
+        # Get historical candles for EMA200 calculation
         trade_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
         current_time = int(datetime.now().timestamp())
         candles = get_historical_candles(client, trade_timestamp, current_time)
+        
+        # Calculate EMA200 and determine trend regime
+        ema200 = calculate_ema200(candles)
+        trend_regime = determine_trend_regime(current_price, ema200)
+        trade['Trend Regime'] = trend_regime
+        
+        # Check if entry price changed, if so reset state
+        if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
+            trade_state = reset_state_for_trade(trade_no, trade_state, entry_price, side, leverage)
         
         # Update MAE/MFE based on current price
         update_mae_mfe(trade, current_price, trade_state)
@@ -387,18 +411,19 @@ def update_pending_trades() -> None:
                 reader = csv.reader(f)
                 headers = next(reader)
         
-        # Check if MAE and MFE columns exist
+        # Check if MAE, MFE, and Trend Regime columns exist
         mae_index = headers.index('MAE') if 'MAE' in headers else -1
         mfe_index = headers.index('MFE') if 'MFE' in headers else -1
         exit_trade_index = headers.index('Exit Trade') if 'Exit Trade' in headers else -1
+        trend_regime_index = headers.index('Trend Regime') if 'Trend Regime' in headers else -1
         
         # Read the trades
         with open(CSV_FILE_PATH, 'r') as f:
             reader = csv.DictReader(f)
             trades = list(reader)
         
-        # Add MAE and MFE fields if they don't exist
-        if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1:
+        # Add MAE, MFE, and Trend Regime fields if they don't exist
+        if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1 or trend_regime_index == -1:
             for trade in trades:
                 if 'MAE' not in trade:
                     trade['MAE'] = '0.0'
@@ -406,6 +431,8 @@ def update_pending_trades() -> None:
                     trade['MFE'] = '0.0'
                 if 'Exit Trade' not in trade:
                     trade['Exit Trade'] = ''
+                if 'Trend Regime' not in trade:
+                    trade['Trend Regime'] = ''
         
         # Process closed trades first
         updated = False
@@ -481,7 +508,7 @@ def update_pending_trades() -> None:
         
         # Write updated trades back to CSV
         if updated:
-            if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1:
+            if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1 or trend_regime_index == -1:
                 all_fields = list(trades[0].keys())
                 with open(CSV_FILE_PATH, 'w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=all_fields)

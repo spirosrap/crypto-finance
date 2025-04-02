@@ -238,7 +238,8 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
                 'ATR %': round(atr_percent, 2),
                 'Setup Type': setup_type,
                 'MAE': 0.0,
-                'MFE': 0.0
+                'MFE': 0.0,
+                'Trend Regime': 'PENDING'
             }])
             
             # Append new trade to CSV
