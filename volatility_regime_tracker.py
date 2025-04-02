@@ -33,15 +33,18 @@ df['TQS'] = 0.5 * df['MFE_scaled'] - 0.3 * df['MAE_scaled'] + 0.2 * df['Efficien
 summary = df.groupby('Volatility Level').agg({
     'No.': 'count',  # Total Trades
     'Outcome %': lambda x: (x > 0).mean() * 100,  # Win Rate
-    'TQS': ['mean', 'max', 'min']
+    'TQS': ['mean', 'max', 'min', 'std']  # Added std for TQS standard deviation
 }).round(2)
 
 # Flatten the multi-level columns
-summary.columns = ['Total Trades', 'Win Rate (%)', 'Average TQS', 'Max TQS', 'Min TQS']
+summary.columns = ['Trades', 'Win_Rate', 'Avg_TQS', 'Max_TQS', 'Min_TQS', 'TQS_StdDev']
 
 # Print the summary table
 print("\nVolatility Regime Analysis Summary:")
 print(tabulate(summary, headers='keys', tablefmt='grid', floatfmt='.2f'))
+
+# Print interpretation
+print("\nLower TQS variance indicates consistent trade quality. Higher variance suggests structural inconsistency.")
 
 # Save the summary to CSV
 summary.to_csv('volatility_regime_summary.csv')
