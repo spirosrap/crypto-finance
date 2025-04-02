@@ -19,7 +19,7 @@ class TradingAnalyzer:
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%Y-%m-%d %H:%M:%S')
         
         # Convert percentage columns
-        percentage_columns = ['Probability', 'Outcome %']
+        percentage_columns = ['Outcome %']
         for col in percentage_columns:
             if df[col].dtype == 'object':  # Only apply string operations if column contains strings
                 df[col] = pd.to_numeric(df[col].str.replace('%', '').str.strip(), errors='coerce')
@@ -180,7 +180,6 @@ class TradingAnalyzer:
         return {
             'Standard Deviation': returns.std() * 100,
             'Average R/R Ratio': self.df['R/R Ratio'].mean(),
-            'Average Probability': self.df['Probability'].mean(),
             'Average Leverage': avg_leverage
         }
     
@@ -270,7 +269,6 @@ class TradingAnalyzer:
         print(f"Current Drawdown: {RED if current_drawdown < 0 else GREEN}{current_drawdown:.2f}%{END}")
         print(f"Standard Deviation: {YELLOW}{risk_metrics['Standard Deviation']:.2f}%{END}")
         print(f"Average R/R Ratio: {BLUE}{risk_metrics['Average R/R Ratio']:.2f}{END}")
-        print(f"Average Trade Probability: {BLUE}{risk_metrics['Average Probability']:.2f}%{END}")
         if risk_metrics['Average Leverage'] > 0:
             print(f"Average Leverage: {YELLOW}{risk_metrics['Average Leverage']:.2f}x{END}")
         print(f"{'=' * 50}\n")
@@ -302,11 +300,9 @@ class TradingAnalyzer:
         # Trading Style Analysis
         print(f"{BOLD}🎨 Trading Style Analysis{END}")
         print(f"{'=' * 50}")
-        avg_prob = risk_metrics['Average Probability']
         avg_rr = risk_metrics['Average R/R Ratio']
-        print(f"Average Trade Probability: {BLUE}{avg_prob:.2f}%{END}")
         print(f"Average Risk/Reward: {BLUE}{avg_rr:.2f}{END}")
-        print(f"Trading Style: {BLUE}{'Conservative' if avg_prob > 70 else 'Moderate' if avg_prob > 50 else 'Aggressive'}{END}")
+        print(f"Trading Style: {BLUE}{'Conservative' if avg_rr > 2 else 'Moderate' if avg_rr > 1.5 else 'Aggressive'}{END}")
         print(f"{'=' * 50}\n")
 
 if __name__ == "__main__":
