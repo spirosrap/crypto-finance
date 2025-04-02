@@ -152,12 +152,7 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         tp_mode, tp_price = determine_tp_mode(entry_price, atr, price_precision)
         
         # Fixed stop loss
-        sl_price = round(entry_price * (1 - SL_PERCENT), price_precision)
-        
-        # Get current market price
-        trades = cb.client.get_market_trades(product_id=perp_product, limit=1)
-        current_price = float(trades['trades'][0]['price'])
-        
+        sl_price = round(entry_price * (1 - SL_PERCENT), price_precision)              
         # Calculate size in USD
         size_usd = margin * leverage
         
