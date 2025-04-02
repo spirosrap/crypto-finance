@@ -232,8 +232,6 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
                 'ENTRY': entry_price,
                 'Take Profit': tp_price,
                 'Stop Loss': sl_price,
-                'Probability': '70.0%',  # Default value since we don't calculate probability
-                'Confidence': 'Moderate',  # Default value
                 'R/R Ratio': round(rr_ratio, 2),
                 'Volatility Level': volume_strength,
                 'Outcome': 'PENDING',
