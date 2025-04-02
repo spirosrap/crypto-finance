@@ -218,11 +218,11 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             
             # Determine volume strength based on ATR percentage - THIS IS VOLATILITY LEVEL
             if atr_percent > 1.0:
-                volume_strength = "Strong"
+                volatility_level = "Strong"
             elif atr_percent > 0.5:
-                volume_strength = "Moderate"
+                volatility_level = "Moderate"
             else:
-                volume_strength = "Weak"
+                volatility_level = "Weak"
             
             # Create new trade entry with additional metrics
             new_trade = pd.DataFrame([{
@@ -233,7 +233,7 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
                 'Take Profit': tp_price,
                 'Stop Loss': sl_price,
                 'R/R Ratio': round(rr_ratio, 2),
-                'Volatility Level': volume_strength,
+                'Volatility Level': volatility_level,
                 'Outcome': 'PENDING',
                 'Outcome %': 0.0,
                 'Leverage': f"{leverage}x",
