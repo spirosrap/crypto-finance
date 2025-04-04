@@ -165,7 +165,7 @@ def calculate_trade_metrics(trades: List[Trade]) -> Dict:
 
 def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
     """Export trade history to CSV file."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     csv_filename = f"backtest_trades_{product_id}_{timestamp}.csv"
     
     try:

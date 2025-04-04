@@ -244,7 +244,7 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             # Create new trade entry with additional metrics
             new_trade = pd.DataFrame([{
                 'No.': next_trade_no,
-                'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'Timestamp': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC'),
                 'SIDE': 'LONG',
                 'ENTRY': entry_price,
                 'Take Profit': tp_price,
