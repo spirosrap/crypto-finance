@@ -318,6 +318,29 @@ def process_pending_trade(
             if not trade_state.get('initialized', False):
                 trade_state['min_price'] = entry_price
                 trade_state['max_price'] = entry_price
+
+            for candle in candles:
+                high = float(candle['high'])
+                low = float(candle['low'])
+
+                if side == 'LONG':
+                    if high >= take_profit:
+                        trade['Exit Reason'] = 'TP HIT (wick)'
+                        trade['Exit Trade'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        return trade, trade_state
+                    elif low <= stop_loss:
+                        trade['Exit Reason'] = 'SL HIT (wick)'
+                        trade['Exit Trade'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        return trade, trade_state
+                else:  # SHORT
+                    if low <= take_profit:
+                        trade['Exit Reason'] = 'TP HIT (wick)'
+                        trade['Exit Trade'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        return trade, trade_state
+                    elif high >= stop_loss:
+                        trade['Exit Reason'] = 'SL HIT (wick)'
+                        trade['Exit Trade'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        return trade, trade_state                
             
             for candle in candles:
                 candle_low = float(candle['low'])
