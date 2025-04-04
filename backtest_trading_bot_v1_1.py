@@ -11,6 +11,7 @@ from config import API_KEY_PERPS, API_SECRET_PERPS
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from tabulate import tabulate
+import numpy as np
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -44,6 +45,9 @@ class Trade:
     atr: float
     atr_percent: float
     tp_mode: str
+    rsi_at_entry: float  # New field for RSI value at entry
+    relative_volume: float  # New field for relative volume
+    trend_slope: float  # New field for trend slope
     mae: float = 0.0  # Maximum Adverse Excursion
     mfe: float = 0.0  # Maximum Favorable Excursion
 
@@ -195,13 +199,17 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
         trades_df['MFE'] = trades_df['mfe'].round(2)
         trades_df['Exit Trade'] = trades_df['exit_time']
         trades_df['Trend Regime'] = 'Bearish'  # Placeholder, could be calculated based on trend
+        trades_df['RSI at Entry'] = trades_df['rsi_at_entry'].round(2)
+        trades_df['Relative Volume'] = trades_df['relative_volume'].round(2)
+        trades_df['Trend Slope'] = trades_df['trend_slope'].round(4)
         
         # Reorder columns to match automated_trades.csv
         columns = [
             'No.', 'Timestamp', 'SIDE', 'ENTRY', 'Take Profit', 'Stop Loss', 
             'R/R Ratio', 'Volatility Level', 'Outcome', 'Outcome %', 
             'Leverage', 'Margin', 'Session', 'TP Mode', 'ATR %', 
-            'Setup Type', 'MAE', 'MFE', 'Exit Trade', 'Trend Regime'
+            'Setup Type', 'MAE', 'MFE', 'Exit Trade', 'Trend Regime',
+            'RSI at Entry', 'Relative Volume', 'Trend Slope'
         ]
         
         # Rename entry_time to Timestamp
@@ -241,7 +249,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
     for i in range(50, len(df)):  # Start after EMA period
         # Get historical data up to current point
         historical_df = df.iloc[:i+1]
-        signal, entry = analyze(historical_df, ta, config.product_id)
+        signal, entry, rsi_value, relative_volume, trend_slope = analyze(historical_df, ta, config.product_id)
         
         # Handle open position
         if current_trade:
@@ -274,6 +282,9 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     atr=atr,
                     atr_percent=(atr / current_trade['entry_price']) * 100,
                     tp_mode=tp_mode,
+                    rsi_at_entry=current_trade['rsi_at_entry'],
+                    relative_volume=current_trade['relative_volume'],
+                    trend_slope=current_trade['trend_slope'],
                     mae=current_trade['mae'],
                     mfe=current_trade['mfe']
                 ))
@@ -295,6 +306,9 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     atr=atr,
                     atr_percent=(atr / current_trade['entry_price']) * 100,
                     tp_mode=tp_mode,
+                    rsi_at_entry=current_trade['rsi_at_entry'],
+                    relative_volume=current_trade['relative_volume'],
+                    trend_slope=current_trade['trend_slope'],
                     mae=current_trade['mae'],
                     mfe=current_trade['mfe']
                 ))
@@ -320,6 +334,9 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                 'tp_price': tp_price,
                 'sl_price': sl_price,
                 'tp_mode': tp_mode,
+                'rsi_at_entry': rsi_value,
+                'relative_volume': relative_volume,
+                'trend_slope': trend_slope,
                 'mae': 0.0,  # Initialize MAE
                 'mfe': 0.0   # Initialize MFE
             }
