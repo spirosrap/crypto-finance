@@ -1,7 +1,7 @@
-from simplified_trading_bot_v1_2_one_bar_delay_atr_stoploss import (
+from simplified_trading_bot_v1_2a_regime_filters_only import (
     CoinbaseService, TechnicalAnalysis, GRANULARITY, RSI_THRESHOLD,
     VOLUME_LOOKBACK, TP_PERCENT, SL_PERCENT, get_perp_product,
-    get_price_precision, analyze, determine_tp_mode
+    get_price_precision, analyze, determine_tp_mode, classify_market_regime
 )
 from datetime import datetime, timedelta, UTC
 import pandas as pd
@@ -11,6 +11,7 @@ from config import API_KEY_PERPS, API_SECRET_PERPS
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from tabulate import tabulate
+from collections import Counter
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -22,6 +23,9 @@ logging.getLogger('technicalanalysis').setLevel(logging.WARNING)
 logging.getLogger('historicaldata').setLevel(logging.WARNING)
 logging.getLogger('bitcoinpredictionmodel').setLevel(logging.WARNING)
 logging.getLogger('ml_model').setLevel(logging.WARNING)
+
+# Global counter for regime distribution
+regime_counter = Counter()
 
 @dataclass
 class BacktestConfig:
@@ -223,6 +227,15 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
     for i in range(50, len(df)):  # Start after EMA period
         # Get historical data up to current point
         historical_df = df.iloc[:i+1]
+        
+        # Calculate ATR for regime classification
+        atr = ta.compute_atr(historical_df.to_dict('records'))
+        current_price = df.iloc[i]['close']
+        regime = classify_market_regime(atr, current_price)
+        
+        # Track regime distribution
+        regime_counter[regime] += 1
+        
         signal, entry = analyze(historical_df, ta, config.product_id)
         
         # Handle open position
@@ -248,18 +261,32 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                 ))
                 if len(trades) >= 200:
                     break
+                
+                # Update drawdown metrics
+                balance_history.append(balance)
+                if balance > peak_balance:
+                    peak_balance = balance
+                    current_drawdown_start = None
+                else:
+                    if current_drawdown_start is None:
+                        current_drawdown_start = df.index[i]
+                    current_drawdown = (peak_balance - balance) / peak_balance * 100
+                    if current_drawdown > max_drawdown:
+                        max_drawdown = current_drawdown
+                        max_drawdown_duration = (df.index[i] - current_drawdown_start).total_seconds() / 3600
+                
                 current_trade = None
                 position = 0
                 
             elif current_price <= current_trade['sl_price']:
-                loss = (current_trade['sl_price'] - current_trade['entry_price']) * current_trade['size'] * config.leverage
-                balance += loss
+                profit = (current_trade['sl_price'] - current_trade['entry_price']) * current_trade['size'] * config.leverage
+                balance += profit
                 trades.append(Trade(
                     entry_time=current_trade['entry_time'],
                     exit_time=df.index[i],
                     entry_price=current_trade['entry_price'],
                     exit_price=current_trade['sl_price'],
-                    profit=loss,
+                    profit=profit,
                     type='SL',
                     atr=atr,
                     atr_percent=(atr / current_trade['entry_price']) * 100,
@@ -267,56 +294,65 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                 ))
                 if len(trades) >= 200:
                     break
+                
+                # Update drawdown metrics
+                balance_history.append(balance)
+                if balance > peak_balance:
+                    peak_balance = balance
+                    current_drawdown_start = None
+                else:
+                    if current_drawdown_start is None:
+                        current_drawdown_start = df.index[i]
+                    current_drawdown = (peak_balance - balance) / peak_balance * 100
+                    if current_drawdown > max_drawdown:
+                        max_drawdown = current_drawdown
+                        max_drawdown_duration = (df.index[i] - current_drawdown_start).total_seconds() / 3600
+                
                 current_trade = None
                 position = 0
         
-        # Enter new trade if signal and no position
-        elif signal and not current_trade:
-            current_price = df.iloc[i]['close']
-            atr = ta.compute_atr(historical_df.to_dict('records'))
-            tp_mode, tp_price = determine_tp_mode(current_price, atr)
-            sl_price = round(current_price * (1 - SL_PERCENT), get_price_precision(get_perp_product(config.product_id)))
-            
+        # Handle new trade entry
+        elif signal and entry:
+            # Calculate position size
             position_size = balance * 0.1  # Use 10% of balance per trade
-            size = position_size / current_price
             
+            # Calculate ATR for TP/SL
+            atr = ta.compute_atr(historical_df.to_dict('records'))
+            tp_mode, tp_price = determine_tp_mode(entry, atr)
+            
+            # Set stop loss
+            sl_price = entry * (1 - SL_PERCENT)
+            
+            # Record trade
             current_trade = {
                 'entry_time': df.index[i],
-                'entry_price': current_price,
-                'size': size,
+                'entry_price': entry,
+                'size': position_size / entry,
                 'tp_price': tp_price,
-                'sl_price': sl_price,
-                'tp_mode': tp_mode
+                'sl_price': sl_price
             }
-            position = size
-        
-        # Update balance history and calculate drawdown
-        balance_history.append(balance)
-        if balance > peak_balance:
-            peak_balance = balance
-            if current_drawdown_start is not None:
-                drawdown_duration = (df.index[i] - current_drawdown_start).total_seconds() / 3600
-                max_drawdown_duration = max(max_drawdown_duration, drawdown_duration)
-                current_drawdown_start = None
-        else:
-            current_drawdown = (peak_balance - balance) / peak_balance
-            max_drawdown = max(max_drawdown, current_drawdown)
-            if current_drawdown_start is None:
-                current_drawdown_start = df.index[i]
+            position = 1
     
-    # Calculate metrics and export results
+    # Calculate final metrics
     metrics = calculate_trade_metrics(trades)
+    
+    # Export trades to CSV
     csv_filename = export_trades_to_csv(trades, config.product_id)
     
-    # Add drawdown metrics
-    metrics['max_drawdown'] = max_drawdown * 100  # Convert to percentage
-    metrics['max_drawdown_duration'] = max_drawdown_duration
+    # Print regime distribution
+    print("\n=== ATR Regime Distribution ===")
+    total = sum(regime_counter.values())
+    for regime, count in regime_counter.items():
+        pct = (count / total) * 100
+        print(f"{regime.capitalize():<10} : {count:>6} bars ({pct:.2f}%)")
     
     return BacktestResults(
         initial_balance=config.initial_balance,
         final_balance=balance,
         trades=trades,
         csv_filename=csv_filename,
+        max_drawdown=max_drawdown,
+        max_drawdown_duration=max_drawdown_duration,
         **metrics
     )
 
