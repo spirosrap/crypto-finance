@@ -237,7 +237,9 @@ class TradingAnalyzer:
         avg_profit = basic_metrics['Average Profit per Trade (%)']
         
         # Calculate expectancy
-        expectancy = (win_rate * avg_profit) + ((1 - win_rate) * -1)  # Assuming 1% loss on losing trades
+        avg_win = self.df[self.df['Outcome'] == 'SUCCESS']['Outcome %'].mean()
+        avg_loss = self.df[self.df['Outcome'] == 'STOP LOSS']['Outcome %'].mean()
+        expectancy = (win_rate * avg_win) + ((1 - win_rate) * avg_loss)
         
         print(f"\n{BOLD}{UNDERLINE}📊 Trading Performance Report{END}\n")
         
