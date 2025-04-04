@@ -1,6 +1,7 @@
-# Simplified Trading Bot
+# Simplified Trading Bot v1.1
 # Single coin (BTC-USDC), single timeframe (5-min), single logic (RSI + EMA + volume)
 # No AI prompts, no ML classifiers, no market regimes
+# Added 1-bar confirmation delay for RSI entries
 
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
@@ -10,6 +11,7 @@ from config import API_KEY_PERPS, API_SECRET_PERPS
 import logging
 import argparse
 import subprocess
+import numpy as np
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -25,6 +27,7 @@ logging.getLogger('ml_model').setLevel(logging.WARNING)
 # Parameters
 GRANULARITY = "FIVE_MINUTE"
 RSI_THRESHOLD = 30
+RSI_CONFIRMATION_THRESHOLD = 35  # New parameter for confirmation bar
 VOLUME_LOOKBACK = 20
 TP_PERCENT = 0.015
 SL_PERCENT = 0.007
@@ -97,23 +100,64 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     # Convert DataFrame to list of dictionaries for the technical analysis methods
     candles = df.to_dict('records')
     
-    # Calculate RSI
-    rsi = ta.compute_rsi(product_id, candles, period=14)
+    # Calculate RSI for the last two bars
+    # First, get RSI for the current bar
+    rsi_current = ta.compute_rsi(product_id, candles, period=14)
+    
+    # Get RSI for the previous bar by using all candles except the last one
+    rsi_previous = ta.compute_rsi(product_id, candles[:-1], period=14)
     
     # Calculate EMA
     ema_50 = ta.get_moving_average(candles, period=50, ma_type='ema')
     
-    # Get current values
+    # Get current and previous values
     current = df.iloc[-1]
+    previous = df.iloc[-2]
     avg_volume = df["volume"].tail(VOLUME_LOOKBACK).mean()
+    
+    # Calculate relative volume (current volume / average volume)
+    relative_volume = current['volume'] / avg_volume if avg_volume > 0 else 0
+    
+    # Calculate trend slope (using EMA) with robust error handling
+    trend_slope = 0.0
+    try:
+        # Use a simpler approach - calculate slope between current and previous close prices
+        if len(df) >= 2:
+            # Get the last 5 close prices for a short-term trend
+            close_prices = df['close'].tail(5).values
+            if len(close_prices) >= 2:
+                # Simple linear regression slope calculation
+                x = np.arange(len(close_prices))
+                y = close_prices
+                slope, _ = np.polyfit(x, y, 1)
+                trend_slope = slope
+    except Exception as e:
+        logger.warning(f"Error calculating trend slope: {e}")
+        trend_slope = 0.0
 
-    if (
-        rsi < RSI_THRESHOLD
-        # and current["close"] > ema_50
-        and current["volume"] > avg_volume
-    ):
-        return True, current["close"]
-    return False, None
+    # Log analysis details
+    logger.info(f"Analysis: Current RSI={rsi_current:.2f}, Previous RSI={rsi_previous:.2f}, "
+                f"Current Close={current['close']:.2f}, Previous Close={previous['close']:.2f}, "
+                f"Volume={current['volume']:.2f} > Avg={avg_volume:.2f}, "
+                f"Relative Volume={relative_volume:.2f}, Trend Slope={trend_slope:.4f}")
+
+    # Check if RSI was below threshold on previous bar and is now below confirmation threshold
+    rsi_triggered = rsi_previous < RSI_THRESHOLD
+    rsi_confirmed = rsi_current < RSI_CONFIRMATION_THRESHOLD
+    
+    # Pure 1-bar delay logic
+    rsi_triggered = rsi_previous < RSI_THRESHOLD
+    rsi_confirmed = rsi_current < RSI_THRESHOLD
+
+    if rsi_triggered and rsi_confirmed:
+        logger.info(f"[SIGNAL] BUY {product_id} at {current['close']:.2f} "
+                    f"(RSI triggered at {rsi_previous:.2f}, confirmed at {rsi_current:.2f})")
+        return True, current["close"], rsi_current, relative_volume, trend_slope    
+    
+    if rsi_triggered and not rsi_confirmed:
+        logger.info(f"[SKIPPED] RSI triggered at {rsi_previous:.2f} but not confirmed at {rsi_current:.2f}")
+    
+    return False, None, None, None, None
 
 def determine_tp_mode(entry_price: float, atr: float, price_precision: float = None) -> tuple[str, float]:
     """
@@ -222,7 +266,7 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             # Create new trade entry with additional metrics
             new_trade = pd.DataFrame([{
                 'No.': next_trade_no,
-                'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'Timestamp': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC'),
                 'SIDE': 'LONG',
                 'ENTRY': entry_price,
                 'Take Profit': tp_price,
@@ -239,7 +283,10 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
                 'Setup Type': setup_type,
                 'MAE': 0.0,
                 'MFE': 0.0,
-                'Trend Regime': 'PENDING'
+                'Trend Regime': 'PENDING',
+                'RSI at Entry': 0.0,  # Will be updated with actual value
+                'Relative Volume': 0.0,  # Will be updated with actual value
+                'Trend Slope': 0.0  # Will be updated with actual value
             }])
             
             # Append new trade to CSV
@@ -267,12 +314,25 @@ def main():
         df = fetch_candles(cb, args.product_id)
         
         # Live trading mode
-        signal, entry = analyze(df, ta, args.product_id)
+        signal, entry, rsi_value, relative_volume, trend_slope = analyze(df, ta, args.product_id)
         
         if signal:
             logger.info(f"[SIGNAL] BUY {args.product_id} at {entry:.2f}")
             if execute_trade(cb, entry, args.product_id, args.margin, args.leverage):
                 logger.info("Trade executed successfully!")
+                
+                # Update the last trade with the additional metrics
+                try:
+                    trades_df = pd.read_csv('automated_trades.csv')
+                    if not trades_df.empty:
+                        # Update the last row with the additional metrics
+                        trades_df.iloc[-1, trades_df.columns.get_loc('RSI at Entry')] = round(rsi_value, 2)
+                        trades_df.iloc[-1, trades_df.columns.get_loc('Relative Volume')] = round(relative_volume, 2)
+                        trades_df.iloc[-1, trades_df.columns.get_loc('Trend Slope')] = round(trend_slope, 4)
+                        trades_df.to_csv('automated_trades.csv', index=False)
+                        logger.info(f"Updated trade with RSI: {rsi_value:.2f}, Rel Volume: {relative_volume:.2f}, Trend Slope: {trend_slope:.4f}")
+                except Exception as e:
+                    logger.error(f"Error updating trade with additional metrics: {e}")
             else:
                 logger.error("Failed to execute trade")
         else:
@@ -282,4 +342,4 @@ def main():
         logger.error(f"An error occurred: {e}")
 
 if __name__ == "__main__":
-    main()
+    main() 
