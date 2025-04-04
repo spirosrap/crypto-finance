@@ -8,7 +8,7 @@ import csv
 import os
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, UTC
 import logging
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
@@ -140,7 +140,7 @@ def generate_unique_trade_id(trade: Dict[str, Any]) -> str:
         return hash_obj.hexdigest()[:12]
     except Exception as e:
         logger.error(f"Error generating unique trade ID: {str(e)}")
-        return datetime.now().strftime("%Y%m%d%H%M%S")
+        return datetime.now(UTC).strftime("%Y%m%d%H%M%S")
 
 def load_state_tracker() -> Dict[str, Dict[str, Any]]:
     """Load the persistent state tracker for MAE/MFE"""
@@ -292,7 +292,7 @@ def process_pending_trade(
         
         # Get historical candles for EMA200 calculation
         trade_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
-        current_time = int(datetime.now().timestamp())
+        current_time = int(datetime.now(UTC).timestamp())
         candles = get_historical_candles(client, trade_timestamp, current_time)
         
         # Calculate EMA200 and determine trend regime
@@ -326,20 +326,20 @@ def process_pending_trade(
                 if side == 'LONG':
                     if high >= take_profit:
                         trade['Exit Reason'] = 'TP HIT (wick)'
-                        trade['Exit Trade'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
                         return trade, trade_state
                     elif low <= stop_loss:
                         trade['Exit Reason'] = 'SL HIT (wick)'
-                        trade['Exit Trade'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
                         return trade, trade_state
                 else:  # SHORT
                     if low <= take_profit:
                         trade['Exit Reason'] = 'TP HIT (wick)'
-                        trade['Exit Trade'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
                         return trade, trade_state
                     elif high >= stop_loss:
                         trade['Exit Reason'] = 'SL HIT (wick)'
-                        trade['Exit Trade'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
                         return trade, trade_state                
             
             for candle in candles:
@@ -383,20 +383,20 @@ def process_pending_trade(
         if side == 'LONG':
             if current_price >= take_profit:
                 trade['Outcome'] = 'SUCCESS'
-                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
             elif current_price <= stop_loss:
                 trade['Outcome'] = 'STOP LOSS'
-                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                 logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
         else:  # SHORT
             if current_price <= take_profit:
                 trade['Outcome'] = 'SUCCESS'
-                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
             elif current_price >= stop_loss:
                 trade['Outcome'] = 'STOP LOSS'
-                trade['Exit Trade'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                 logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
         
         # Calculate outcome percentage if trade is closed
