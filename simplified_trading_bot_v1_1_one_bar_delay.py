@@ -122,25 +122,18 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     # Check if RSI was below threshold on previous bar and is now below confirmation threshold
     rsi_triggered = rsi_previous < RSI_THRESHOLD
     rsi_confirmed = rsi_current < RSI_CONFIRMATION_THRESHOLD
-    price_higher = current["close"] > previous["close"]
-    volume_confirmed = current["volume"] > avg_volume
+    
+    # Pure 1-bar delay logic
+    rsi_triggered = rsi_previous < RSI_THRESHOLD
+    rsi_confirmed = rsi_current < RSI_THRESHOLD
 
-    if (
-        rsi_triggered  # RSI was below threshold on previous bar
-        and rsi_confirmed  # RSI is still below confirmation threshold
-        and price_higher  # Price is higher than previous close
-        and volume_confirmed  # Volume is above average
-    ):
+    if rsi_triggered and rsi_confirmed:
         logger.info(f"[SIGNAL] BUY {product_id} at {current['close']:.2f} "
-                   f"(RSI triggered at {rsi_previous:.2f}, confirmed at {rsi_current:.2f})")
-        return True, current["close"]
+                    f"(RSI triggered at {rsi_previous:.2f}, confirmed at {rsi_current:.2f})")
+        return True, current["close"]    
     
     if rsi_triggered and not rsi_confirmed:
         logger.info(f"[SKIPPED] RSI triggered at {rsi_previous:.2f} but not confirmed at {rsi_current:.2f}")
-    elif rsi_triggered and not price_higher:
-        logger.info(f"[SKIPPED] RSI triggered but price not higher (current: {current['close']:.2f}, previous: {previous['close']:.2f})")
-    elif rsi_triggered and not volume_confirmed:
-        logger.info(f"[SKIPPED] RSI triggered but volume not confirmed (current: {current['volume']:.2f}, avg: {avg_volume:.2f})")
     
     return False, None
 
