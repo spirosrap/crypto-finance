@@ -291,7 +291,11 @@ def process_pending_trade(
         leverage = float(trade['Leverage'].replace('x', ''))
         
         # Get historical candles for EMA200 calculation
-        trade_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
+        try:
+            trade_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
+        except ValueError:
+            # Try with UTC suffix if the first attempt fails
+            trade_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
         current_time = int(datetime.now(UTC).timestamp())
         candles = get_historical_candles(client, trade_timestamp, current_time)
         
@@ -466,8 +470,13 @@ def update_pending_trades() -> None:
                     if trade['MAE'] and trade['MAE'] != '0.0' and trade['MFE'] and trade['MFE'] != '0.0':
                         continue
 
-                    entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
-                    exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S").timestamp())
+                    try:
+                        entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
+                        exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
+                    except ValueError:
+                        # Try with UTC suffix if the first attempt fails
+                        entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
+                        exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
                     
                     trade = process_closed_trade(trade, client, entry_timestamp, exit_timestamp)
                     updated = True
