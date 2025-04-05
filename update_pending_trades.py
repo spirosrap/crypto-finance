@@ -331,19 +331,33 @@ def process_pending_trade(
                     if high >= take_profit:
                         trade['Exit Reason'] = 'TP HIT (wick)'
                         trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        trade['Outcome'] = 'SUCCESS'
+                        trade['Outcome %'] = str(round(((take_profit - entry_price) / entry_price) * leverage * 100, 2))
                         return trade, trade_state
                     elif low <= stop_loss:
                         trade['Exit Reason'] = 'SL HIT (wick)'
                         trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        trade['Outcome'] = 'STOP LOSS'
+                        # For long positions, loss percentage is (stop_loss - entry) / entry * leverage
+                        loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage
+                        trade['Outcome %'] = str(round(loss_pct, 2))
                         return trade, trade_state
                 else:  # SHORT
                     if low <= take_profit:
                         trade['Exit Reason'] = 'TP HIT (wick)'
                         trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        trade['Outcome'] = 'SUCCESS'
+                        # For short positions, profit percentage is (entry - take_profit) / entry * leverage
+                        profit_pct = ((entry_price - take_profit) / entry_price) * 100 * leverage
+                        trade['Outcome %'] = str(round(profit_pct, 2))
                         return trade, trade_state
                     elif high >= stop_loss:
                         trade['Exit Reason'] = 'SL HIT (wick)'
                         trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        trade['Outcome'] = 'STOP LOSS'
+                        # For short positions, loss percentage is (stop_loss - entry) / entry * leverage
+                        loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage * -1
+                        trade['Outcome %'] = str(round(loss_pct, 2))
                         return trade, trade_state                
             
             for candle in candles:
