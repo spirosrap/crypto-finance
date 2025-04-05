@@ -230,6 +230,36 @@ def process_closed_trade(
         
         logger.info(f"Processing closed trade {trade_no} from {trade['Timestamp']} to {trade['Exit Trade']}")
         
+        # Parse timestamps and ensure they're in UTC
+        try:
+            # Parse entry timestamp
+            entry_str = trade['Timestamp']
+            if 'UTC' not in entry_str:
+                entry_dt = datetime.strptime(entry_str, "%Y-%m-%d %H:%M:%S")
+                entry_dt = entry_dt.astimezone(UTC)
+            else:
+                entry_dt = datetime.strptime(entry_str, "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=UTC)
+            
+            # Parse exit timestamp
+            exit_str = trade['Exit Trade']
+            if 'UTC' not in exit_str:
+                exit_dt = datetime.strptime(exit_str, "%Y-%m-%d %H:%M:%S")
+                exit_dt = exit_dt.astimezone(UTC)
+            else:
+                exit_dt = datetime.strptime(exit_str, "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=UTC)
+            
+            # Calculate duration in hours
+            duration = exit_dt - entry_dt
+            duration_hours = duration.total_seconds() / 3600
+            trade['Duration'] = str(round(duration_hours, 2))
+            
+            logger.info(f"Closed trade {trade_no} duration: {trade['Duration']} hours (from {entry_dt} to {exit_dt})")
+        except Exception as e:
+            logger.error(f"Error calculating duration for trade {trade_no}: {str(e)}")
+            # Fallback to simple calculation if parsing fails
+            duration_hours = (exit_timestamp - entry_timestamp) / 3600
+            trade['Duration'] = str(round(duration_hours, 2))
+        
         candles = get_historical_candles(client, entry_timestamp, exit_timestamp)
         
         if not candles:
@@ -292,11 +322,33 @@ def process_pending_trade(
         
         # Get historical candles for EMA200 calculation
         try:
-            trade_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
-        except ValueError:
-            # Try with UTC suffix if the first attempt fails
-            trade_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
+            # Parse the timestamp and ensure it's in UTC
+            timestamp_str = trade['Timestamp']
+            if 'UTC' not in timestamp_str:
+                # If no timezone is specified, assume it's in local time
+                entry_dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                # Convert to UTC
+                entry_dt = entry_dt.astimezone(UTC)
+            else:
+                # If UTC is specified, parse directly
+                entry_dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S UTC").replace(tzinfo=UTC)
+            
+            trade_timestamp = int(entry_dt.timestamp())
+        except ValueError as e:
+            logger.error(f"Error parsing timestamp for trade {trade_no}: {str(e)}")
+            # Fallback to current time if parsing fails
+            trade_timestamp = int(datetime.now(UTC).timestamp())
+        
         current_time = int(datetime.now(UTC).timestamp())
+        current_dt = datetime.now(UTC)
+        
+        # Calculate duration in hours
+        duration = current_dt - entry_dt
+        duration_hours = duration.total_seconds() / 3600
+        trade['Duration'] = str(round(duration_hours, 2))
+        
+        logger.info(f"Trade {trade_no} duration: {trade['Duration']} hours (from {entry_dt} to {current_dt})")
+        
         candles = get_historical_candles(client, trade_timestamp, current_time)
         
         # Calculate EMA200 and determine trend regime
@@ -461,6 +513,7 @@ def update_pending_trades() -> None:
         mfe_index = headers.index('MFE') if 'MFE' in headers else -1
         exit_trade_index = headers.index('Exit Trade') if 'Exit Trade' in headers else -1
         trend_regime_index = headers.index('Trend Regime') if 'Trend Regime' in headers else -1
+        duration_index = headers.index('Duration') if 'Duration' in headers else -1
         
         # Read the trades
         with open(CSV_FILE_PATH, 'r') as f:
@@ -468,7 +521,7 @@ def update_pending_trades() -> None:
             trades = list(reader)
         
         # Add MAE, MFE, and Trend Regime fields if they don't exist
-        if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1 or trend_regime_index == -1:
+        if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1 or trend_regime_index == -1 or duration_index == -1:
             for trade in trades:
                 if 'MAE' not in trade:
                     trade['MAE'] = '0.0'
@@ -478,26 +531,38 @@ def update_pending_trades() -> None:
                     trade['Exit Trade'] = ''
                 if 'Trend Regime' not in trade:
                     trade['Trend Regime'] = ''
+                if 'Duration' not in trade:
+                    trade['Duration'] = ''
         
         # Process closed trades first
         updated = False
         for trade in trades:
             if trade['Outcome'] in ['SUCCESS', 'STOP LOSS'] and trade['Exit Trade']:
                 try:
+                    # Check if we need to update this trade
+                    needs_update = False
+                    
                     # Skip if MAE and MFE are already calculated
                     if trade['MAE'] and trade['MAE'] != '0.0' and trade['MFE'] and trade['MFE'] != '0.0':
-                        continue
-
-                    try:
-                        entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
-                        exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
-                    except ValueError:
-                        # Try with UTC suffix if the first attempt fails
-                        entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
-                        exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
+                        # Only skip if Duration is also already calculated
+                        if trade['Duration'] and trade['Duration'] != '':
+                            continue
+                        else:
+                            needs_update = True
+                    else:
+                        needs_update = True
                     
-                    trade = process_closed_trade(trade, client, entry_timestamp, exit_timestamp)
-                    updated = True
+                    if needs_update:
+                        try:
+                            entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S").timestamp())
+                            exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
+                        except ValueError:
+                            # Try with UTC suffix if the first attempt fails
+                            entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
+                            exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
+                        
+                        trade = process_closed_trade(trade, client, entry_timestamp, exit_timestamp)
+                        updated = True
                     
                 except Exception as e:
                     logger.error(f"Error processing closed trade {trade.get('No.', 'unknown')}: {str(e)}")
@@ -558,7 +623,7 @@ def update_pending_trades() -> None:
         
         # Write updated trades back to CSV
         if updated:
-            if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1 or trend_regime_index == -1:
+            if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1 or trend_regime_index == -1 or duration_index == -1:
                 all_fields = list(trades[0].keys())
                 with open(CSV_FILE_PATH, 'w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=all_fields)
