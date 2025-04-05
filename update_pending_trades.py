@@ -402,19 +402,23 @@ def process_pending_trade(
             if current_price >= take_profit:
                 trade['Outcome'] = 'SUCCESS'
                 trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trade['Exit Reason'] = 'TP HIT'
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
             elif current_price <= stop_loss:
                 trade['Outcome'] = 'STOP LOSS'
                 trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trade['Exit Reason'] = 'SL HIT'
                 logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
         else:  # SHORT
             if current_price <= take_profit:
                 trade['Outcome'] = 'SUCCESS'
                 trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trade['Exit Reason'] = 'TP HIT'
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
             elif current_price >= stop_loss:
                 trade['Outcome'] = 'STOP LOSS'
                 trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trade['Exit Reason'] = 'SL HIT'
                 logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
         
         # Calculate outcome percentage if trade is closed
