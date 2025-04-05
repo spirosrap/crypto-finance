@@ -1,4 +1,4 @@
-from simplified_trading_bot_v1_1_one_bar_delay import (
+from simplified_trading_bot_v1_1_rsi_one_bar_confirmation import (
     CoinbaseService, TechnicalAnalysis, GRANULARITY, RSI_THRESHOLD,
     VOLUME_LOOKBACK, TP_PERCENT, SL_PERCENT, get_perp_product,
     get_price_precision, analyze, determine_tp_mode
