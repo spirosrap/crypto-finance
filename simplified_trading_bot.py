@@ -286,7 +286,9 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
                 'Trend Regime': 'PENDING',
                 'RSI at Entry': 0.0,  # Will be updated with actual value
                 'Relative Volume': 0.0,  # Will be updated with actual value
-                'Trend Slope': 0.0  # Will be updated with actual value
+                'Trend Slope': 0.0,  # Will be updated with actual value
+                'Exit Reason': 'PENDING',
+                'Duration': 0.0
             }])
             
             # Append new trade to CSV
