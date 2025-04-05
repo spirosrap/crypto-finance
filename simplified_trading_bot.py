@@ -141,11 +141,7 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
                 f"Volume={current['volume']:.2f} > Avg={avg_volume:.2f}, "
                 f"Relative Volume={relative_volume:.2f}, Trend Slope={trend_slope:.4f}")
 
-    # Check if RSI was below threshold on previous bar and is now below confirmation threshold
-    rsi_triggered = rsi_previous < RSI_THRESHOLD
-    rsi_confirmed = rsi_current < RSI_CONFIRMATION_THRESHOLD
-    
-    # Pure 1-bar delay logic
+    # RSI 1-bar confirmation logic
     rsi_triggered = rsi_previous < RSI_THRESHOLD
     rsi_confirmed = rsi_current < RSI_THRESHOLD
 
