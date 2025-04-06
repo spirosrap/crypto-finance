@@ -1,7 +1,7 @@
-# Simplified Trading Bot v1.1
-# Single coin (BTC-USDC), single timeframe (5-min), single logic (RSI + EMA + volume)
-# No AI prompts, no ML classifiers, no market regimes
-# Added 1-bar confirmation delay for RSI entries
+# Sniper v1.2: Adds strict 2-bar RSI confirmation logic.
+# Entry: RSI crosses below 32 (bar N), then crosses above 35 (bar N+1).
+# Goal: Reduce noise entries, align with sniper-style asymmetry.
+# Status: Experimental only. Not live-tested. Sensitive to trending regimes.
 
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
@@ -12,6 +12,7 @@ import logging
 import argparse
 import subprocess
 import numpy as np
+import talib
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -125,49 +126,48 @@ def calculate_trend_slope(df):
     return trend_slope
 
 def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
-    # Convert DataFrame to list of dictionaries for the technical analysis methods
-    candles = df.to_dict('records')
-    
-    # Calculate RSI for the last two bars
-    # First, get RSI for the current bar
-    rsi_current = ta.compute_rsi(product_id, candles, period=14)
-    
-    # Get RSI for the previous bar by using all candles except the last one
-    rsi_previous = ta.compute_rsi(product_id, candles[:-1], period=14)
-    
-    # Calculate EMA
-    ema_50 = ta.get_moving_average(candles, period=50, ma_type='ema')
-    
-    # Get current and previous values
-    current = df.iloc[-1]
-    previous = df.iloc[-2]
-    avg_volume = df["volume"].tail(VOLUME_LOOKBACK).mean()
-    
-    # Calculate relative volume (current volume / average volume)
-    relative_volume = current['volume'] / avg_volume if avg_volume > 0 else 0
-    
-    # Calculate trend slope using the new function
-    trend_slope = calculate_trend_slope(df)
+    """
+    Analyze market data and return whether a trade signal is present.
+    Implements 2-bar RSI confirmation logic:
+    - Bar N: RSI crosses below 32
+    - Bar N+1: RSI crosses above 35
+    """
 
-    # Log analysis details
-    logger.info(f"Analysis: Current RSI={rsi_current:.2f}, Previous RSI={rsi_previous:.2f}, "
-                f"Current Close={current['close']:.2f}, Previous Close={previous['close']:.2f}, "
-                f"Volume={current['volume']:.2f} > Avg={avg_volume:.2f}, "
-                f"Relative Volume={relative_volume:.2f}, Trend Slope={trend_slope:.4f}")
+    if len(df) < 3:
+        return False, 0, 0, 0, 0
 
-    # RSI 1-bar confirmation logic
-    rsi_triggered = rsi_previous < RSI_THRESHOLD
-    rsi_confirmed = rsi_current < RSI_THRESHOLD
+    # Create a copy of the DataFrame to avoid SettingWithCopyWarning
+    df_copy = df.copy()
+    
+    # Calculate RSI for each row
+    df_copy['rsi'] = talib.RSI(df_copy['close'], timeperiod=14)    
+    if df_copy['rsi'].isna().iloc[-3:].any():
+        return False, 0, 0, 0, 0
+    # Calculate other indicators
+    df_copy.loc[:, 'atr'] = ta.compute_atr(df_copy.to_dict('records'))
+    df_copy.loc[:, 'relative_volume'] = df_copy['volume'] / df_copy['volume'].rolling(window=20).mean()
+    df_copy.loc[:, 'ema_50'] = ta.get_moving_average(df_copy.to_dict('records'), period=50, ma_type='ema')
 
-    if rsi_triggered and rsi_confirmed:
-        logger.info(f"[SIGNAL] BUY {product_id} at {current['close']:.2f} "
-                    f"(RSI triggered at {rsi_previous:.2f}, confirmed at {rsi_current:.2f})")
-        return True, current["close"], rsi_current, relative_volume, trend_slope    
-    
-    if rsi_triggered and not rsi_confirmed:
-        logger.info(f"[SKIPPED] RSI triggered at {rsi_previous:.2f} but not confirmed at {rsi_current:.2f}")
-    
-    return False, None, None, None, None
+    # Get the last 3 RSI values
+    rsi_prev2 = df_copy['rsi'].iloc[-3]
+    rsi_prev1 = df_copy['rsi'].iloc[-2]
+    rsi_now   = df_copy['rsi'].iloc[-1]
+
+    # Step 1: RSI crossed below 32 on previous bar
+    triggered = rsi_prev2 > 32 and rsi_prev1 <= 32
+
+    # Step 2: RSI now > 35 for confirmation
+    confirmed = triggered and rsi_now > 35
+
+    if confirmed:
+        logger.info(f"[SIGNAL CONFIRMED] RSI dropped {rsi_prev2:.2f} → {rsi_prev1:.2f} then rebounded to {rsi_now:.2f}")
+        logger.info(f"[SNIPER] Time: {df_copy.index[-1]} | Price: {df_copy['close'].iloc[-1]:.2f}")
+        return True, df_copy['close'].iloc[-1], rsi_now, df_copy['relative_volume'].iloc[-1], 0  # trend_slope placeholder
+
+    if triggered:
+        logger.info(f"[TRIGGER SEEN] RSI dipped: {rsi_prev2:.2f} → {rsi_prev1:.2f}, waiting for confirmation...")
+
+    return False, 0, rsi_now, df_copy['relative_volume'].iloc[-1], 0
 
 def determine_tp_mode(entry_price: float, atr: float, price_precision: float = None) -> tuple[str, float]:
     """
