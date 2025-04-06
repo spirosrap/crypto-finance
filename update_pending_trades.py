@@ -58,22 +58,28 @@ def load_api_keys() -> Tuple[str, str]:
         raise ValueError("API keys not found in .env file")
     return api_key, api_secret
 
-def get_current_btc_price(client: CoinbaseService) -> float:
-    """Get current BTC price from Coinbase with retry logic"""
+def get_current_btc_price_from_candles(client: CoinbaseService) -> float:
+    """Get current BTC price from historical candles with retry logic"""
     for attempt in range(MAX_RETRIES):
         try:
-            prices = client.get_btc_prices()
-            if 'BTC-USDC' in prices:
-                return float(prices['BTC-USDC']['ask'])
-            elif 'BTC-EUR' in prices:
-                return float(prices['BTC-EUR']['ask'])
-            else:
-                raise ValueError("No BTC price found in available pairs")
+            # Get current timestamp and timestamp from 5 minutes ago
+            current_time = int(datetime.now(UTC).timestamp())
+            five_minutes_ago = current_time - 300  # 5 minutes in seconds
+            
+            # Get historical candles for the last 5 minutes
+            candles = get_historical_candles(client, five_minutes_ago, current_time)
+            
+            if not candles:
+                raise ValueError("No candle data available")
+            
+            # Get the most recent candle's closing price
+            latest_candle = candles[-1]
+            return float(latest_candle['close'])
         except Exception as e:
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error getting current BTC price after {MAX_RETRIES} attempts: {str(e)}")
+                logger.error(f"Error getting current BTC price from candles after {MAX_RETRIES} attempts: {str(e)}")
                 raise
-            logger.warning(f"Attempt {attempt + 1} failed to get BTC price: {str(e)}")
+            logger.warning(f"Attempt {attempt + 1} failed to get BTC price from candles: {str(e)}")
             time.sleep(RETRY_DELAY)
 
 def get_historical_candles(
@@ -85,7 +91,7 @@ def get_historical_candles(
     """Get historical candles for calculating MAE and MFE with retry logic"""
     for attempt in range(MAX_RETRIES):
         try:
-            product_id = "BTC-USDC"
+            product_id = "BTC-PERP-INTX"
             start_date = datetime.fromtimestamp(start_timestamp)
             end_date = datetime.fromtimestamp(end_timestamp)
             
@@ -501,8 +507,8 @@ def update_pending_trades() -> None:
         api_key, api_secret = load_api_keys()
         client = CoinbaseService(api_key, api_secret)
         
-        # Get current BTC price
-        current_price = get_current_btc_price(client)
+        # Get current BTC price from historical candles
+        current_price = get_current_btc_price_from_candles(client)
         logger.info(f"Current BTC price: {current_price}")
         
         # Load persistent state tracker
