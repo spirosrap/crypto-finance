@@ -349,6 +349,45 @@ def process_pending_trade(
         
         logger.info(f"Trade {trade_no} duration: {trade['Duration']} hours (from {entry_dt} to {current_dt})")
         
+        # FIRST: Check current price against take profit and stop loss levels
+        # This ensures we prioritize current price conditions over historical wicks
+        if side == 'LONG':
+            if current_price >= take_profit:
+                trade['Outcome'] = 'SUCCESS'
+                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trade['Exit Reason'] = 'TP HIT'
+                trade['Outcome %'] = str(round(((take_profit - entry_price) / entry_price) * leverage * 100, 2))
+                logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
+                return trade, trade_state
+            elif current_price <= stop_loss:
+                trade['Outcome'] = 'STOP LOSS'
+                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trade['Exit Reason'] = 'SL HIT'
+                # For long positions, loss percentage is (stop_loss - entry) / entry * leverage
+                loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage
+                trade['Outcome %'] = str(round(loss_pct, 2))
+                logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
+                return trade, trade_state
+        else:  # SHORT
+            if current_price <= take_profit:
+                trade['Outcome'] = 'SUCCESS'
+                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trade['Exit Reason'] = 'TP HIT'
+                # For short positions, profit percentage is (entry - take_profit) / entry * leverage
+                profit_pct = ((entry_price - take_profit) / entry_price) * 100 * leverage
+                trade['Outcome %'] = str(round(profit_pct, 2))
+                logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
+                return trade, trade_state
+            elif current_price >= stop_loss:
+                trade['Outcome'] = 'STOP LOSS'
+                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+                trade['Exit Reason'] = 'SL HIT'
+                # For short positions, loss percentage is (stop_loss - entry) / entry * leverage
+                loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage * -1
+                trade['Outcome %'] = str(round(loss_pct, 2))
+                logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
+                return trade, trade_state
+        
         candles = get_historical_candles(client, trade_timestamp, current_time)
         
         # Calculate EMA200 and determine trend regime
@@ -367,7 +406,7 @@ def process_pending_trade(
         mae_pct = trade_state['mae_pct']
         mfe_pct = trade_state['mfe_pct']
         
-        # Process candles if available
+        # SECOND: Process candles if available - only if current price didn't trigger an exit
         if candles:
             logger.info(f"Processing {len(candles)} candles for trade {trade_no}")
             
@@ -448,35 +487,6 @@ def process_pending_trade(
         # Update trade with calculated values
         trade['MAE'] = str(round(abs(mae_pct), 2))
         trade['MFE'] = str(round(mfe_pct, 2))
-        
-        # Check for exit conditions
-        if side == 'LONG':
-            if current_price >= take_profit:
-                trade['Outcome'] = 'SUCCESS'
-                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-                trade['Exit Reason'] = 'TP HIT'
-                logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
-            elif current_price <= stop_loss:
-                trade['Outcome'] = 'STOP LOSS'
-                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-                trade['Exit Reason'] = 'SL HIT'
-                logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
-        else:  # SHORT
-            if current_price <= take_profit:
-                trade['Outcome'] = 'SUCCESS'
-                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-                trade['Exit Reason'] = 'TP HIT'
-                logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
-            elif current_price >= stop_loss:
-                trade['Outcome'] = 'STOP LOSS'
-                trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
-                trade['Exit Reason'] = 'SL HIT'
-                logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
-        
-        # Calculate outcome percentage if trade is closed
-        if trade['Outcome'] != 'PENDING':
-            outcome_percentage = ((take_profit - entry_price) / entry_price) * leverage * 100 if trade['Outcome'] == 'SUCCESS' else ((entry_price - stop_loss) / entry_price) * leverage * -100
-            trade['Outcome %'] = str(round(outcome_percentage, 2))
         
         return trade, trade_state
         
