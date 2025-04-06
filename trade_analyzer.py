@@ -15,8 +15,8 @@ class TradingAnalyzer:
         # Read the CSV file
         df = pd.read_csv(self.file_path)
         
-        # Convert timestamp to datetime with explicit format
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%Y-%m-%d %H:%M:%S')
+        # Convert timestamp to datetime with format that includes UTC
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%Y-%m-%d %H:%M:%S UTC')
         
         # Convert percentage columns
         percentage_columns = ['Outcome %']
