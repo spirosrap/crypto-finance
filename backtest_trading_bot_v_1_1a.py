@@ -1,4 +1,4 @@
-from simplified_trading_bot_v_1_1a_TP_adjust import (
+from simplified_trading_bot import (
     CoinbaseService, TechnicalAnalysis, GRANULARITY, RSI_THRESHOLD,
     VOLUME_LOOKBACK, TP_PERCENT, SL_PERCENT, get_perp_product,
     get_price_precision, analyze, determine_tp_mode
@@ -412,7 +412,9 @@ def print_results(results: BacktestResults):
         ["Winning Trades", results.winning_trades],
         ["Losing Trades", results.losing_trades],
         ["Win Rate", f"{results.win_rate:.2f}%"],
-        ["Profit Factor", f"{results.profit_factor:.2f}"]
+        ["Profit Factor", f"{results.profit_factor:.2f}"],
+        ["Max Drawdown", f"{results.max_drawdown:.2f}%"],
+        ["Max Drawdown Duration", f"{results.max_drawdown_duration:.1f} hours"]
     ]
     
     tp_mode_data = [
