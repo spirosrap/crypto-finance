@@ -96,6 +96,34 @@ def fetch_candles(cb, product_id):
     
     return df
 
+def calculate_trend_slope(df: pd.DataFrame) -> float:
+    """
+    Calculate the trend slope using a simple linear regression on the last 5 close prices.
+    
+    Args:
+        df: DataFrame containing price data with 'close' column
+        
+    Returns:
+        float: The calculated trend slope
+    """
+    trend_slope = 0.0
+    try:
+        # Use a simpler approach - calculate slope between current and previous close prices
+        if len(df) >= 2:
+            # Get the last 5 close prices for a short-term trend
+            close_prices = df['close'].tail(5).values
+            if len(close_prices) >= 2:
+                # Simple linear regression slope calculation
+                x = np.arange(len(close_prices))
+                y = close_prices
+                slope, _ = np.polyfit(x, y, 1)
+                trend_slope = slope
+    except Exception as e:
+        logger.warning(f"Error calculating trend slope: {e}")
+        trend_slope = 0.0
+    
+    return trend_slope
+
 def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     # Convert DataFrame to list of dictionaries for the technical analysis methods
     candles = df.to_dict('records')
@@ -118,22 +146,8 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     # Calculate relative volume (current volume / average volume)
     relative_volume = current['volume'] / avg_volume if avg_volume > 0 else 0
     
-    # Calculate trend slope (using EMA) with robust error handling
-    trend_slope = 0.0
-    try:
-        # Use a simpler approach - calculate slope between current and previous close prices
-        if len(df) >= 2:
-            # Get the last 5 close prices for a short-term trend
-            close_prices = df['close'].tail(5).values
-            if len(close_prices) >= 2:
-                # Simple linear regression slope calculation
-                x = np.arange(len(close_prices))
-                y = close_prices
-                slope, _ = np.polyfit(x, y, 1)
-                trend_slope = slope
-    except Exception as e:
-        logger.warning(f"Error calculating trend slope: {e}")
-        trend_slope = 0.0
+    # Calculate trend slope using the new function
+    trend_slope = calculate_trend_slope(df)
 
     # Log analysis details
     logger.info(f"Analysis: Current RSI={rsi_current:.2f}, Previous RSI={rsi_previous:.2f}, "
