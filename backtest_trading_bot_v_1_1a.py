@@ -180,20 +180,13 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
         trades_df['No.'] = range(1, len(trades_df) + 1)
         trades_df['SIDE'] = 'LONG'  # All trades are long in this backtest
         trades_df['ENTRY'] = trades_df['entry_price'].round(2)
-        
-        # Calculate dynamic TP and SL based on market conditions
         trades_df['Take Profit'] = trades_df.apply(
             lambda row: determine_tp_mode(row['entry_price'], row['atr'], None, None, row['trend_slope'])[1], 
             axis=1
         ).round(2)
-        
-        # Keep SL fixed at 0.7% for now
         trades_df['Stop Loss'] = (trades_df['entry_price'] * (1 - SL_PERCENT)).round(2)
-        
-        # Calculate R/R ratio using actual TP and SL values
         trades_df['R/R Ratio'] = ((trades_df['Take Profit'] - trades_df['ENTRY']) / 
                                  (trades_df['ENTRY'] - trades_df['Stop Loss'])).round(2)
-        
         trades_df['Volatility Level'] = trades_df['atr_percent'].apply(
             lambda x: 'Weak' if x < 0.5 else 'Moderate' if x < 1.0 else 'Strong'
         )
@@ -209,13 +202,13 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
         trades_df['Setup Type'] = 'RSI Dip'
         trades_df['MAE'] = trades_df['mae'].round(2)
         trades_df['MFE'] = trades_df['mfe'].round(2)
+        trades_df['Exit Trade'] = trades_df['exit_price'].round(2)
         trades_df['Trend Regime'] = trades_df['market_regime']
         trades_df['RSI at Entry'] = trades_df['rsi_at_entry'].round(2)
         trades_df['Relative Volume'] = trades_df['relative_volume'].round(2)
         trades_df['Trend Slope'] = trades_df['trend_slope'].round(4)
-        
-        # Add Exit Trade column
-        trades_df['Exit Trade'] = trades_df['exit_price'].round(2)
+        trades_df['Exit Reason'] = trades_df['type'].apply(lambda x: 'TP HIT' if x == 'TP' else 'SL HIT')
+        trades_df['Duration'] = ((trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 3600).round(2)
         
         # Reorder columns to match automated_trades.csv
         columns = [
@@ -223,7 +216,7 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
             'R/R Ratio', 'Volatility Level', 'Outcome', 'Outcome %', 
             'Leverage', 'Margin', 'Session', 'TP Mode', 'ATR %', 
             'Setup Type', 'MAE', 'MFE', 'Exit Trade', 'Trend Regime',
-            'RSI at Entry', 'Relative Volume', 'Trend Slope'
+            'RSI at Entry', 'Relative Volume', 'Trend Slope', 'Exit Reason', 'Duration'
         ]
         
         # Rename entry_time to Timestamp
