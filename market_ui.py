@@ -1409,7 +1409,13 @@ class MarketAnalyzerUI:
                             trade_completed = True
                             
                 if stderr:
-                    self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                    # Check if stderr contains actual error messages (not just INFO logs)
+                    error_lines = [line for line in stderr.splitlines() if 'ERROR' in line or 'CRITICAL' in line]
+                    if error_lines:
+                        self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                    else:
+                        # If it's just INFO logs, append them without the Errors header
+                        self.queue.put(("append", stderr))
                 
                 # Clear current process
                 self.current_process = None
@@ -1700,7 +1706,13 @@ class MarketAnalyzerUI:
                             trade_completed = True
                             
                 if stderr:
-                    self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                    # Check if stderr contains actual error messages (not just INFO logs)
+                    error_lines = [line for line in stderr.splitlines() if 'ERROR' in line or 'CRITICAL' in line]
+                    if error_lines:
+                        self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                    else:
+                        # If it's just INFO logs, append them without the Errors header
+                        self.queue.put(("append", stderr))
                 
                 # Clear current process
                 self.current_process = None
@@ -2430,7 +2442,7 @@ class MarketAnalyzerUI:
             stdout, stderr = process.communicate()
             
             # Only show errors in the UI
-            if stderr:
+            if stderr and stderr.strip():  # Only show errors if stderr is not empty after stripping whitespace
                 self.queue.put(("append", f"\nErrors from update_trade_status.py:\n{stderr}"))
                 if process.returncode != 0:
                     raise Exception(f"update_trade_status.py failed with return code {process.returncode}")
@@ -2926,7 +2938,13 @@ class MarketAnalyzerUI:
                             trade_completed = True
                             
                 if stderr:
-                    self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                    # Check if stderr contains actual error messages (not just INFO logs)
+                    error_lines = [line for line in stderr.splitlines() if 'ERROR' in line or 'CRITICAL' in line]
+                    if error_lines:
+                        self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                    else:
+                        # If it's just INFO logs, append them without the Errors header
+                        self.queue.put(("append", stderr))
                 
                 # Clear current process
                 self.current_process = None
