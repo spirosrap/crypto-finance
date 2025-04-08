@@ -11,7 +11,13 @@ Example of regime proxies:
 
 ----
 
-python backtest_trading_bot.py --start_date 2023-01-01 --end_date 2023-02-01
+ALL BACKTEST REPORTS - Generated on 2025-04-07 21:39:34
+================================================================================
+
+
+================================================================================
+BACKTEST PERIOD: 2023-01-01 to 2023-02-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+-------------+
@@ -62,8 +68,12 @@ python backtest_trading_bot.py --start_date 2023-01-01 --end_date 2023-02-01
 | Uncertain Win Rate | 80.00% |
 +--------------------+--------+
 
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184020.csv
 
-python backtest_trading_bot.py --start_date 2023-03-01 --end_date 2023-04-01
+
+================================================================================
+BACKTEST PERIOD: 2023-03-01 to 2023-04-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+-------------+
@@ -114,8 +124,12 @@ python backtest_trading_bot.py --start_date 2023-03-01 --end_date 2023-04-01
 | Uncertain Win Rate | 0.00%   |
 +--------------------+---------+
 
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184105.csv
 
-python backtest_trading_bot.py --start_date 2023-06-01 --end_date 2023-07-01
+
+================================================================================
+BACKTEST PERIOD: 2023-06-01 to 2023-07-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+------------+
@@ -166,9 +180,12 @@ python backtest_trading_bot.py --start_date 2023-06-01 --end_date 2023-07-01
 | Uncertain Win Rate | 85.71% |
 +--------------------+--------+
 
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184150.csv
 
 
-python backtest_trading_bot.py --start_date 2023-11-01 --end_date 2023-12-01
+================================================================================
+BACKTEST PERIOD: 2023-11-01 to 2023-12-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+-------------+
@@ -219,10 +236,12 @@ python backtest_trading_bot.py --start_date 2023-11-01 --end_date 2023-12-01
 | Uncertain Win Rate | 60.00% |
 +--------------------+--------+
 
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184257.csv
 
 
-python backtest_trading_bot.py --start_date 2024-01-01 --end_date 2024-02-01
-
+================================================================================
+BACKTEST PERIOD: 2024-01-01 to 2024-02-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+-------------+
@@ -273,10 +292,12 @@ python backtest_trading_bot.py --start_date 2024-01-01 --end_date 2024-02-01
 | Uncertain Win Rate | 44.44% |
 +--------------------+--------+
 
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184405.csv
 
 
-
-python backtest_trading_bot.py --start_date 2024-03-01 --end_date 2024-04-01
+================================================================================
+BACKTEST PERIOD: 2024-03-01 to 2024-04-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+-------------+
@@ -327,9 +348,12 @@ python backtest_trading_bot.py --start_date 2024-03-01 --end_date 2024-04-01
 | Uncertain Win Rate | 0.00%   |
 +--------------------+---------+
 
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184511.csv
 
-python backtest_trading_bot.py --start_date 2025-03-01 --end_date 2025-04-01
 
+================================================================================
+BACKTEST PERIOD: 2025-03-01 to 2025-04-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+-------------+
@@ -380,9 +404,12 @@ python backtest_trading_bot.py --start_date 2025-03-01 --end_date 2025-04-01
 | Uncertain Win Rate | 16.67% |
 +--------------------+--------+
 
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184624.csv
 
-python backtest_trading_bot.py --start_date 2025-01-01 --end_date 2025-02-01
 
+================================================================================
+BACKTEST PERIOD: 2025-01-01 to 2025-02-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+-------------+
@@ -433,8 +460,12 @@ python backtest_trading_bot.py --start_date 2025-01-01 --end_date 2025-02-01
 | Uncertain Win Rate | 70.00% |
 +--------------------+--------+
 
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184734.csv
 
-python backtest_trading_bot.py --start_date 2025-02-01 --end_date 2025-03-01
+
+================================================================================
+BACKTEST PERIOD: 2025-02-01 to 2025-03-01
+================================================================================
 
 === BACKTEST RESULTS ===
 +-----------------------+-------------+
@@ -484,3 +515,6 @@ python backtest_trading_bot.py --start_date 2025-02-01 --end_date 2025-03-01
 +--------------------+--------+
 | Uncertain Win Rate | 15.38% |
 +--------------------+--------+
+
+CSV file saved as: backtest_trades_BTC-USDC_20250407_184837.csv
+
