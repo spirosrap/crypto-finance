@@ -1561,3 +1561,34 @@ This Bitcoin Trading Bot is for educational and research purposes only. It is no
 - Test strategies thoroughly before live trading
 - Monitor positions and risk levels continuously
 - Keep API keys secure and never share them
+
+## Tools
+
+### run_backtests.py
+
+This tool runs multiple backtests over predefined date ranges and collects all the results into a single report file. It's designed to evaluate strategy performance across different market periods. This tool specifically refers to the `simplified_trading_bot.py` implementation.
+
+#### Usage
+
+```bash
+python run_backtests.py
+```
+
+#### Functionality
+
+The script:
+1. Runs backtests for multiple predefined date ranges (e.g., Jan-Feb 2023, Mar-Apr 2023, etc.)
+2. Executes `backtest_trading_bot.py` for each date range with appropriate parameters
+3. Captures the output and extracts the backtest results
+4. Combines all results into a single report file with timestamp
+5. Handles timeouts and errors gracefully
+
+#### Output
+
+The tool generates a single text file (`all_backtest_reports_TIMESTAMP.txt`) containing:
+- A header with generation timestamp
+- Separate sections for each backtest period
+- Complete backtest results for each period
+- Clear separation between different backtest periods
+
+This consolidated report makes it easy to compare strategy performance across different market conditions and timeframes.
