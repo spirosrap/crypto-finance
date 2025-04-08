@@ -34,6 +34,10 @@ SL_PERCENT = 0.007
 LEVERAGE = 5  # Conservative leverage
 POSITION_SIZE_USD = 100  # Position size in USD
 
+# Recalculate these values every 50 trades using plot_atr_histogram.py
+mean_atr_percent = 0.284
+std_atr_percent = 0.148
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Simplified Trading Bot')
     parser.add_argument('--product_id', type=str, default='BTC-USDC',
@@ -98,31 +102,23 @@ def fetch_candles(cb, product_id):
 
 def calculate_trend_slope(df: pd.DataFrame) -> float:
     """
-    Calculate the trend slope using a simple linear regression on the last 5 close prices.
-    
-    Args:
-        df: DataFrame containing price data with 'close' column
-        
-    Returns:
-        float: The calculated trend slope
+    Calculate normalized trend slope over last 5 closes.
+    Returns: slope as % change per bar.
     """
-    trend_slope = 0.0
-    try:
-        # Use a simpler approach - calculate slope between current and previous close prices
-        if len(df) >= 2:
-            # Get the last 5 close prices for a short-term trend
-            close_prices = df['close'].tail(5).values
-            if len(close_prices) >= 2:
-                # Simple linear regression slope calculation
-                x = np.arange(len(close_prices))
-                y = close_prices
-                slope, _ = np.polyfit(x, y, 1)
-                trend_slope = slope
-    except Exception as e:
-        logger.warning(f"Error calculating trend slope: {e}")
-        trend_slope = 0.0
-    
-    return trend_slope
+    if len(df) < 5:
+        return 0.0
+
+    close_prices = df['close'].tail(5).values
+    x = np.arange(len(close_prices))
+    y = close_prices
+
+    slope, _ = np.polyfit(x, y, 1)
+
+    # Normalize: slope as % of price per bar
+    mean_price = np.mean(close_prices)
+    normalized_slope = slope / mean_price
+
+    return normalized_slope
 
 def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     # Convert DataFrame to list of dictionaries for the technical analysis methods
@@ -169,28 +165,72 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     
     return False, None, None, None, None
 
-def determine_tp_mode(entry_price: float, atr: float, price_precision: float = None) -> tuple[str, float]:
+def determine_tp_mode(entry_price: float, atr: float, price_precision: float = None, 
+                     df: pd.DataFrame = None, trend_slope: float = None) -> tuple[str, float, str]:
     """
-    Determine take profit mode and price based on ATR volatility.
-    Returns a tuple of (tp_mode, tp_price)
+    Determine take profit mode and price based on ATR volatility and market regime.
+    Also determines the market regime internally.
+    
+    Args:
+        entry_price: Current entry price
+        atr: Average True Range value
+        price_precision: Precision for rounding the price
+        df: DataFrame containing price data (optional)
+        trend_slope: Pre-calculated trend slope (optional)
+        
+    Returns:
+        tuple: (tp_mode, tp_price, market_regime)
     """
     atr_percent = (atr / entry_price) * 100
-    if atr_percent > 0.7:
-        # High volatility → Use adaptive TP (2.5x ATR handles volatility better)
+    # Determine market regime internally
+    market_regime = "UNCERTAIN"  # Default
+    
+    # If we have a DataFrame, calculate trend slope if not provided
+    if df is not None and trend_slope is None:
+        trend_slope = calculate_trend_slope(df)
+    
+    # If we have a trend slope, determine market regime
+    if trend_slope is not None:
+        # Define thresholds for trend strength
+        TREND_THRESHOLD = 0.001  # 1% per bar threshold
+        VOLATILITY_THRESHOLD = 0.25  # 0.25% ATR threshold
+        
+        # Check if we have a strong trend
+        if abs(trend_slope) > TREND_THRESHOLD:
+            market_regime = "TRENDING"
+        
+        # Check if we're in a choppy market (low trend, moderate volatility)
+        elif atr_percent > VOLATILITY_THRESHOLD:
+            market_regime = "CHOP"
+    
+    # High volatility → Use adaptive TP (2.5x ATR handles volatility better)
+    adaptive_trigger = mean_atr_percent + std_atr_percent
+
+    if atr_percent > adaptive_trigger and market_regime == "TRENDING":
         tp_mode = "ADAPTIVE"
-        tp_price = entry_price + (2.5 * atr)  # 2.5×ATR adaptive TP
+        tp_price = entry_price + (2.5 * atr)  # 2×ATR adaptive TP
     else:
-        # Low volatility → Use fixed TP (market less likely to run, so %-based makes sense)
+        # Low volatility → Use fixed TP based on market regime
         tp_mode = "FIXED"
-        tp_price = entry_price * (1 + TP_PERCENT)  # 1.5% fixed TP
+                
+        # Regime-based TP logic
+        if market_regime == "TRENDING":
+            # Trending regime → TP = 1.5% or higher
+            tp_price = entry_price * (1 + 0.015)  # 1.5% fixed TP
+        elif market_regime == "CHOP":
+            # Chop/news/noise → TP = 1.1%
+            tp_price = entry_price * (1 + 0.011)  # 1.1% fixed TP
+        else:
+            # Default fallback → TP = 1.1% if uncertain
+            tp_price = entry_price * (1 + 0.011)  # 1.1% fixed TP
     
     # Round the price if precision is provided
     if price_precision is not None:
         tp_price = round(tp_price, price_precision)
     
-    return tp_mode, tp_price
+    return tp_mode, tp_price, market_regime
 
-def execute_trade(cb, entry_price: float, product_id: str, margin: float, leverage: int):
+def execute_trade(cb, entry_price: float, product_id: str, margin: float, leverage: int, trend_slope: float = None):
     """Execute the trade using trade_btc_perp.py functions"""
     try:
         # Convert to perpetual futures product ID
@@ -202,8 +242,28 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         ta = TechnicalAnalysis(cb)
         atr = ta.compute_atr(candles)
         
-        # Determine TP mode and price using centralized function
-        tp_mode, tp_price = determine_tp_mode(entry_price, atr, price_precision)
+        # Calculate ATR percentage
+        atr_percent = (atr / entry_price) * 100
+        
+        # If trend_slope is not provided, calculate it
+        if trend_slope is None:
+            # Convert candles to DataFrame for trend analysis
+            candles_df = pd.DataFrame(candles)
+            if 'start' in candles_df.columns:
+                candles_df['start'] = pd.to_datetime(pd.to_numeric(candles_df['start']), unit='s', utc=True)
+                candles_df.set_index('start', inplace=True)
+            elif 'timestamp' in candles_df.columns:
+                candles_df['timestamp'] = pd.to_datetime(candles_df['timestamp'], unit='s', utc=True)
+                candles_df.set_index('timestamp', inplace=True)
+            elif 'time' in candles_df.columns:
+                candles_df['time'] = pd.to_datetime(candles_df['time'], unit='s', utc=True)
+                candles_df.set_index('time', inplace=True)
+            
+            # Calculate trend slope
+            trend_slope = calculate_trend_slope(candles_df)
+        
+        # Determine TP mode, price, and market regime using centralized function
+        tp_mode, tp_price, market_regime = determine_tp_mode(entry_price, atr, price_precision, pd.DataFrame(candles), trend_slope)
         
         # Fixed stop loss
         sl_price = round(entry_price * (1 - SL_PERCENT), price_precision)              
@@ -219,9 +279,6 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         else:
             session = "US"            
         
-        # Calculate ATR percentage
-        atr_percent = (atr / entry_price) * 100
-        
         # Determine setup type based on entry conditions
         setup_type = "RSI Dip"  # Default since we're using RSI strategy
         
@@ -233,6 +290,8 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         logger.info(f"Session: {session}")
         logger.info(f"ATR %: {atr_percent:.2f}")
         logger.info(f"Setup Type: {setup_type}")
+        logger.info(f"Market Regime: {market_regime}")
+        logger.info(f"Trend Slope: {trend_slope:.4f}")
 
         # Prepare command for trade_btc_perp.py
         cmd = [
@@ -266,13 +325,22 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             rr_ratio = (tp_price - entry_price) / (entry_price - sl_price)
             
             # Determine volume strength based on ATR percentage - THIS IS VOLATILITY LEVEL
-            if atr_percent > 1.0:
+            # if atr_percent > 1.0:
+            #     volatility_level = "Strong"
+            # elif atr_percent > 0.5:
+            #     volatility_level = "Moderate"
+            # else:
+            #     volatility_level = "Weak"
+
+            if atr_percent > mean_atr_percent + std_atr_percent:
+                volatility_level = "Very Strong"
+            elif atr_percent > mean_atr_percent:
                 volatility_level = "Strong"
-            elif atr_percent > 0.5:
+            elif atr_percent > mean_atr_percent - std_atr_percent:
                 volatility_level = "Moderate"
             else:
-                volatility_level = "Weak"
-            
+                volatility_level = "Weak"                
+                       
             # Create new trade entry with additional metrics
             new_trade = pd.DataFrame([{
                 'No.': next_trade_no,
@@ -293,10 +361,10 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
                 'Setup Type': setup_type,
                 'MAE': 0.0,
                 'MFE': 0.0,
-                'Trend Regime': 'PENDING',
+                'Trend Regime': market_regime,
                 'RSI at Entry': 0.0,  # Will be updated with actual value
                 'Relative Volume': 0.0,  # Will be updated with actual value
-                'Trend Slope': 0.0,  # Will be updated with actual value
+                'Trend Slope': trend_slope,  # Will be updated with actual value
                 'Exit Reason': 'PENDING',
                 'Duration': 0.0
             }])
@@ -330,7 +398,7 @@ def main():
         
         if signal:
             logger.info(f"[SIGNAL] BUY {args.product_id} at {entry:.2f}")
-            if execute_trade(cb, entry, args.product_id, args.margin, args.leverage):
+            if execute_trade(cb, entry, args.product_id, args.margin, args.leverage, trend_slope):
                 logger.info("Trade executed successfully!")
                 
                 # Update the last trade with the additional metrics

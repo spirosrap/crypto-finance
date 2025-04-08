@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from tabulate import tabulate
 import numpy as np
 
+# Recalculate these values every 50 trades using plot_atr_histogram.py
+mean_atr_percent = 0.284
+std_atr_percent = 0.148
+
+
 # Set up logging
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
@@ -48,6 +53,7 @@ class Trade:
     rsi_at_entry: float  # New field for RSI value at entry
     relative_volume: float  # New field for relative volume
     trend_slope: float  # New field for trend slope
+    market_regime: str  # New field for market regime
     mae: float = 0.0  # Maximum Adverse Excursion
     mfe: float = 0.0  # Maximum Favorable Excursion
 
@@ -179,11 +185,19 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
         trades_df['No.'] = range(1, len(trades_df) + 1)
         trades_df['SIDE'] = 'LONG'  # All trades are long in this backtest
         trades_df['ENTRY'] = trades_df['entry_price'].round(2)
-        trades_df['Take Profit'] = (trades_df['entry_price'] * (1 + TP_PERCENT)).round(2)
+        trades_df['Take Profit'] = trades_df.apply(
+            lambda row: determine_tp_mode(row['entry_price'], row['atr'], None, None, row['trend_slope'])[1], 
+            axis=1
+        ).round(2)
         trades_df['Stop Loss'] = (trades_df['entry_price'] * (1 - SL_PERCENT)).round(2)
-        trades_df['R/R Ratio'] = TP_PERCENT / SL_PERCENT
+        trades_df['R/R Ratio'] = ((trades_df['Take Profit'] - trades_df['ENTRY']) / 
+                                 (trades_df['ENTRY'] - trades_df['Stop Loss'])).round(2)
+
         trades_df['Volatility Level'] = trades_df['atr_percent'].apply(
-            lambda x: 'Weak' if x < 0.5 else 'Moderate' if x < 1.0 else 'Strong'
+            lambda atr_percent: "Very Strong" if atr_percent > mean_atr_percent + std_atr_percent else 
+                                "Strong" if atr_percent > mean_atr_percent else 
+                                "Moderate" if atr_percent > mean_atr_percent - std_atr_percent else 
+                                "Weak"
         )
         trades_df['Outcome'] = trades_df['type'].apply(lambda x: 'SUCCESS' if x == 'TP' else 'STOP LOSS')
         trades_df['Outcome %'] = trades_df['profit'].apply(lambda x: 7.5 if x > 0 else -3.5)
@@ -197,11 +211,13 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
         trades_df['Setup Type'] = 'RSI Dip'
         trades_df['MAE'] = trades_df['mae'].round(2)
         trades_df['MFE'] = trades_df['mfe'].round(2)
-        trades_df['Exit Trade'] = trades_df['exit_time']
-        trades_df['Trend Regime'] = 'Bearish'  # Placeholder, could be calculated based on trend
+        trades_df['Exit Trade'] = trades_df['exit_price'].round(2)
+        trades_df['Trend Regime'] = trades_df['market_regime']
         trades_df['RSI at Entry'] = trades_df['rsi_at_entry'].round(2)
         trades_df['Relative Volume'] = trades_df['relative_volume'].round(2)
         trades_df['Trend Slope'] = trades_df['trend_slope'].round(4)
+        trades_df['Exit Reason'] = trades_df['type'].apply(lambda x: 'TP HIT' if x == 'TP' else 'SL HIT')
+        trades_df['Duration'] = ((trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 3600).round(2)
         
         # Reorder columns to match automated_trades.csv
         columns = [
@@ -209,7 +225,7 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
             'R/R Ratio', 'Volatility Level', 'Outcome', 'Outcome %', 
             'Leverage', 'Margin', 'Session', 'TP Mode', 'ATR %', 
             'Setup Type', 'MAE', 'MFE', 'Exit Trade', 'Trend Regime',
-            'RSI at Entry', 'Relative Volume', 'Trend Slope'
+            'RSI at Entry', 'Relative Volume', 'Trend Slope', 'Exit Reason', 'Duration'
         ]
         
         # Rename entry_time to Timestamp
@@ -255,7 +271,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
         if current_trade:
             current_price = df.iloc[i]['close']
             atr = ta.compute_atr(historical_df.to_dict('records'))
-            tp_mode, tp_price = determine_tp_mode(current_trade['entry_price'], atr)
+            tp_mode, tp_price, market_regime = determine_tp_mode(current_trade['entry_price'], atr, None, historical_df)
             
             # Calculate MAE and MFE for the current trade
             price_change_percent = (current_price - current_trade['entry_price']) / current_trade['entry_price'] * 100
@@ -285,6 +301,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     rsi_at_entry=current_trade['rsi_at_entry'],
                     relative_volume=current_trade['relative_volume'],
                     trend_slope=current_trade['trend_slope'],
+                    market_regime=current_trade['market_regime'],
                     mae=current_trade['mae'],
                     mfe=current_trade['mfe']
                 ))
@@ -309,6 +326,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     rsi_at_entry=current_trade['rsi_at_entry'],
                     relative_volume=current_trade['relative_volume'],
                     trend_slope=current_trade['trend_slope'],
+                    market_regime=current_trade['market_regime'],
                     mae=current_trade['mae'],
                     mfe=current_trade['mfe']
                 ))
@@ -321,7 +339,17 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
         elif signal and not current_trade:
             current_price = df.iloc[i]['close']
             atr = ta.compute_atr(historical_df.to_dict('records'))
-            tp_mode, tp_price = determine_tp_mode(current_price, atr)
+            
+            # Get dynamic TP based on market conditions
+            tp_mode, tp_price, market_regime = determine_tp_mode(
+                current_price, 
+                atr, 
+                get_price_precision(get_perp_product(config.product_id)),
+                historical_df,
+                trend_slope
+            )
+            
+            # Keep SL fixed at 0.7% for now
             sl_price = round(current_price * (1 - SL_PERCENT), get_price_precision(get_perp_product(config.product_id)))
             
             position_size = balance * 0.1  # Use 10% of balance per trade
@@ -334,11 +362,14 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                 'tp_price': tp_price,
                 'sl_price': sl_price,
                 'tp_mode': tp_mode,
+                'atr': atr,
+                'atr_percent': (atr / current_price) * 100,
                 'rsi_at_entry': rsi_value,
                 'relative_volume': relative_volume,
                 'trend_slope': trend_slope,
-                'mae': 0.0,  # Initialize MAE
-                'mfe': 0.0   # Initialize MFE
+                'market_regime': market_regime,
+                'mae': 0.0,
+                'mfe': 0.0
             }
             position = size
         
@@ -383,7 +414,9 @@ def print_results(results: BacktestResults):
         ["Winning Trades", results.winning_trades],
         ["Losing Trades", results.losing_trades],
         ["Win Rate", f"{results.win_rate:.2f}%"],
-        ["Profit Factor", f"{results.profit_factor:.2f}"]
+        ["Profit Factor", f"{results.profit_factor:.2f}"],
+        ["Max Drawdown", f"{results.max_drawdown:.2f}%"],
+        ["Max Drawdown Duration", f"{results.max_drawdown_duration:.1f} hours"]
     ]
     
     tp_mode_data = [
@@ -393,38 +426,39 @@ def print_results(results: BacktestResults):
         ["Adaptive TP Win Rate", f"{results.adaptive_tp_win_rate:.2f}%"]
     ]
     
-    risk_data = [
-        ["Maximum Drawdown", f"{results.max_drawdown:.2f}%"],
-        ["Maximum Drawdown Duration", f"{results.max_drawdown_duration:.2f} hours"]
+    # Calculate market regime statistics
+    trending_trades = [t for t in results.trades if t.market_regime == "TRENDING"]
+    chop_trades = [t for t in results.trades if t.market_regime == "CHOP"]
+    uncertain_trades = [t for t in results.trades if t.market_regime == "UNCERTAIN"]
+    
+    trending_wins = sum(1 for t in trending_trades if t.profit > 0)
+    chop_wins = sum(1 for t in chop_trades if t.profit > 0)
+    uncertain_wins = sum(1 for t in uncertain_trades if t.profit > 0)
+    
+    trending_win_rate = (trending_wins / len(trending_trades) * 100) if trending_trades else 0
+    chop_win_rate = (chop_wins / len(chop_trades) * 100) if chop_trades else 0
+    uncertain_win_rate = (uncertain_wins / len(uncertain_trades) * 100) if uncertain_trades else 0
+    
+    regime_data = [
+        ["Trending Trades", len(trending_trades)],
+        ["Trending Win Rate", f"{trending_win_rate:.2f}%"],
+        ["Chop Trades", len(chop_trades)],
+        ["Chop Win Rate", f"{chop_win_rate:.2f}%"],
+        ["Uncertain Trades", len(uncertain_trades)],
+        ["Uncertain Win Rate", f"{uncertain_win_rate:.2f}%"]
     ]
     
-    # Print results using tabulate with single logger calls
-    logger.info("\nBacktest Results:\n" + tabulate(summary_data, tablefmt="grid"))
-    logger.info("\nTP Mode Statistics:\n" + tabulate(tp_mode_data, tablefmt="grid"))
-    logger.info("\nRisk Metrics:\n" + tabulate(risk_data, tablefmt="grid"))
+    # Print tables
+    print("\n=== BACKTEST RESULTS ===")
+    print(tabulate(summary_data, tablefmt="grid"))
     
-    if results.csv_filename:
-        logger.info(f"\nDetailed trade history saved to: {results.csv_filename}")
+    print("\n=== TP MODE STATISTICS ===")
+    print(tabulate(tp_mode_data, tablefmt="grid"))
     
-    # Print trade history in a format similar to automated_trades.csv
-    logger.info("\nTrade History:")
-    logger.info("No. | Timestamp | SIDE | ENTRY | Take Profit | Stop Loss | Outcome | Outcome % | Session | TP Mode | ATR % | Setup Type")
-    logger.info("-" * 120)
+    print("\n=== MARKET REGIME STATISTICS ===")
+    print(tabulate(regime_data, tablefmt="grid"))
     
-    for i, trade in enumerate(results.trades, 1):
-        # Calculate take profit and stop loss prices
-        tp_price = trade.entry_price * (1 + TP_PERCENT)
-        sl_price = trade.entry_price * (1 - SL_PERCENT)
-        
-        # Determine session
-        session = 'Asia' if 0 <= trade.entry_time.hour < 9 else 'EU' if 9 <= trade.entry_time.hour < 17 else 'US'
-        
-        # Format the trade information with limited decimals
-        logger.info(
-            f"{i:3d} | {trade.entry_time.strftime('%Y-%m-%d %H:%M:%S')} | LONG | {trade.entry_price:.2f} | "
-            f"{tp_price:.2f} | {sl_price:.2f} | {'SUCCESS' if trade.type == 'TP' else 'STOP LOSS'} | "
-            f"{7.5 if trade.profit > 0 else -3.5} | {session} | {trade.tp_mode} | {trade.atr_percent:.2f} | RSI Dip"
-        )
+    print(f"\nCSV file saved as: {results.csv_filename}")
 
 def main():
     """Main entry point for the backtest script."""
