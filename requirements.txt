@@ -2,7 +2,7 @@ coinbase-advanced-py
 numpy>=1.24.0
 nltk
 scikit-learn
-pandas>=2.0.0
+pandas>=1.5.0
 git+https://github.com/TA-Lib/ta-lib-python.git
 # in linux do this instead:
 # $ python -m pip install TA-Lib
@@ -22,3 +22,4 @@ timeout-decorator
 customtkinter
 Pillow>=10.0.0  # Required for icon generation
 pyobjc-framework-Cocoa>=11.0; sys_platform == 'darwin'  # Required for macOS icon support
+tabulate>=0.9.0
