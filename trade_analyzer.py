@@ -3,6 +3,7 @@ import numpy as np
 from typing import List, Tuple
 import matplotlib.pyplot as plt
 from datetime import datetime
+import sys
 
 class TradingAnalyzer:
     def __init__(self, file_path: str):
@@ -15,8 +16,17 @@ class TradingAnalyzer:
         # Read the CSV file
         df = pd.read_csv(self.file_path)
         
-        # Convert timestamp to datetime with format that includes UTC
-        df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%Y-%m-%d %H:%M:%S UTC')
+        # Convert timestamp to datetime with flexible format handling
+        try:
+            # First try with ISO8601 format
+            df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='ISO8601')
+        except ValueError:
+            try:
+                # Then try with the specific UTC format
+                df['Timestamp'] = pd.to_datetime(df['Timestamp'], format='%Y-%m-%d %H:%M:%S UTC')
+            except ValueError:
+                # If both fail, let pandas infer the format
+                df['Timestamp'] = pd.to_datetime(df['Timestamp'])
         
         # Convert percentage columns
         percentage_columns = ['Outcome %']
@@ -308,7 +318,16 @@ class TradingAnalyzer:
         print(f"{'=' * 50}\n")
 
 if __name__ == "__main__":
-    analyzer = TradingAnalyzer("automated_trades.csv")
+    # Default file path
+    default_file = "automated_trades.csv"
+    
+    # Check if a file path was provided as an argument
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+    else:
+        file_path = default_file
+    
+    analyzer = TradingAnalyzer(file_path)
     analyzer.generate_report()
     current_drawdown = analyzer.get_current_drawdown()
     print(f"Current Drawdown: {current_drawdown:.2f}%") 
