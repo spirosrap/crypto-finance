@@ -398,8 +398,8 @@ def process_pending_trade(
         
         # Calculate EMA200 and determine trend regime
         ema200 = calculate_ema200(candles)
-        trend_regime = determine_trend_regime(current_price, ema200)
-        trade['Trend Regime'] = trend_regime
+        market_trend = determine_trend_regime(current_price, ema200)
+        trade['Market Trend'] = market_trend
         
         # Check if entry price changed, if so reset state
         if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
@@ -524,11 +524,11 @@ def update_pending_trades() -> None:
                 reader = csv.reader(f)
                 headers = next(reader)
         
-        # Check if MAE, MFE, and Trend Regime columns exist
+        # Check if MAE, MFE, and Market Trend columns exist
         mae_index = headers.index('MAE') if 'MAE' in headers else -1
         mfe_index = headers.index('MFE') if 'MFE' in headers else -1
         exit_trade_index = headers.index('Exit Trade') if 'Exit Trade' in headers else -1
-        trend_regime_index = headers.index('Trend Regime') if 'Trend Regime' in headers else -1
+        trend_regime_index = headers.index('Market Trend') if 'Market Trend' in headers else -1
         duration_index = headers.index('Duration') if 'Duration' in headers else -1
         
         # Read the trades
@@ -536,7 +536,7 @@ def update_pending_trades() -> None:
             reader = csv.DictReader(f)
             trades = list(reader)
         
-        # Add MAE, MFE, and Trend Regime fields if they don't exist
+        # Add MAE, MFE, and Market Trend fields if they don't exist
         if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1 or trend_regime_index == -1 or duration_index == -1:
             for trade in trades:
                 if 'MAE' not in trade:
@@ -545,8 +545,8 @@ def update_pending_trades() -> None:
                     trade['MFE'] = '0.0'
                 if 'Exit Trade' not in trade:
                     trade['Exit Trade'] = ''
-                if 'Trend Regime' not in trade:
-                    trade['Trend Regime'] = ''
+                if 'Market Trend' not in trade:
+                    trade['Market Trend'] = ''
                 if 'Duration' not in trade:
                     trade['Duration'] = ''
         

@@ -1,3 +1,3 @@
-No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,R/R Ratio,Volatility Level,Outcome,Outcome %,Leverage,Margin,Session,TP Mode,ATR %,Setup Type,MAE,MFE,Exit Trade,Trend Regime,RSI at Entry,Relative Volume,Trend Slope,Exit Reason,Duration
-1,2025-04-09 01:16:32 UTC,LONG,75271.74,76400.8,74744.8,2.14,Strong,STOP LOSS,-3.5,5x,50.0,Asia,FIXED,0.39,RSI Dip,0.0,2.16,2025-04-09 01:30:17 UTC,Bearish,27.3,1.29,-0.0045,SL HIT,0.23
-2,2025-04-09 01:27:55 UTC,LONG,74700.0,75820.5,74177.1,2.14,Strong,SUCCESS,7.5,5x,50.0,Asia,FIXED,0.4,RSI Dip,0.1,1.49,2025-04-09 01:50:17 UTC,Bearish,21.45,1.87,-0.0032,TP HIT,0.37
+No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,R/R Ratio,Volatility Level,Outcome,Outcome %,Leverage,Margin,Session,TP Mode,ATR %,Setup Type,MAE,MFE,Exit Trade,Trend Regime,RSI at Entry,Relative Volume,Trend Slope,Exit Reason,Duration,Market Trend
+1,2025-04-09 01:16:32 UTC,LONG,75271.74,76400.8,74744.8,2.14,Strong,STOP LOSS,-3.5,5x,50.0,Asia,FIXED,0.39,RSI Dip,0.0,2.16,2025-04-09 01:30:17 UTC,TRENDING,27.3,1.29,-0.0045,SL HIT,0.23,BEARISH
+2,2025-04-09 01:27:55 UTC,LONG,74700.0,75820.5,74177.1,2.14,Strong,SUCCESS,7.5,5x,50.0,Asia,FIXED,0.4,RSI Dip,0.1,1.49,2025-04-09 01:50:17 UTC,TRENDING,21.45,1.87,-0.0032,TP HIT,0.37,BEARISH
