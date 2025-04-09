@@ -361,12 +361,14 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
                 'Setup Type': setup_type,
                 'MAE': 0.0,
                 'MFE': 0.0,
+                'Exit Trade': 0.0,
                 'Trend Regime': market_regime,
                 'RSI at Entry': 0.0,  # Will be updated with actual value
                 'Relative Volume': 0.0,  # Will be updated with actual value
                 'Trend Slope': trend_slope,  # Will be updated with actual value
                 'Exit Reason': 'PENDING',
-                'Duration': 0.0
+                'Duration': 0.0,
+                'Market Trend': 'PENDING'
             }])
             
             # Append new trade to CSV
