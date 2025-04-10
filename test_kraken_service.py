@@ -10,11 +10,11 @@ import logging
 import time
 from datetime import datetime
 from krakenservice import KrakenService
-from config import KRAKEN_API_KEY, KRAKEN_API_SECRET
+import config
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 def main():
     """Main function to test KrakenService functionality."""
     # Get API credentials from config.py
-    api_key = KRAKEN_API_KEY
-    api_secret = KRAKEN_API_SECRET
+    api_key = config.KRAKEN_API_KEY
+    api_secret = config.KRAKEN_API_SECRET
     
     if not api_key or not api_secret:
         logger.error("API credentials not found in config.py. Please set KRAKEN_API_KEY and KRAKEN_API_SECRET in config.py.")
@@ -35,24 +35,29 @@ def main():
     # Test portfolio information
     test_portfolio_info(kraken)
     
-    # Test getting BTC prices
-    test_get_btc_prices(kraken)
+    # # Test getting BTC prices
+    # test_get_btc_prices(kraken)
     
-    # Test placing orders with stop loss and take profit
-    test_place_orders_with_sl_tp(kraken)
+    # # Test placing orders with stop loss and take profit
+    # test_place_orders_with_sl_tp(kraken)
     
-    # Test getting OHLC data
-    test_get_ohlc_data(kraken)
+    # # Test getting OHLC data
+    # test_get_ohlc_data(kraken)
     
-    # Test getting recent trades
-    test_get_recent_trades(kraken)
+    # # Test getting recent trades
+    # test_get_recent_trades(kraken)
     
-    # Test closing positions
-    test_close_positions(kraken)
+    # # Test closing positions
+    # test_close_positions(kraken)
 
 def test_portfolio_info(kraken):
     """Test getting portfolio information."""
     logger.info("Testing portfolio information...")
+    
+    # Test raw balance endpoint
+    logger.info("Testing raw balance endpoint...")
+    response = kraken._api_request("POST", "/private/Balance", {})
+    logger.info(f"Raw balance response: {response}")
     
     # Get spot portfolio info
     fiat_balance, crypto_balance = kraken.get_portfolio_info(portfolio_type="SPOT")
@@ -97,70 +102,12 @@ def test_place_orders_with_sl_tp(kraken):
     logger.info(f"Stop Loss Price: {stop_loss_price} ({stop_loss_percentage*100}% below)")
     logger.info(f"Take Profit Price: {take_profit_price} ({take_profit_percentage*100}% above)")
     
-    # Place a spot limit order with stop loss and take profit
-    # Note: This is a demonstration. In a real scenario, you would use smaller amounts.
-    volume = 0.001  # Small amount for testing
-    
-    # Place the main limit order
-    logger.info("Placing spot limit order...")
-    order_result = kraken.place_order(
-        pair="XBTUSD",
-        side="buy",
-        volume=volume,
-        order_type="limit",
-        price=current_price
-    )
-    
-    if 'error' in order_result:
-        logger.error(f"Error placing spot limit order: {order_result['error']}")
-        return
-    
-    logger.info(f"Spot limit order placed: {order_result}")
-    
-    # Extract order ID
-    order_id = None
-    if isinstance(order_result, dict) and 'result' in order_result:
-        order_id = order_result['result'].get('txid', [None])[0]
-    
-    if not order_id:
-        logger.error("Could not extract order ID. Skipping stop loss and take profit orders.")
-        return
-    
-    # Place stop loss order
-    logger.info("Placing stop loss order...")
-    sl_order_result = kraken.place_order(
-        pair="XBTUSD",
-        side="sell",
-        volume=volume,
-        order_type="stop-loss",
-        price=stop_loss_price
-    )
-    
-    if 'error' in sl_order_result:
-        logger.error(f"Error placing stop loss order: {sl_order_result['error']}")
-    else:
-        logger.info(f"Stop loss order placed: {sl_order_result}")
-    
-    # Place take profit order
-    logger.info("Placing take profit order...")
-    tp_order_result = kraken.place_order(
-        pair="XBTUSD",
-        side="sell",
-        volume=volume,
-        order_type="take-profit",
-        price=take_profit_price
-    )
-    
-    if 'error' in tp_order_result:
-        logger.error(f"Error placing take profit order: {tp_order_result['error']}")
-    else:
-        logger.info(f"Take profit order placed: {tp_order_result}")
-    
-    # Now test futures orders with leverage
+    # Test futures orders with leverage
     logger.info("Testing futures orders with leverage...")
     
     # Place a futures market order with leverage
     leverage = 5  # 5x leverage
+    futures_volume = 0.001  # Small amount for testing
     
     # First set leverage
     leverage_result = kraken._set_leverage("XBTUSD", leverage)
@@ -171,8 +118,6 @@ def test_place_orders_with_sl_tp(kraken):
     logger.info(f"Leverage set to {leverage}x: {leverage_result}")
     
     # Place a futures market order
-    futures_volume = 0.001  # Small amount for testing
-    
     logger.info("Placing futures market order...")
     futures_order_result = kraken.place_order(
         pair="XBTUSD",

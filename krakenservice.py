@@ -10,6 +10,7 @@ import hashlib
 import base64
 import json
 from typing import Tuple, List, Dict, Optional, Union
+import urllib.parse
 
 class KrakenService:
     def __init__(self, api_key: str, api_secret: str):
@@ -20,15 +21,40 @@ class KrakenService:
             api_key (str): Kraken API key
             api_secret (str): Kraken API secret
         """
+        # Validate API credentials
+        if not api_key or not api_secret:
+            raise ValueError("API key and secret are required")
+        
+        # Remove any whitespace
+        api_key = api_key.strip()
+        api_secret = api_secret.strip()
+        
+        # Validate API key format
+        if not all(c in '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ/+=' for c in api_key):
+            raise ValueError("API key contains invalid characters")
+        
+        # Validate API secret format (should be base64 encoded)
+        try:
+            base64.b64decode(api_secret)
+        except Exception:
+            raise ValueError("API secret is not valid base64")
+        
+        # Store API credentials directly
+        self.api_key = api_key
+        self.api_secret = api_secret
+        
+        # Initialize Kraken API for spot trading
         self.kraken = krakenex.API(api_key, api_secret)
         self.api = KrakenAPI(self.kraken)
+        
+        # Settings
         self.DEFAULT_FEE_RATE = 0.0026  # 0.26% for maker orders
         self.MAX_RETRIES = 3
         self.RETRY_DELAY_SECONDS = 5
         self.logger = logging.getLogger(__name__)
         
-        # Kraken Pro API URL
-        self.pro_api_url = "https://api.kraken.com/0"
+        # Kraken API URL - using main API for both spot and futures
+        self.api_url = "https://api.kraken.com/0"
         
         # Check if API is configured
         self.logger.info("Kraken API initialized")
@@ -73,10 +99,15 @@ class KrakenService:
             return 0.0, 0.0
     
     def _get_futures_portfolio_info(self) -> Tuple[float, float]:
-        """Get futures portfolio information from Kraken Pro."""
+        """
+        Get futures portfolio information from Kraken Pro API.
+        
+        Returns:
+            Tuple[float, float]: (usd_balance, position_size)
+        """
         try:
-            # Get account information from Kraken Pro API
-            response = self._pro_api_request("GET", "/private/Balance")
+            # Get account balance
+            response = self._api_request("POST", "/private/Balance", {})
             
             if 'error' in response and response['error']:
                 self.logger.error(f"Error getting futures portfolio: {response['error']}")
@@ -89,14 +120,20 @@ class KrakenService:
             usd_balance = float(result.get('ZUSD', 0))
             
             # Get open positions
-            positions_response = self._pro_api_request("GET", "/private/OpenPositions")
-            positions = positions_response.get('result', {}).get('open', [])
+            positions_response = self._api_request("POST", "/private/OpenPositions", {})
             
-            # Calculate total position size
+            if 'error' in positions_response and positions_response['error']:
+                self.logger.error(f"Error getting open positions: {positions_response['error']}")
+                return usd_balance, 0.0
+            
+            positions = positions_response.get('result', {})
+            
+            # Calculate total position size for futures
             position_size = 0.0
-            for position in positions:
-                if position.get('pair') == 'XBTUSD':  # Bitcoin perpetual
-                    position_size += float(position.get('vol', 0))
+            for pos_id, pos in positions.items():
+                pair = pos.get('pair', '')
+                if pair.startswith('FI_'):  # Futures pairs start with FI_
+                    position_size += abs(float(pos.get('vol', 0)))  # Use abs() to handle both long and short positions
             
             self.logger.info(f"Retrieved futures portfolio - USD: {usd_balance}, Position Size: {position_size}")
             return usd_balance, position_size
@@ -119,33 +156,37 @@ class KrakenService:
         
         # Get spot prices
         try:
-            ticker = self.api.get_ticker_information(['XBTUSD', 'XBTEUR'])
+            response = self._api_request("GET", "/public/Ticker", {'pair': 'XBTUSD'})
             
-            for pair, data in ticker.items():
-                prices[pair] = {
-                    'bid': float(data['b'][0]),  # Best bid price
-                    'ask': float(data['a'][0])   # Best ask price
-                }
+            if 'error' in response and response['error']:
+                self.logger.error(f"Error getting spot BTC prices: {response['error']}")
+            else:
+                result = response.get('result', {})
+                for pair, data in result.items():
+                    prices[pair] = {
+                        'bid': float(data['b'][0]),  # Best bid price
+                        'ask': float(data['a'][0])   # Best ask price
+                    }
         except Exception as e:
             self.logger.error(f"Error getting spot BTC prices: {str(e)}")
         
         # Get futures prices if requested
         if include_futures:
             try:
-                # Get perpetual futures ticker from Kraken Pro
-                ticker_response = self._pro_api_request("GET", "/public/Ticker", {'pair': 'XBTUSD'})
+                # Get futures ticker
+                response = self._api_request("GET", "/public/Ticker", {'pair': 'FI_XBTUSD'})
                 
-                if 'error' in ticker_response and ticker_response['error']:
-                    self.logger.error(f"Error getting futures BTC prices: {ticker_response['error']}")
+                if 'error' in response and response['error']:
+                    self.logger.error(f"Error getting futures BTC prices: {response['error']}")
                 else:
-                    result = ticker_response.get('result', {})
-                    if 'XXBTZUSD' in result:  # Kraken Pro uses XXBTZUSD for BTC/USD
-                        ticker_data = result['XXBTZUSD']
-                        prices['XBTUSD-PERP'] = {
-                            'bid': float(ticker_data.get('b', [0])[0]),
-                            'ask': float(ticker_data.get('a', [0])[0]),
-                            'last': float(ticker_data.get('c', [0])[0]),
-                            'volume': float(ticker_data.get('v', [0])[0])
+                    result = response.get('result', {})
+                    if 'FI_XBTUSD' in result:
+                        ticker_data = result['FI_XBTUSD']
+                        prices['FI_XBTUSD'] = {
+                            'bid': float(ticker_data['b'][0]),
+                            'ask': float(ticker_data['a'][0]),
+                            'last': float(ticker_data['c'][0]),
+                            'volume': float(ticker_data['v'][0])
                         }
             except Exception as e:
                 self.logger.error(f"Error getting futures BTC prices: {str(e)}")
@@ -217,6 +258,10 @@ class KrakenService:
                            leverage: Optional[int] = None) -> Dict:
         """Place a futures order on Kraken Pro."""
         try:
+            # Add FI_ prefix for futures if not present
+            if not pair.startswith('FI_'):
+                pair = f"FI_{pair}"
+            
             # Set leverage if provided
             if leverage is not None:
                 self._set_leverage(pair, leverage)
@@ -226,17 +271,17 @@ class KrakenService:
                 'pair': pair,
                 'type': side.lower(),
                 'ordertype': order_type.lower(),
-                'volume': str(volume),
-                'leverage': str(leverage) if leverage else '1'
+                'volume': str(volume)
             }
             
-            if order_type.lower() == 'limit':
-                if price is None:
-                    raise ValueError("Price must be specified for limit orders")
+            if leverage is not None:
+                params['leverage'] = str(leverage)
+            
+            if order_type.lower() == 'limit' and price is not None:
                 params['price'] = str(price)
             
-            # Place the order
-            response = self._pro_api_request("POST", "/private/AddOrder", params)
+            # Place the order using the main API
+            response = self._api_request("POST", "/private/AddOrder", params)
             
             if 'error' in response and response['error']:
                 self.logger.error(f"Error placing futures order: {response['error']}")
@@ -250,14 +295,14 @@ class KrakenService:
             return {'error': str(e)}
     
     def _set_leverage(self, pair: str, leverage: int) -> Dict:
-        """Set leverage for a futures trading pair on Kraken Pro."""
+        """Set leverage for a trading pair."""
         try:
             params = {
                 'pair': pair,
                 'leverage': str(leverage)
             }
             
-            response = self._pro_api_request("POST", "/private/Leverage", params)
+            response = self._api_request("POST", "/private/SetLeverage", params)
             
             if 'error' in response and response['error']:
                 self.logger.error(f"Error setting leverage: {response['error']}")
@@ -325,7 +370,7 @@ class KrakenService:
         """Cancel all futures orders on Kraken Pro."""
         try:
             # Get open orders
-            response = self._pro_api_request("GET", "/private/OpenOrders")
+            response = self._api_request("GET", "/private/OpenOrders")
             
             if 'error' in response and response['error']:
                 self.logger.error(f"Error getting open futures orders: {response['error']}")
@@ -348,7 +393,7 @@ class KrakenService:
                         'txid': order_id
                     }
                     
-                    cancel_response = self._pro_api_request("POST", "/private/CancelOrder", cancel_params)
+                    cancel_response = self._api_request("POST", "/private/CancelOrder", cancel_params)
                     
                     if 'error' in cancel_response and cancel_response['error']:
                         self.logger.error(f"Error cancelling futures order {order_id}: {cancel_response['error']}")
@@ -379,7 +424,7 @@ class KrakenService:
         """
         try:
             # Get open positions
-            response = self._pro_api_request("GET", "/private/OpenPositions")
+            response = self._api_request("GET", "/private/OpenPositions")
             
             if 'error' in response and response['error']:
                 self.logger.error(f"Error getting open futures positions: {response['error']}")
@@ -411,7 +456,7 @@ class KrakenService:
                         'leverage': position.get('leverage', '1')
                     }
                     
-                    close_response = self._pro_api_request("POST", "/private/AddOrder", close_params)
+                    close_response = self._api_request("POST", "/private/AddOrder", close_params)
                     
                     if 'error' in close_response and close_response['error']:
                         self.logger.error(f"Error closing position {position.get('pair')}: {close_response['error']}")
@@ -454,15 +499,26 @@ class KrakenService:
     def _get_recent_spot_trades(self, pair: str, since: Optional[str] = None) -> List[Dict]:
         """Get recent spot trades."""
         try:
-            trades = self.api.get_recent_trades(pair, since)
+            params = {'pair': pair}
+            if since:
+                params['since'] = since
+            
+            response = self._api_request("GET", "/public/Trades", params)
+            
+            if 'error' in response and response['error']:
+                self.logger.error(f"Error getting recent spot trades: {response['error']}")
+                return []
+            
+            result = response.get('result', {})
+            trades = result.get(pair, [])
             
             formatted_trades = []
-            for trade in trades.itertuples():
+            for trade in trades:
                 formatted_trade = {
-                    'trade_time': int(trade.time.timestamp()),
-                    'side': 'buy' if trade.type == 'b' else 'sell',
-                    'price': float(trade.price),
-                    'volume': float(trade.volume),
+                    'trade_time': int(trade[2]),
+                    'side': 'buy' if trade[3] == 'b' else 'sell',
+                    'price': float(trade[0]),
+                    'volume': float(trade[1]),
                     'pair': pair
                 }
                 formatted_trades.append(formatted_trade)
@@ -474,25 +530,26 @@ class KrakenService:
             return []
     
     def _get_recent_futures_trades(self, pair: str) -> List[Dict]:
-        """Get recent futures trades from Kraken Pro."""
+        """Get recent futures trades."""
         try:
-            # Get recent trades from Kraken Pro API
-            response = self._pro_api_request("GET", "/private/TradesHistory", {'pair': pair})
+            # Get recent trades
+            response = self._api_request("GET", "/public/Trades", {'pair': f"FI_{pair}"})
             
             if 'error' in response and response['error']:
                 self.logger.error(f"Error getting recent futures trades: {response['error']}")
                 return []
             
-            trades = response.get('result', {}).get('trades', [])
+            result = response.get('result', {})
+            trades = result.get(f"FI_{pair}", [])
             
             formatted_trades = []
-            for trade_id, trade in trades.items():
+            for trade in trades:
                 formatted_trade = {
-                    'trade_time': int(trade.get('time', 0)),
-                    'side': 'buy' if trade.get('type') == 'buy' else 'sell',
-                    'price': float(trade.get('price', 0)),
-                    'volume': float(trade.get('vol', 0)),
-                    'pair': trade.get('pair', pair)
+                    'trade_time': int(trade[2]),
+                    'side': 'buy' if trade[3] == 'b' else 'sell',
+                    'price': float(trade[0]),
+                    'volume': float(trade[1]),
+                    'pair': f"FI_{pair}"
                 }
                 formatted_trades.append(formatted_trade)
             
@@ -522,17 +579,27 @@ class KrakenService:
     def _get_spot_ohlc_data(self, pair: str, interval: int = 1) -> List[Dict]:
         """Get spot OHLC data."""
         try:
-            ohlc, last = self.api.get_ohlc_data(pair, interval=interval)
+            response = self._api_request("GET", "/public/OHLC", {
+                'pair': pair,
+                'interval': interval
+            })
+            
+            if 'error' in response and response['error']:
+                self.logger.error(f"Error getting spot OHLC data: {response['error']}")
+                return []
+            
+            result = response.get('result', {})
+            ohlc_data = result.get(pair, [])
             
             formatted_data = []
-            for index, row in ohlc.iterrows():
+            for candle in ohlc_data:
                 data_point = {
-                    'time': int(index.timestamp()),
-                    'open': float(row['open']),
-                    'high': float(row['high']),
-                    'low': float(row['low']),
-                    'close': float(row['close']),
-                    'volume': float(row['volume'])
+                    'time': int(candle[0]),
+                    'open': float(candle[1]),
+                    'high': float(candle[2]),
+                    'low': float(candle[3]),
+                    'close': float(candle[4]),
+                    'volume': float(candle[6])
                 }
                 formatted_data.append(data_point)
             
@@ -543,25 +610,23 @@ class KrakenService:
             return []
     
     def _get_futures_ohlc_data(self, pair: str, interval: int = 1) -> List[Dict]:
-        """Get futures OHLC data from Kraken Pro."""
+        """Get futures OHLC data."""
         try:
             # Convert interval to seconds
             interval_seconds = interval * 60
             
-            # Get OHLC data from Kraken Pro API
-            params = {
-                'pair': pair,
-                'interval': interval_seconds,
-                'since': int(time.time() - 86400)  # Last 24 hours
-            }
-            
-            response = self._pro_api_request("GET", "/public/OHLC", params)
+            # Get OHLC data
+            response = self._api_request("GET", "/public/OHLC", {
+                'pair': f"FI_{pair}",  # Add FI_ prefix for futures
+                'interval': interval_seconds
+            })
             
             if 'error' in response and response['error']:
                 self.logger.error(f"Error getting futures OHLC data: {response['error']}")
                 return []
             
-            ohlc_data = response.get('result', {}).get(pair, [])
+            result = response.get('result', {})
+            ohlc_data = result.get(f"FI_{pair}", [])
             
             formatted_data = []
             for candle in ohlc_data:
@@ -582,10 +647,10 @@ class KrakenService:
         except Exception as e:
             self.logger.error(f"Error getting futures OHLC data: {str(e)}")
             return []
-    
-    def _pro_api_request(self, method: str, endpoint: str, params: Optional[Dict] = None) -> Dict:
+
+    def _api_request(self, method: str, endpoint: str, params: Optional[Dict] = None) -> Dict:
         """
-        Make a request to the Kraken Pro API.
+        Make a request to the Kraken API.
         
         Args:
             method (str): HTTP method ('GET' or 'POST')
@@ -596,61 +661,16 @@ class KrakenService:
             Dict: API response
         """
         try:
-            url = f"{self.pro_api_url}{endpoint}"
-            
-            # Add authentication headers
-            headers = self._get_pro_auth_headers(method, endpoint, params)
-            
-            # Make the request
-            if method.upper() == 'GET':
-                response = requests.get(url, headers=headers, params=params)
+            # For private endpoints, use krakenex's query method
+            if endpoint.startswith('/private/'):
+                # Remove the leading slash as krakenex adds it
+                endpoint = endpoint[1:]
+                return self.kraken.query_private(endpoint.split('/')[-1], params or {})
             else:
-                response = requests.post(url, headers=headers, data=params)
-            
-            # Parse the response
-            return response.json()
+                # For public endpoints, use krakenex's query method
+                endpoint = endpoint[1:]
+                return self.kraken.query_public(endpoint.split('/')[-1], params or {})
             
         except Exception as e:
-            self.logger.error(f"Error making Kraken Pro API request: {str(e)}")
-            return {'error': str(e)}
-    
-    def _get_pro_auth_headers(self, method: str, endpoint: str, params: Optional[Dict] = None) -> Dict:
-        """
-        Generate authentication headers for the Kraken Pro API.
-        
-        Args:
-            method (str): HTTP method ('GET' or 'POST')
-            endpoint (str): API endpoint
-            params (Dict, optional): Request parameters
-            
-        Returns:
-            Dict: Authentication headers
-        """
-        # Create nonce
-        nonce = str(int(time.time() * 1000))
-        
-        # Create post data
-        post_data = ""
-        if params:
-            if method.upper() == 'GET':
-                # For GET requests, convert params to query string
-                post_data = "&".join([f"{k}={v}" for k, v in params.items()])
-            else:
-                # For POST requests, convert params to form data
-                post_data = "&".join([f"{k}={v}" for k, v in params.items()])
-        
-        # Create signature
-        signature_payload = nonce + endpoint + post_data
-        signature = hmac.new(
-            base64.b64decode(self.kraken._secret),
-            signature_payload.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        # Create headers
-        headers = {
-            'API-Key': self.kraken._key,
-            'API-Sign': signature
-        }
-        
-        return headers 
+            self.logger.error(f"Error making Kraken API request: {str(e)}")
+            return {'error': str(e)} 
