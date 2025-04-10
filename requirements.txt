@@ -23,3 +23,7 @@ customtkinter
 Pillow>=10.0.0  # Required for icon generation
 pyobjc-framework-Cocoa>=11.0; sys_platform == 'darwin'  # Required for macOS icon support
 tabulate>=0.9.0
+krakenex>=2.1.0
+pykrakenapi>=0.3.1
+requests>=2.26.0
+python-dotenv>=0.19.0
