@@ -36,16 +36,17 @@ def main():
     test_portfolio_info(kraken)
     
     # # Test getting BTC prices
-    # test_get_btc_prices(kraken)
+    test_get_btc_prices(kraken)
     
+    
+    # Test getting OHLC data
+    test_get_ohlc_data(kraken)
+    
+    # Test getting recent trades
+    test_get_recent_trades(kraken)
+
     # # Test placing orders with stop loss and take profit
     # test_place_orders_with_sl_tp(kraken)
-    
-    # # Test getting OHLC data
-    # test_get_ohlc_data(kraken)
-    
-    # # Test getting recent trades
-    # test_get_recent_trades(kraken)
     
     # # Test closing positions
     # test_close_positions(kraken)

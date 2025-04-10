@@ -132,7 +132,7 @@ class KrakenService:
             position_size = 0.0
             for pos_id, pos in positions.items():
                 pair = pos.get('pair', '')
-                if pair.startswith('FI_'):  # Futures pairs start with FI_
+                if pair.startswith('PI_'):  # Perpetual futures pairs start with PI_
                     position_size += abs(float(pos.get('vol', 0)))  # Use abs() to handle both long and short positions
             
             self.logger.info(f"Retrieved futures portfolio - USD: {usd_balance}, Position Size: {position_size}")
@@ -173,20 +173,20 @@ class KrakenService:
         # Get futures prices if requested
         if include_futures:
             try:
-                # Get futures ticker
-                response = self._api_request("GET", "/public/Ticker", {'pair': 'FI_XBTUSD'})
+                # Get futures ticker using the correct pair format for perpetual futures
+                response = self._api_request("GET", "/public/Ticker", {'pair': 'XBTUSD'})
                 
                 if 'error' in response and response['error']:
                     self.logger.error(f"Error getting futures BTC prices: {response['error']}")
                 else:
                     result = response.get('result', {})
-                    if 'FI_XBTUSD' in result:
-                        ticker_data = result['FI_XBTUSD']
-                        prices['FI_XBTUSD'] = {
-                            'bid': float(ticker_data['b'][0]),
-                            'ask': float(ticker_data['a'][0]),
-                            'last': float(ticker_data['c'][0]),
-                            'volume': float(ticker_data['v'][0])
+                    if 'XBTUSD' in result:
+                        data = result['XBTUSD']
+                        prices['XBTUSD'] = {
+                            'bid': float(data['b'][0]),  # Best bid price
+                            'ask': float(data['a'][0]),  # Best ask price
+                            'last': float(data['c'][0]), # Last trade closed price
+                            'volume': float(data['v'][1]) # Volume today
                         }
             except Exception as e:
                 self.logger.error(f"Error getting futures BTC prices: {str(e)}")
@@ -256,29 +256,34 @@ class KrakenService:
     def _place_futures_order(self, pair: str, side: str, volume: float, 
                            order_type: str = "market", price: Optional[float] = None,
                            leverage: Optional[int] = None) -> Dict:
-        """Place a futures order on Kraken Pro."""
+        """
+        Place a futures order on Kraken.
+        
+        Args:
+            pair (str): Trading pair (e.g., 'XBTUSD')
+            side (str): 'buy' or 'sell'
+            volume (float): Order volume in BTC
+            order_type (str): Type of order (market, limit)
+            price (float, optional): Limit price for limit orders
+            leverage (int, optional): Leverage for futures orders
+            
+        Returns:
+            Dict: Order response from Kraken
+        """
         try:
-            # Add FI_ prefix for futures if not present
-            if not pair.startswith('FI_'):
-                pair = f"FI_{pair}"
-            
-            # Set leverage if provided
-            if leverage is not None:
-                self._set_leverage(pair, leverage)
-            
             # Prepare order parameters
             params = {
-                'pair': pair,
+                'pair': 'XBTUSD',  # Perpetual futures pair
                 'type': side.lower(),
                 'ordertype': order_type.lower(),
-                'volume': str(volume)
+                'volume': str(abs(volume))
             }
+            
+            if price is not None:
+                params['price'] = str(price)
             
             if leverage is not None:
                 params['leverage'] = str(leverage)
-            
-            if order_type.lower() == 'limit' and price is not None:
-                params['price'] = str(price)
             
             # Place the order using the main API
             response = self._api_request("POST", "/private/AddOrder", params)
@@ -287,8 +292,7 @@ class KrakenService:
                 self.logger.error(f"Error placing futures order: {response['error']}")
                 return {'error': response['error']}
             
-            self.logger.info(f"Futures order placed successfully: {response}")
-            return response
+            return response.get('result', {})
             
         except Exception as e:
             self.logger.error(f"Error placing futures order: {str(e)}")
@@ -492,14 +496,14 @@ class KrakenService:
             List[Dict]: List of recent trades
         """
         if is_futures:
-            return self._get_recent_futures_trades(pair)
+            return self._get_recent_futures_trades(pair, since)
         else:
             return self._get_recent_spot_trades(pair, since)
     
     def _get_recent_spot_trades(self, pair: str, since: Optional[str] = None) -> List[Dict]:
         """Get recent spot trades."""
         try:
-            params = {'pair': pair}
+            params = {'pair': 'XXBTZUSD'}  # Use XXBTZUSD for spot trading
             if since:
                 params['since'] = since
             
@@ -510,7 +514,7 @@ class KrakenService:
                 return []
             
             result = response.get('result', {})
-            trades = result.get(pair, [])
+            trades = result.get('XXBTZUSD', [])  # Use XXBTZUSD as the key
             
             formatted_trades = []
             for trade in trades:
@@ -519,7 +523,7 @@ class KrakenService:
                     'side': 'buy' if trade[3] == 'b' else 'sell',
                     'price': float(trade[0]),
                     'volume': float(trade[1]),
-                    'pair': pair
+                    'pair': 'XXBTZUSD'
                 }
                 formatted_trades.append(formatted_trade)
             
@@ -529,18 +533,33 @@ class KrakenService:
             self.logger.error(f"Error getting recent spot trades: {str(e)}")
             return []
     
-    def _get_recent_futures_trades(self, pair: str) -> List[Dict]:
-        """Get recent futures trades."""
+    def _get_recent_futures_trades(self, pair: str = 'XBTUSD', since: Optional[str] = None) -> List[Dict]:
+        """
+        Get recent futures trades from Kraken.
+        
+        Args:
+            pair (str): Trading pair (e.g., 'XBTUSD')
+            since (str, optional): Return trade data since given timestamp
+            
+        Returns:
+            List[Dict]: List of recent trades
+        """
         try:
-            # Get recent trades
-            response = self._api_request("GET", "/public/Trades", {'pair': f"FI_{pair}"})
+            params = {
+                'pair': 'XBTUSD'  # Use XBTUSD directly for perpetual futures
+            }
+            
+            if since:
+                params['since'] = since
+            
+            response = self._api_request("GET", "/public/Trades", params)
             
             if 'error' in response and response['error']:
                 self.logger.error(f"Error getting recent futures trades: {response['error']}")
                 return []
             
             result = response.get('result', {})
-            trades = result.get(f"FI_{pair}", [])
+            trades = result.get('XBTUSD', [])  # Use XBTUSD as the key
             
             formatted_trades = []
             for trade in trades:
@@ -549,7 +568,7 @@ class KrakenService:
                     'side': 'buy' if trade[3] == 'b' else 'sell',
                     'price': float(trade[0]),
                     'volume': float(trade[1]),
-                    'pair': f"FI_{pair}"
+                    'pair': 'XBTUSD'
                 }
                 formatted_trades.append(formatted_trade)
             
@@ -580,7 +599,7 @@ class KrakenService:
         """Get spot OHLC data."""
         try:
             response = self._api_request("GET", "/public/OHLC", {
-                'pair': pair,
+                'pair': 'XXBTZUSD',  # Use XXBTZUSD for spot trading
                 'interval': interval
             })
             
@@ -589,7 +608,7 @@ class KrakenService:
                 return []
             
             result = response.get('result', {})
-            ohlc_data = result.get(pair, [])
+            ohlc_data = result.get('XXBTZUSD', [])  # Kraken returns data with this key for XBT/USD
             
             formatted_data = []
             for candle in ohlc_data:
@@ -612,13 +631,9 @@ class KrakenService:
     def _get_futures_ohlc_data(self, pair: str, interval: int = 1) -> List[Dict]:
         """Get futures OHLC data."""
         try:
-            # Convert interval to seconds
-            interval_seconds = interval * 60
-            
-            # Get OHLC data
             response = self._api_request("GET", "/public/OHLC", {
-                'pair': f"FI_{pair}",  # Add FI_ prefix for futures
-                'interval': interval_seconds
+                'pair': 'XXBTZUSD',  # Use XXBTZUSD for both spot and futures
+                'interval': interval
             })
             
             if 'error' in response and response['error']:
@@ -626,7 +641,7 @@ class KrakenService:
                 return []
             
             result = response.get('result', {})
-            ohlc_data = result.get(f"FI_{pair}", [])
+            ohlc_data = result.get('XXBTZUSD', [])  # Use XXBTZUSD as the key
             
             formatted_data = []
             for candle in ohlc_data:
