@@ -181,19 +181,81 @@ def reset_state_for_trade(
     trade_state: Dict[str, Any],
     entry_price: float,
     side: str,
-    leverage: float
+    leverage: float,
+    candles: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """Reset the state for a trade to recalculate MAE/MFE from scratch"""
     trade_state['entry_price'] = entry_price
     trade_state['side'] = side
-    trade_state['min_price'] = entry_price
-    trade_state['max_price'] = entry_price
-    trade_state['mae_pct'] = 0.0
-    trade_state['mfe_pct'] = 0.0
     trade_state['leverage'] = leverage
     trade_state['initialized'] = True
+    
+    # Initialize min_price and max_price from candle history if available
+    if candles:
+        min_price = entry_price
+        max_price = entry_price
+        
+        for candle in candles:
+            candle_low = float(candle['low'])
+            candle_high = float(candle['high'])
+            
+            if side == 'LONG':
+                if candle_low < min_price:
+                    min_price = candle_low
+                if candle_high > max_price:
+                    max_price = candle_high
+            else:  # SHORT
+                if candle_high > max_price:
+                    max_price = candle_high
+                if candle_low < min_price:
+                    min_price = candle_low
+        
+        trade_state['min_price'] = min_price
+        trade_state['max_price'] = max_price
+    else:
+        # Fallback to entry price if no candles available
+        trade_state['min_price'] = entry_price
+        trade_state['max_price'] = entry_price
+    
+    # Reset MAE and MFE
+    trade_state['mae_pct'] = 0.0
+    trade_state['mfe_pct'] = 0.0
+    
     logger.info(f"Reset state for trade {unique_id} to recalculate from entry")
     return trade_state
+
+def calculate_final_mae_mfe(
+    trade: Dict[str, Any],
+    trade_state: Dict[str, Any],
+    entry_price: float,
+    side: str,
+    leverage: float
+) -> None:
+    """Calculate final MAE and MFE values for a trade"""
+    try:
+        # Calculate MAE and MFE based on min_price and max_price
+        if side == 'LONG':
+            mae_price_diff = entry_price - trade_state['min_price']
+            mae_pct = (mae_price_diff / entry_price) * 100
+            mfe_price_diff = trade_state['max_price'] - entry_price
+            mfe_pct = (mfe_price_diff / entry_price) * 100
+        else:  # SHORT
+            mae_price_diff = trade_state['max_price'] - entry_price
+            mae_pct = (mae_price_diff / entry_price) * 100 * -1
+            mfe_price_diff = entry_price - trade_state['min_price']
+            mfe_pct = (mfe_price_diff / entry_price) * 100
+        
+        # Update trade with calculated values
+        trade['MAE'] = str(round(abs(mae_pct), 2))
+        trade['MFE'] = str(round(mfe_pct, 2))
+        
+        # Update trade state
+        trade_state['mae_pct'] = abs(mae_pct)
+        trade_state['mfe_pct'] = mfe_pct
+        
+        logger.info(f"Calculated final MAE={trade['MAE']}%, MFE={trade['MFE']}% for trade {trade.get('No.', 'unknown')}")
+    except Exception as e:
+        logger.error(f"Error calculating final MAE/MFE for trade {trade.get('No.', 'unknown')}: {str(e)}")
 
 def update_mae_mfe(
     trade: Dict[str, Any],
@@ -355,10 +417,94 @@ def process_pending_trade(
         
         logger.info(f"Trade {trade_no} duration: {trade['Duration']} hours (from {entry_dt} to {current_dt})")
         
+        # Get historical candles for the entire trade period
+        candles = get_historical_candles(client, trade_timestamp, current_time)
+        
+        # Calculate EMA200 and determine trend regime
+        ema200 = calculate_ema200(candles)
+        market_trend = determine_trend_regime(current_price, ema200)
+        trade['Market Trend'] = market_trend
+        
+        # Check if entry price changed, if so reset state
+        if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
+            trade_state = reset_state_for_trade(trade_no, trade_state, entry_price, side, leverage, candles)
+        
+        # Update MAE/MFE based on current price
+        update_mae_mfe(trade, current_price, trade_state)
+        
+        # Process all candles to update min_price and max_price
+        if candles:
+            logger.info(f"Processing {len(candles)} candles for trade {trade_no}")
+            
+            for candle in candles:
+                high = float(candle['high'])
+                low = float(candle['low'])
+                
+                # Update min_price and max_price from candle data
+                if side == 'LONG':
+                    if low < trade_state['min_price']:
+                        trade_state['min_price'] = low
+                    if high > trade_state['max_price']:
+                        trade_state['max_price'] = high
+                else:  # SHORT
+                    if high > trade_state['max_price']:
+                        trade_state['max_price'] = high
+                    if low < trade_state['min_price']:
+                        trade_state['min_price'] = low
+                
+                # Check for TP/SL hits in candle wicks
+                if side == 'LONG':
+                    if high >= take_profit:
+                        # Before exiting, ensure MAE/MFE are calculated from all candles
+                        calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
+                        
+                        trade['Exit Reason'] = 'TP HIT (wick)'
+                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        trade['Outcome'] = 'SUCCESS'
+                        trade['Outcome %'] = str(round(((take_profit - entry_price) / entry_price) * leverage * 100, 2))
+                        return trade, trade_state
+                    elif low <= stop_loss:
+                        # Before exiting, ensure MAE/MFE are calculated from all candles
+                        calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
+                        
+                        trade['Exit Reason'] = 'SL HIT (wick)'
+                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        trade['Outcome'] = 'STOP LOSS'
+                        # For long positions, loss percentage is (stop_loss - entry) / entry * leverage
+                        loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage
+                        trade['Outcome %'] = str(round(loss_pct, 2))
+                        return trade, trade_state
+                else:  # SHORT
+                    if low <= take_profit:
+                        # Before exiting, ensure MAE/MFE are calculated from all candles
+                        calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
+                        
+                        trade['Exit Reason'] = 'TP HIT (wick)'
+                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        trade['Outcome'] = 'SUCCESS'
+                        # For short positions, profit percentage is (entry - take_profit) / entry * leverage
+                        profit_pct = ((entry_price - take_profit) / entry_price) * 100 * leverage
+                        trade['Outcome %'] = str(round(profit_pct, 2))
+                        return trade, trade_state
+                    elif high >= stop_loss:
+                        # Before exiting, ensure MAE/MFE are calculated from all candles
+                        calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
+                        
+                        trade['Exit Reason'] = 'SL HIT (wick)'
+                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                        trade['Outcome'] = 'STOP LOSS'
+                        # For short positions, loss percentage is (stop_loss - entry) / entry * leverage
+                        loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage * -1
+                        trade['Outcome %'] = str(round(loss_pct, 2))
+                        return trade, trade_state
+        
         # FIRST: Check current price against take profit and stop loss levels
         # This ensures we prioritize current price conditions over historical wicks
         if side == 'LONG':
             if current_price >= take_profit:
+                # Before exiting, ensure MAE/MFE are calculated from all candles
+                calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
+                
                 trade['Outcome'] = 'SUCCESS'
                 trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                 trade['Exit Reason'] = 'TP HIT'
@@ -366,6 +512,9 @@ def process_pending_trade(
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
                 return trade, trade_state
             elif current_price <= stop_loss:
+                # Before exiting, ensure MAE/MFE are calculated from all candles
+                calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
+                
                 trade['Outcome'] = 'STOP LOSS'
                 trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                 trade['Exit Reason'] = 'SL HIT'
@@ -376,6 +525,9 @@ def process_pending_trade(
                 return trade, trade_state
         else:  # SHORT
             if current_price <= take_profit:
+                # Before exiting, ensure MAE/MFE are calculated from all candles
+                calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
+                
                 trade['Outcome'] = 'SUCCESS'
                 trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                 trade['Exit Reason'] = 'TP HIT'
@@ -385,6 +537,9 @@ def process_pending_trade(
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
                 return trade, trade_state
             elif current_price >= stop_loss:
+                # Before exiting, ensure MAE/MFE are calculated from all candles
+                calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
+                
                 trade['Outcome'] = 'STOP LOSS'
                 trade['Exit Trade'] = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
                 trade['Exit Reason'] = 'SL HIT'
@@ -394,105 +549,8 @@ def process_pending_trade(
                 logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
                 return trade, trade_state
         
-        candles = get_historical_candles(client, trade_timestamp, current_time)
-        
-        # Calculate EMA200 and determine trend regime
-        ema200 = calculate_ema200(candles)
-        market_trend = determine_trend_regime(current_price, ema200)
-        trade['Market Trend'] = market_trend
-        
-        # Check if entry price changed, if so reset state
-        if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
-            trade_state = reset_state_for_trade(trade_no, trade_state, entry_price, side, leverage)
-        
-        # Update MAE/MFE based on current price
-        update_mae_mfe(trade, current_price, trade_state)
-        
-        # Initialize MAE and MFE variables
-        mae_pct = trade_state['mae_pct']
-        mfe_pct = trade_state['mfe_pct']
-        
-        # SECOND: Process candles if available - only if current price didn't trigger an exit
-        if candles:
-            logger.info(f"Processing {len(candles)} candles for trade {trade_no}")
-            
-            if not trade_state.get('initialized', False):
-                trade_state['min_price'] = entry_price
-                trade_state['max_price'] = entry_price
-
-            for candle in candles:
-                high = float(candle['high'])
-                low = float(candle['low'])
-
-                if side == 'LONG':
-                    if high >= take_profit:
-                        trade['Exit Reason'] = 'TP HIT (wick)'
-                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
-                        trade['Outcome'] = 'SUCCESS'
-                        trade['Outcome %'] = str(round(((take_profit - entry_price) / entry_price) * leverage * 100, 2))
-                        return trade, trade_state
-                    elif low <= stop_loss:
-                        trade['Exit Reason'] = 'SL HIT (wick)'
-                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
-                        trade['Outcome'] = 'STOP LOSS'
-                        # For long positions, loss percentage is (stop_loss - entry) / entry * leverage
-                        loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage
-                        trade['Outcome %'] = str(round(loss_pct, 2))
-                        return trade, trade_state
-                else:  # SHORT
-                    if low <= take_profit:
-                        trade['Exit Reason'] = 'TP HIT (wick)'
-                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
-                        trade['Outcome'] = 'SUCCESS'
-                        # For short positions, profit percentage is (entry - take_profit) / entry * leverage
-                        profit_pct = ((entry_price - take_profit) / entry_price) * 100 * leverage
-                        trade['Outcome %'] = str(round(profit_pct, 2))
-                        return trade, trade_state
-                    elif high >= stop_loss:
-                        trade['Exit Reason'] = 'SL HIT (wick)'
-                        trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
-                        trade['Outcome'] = 'STOP LOSS'
-                        # For short positions, loss percentage is (stop_loss - entry) / entry * leverage
-                        loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage * -1
-                        trade['Outcome %'] = str(round(loss_pct, 2))
-                        return trade, trade_state                
-            
-            for candle in candles:
-                candle_low = float(candle['low'])
-                candle_high = float(candle['high'])
-                
-                if side == 'LONG':
-                    if candle_low < trade_state['min_price']:
-                        trade_state['min_price'] = candle_low
-                    if candle_high > trade_state['max_price']:
-                        trade_state['max_price'] = candle_high
-                else:  # SHORT
-                    if candle_high > trade_state['max_price']:
-                        trade_state['max_price'] = candle_high
-                    if candle_low < trade_state['min_price']:
-                        trade_state['min_price'] = candle_low
-        
-        # Check if current price creates new min/max
-        if current_price < trade_state['min_price']:
-            trade_state['min_price'] = current_price
-        if current_price > trade_state['max_price']:
-            trade_state['max_price'] = current_price
-        
         # Calculate final MAE and MFE
-        if side == 'LONG':
-            mae_price_diff = entry_price - trade_state['min_price']
-            mae_pct = (mae_price_diff / entry_price) * 100
-            mfe_price_diff = trade_state['max_price'] - entry_price
-            mfe_pct = (mfe_price_diff / entry_price) * 100
-        else:  # SHORT
-            mae_price_diff = trade_state['max_price'] - entry_price
-            mae_pct = (mae_price_diff / entry_price) * 100 * -1
-            mfe_price_diff = entry_price - trade_state['min_price']
-            mfe_pct = (mfe_price_diff / entry_price) * 100
-        
-        # Update trade with calculated values
-        trade['MAE'] = str(round(abs(mae_pct), 2))
-        trade['MFE'] = str(round(mfe_pct, 2))
+        calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
         
         return trade, trade_state
         
