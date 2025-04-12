@@ -6,6 +6,8 @@ from typing import Dict, Tuple, Optional, List
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
 from config import API_KEY_PERPS, API_SECRET_PERPS
+import os
+import subprocess
 
 # Configure logging
 logging.basicConfig(
@@ -34,6 +36,11 @@ CONFIG = {
     # Volatility Parameters
     'MIN_ATR_PERCENT': 0.2,  # 0.2% ATR
     'MAX_ATR_PERCENT': 2.0,  # 2.0% ATR
+
+    # VOLATILITY CALIBRATION
+    # Recalculate these values every 50 trades using plot_atr_histogram.py    
+    'MEAN_ATR_PERCENT': 0.284,
+    'STD_ATR_PERCENT': 0.148,
     
     # Risk Parameters
     'MAX_POSITION_SIZE': 250,  # USD
@@ -68,20 +75,15 @@ def calculate_trend_slope(df: pd.DataFrame) -> float:
 
     return normalized_slope
 
-def detect_regime(df: pd.DataFrame) -> str:
+def detect_regime(df: pd.DataFrame, ta: TechnicalAnalysis, candles: pd.DataFrame) -> str:
     """
     Classify market regime using ATR and EMA slope.
     Returns: 'TRENDING', 'CHOP', or 'UNCERTAIN'
     """
-    # Calculate ATR
-    high_low = df['high'] - df['low']
-    high_close = np.abs(df['high'] - df['close'].shift())
-    low_close = np.abs(df['low'] - df['close'].shift())
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    true_range = np.max(ranges, axis=1)
-    atr = true_range.rolling(CONFIG['ATR_PERIOD']).mean()
-    atr_percent = (atr / df['close']) * 100
-    
+    # Calculate ATR using TechnicalAnalysis
+    atr = ta.compute_atr(candles)
+    atr_percent = (atr / df['close'].iloc[-1]) * 100
+        
     # Calculate EMA slope
     ema = df['close'].ewm(span=CONFIG['EMA_PERIOD']).mean()
     slope = ema.diff(CONFIG['TREND_SLOPE_PERIOD']) / CONFIG['TREND_SLOPE_PERIOD']
@@ -91,34 +93,40 @@ def detect_regime(df: pd.DataFrame) -> str:
     # Determine regime
     if abs(slope_percent.iloc[-1]) > CONFIG['TREND_THRESHOLD']:
         return 'TRENDING'
-    elif atr_percent.iloc[-1] > CONFIG['MIN_ATR_PERCENT']:
+    elif atr_percent > CONFIG['MIN_ATR_PERCENT']:
         return 'CHOP'
     return 'UNCERTAIN'
 
-def detect_rsi_dip(df: pd.DataFrame) -> Tuple[bool, Optional[float]]:
+def detect_rsi_dip(df: pd.DataFrame, ta: TechnicalAnalysis, candles: pd.DataFrame, product_id: str) -> Tuple[bool, Optional[float]]:
     """
     Detect RSI dip with confirmation.
+    Args:
+        df: DataFrame with price data
+        ta: TechnicalAnalysis instance
+        candles: DataFrame with candle data
+        product_id: Trading pair identifier (e.g. 'BTC-USDC')
     Returns: (signal, entry_price)
     """
-    # Calculate RSI
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(CONFIG['RSI_PERIOD']).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(CONFIG['RSI_PERIOD']).mean()
-    rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
+    # Calculate RSI for current and previous candles
+    current_rsi = ta.compute_rsi(product_id, candles, CONFIG['RSI_PERIOD'])
     
-    # Check for RSI dip with confirmation
-    current_rsi = rsi.iloc[-1]
-    prev_rsi = rsi.iloc[-2]
+    # Get previous RSI by removing the last candle
+    prev_candles = candles[:-1]
+    prev_rsi = ta.compute_rsi(product_id, prev_candles, CONFIG['RSI_PERIOD'])
     
     if (prev_rsi < CONFIG['RSI_OVERSOLD'] and 
         current_rsi < CONFIG['RSI_CONFIRMATION']):
         return True, df['close'].iloc[-1]
     return False, None
 
-def detect_breakout(df: pd.DataFrame) -> Tuple[bool, Optional[float]]:
+def detect_breakout(df: pd.DataFrame, ta: TechnicalAnalysis, candles: pd.DataFrame, product_id: str) -> Tuple[bool, Optional[float]]:
     """
     Detect price breakout above resistance with volume confirmation.
+    Args:
+        df: DataFrame with price data
+        ta: TechnicalAnalysis instance
+        candles: DataFrame with candle data
+        product_id: Trading pair identifier (e.g. 'BTC-USDC')
     Returns: (signal, entry_price)
     """
     # Calculate resistance (20-period high)
@@ -183,10 +191,99 @@ def risk_check(entry_price: float, stop_loss: float, position_size: float) -> bo
     return True
 
 def execute_trade(signal_data: Dict) -> None:
-    """Log and simulate trade execution"""
-    logger.info(f"Executing trade: {signal_data}")
-    # In a real implementation, this would place orders with an exchange
-    # For now, we just log the trade details
+    """Execute trade using trade_btc_perp.py and log to CSV"""
+    try:
+        # Read existing trades to get the next trade number
+        try:
+            trades_df = pd.read_csv('automated_trades.csv')
+            next_trade_no = len(trades_df) + 1
+        except FileNotFoundError:
+            next_trade_no = 1
+            trades_df = pd.DataFrame()
+        
+        # Calculate R/R ratio
+        rr_ratio = (signal_data['take_profit'] - signal_data['entry_price']) / (signal_data['entry_price'] - signal_data['stop_loss'])
+        
+        # Determine volatility level based on ATR percentage
+        if signal_data['atr_percent'] > CONFIG['MEAN_ATR_PERCENT'] + CONFIG['STD_ATR_PERCENT']:
+            volatility_level = "Very Strong"
+        elif signal_data['atr_percent'] > CONFIG['MEAN_ATR_PERCENT']:
+            volatility_level = "Strong"
+        elif signal_data['atr_percent'] > CONFIG['MEAN_ATR_PERCENT'] - CONFIG['STD_ATR_PERCENT']:
+            volatility_level = "Moderate"
+        else:
+            volatility_level = "Weak"                
+            
+        
+        # Determine trading session based on current UTC time
+        current_hour = datetime.now(UTC).hour
+        if 0 <= current_hour < 9:
+            session = "Asia"
+        elif 9 <= current_hour < 17:
+            session = "EU"
+        else:
+            session = "US"
+
+        # Create new trade entry
+        new_trade = pd.DataFrame([{
+            'No.': next_trade_no,
+            'Timestamp': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC'),
+            'SIDE': 'LONG',
+            'ENTRY': signal_data['entry_price'],
+            'Take Profit': signal_data['take_profit'],
+            'Stop Loss': signal_data['stop_loss'],
+            'R/R Ratio': round(rr_ratio, 2),
+            'Volatility Level': volatility_level,
+            'Outcome': 'PENDING',
+            'Outcome %': 0.0,
+            'Leverage': f"{signal_data['leverage']}x",
+            'Margin': signal_data['position_size'] / signal_data['leverage'],
+            'Session': session,
+            'TP Mode': 'ADAPTIVE' if signal_data['regime'] == 'TRENDING' else 'FIXED',
+            'ATR %': round(signal_data['atr_percent'], 2),
+            'Setup Type': signal_data['strategy'],
+            'MAE': 0.0,
+            'MFE': 0.0,
+            'Exit Trade': 0.0,
+            'Trend Regime': signal_data['regime'],
+            'RSI at Entry': 0.0,  # Would be populated in real implementation
+            'Relative Volume': round(signal_data['relative_volume'], 2),
+            'Trend Slope': round(signal_data['trend_slope'], 4),
+            'Exit Reason': 'PENDING',
+            'Duration': 0.0,
+            'Market Trend': 'PENDING'
+        }])
+        
+        # Append new trade to CSV
+        new_trade.to_csv('automated_trades.csv', mode='a', header=not os.path.exists('automated_trades.csv'), index=False)
+        logger.info("Trade logged to automated_trades.csv")
+
+        # Prepare command for trade_btc_perp.py
+        cmd = [
+            'python', 'trade_btc_perp.py',
+            '--product', signal_data['product_id'],
+            '--side', 'BUY',
+            '--size', str(signal_data['position_size']),
+            '--leverage', str(signal_data['leverage']),
+            '--tp', str(signal_data['take_profit']),
+            '--sl', str(signal_data['stop_loss']),
+            '--no-confirm'
+        ]
+        
+        # Execute the command
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"Error placing order: {result.stderr}")
+            return False
+            
+        logger.info("Order placed successfully!")
+        logger.info(f"Command output: {result.stdout}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error executing trade: {e}")
+        return False
 
 # Strategy dictionary mapping names to detection functions
 STRATEGIES = {
@@ -196,21 +293,31 @@ STRATEGIES = {
 
 def run_strategy(df: pd.DataFrame) -> None:
     """Main strategy loop"""
+    # Initialize services
+    cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+    ta = TechnicalAnalysis(cb)
+    
+    # Fetch candles once for all calculations
+    candles = cb.historical_data.get_historical_data('BTC-USDC', datetime.now(UTC) - timedelta(minutes=5 * 100), datetime.now(UTC), "FIVE_MINUTE")
+    
     # Detect market regime
-    regime = detect_regime(df)
+    regime = detect_regime(df, ta, candles)
     logger.info(f"Current market regime: {regime}")
     
-    # Calculate ATR for volatility check
-    atr = df['high'].rolling(CONFIG['ATR_PERIOD']).max() - df['low'].rolling(CONFIG['ATR_PERIOD']).min()
-    atr_percent = (atr / df['close']) * 100
+    # Calculate ATR for volatility check using TechnicalAnalysis
+    atr = ta.compute_atr(candles)
+    atr_percent = (atr / df['close'].iloc[-1]) * 100
     
     # Calculate relative volume
     avg_volume = df['volume'].rolling(CONFIG['VOLUME_LOOKBACK']).mean()
     relative_volume = df['volume'].iloc[-1] / avg_volume.iloc[-1]
     
+    # Calculate trend slope
+    trend_slope = calculate_trend_slope(df)
+    
     # Run each strategy
     for strategy_name, detection_fn in STRATEGIES.items():
-        signal, entry_price = detection_fn(df)
+        signal, entry_price = detection_fn(df, ta, candles, 'BTC-USDC')
         
         if signal:
             # Apply filters
@@ -218,12 +325,12 @@ def run_strategy(df: pd.DataFrame) -> None:
                 logger.info(f"{strategy_name} filtered by volume")
                 continue
                 
-            if not filter_by_volatility(atr_percent.iloc[-1]):
+            if not filter_by_volatility(atr_percent):
                 logger.info(f"{strategy_name} filtered by volatility")
                 continue
             
             # Compute TP/SL
-            tp, sl = compute_tp_sl(entry_price, regime, atr.iloc[-1])
+            tp, sl = compute_tp_sl(entry_price, regime, atr)
             
             # Calculate position size
             position_size = CONFIG['MAX_POSITION_SIZE'] * CONFIG['LEVERAGE']
@@ -235,7 +342,6 @@ def run_strategy(df: pd.DataFrame) -> None:
             
             # Prepare trade data
             trade_data = {
-                'timestamp': datetime.now(UTC).isoformat(),
                 'strategy': strategy_name,
                 'regime': regime,
                 'entry_price': entry_price,
@@ -243,9 +349,10 @@ def run_strategy(df: pd.DataFrame) -> None:
                 'stop_loss': sl,
                 'position_size': position_size,
                 'leverage': CONFIG['LEVERAGE'],
-                'rsi': None,  # Would be populated in real implementation
                 'relative_volume': relative_volume,
-                'atr_percent': atr_percent.iloc[-1]
+                'atr_percent': atr_percent,
+                'trend_slope': trend_slope,
+                'product_id': 'BTC-USDC'
             }
             
             # Execute trade
