@@ -119,12 +119,13 @@ class TechnicalAnalysis:
         self.candle_interval = candle_interval
         self.product_id = product_id
         self.intervals_per_day = self.calculate_intervals_per_day()
+        self.force_retrain = force_retrain
+        
+        # Initialize model instances but don't load them yet
         historical_data = HistoricalData(coinbase_service.client)
         self.ml_signal = MLSignal(self.logger, historical_data, product_id=self.product_id, granularity=self.candle_interval, force_retrain=force_retrain)
-        self.ml_signal.load_model()
         self.scaler = StandardScaler()
         self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service, product_id=self.product_id, granularity=self.candle_interval, force_retrain=force_retrain)
-        self.bitcoin_prediction_model.load_model()
         
         # Set product-specific parameters
         self.set_product_specific_parameters()
@@ -135,6 +136,16 @@ class TechnicalAnalysis:
         self.signal_history = []  # Store recent signals
         self.min_signal_duration = 4  # Minimum candles before signal can change
         self.trend_confirmation_period = 3  # Number of candles needed to confirm trend
+
+    def _ensure_models_loaded(self):
+        """Ensure both ML models are loaded."""
+        if not hasattr(self, '_models_loaded') or not self._models_loaded or self.force_retrain:
+            self.logger.info("Loading ML models...")
+            if self.force_retrain:
+                self.logger.info("Force retrain requested, retraining models...")
+            self.ml_signal.load_model()
+            self.bitcoin_prediction_model.load_model()
+            self._models_loaded = True
 
     def set_product_weights(self):
         """Set product-specific signal weights."""
@@ -671,13 +682,14 @@ class TechnicalAnalysis:
 
         # Add ML model signal
         if weights['ml_model'] > 0:
+            self._ensure_models_loaded()
             ml_signal = self.ml_signal.predict_signal(candles)
             self.logger.debug(f"ML signal: {ml_signal}")  # Log the ML signal
             signal_strength += weights['ml_model'] * ml_signal
 
         # Add BitcoinPredictionModel signal
         if weights['bitcoin_prediction'] > 0:
-            # Ensure the model is loaded
+            self._ensure_models_loaded()
             bitcoin_prediction_signal = self.get_bitcoin_prediction_signal(candles)
             signal_strength += weights['bitcoin_prediction'] * bitcoin_prediction_signal
 
@@ -900,6 +912,7 @@ class TechnicalAnalysis:
 
     def get_bitcoin_prediction_signal(self, candles: List[Dict]) -> int:
         try:
+            self._ensure_models_loaded()
             # Prepare the data for prediction
             df, X, _ = self.bitcoin_prediction_model.prepare_data(candles)
             
@@ -1242,6 +1255,9 @@ class TechnicalAnalysis:
 
     def _calculate_base_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
         """Calculate the base signal without stability checks."""
+        # Ensure models are loaded before calculating signal
+        self._ensure_models_loaded()
+        
         # Move the original signal calculation logic here
         weights = self.set_product_weights()
         signal_strength = 0.0
