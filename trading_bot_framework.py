@@ -85,13 +85,10 @@ def detect_regime(df: pd.DataFrame, ta: TechnicalAnalysis, candles: pd.DataFrame
     atr_percent = (atr / df['close'].iloc[-1]) * 100
         
     # Calculate EMA slope
-    ema = df['close'].ewm(span=CONFIG['EMA_PERIOD']).mean()
-    slope = ema.diff(CONFIG['TREND_SLOPE_PERIOD']) / CONFIG['TREND_SLOPE_PERIOD']
-    slope_percent = (slope / ema) * 100
     trend_slope = calculate_trend_slope(df)
     
     # Determine regime
-    if abs(slope_percent.iloc[-1]) > CONFIG['TREND_THRESHOLD']:
+    if abs(trend_slope) > CONFIG['TREND_THRESHOLD']:
         return 'TRENDING'
     elif atr_percent > CONFIG['MIN_ATR_PERCENT']:
         return 'CHOP'
@@ -315,11 +312,15 @@ def run_strategy(df: pd.DataFrame) -> None:
     # Calculate trend slope
     trend_slope = calculate_trend_slope(df)
     
+    # Flag to track if any signal was detected
+    signal_detected = False
+    
     # Run each strategy
     for strategy_name, detection_fn in STRATEGIES.items():
         signal, entry_price = detection_fn(df, ta, candles, 'BTC-USDC')
         
         if signal:
+            signal_detected = True
             # Apply filters
             if not filter_by_volume(relative_volume):
                 logger.info(f"{strategy_name} filtered by volume")
@@ -358,6 +359,9 @@ def run_strategy(df: pd.DataFrame) -> None:
             # Execute trade
             execute_trade(trade_data)
             break  # Only execute one strategy per run
+    
+    if not signal_detected:
+        logger.info("Signal RSI Dip or Signal breakout not detected")
 
 def fetch_candles(cb: CoinbaseService, product_id: str = 'BTC-USDC') -> pd.DataFrame:
     """
