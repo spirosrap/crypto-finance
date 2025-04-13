@@ -53,6 +53,8 @@ CONFIG = {
     'FIXED_SL_PERCENT': 0.007,  # 0.7%
     'ADAPTIVE_TP_MULTIPLIER': 2.5,  # 2.5x ATR
     'ADAPTIVE_SL_MULTIPLIER': 1.5,  # 1.5x ATR
+
+    'GRANULARITY': 'FIVE_MINUTE',
 }
 
 def get_perp_product(product_id):
@@ -65,6 +67,17 @@ def get_perp_product(product_id):
         'SHIB-USDC': '1000SHIB-PERP-INTX'
     }
     return perp_map.get(product_id, 'BTC-PERP-INTX')
+
+def get_price_precision(product_id):
+    """Get price precision for a product"""
+    precision_map = {
+        'BTC-PERP-INTX': 1,      # $1 precision for BTC
+        'ETH-PERP-INTX': 0.1,    # $0.1 precision for ETH
+        'DOGE-PERP-INTX': 0.0001, # $0.0001 precision for DOGE
+        'SOL-PERP-INTX': 0.01,   # $0.01 precision for SOL
+        '1000SHIB-PERP-INTX': 0.000001  # $0.000001 precision for SHIB
+    }
+    return precision_map.get(product_id, 1)
 
 def calculate_trend_slope(df: pd.DataFrame) -> float:
     """
@@ -125,6 +138,8 @@ def detect_rsi_dip(df: pd.DataFrame, ta: TechnicalAnalysis, candles: pd.DataFram
     if (prev_rsi < CONFIG['RSI_OVERSOLD'] and 
         current_rsi < CONFIG['RSI_CONFIRMATION']):
         return True, df['close'].iloc[-1]
+    
+    
     return False, None
 
 def detect_breakout(df: pd.DataFrame, ta: TechnicalAnalysis, candles: pd.DataFrame, product_id: str) -> Tuple[bool, Optional[float]]:
@@ -165,10 +180,12 @@ def compute_tp_sl(entry_price: float, regime: str, atr: float) -> Tuple[float, f
     Compute take profit and stop loss based on regime.
     Returns: (take_profit, stop_loss)
     """
-    if regime == 'TRENDING':
+    atr_percent = (atr / entry_price) * 100
+    adaptive_trigger = CONFIG['MEAN_ATR_PERCENT'] + CONFIG['STD_ATR_PERCENT']
+
+    if atr_percent > adaptive_trigger and regime == "TRENDING":
         # Use adaptive TP/SL in trending markets
         tp = entry_price + (CONFIG['ADAPTIVE_TP_MULTIPLIER'] * atr)
-        sl = entry_price - (CONFIG['ADAPTIVE_SL_MULTIPLIER'] * atr)
     else:
         # Use fixed TP/SL in other regimes
         if regime == "TRENDING":
@@ -176,7 +193,7 @@ def compute_tp_sl(entry_price: float, regime: str, atr: float) -> Tuple[float, f
         else:
             tp = entry_price * (1 + CONFIG['FIXED_TP_PERCENT_UNCERTAIN_CHOP'])
 
-        sl = entry_price * (1 - CONFIG['FIXED_SL_PERCENT'])
+    sl = entry_price * (1 - CONFIG['FIXED_SL_PERCENT'])
     
     return tp, sl
 
@@ -374,7 +391,7 @@ def run_strategy(df: pd.DataFrame) -> None:
     if not signal_detected:
         logger.info("Signal RSI Dip or Signal breakout not detected")
 
-def fetch_candles(cb: CoinbaseService, product_id: str = 'BTC-USDC') -> pd.DataFrame:
+def fetch_candles(cb: CoinbaseService, product_id: str = 'BTC-USDC', start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
     """
     Fetch historical candles from Coinbase.
     Returns DataFrame with OHLCV data.
@@ -383,10 +400,19 @@ def fetch_candles(cb: CoinbaseService, product_id: str = 'BTC-USDC') -> pd.DataF
     now = datetime.now(UTC)
     start = now - timedelta(minutes=5 * 8000)
     end = now
+
+    if start_date and end_date:
+        start = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+        end = datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=UTC)
+    else:
+        # Default to last 8000 5-minute candles
+        now = datetime.now(UTC)
+        start = now - timedelta(minutes=5 * 8000)
+        end = now    
     
     perp_product = get_perp_product(product_id)
-    raw_data = cb.historical_data.get_historical_data(perp_product, start, end, "FIVE_MINUTE")
-    df = pd.DataFrame(raw_data)
+    candles = cb.historical_data.get_historical_data(perp_product, start, end, "FIVE_MINUTE")
+    df = pd.DataFrame(candles)
     
     # Convert string columns to numeric
     numeric_columns = ['open', 'high', 'low', 'close', 'volume']
@@ -404,7 +430,7 @@ def fetch_candles(cb: CoinbaseService, product_id: str = 'BTC-USDC') -> pd.DataF
         df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
         df.set_index('time', inplace=True)
     
-    return df
+    return df, candles
 
 def main():
     # Initialize services
@@ -412,7 +438,7 @@ def main():
     
     try:
         # Fetch historical data
-        df = fetch_candles(cb)
+        df, _ = fetch_candles(cb)
         
         # Run strategy
         run_strategy(df)
