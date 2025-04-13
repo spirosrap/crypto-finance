@@ -55,6 +55,17 @@ CONFIG = {
     'ADAPTIVE_SL_MULTIPLIER': 1.5,  # 1.5x ATR
 }
 
+def get_perp_product(product_id):
+    """Convert spot product ID to perpetual futures product ID"""
+    perp_map = {
+        'BTC-USDC': 'BTC-PERP-INTX',
+        'ETH-USDC': 'ETH-PERP-INTX',
+        'DOGE-USDC': 'DOGE-PERP-INTX',
+        'SOL-USDC': 'SOL-PERP-INTX',
+        'SHIB-USDC': '1000SHIB-PERP-INTX'
+    }
+    return perp_map.get(product_id, 'BTC-PERP-INTX')
+
 def calculate_trend_slope(df: pd.DataFrame) -> float:
     """
     Calculate normalized trend slope over last 5 closes.
@@ -373,7 +384,8 @@ def fetch_candles(cb: CoinbaseService, product_id: str = 'BTC-USDC') -> pd.DataF
     start = now - timedelta(minutes=5 * 8000)
     end = now
     
-    raw_data = cb.historical_data.get_historical_data(product_id, start, end, "FIVE_MINUTE")
+    perp_product = get_perp_product(product_id)
+    raw_data = cb.historical_data.get_historical_data(perp_product, start, end, "FIVE_MINUTE")
     df = pd.DataFrame(raw_data)
     
     # Convert string columns to numeric
@@ -397,7 +409,6 @@ def fetch_candles(cb: CoinbaseService, product_id: str = 'BTC-USDC') -> pd.DataF
 def main():
     # Initialize services
     cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
-    ta = TechnicalAnalysis(cb)
     
     try:
         # Fetch historical data
