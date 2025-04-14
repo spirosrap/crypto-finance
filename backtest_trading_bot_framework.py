@@ -50,6 +50,19 @@ class Trade:
     relative_volume: float
     trend_slope: float
     rsi: float
+    take_profit: float
+    stop_loss: float
+    rr_ratio: float
+    volatility_level: str
+    outcome: str
+    outcome_percent: float
+    leverage: str
+    margin: float
+    session: str
+    mae: float
+    mfe: float
+    exit_reason: str
+    duration: float
 
 @dataclass
 class BacktestResults:
@@ -160,14 +173,24 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
         if position > 0:
             current_trade = trades[-1]
             
+            # Update MAE and MFE
+            current_mae = (current_price - current_trade.entry_price) / current_trade.entry_price
+            current_mfe = (current_price - current_trade.entry_price) / current_trade.entry_price
+            current_trade.mae = min(current_trade.mae, current_mae)
+            current_trade.mfe = max(current_trade.mfe, current_mfe)
+            
             # Check for take profit
             if current_price >= current_trade.take_profit:
                 # Calculate profit with leverage using take profit price
                 profit = (current_trade.take_profit - current_trade.entry_price) * position
                 balance += profit
                 current_trade.exit_time = current_time
-                current_trade.exit_price = current_trade.take_profit  # Use TP price instead of current price
+                current_trade.exit_price = current_trade.take_profit
                 current_trade.profit = profit
+                current_trade.outcome = 'SUCCESS'
+                current_trade.outcome_percent = 7.5  # Hardcoded for now
+                current_trade.exit_reason = 'TP HIT'
+                current_trade.duration = (current_trade.exit_time - current_trade.entry_time).total_seconds() / 3600
                 position = 0
                 total_trades += 1
                 winning_trades += 1
@@ -185,8 +208,12 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                 loss = (current_trade.stop_loss - current_trade.entry_price) * position
                 balance += loss
                 current_trade.exit_time = current_time
-                current_trade.exit_price = current_trade.stop_loss  # Use SL price instead of current price
+                current_trade.exit_price = current_trade.stop_loss
                 current_trade.profit = loss
+                current_trade.outcome = 'STOP LOSS'
+                current_trade.outcome_percent = -3.5  # Hardcoded for now
+                current_trade.exit_reason = 'SL HIT'
+                current_trade.duration = (current_trade.exit_time - current_trade.entry_time).total_seconds() / 3600
                 position = 0
                 total_trades += 1
                 losing_trades += 1
@@ -252,10 +279,21 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                             strategy='RSI Dip',
                             relative_volume=relative_volume,
                             trend_slope=trend_slope,
-                            rsi=ta.compute_rsi(config.product_id, current_df.to_dict('records'), CONFIG['RSI_PERIOD'])
+                            rsi=ta.compute_rsi(config.product_id, current_df.to_dict('records'), CONFIG['RSI_PERIOD']),
+                            take_profit=tp,
+                            stop_loss=sl,
+                            rr_ratio=round((tp - rsi_entry_price) / (rsi_entry_price - sl), 2),
+                            volatility_level='Moderate' if atr_percent > CONFIG['MEAN_ATR_PERCENT'] else 'Weak',
+                            outcome=None,
+                            outcome_percent=None,
+                            leverage=f"{config.leverage}x",
+                            margin=50.0,  # Hardcoded for now
+                            session='Asia' if 0 <= current_time.hour < 8 else 'EU' if 8 <= current_time.hour < 16 else 'US',
+                            mae=0.0,
+                            mfe=0.0,
+                            exit_reason=None,
+                            duration=0.0
                         )
-                        trade.take_profit = tp
-                        trade.stop_loss = sl
                         trades.append(trade)
                         continue
                 
@@ -318,23 +356,34 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
     avg_losing_atr = sum(losing_atrs) / len(losing_atrs) if losing_atrs else 0
     
     # Save trades to CSV
-    csv_filename = f"backtest_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    csv_filename = f"backtest_trades_{config.product_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     trades_df = pd.DataFrame([{
-        'Entry Time': t.entry_time,
-        'Exit Time': t.exit_time,
-        'Entry Price': t.entry_price,
-        'Exit Price': t.exit_price,
-        'Profit': t.profit,
-        'Type': t.type,
-        'Regime': t.regime,
-        'ATR': t.atr,
-        'ATR %': t.atr_percent,
+        'No.': i + 1,
+        'Timestamp': t.entry_time,
+        'SIDE': t.type,
+        'ENTRY': round(t.entry_price, 2),
+        'Take Profit': round(t.take_profit, 2),
+        'Stop Loss': round(t.stop_loss, 2),
+        'R/R Ratio': round(t.rr_ratio, 2),
+        'Volatility Level': t.volatility_level,
+        'Outcome': t.outcome,
+        'Outcome %': round(t.outcome_percent, 1) if t.outcome_percent is not None else None,
+        'Leverage': t.leverage,
+        'Margin': round(t.margin, 1),
+        'Session': t.session,
         'TP Mode': t.tp_mode,
-        'Strategy': t.strategy,
-        'Relative Volume': t.relative_volume,
-        'Trend Slope': t.trend_slope,
-        'RSI': t.rsi
-    } for t in trades])
+        'ATR %': round(t.atr_percent, 2),
+        'Setup Type': t.strategy,
+        'MAE': round(t.mae, 2),
+        'MFE': round(t.mfe, 2),
+        'Exit Trade': round(t.exit_price, 2) if t.exit_price is not None else None,
+        'Trend Regime': t.regime,
+        'RSI at Entry': round(t.rsi, 2),
+        'Relative Volume': round(t.relative_volume, 2),
+        'Trend Slope': round(t.trend_slope, 4),
+        'Exit Reason': t.exit_reason,
+        'Duration': round(t.duration, 2)
+    } for i, t in enumerate(trades)])
     trades_df.to_csv(csv_filename, index=False)
     
     return BacktestResults(
