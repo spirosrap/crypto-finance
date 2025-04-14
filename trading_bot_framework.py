@@ -43,8 +43,9 @@ CONFIG = {
     'STD_ATR_PERCENT': 0.148,
     
     # Risk Parameters
-    'MAX_POSITION_SIZE': 50,  # USD
-    'MAX_RISK_PER_TRADE': 1,  # 100% of account
+    'INITIAL_BALANCE': 10000,  # USD
+    'MAX_POSITION_SIZE': 2000,  # USD
+    'MAX_RISK_PER_TRADE': 0.1,  # 100% of account
     'LEVERAGE': 5,
     
     # Take Profit & Stop Loss

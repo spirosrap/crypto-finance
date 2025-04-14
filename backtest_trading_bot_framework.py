@@ -229,10 +229,13 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                         CONFIG['MAX_POSITION_SIZE'],
                         balance * CONFIG['MAX_RISK_PER_TRADE']
                     )
+                    position_size = 50 # Hardcoded for testing
+                    # Calculate position with leverage
+                    leveraged_position = position_size * config.leverage
                     
-                    if risk_check(rsi_entry_price, sl, position_size):
-                        # Calculate position with leverage
-                        position = (position_size * config.leverage) / rsi_entry_price
+                    if risk_check(rsi_entry_price, sl, leveraged_position):
+                        # Calculate final position size in units of the asset
+                        position = leveraged_position / rsi_entry_price
                         
                         # Create new trade
                         trade = Trade(
@@ -295,7 +298,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                 continue
 
     # Calculate final results
-    final_balance = balance + (position * df['close'].iloc[-1])
+    final_balance = balance
     total_profit = final_balance - config.initial_balance
     
     # Calculate win rates
@@ -304,13 +307,13 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
     adaptive_tp_win_rate = adaptive_tp_wins / adaptive_tp_trades if adaptive_tp_trades > 0 else 0
     
     # Calculate profit factor
-    winning_profits = sum(t.profit for t in trades if t.profit > 0)
-    losing_profits = abs(sum(t.profit for t in trades if t.profit < 0))
+    winning_profits = sum(t.profit for t in trades if t.profit is not None and t.profit > 0)
+    losing_profits = abs(sum(t.profit for t in trades if t.profit is not None and t.profit < 0))
     profit_factor = winning_profits / losing_profits if losing_profits > 0 else float('inf')
     
     # Calculate average ATR for winning and losing trades
-    winning_atrs = [t.atr for t in trades if t.profit > 0]
-    losing_atrs = [t.atr for t in trades if t.profit < 0]
+    winning_atrs = [t.atr for t in trades if t.profit is not None and t.profit > 0]
+    losing_atrs = [t.atr for t in trades if t.profit is not None and t.profit < 0]
     avg_winning_atr = sum(winning_atrs) / len(winning_atrs) if winning_atrs else 0
     avg_losing_atr = sum(losing_atrs) / len(losing_atrs) if losing_atrs else 0
     
