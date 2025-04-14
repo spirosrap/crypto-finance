@@ -34,7 +34,7 @@ CONFIG = {
     'MIN_RELATIVE_VOLUME': 1.2,
     
     # Volatility Parameters
-    'MIN_ATR_PERCENT': 0.2,  # 0.2% ATR
+    'MIN_ATR_PERCENT': 0.25,  # 0.25% ATR
     'MAX_ATR_PERCENT': 2.0,  # 2.0% ATR
 
     # VOLATILITY CALIBRATION
