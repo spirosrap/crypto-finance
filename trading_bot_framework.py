@@ -27,7 +27,7 @@ CONFIG = {
     # RSI Parameters
     'RSI_PERIOD': 14,
     'RSI_OVERSOLD': 30,
-    'RSI_CONFIRMATION': 35,
+    'RSI_CONFIRMATION': 30,
     
     # Volume Parameters
     'VOLUME_LOOKBACK': 20,
