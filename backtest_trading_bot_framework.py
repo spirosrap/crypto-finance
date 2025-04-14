@@ -112,15 +112,19 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
     cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
     ta = TechnicalAnalysis(cb)
     
-    # Validate date range
-    if config.start_date and config.end_date:
+    # Set default date range if not provided
+    if not config.start_date or not config.end_date:
+        end = datetime.now(UTC)
+        start = end - timedelta(days=30)  # Default to last 30 days
+    else:
+        # Validate date range
         try:
-            start = datetime.strptime(config.start_date, '%Y-%m-%d')
-            end = datetime.strptime(config.end_date, '%Y-%m-%d')
+            start = datetime.strptime(config.start_date, '%Y-%m-%d').replace(tzinfo=UTC)
+            end = datetime.strptime(config.end_date, '%Y-%m-%d').replace(tzinfo=UTC)
             if end < start:
                 logger.error("End date cannot be before start date")
                 return None
-            if end > datetime.now():
+            if end > datetime.now(UTC):
                 logger.error("End date cannot be in the future")
                 return None
         except ValueError as e:
@@ -140,7 +144,8 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # Convert timestamp to datetime
+    # Convert timestamp to datetime - explicitly convert to numeric first
+    df['start'] = pd.to_numeric(df['start'], errors='coerce')
     df['start'] = pd.to_datetime(df['start'], unit='s', utc=True)
     df.set_index('start', inplace=True)
     
