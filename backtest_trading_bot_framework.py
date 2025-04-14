@@ -109,6 +109,21 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
     cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
     ta = TechnicalAnalysis(cb)
     
+    # Validate date range
+    if config.start_date and config.end_date:
+        try:
+            start = datetime.strptime(config.start_date, '%Y-%m-%d')
+            end = datetime.strptime(config.end_date, '%Y-%m-%d')
+            if end < start:
+                logger.error("End date cannot be before start date")
+                return None
+            if end > datetime.now():
+                logger.error("End date cannot be in the future")
+                return None
+        except ValueError as e:
+            logger.error(f"Invalid date format: {str(e)}. Use YYYY-MM-DD format")
+            return None
+    
     # Fetch historical data
     df, candles = fetch_candles(cb, config.product_id, config.start_date, config.end_date)
     
@@ -256,7 +271,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                         CONFIG['MAX_POSITION_SIZE'],
                         balance * CONFIG['MAX_RISK_PER_TRADE']
                     )
-                    position_size = 50 # Hardcoded for testing
+                    position_size = 200 # Hardcoded for testing
                     # Calculate position with leverage
                     leveraged_position = position_size * config.leverage
                     
