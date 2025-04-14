@@ -189,9 +189,15 @@ def compute_tp_sl(entry_price: float, regime: str, atr: float) -> Tuple[float, f
     else:
         # Use fixed TP/SL in other regimes
         if regime == "TRENDING":
-            tp = entry_price * (1 + CONFIG['FIXED_TP_PERCENT'])
+            # Trending regime → TP = 1.5% or higher
+            tp = entry_price * (1 + CONFIG['FIXED_TP_PERCENT'])  # 1.5% fixed TP
+        elif regime == "CHOP":
+            # Chop/news/noise → TP = 1.1%
+            tp = entry_price * (1 + CONFIG['FIXED_TP_PERCENT_UNCERTAIN_CHOP'])  # 1.1% fixed TP
         else:
-            tp = entry_price * (1 + CONFIG['FIXED_TP_PERCENT_UNCERTAIN_CHOP'])
+            # Default fallback → TP = 1.1% if uncertain
+            tp = entry_price * (1 + CONFIG['FIXED_TP_PERCENT_UNCERTAIN_CHOP'])  # 1.1% fixed TP
+
 
     sl = entry_price * (1 - CONFIG['FIXED_SL_PERCENT'])
     

@@ -136,7 +136,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
     adaptive_tp_wins = 0
     
     # Main backtest loop
-    for i in range(min_candles, len(df)):  # Start from min_candles to ensure we have enough data
+    for i in range(50, len(df)):  # Start after EMA period
         current_time = df.index[i]
         current_price = df['close'].iloc[i]
         
@@ -163,8 +163,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
             # Check for take profit
             if current_price >= current_trade.take_profit:
                 # Calculate profit with leverage using take profit price
-                price_change = (current_trade.take_profit - current_trade.entry_price) / current_trade.entry_price
-                profit = position * current_trade.entry_price * price_change
+                profit = (current_trade.take_profit - current_trade.entry_price) * position
                 balance += profit
                 current_trade.exit_time = current_time
                 current_trade.exit_price = current_trade.take_profit  # Use TP price instead of current price
@@ -183,8 +182,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
             # Check for stop loss
             if current_price <= current_trade.stop_loss:
                 # Calculate loss with leverage
-                price_change = (current_trade.stop_loss - current_trade.entry_price) / current_trade.entry_price
-                loss = position * current_trade.entry_price * price_change
+                loss = (current_trade.stop_loss - current_trade.entry_price) * position
                 balance += loss
                 current_trade.exit_time = current_time
                 current_trade.exit_price = current_trade.stop_loss  # Use SL price instead of current price
@@ -201,19 +199,18 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
         # If we don't have a position, check for entry signals
         if position == 0 and balance > 0:
             # Get current market data
-            current_candles = candles[:i+1]
             current_df = df.iloc[:i+1]
             
             # Ensure we have enough data for calculations
-            if len(current_candles) < min_candles:
+            if len(current_df) < min_candles:
                 continue
             
             try:
                 # Detect market regime
-                regime = detect_regime(current_df, ta, current_candles)
+                regime = detect_regime(current_df, ta, current_df.to_dict('records'))
                 
                 # Calculate ATR and other indicators
-                atr = ta.compute_atr(current_candles)
+                atr = ta.compute_atr(current_df.to_dict('records'))
                 atr_percent = (atr / current_price) * 100
                 
                 # Calculate relative volume
@@ -224,8 +221,8 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                 trend_slope = calculate_trend_slope(current_df)
                 
                 # Check RSI dip strategy
-                rsi_signal, rsi_entry_price = detect_rsi_dip(current_df, ta, current_candles, config.product_id)
-                if rsi_signal and filter_by_volume(relative_volume) and filter_by_volatility(atr_percent):
+                rsi_signal, rsi_entry_price = detect_rsi_dip(current_df, ta, current_df.to_dict('records'), config.product_id)
+                if rsi_signal:# and filter_by_volume(relative_volume) and filter_by_volatility(atr_percent):
                     # Calculate position size and risk
                     tp, sl = compute_tp_sl(rsi_entry_price, regime, atr)
                     position_size = min(
@@ -252,7 +249,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                             strategy='RSI Dip',
                             relative_volume=relative_volume,
                             trend_slope=trend_slope,
-                            rsi=ta.compute_rsi(config.product_id, current_candles, CONFIG['RSI_PERIOD'])
+                            rsi=ta.compute_rsi(config.product_id, current_df.to_dict('records'), CONFIG['RSI_PERIOD'])
                         )
                         trade.take_profit = tp
                         trade.stop_loss = sl
@@ -260,8 +257,8 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                         continue
                 
                 # Check breakout strategy
-                breakout_signal, breakout_entry_price = detect_breakout(current_df, ta, current_candles, config.product_id)
-                if breakout_signal and filter_by_volume(relative_volume) and filter_by_volatility(atr_percent):
+                breakout_signal, breakout_entry_price = detect_breakout(current_df, ta, current_df.to_dict('records'), config.product_id)
+                if False and breakout_signal and filter_by_volume(relative_volume) and filter_by_volatility(atr_percent):
                     # Calculate position size and risk
                     tp, sl = compute_tp_sl(breakout_entry_price, regime, atr)
                     position_size = min(
@@ -288,7 +285,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                             strategy='Breakout',
                             relative_volume=relative_volume,
                             trend_slope=trend_slope,
-                            rsi=ta.compute_rsi(config.product_id, current_candles, CONFIG['RSI_PERIOD'])
+                            rsi=ta.compute_rsi(config.product_id, current_df.to_dict('records'), CONFIG['RSI_PERIOD'])
                         )
                         trade.take_profit = tp
                         trade.stop_loss = sl
