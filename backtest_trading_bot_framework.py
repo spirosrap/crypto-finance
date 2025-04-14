@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from tabulate import tabulate
 import numpy as np
 
+# Constants
+GRANULARITY = "FIVE_MINUTE"  # Default candle interval
+
 # Set up logging
 logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(message)s')
@@ -125,7 +128,21 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
             return None
     
     # Fetch historical data
-    df, candles = fetch_candles(cb, config.product_id, config.start_date, config.end_date)
+    raw_data = cb.historical_data.get_historical_data(config.product_id, start, end, GRANULARITY)
+    logger.info(f"Raw data type: {type(raw_data)}")
+    if raw_data:
+        logger.info(f"First candle structure: {raw_data[0]}")
+    df = pd.DataFrame(raw_data)
+    logger.info(f"DataFrame columns: {df.columns.tolist()}")
+    
+    # Convert string columns to numeric
+    numeric_columns = ['open', 'high', 'low', 'close', 'volume']
+    for col in numeric_columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Convert timestamp to datetime
+    df['start'] = pd.to_datetime(df['start'], unit='s', utc=True)
+    df.set_index('start', inplace=True)
     
     if df.empty:
         logger.error("No historical data available for backtesting")
@@ -186,6 +203,11 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
         
         # If we have an open position, check for exit conditions
         if position > 0:
+            if not trades:  # Add check for empty trades list
+                logger.warning("Position is > 0 but trades list is empty")
+                position = 0
+                continue
+            
             current_trade = trades[-1]
             
             # Update MAE and MFE
@@ -449,7 +471,7 @@ def display_results(results: BacktestResults) -> None:
         ["Avg Losing ATR", f"{results.avg_losing_atr:.2f}"]
     ]
     
-    print("\nBacktest Results Summary:")
+    print("\n=== BACKTEST RESULTS ===:")
     print(tabulate(summary_data, tablefmt="grid"))
     
     if results.csv_filename:
