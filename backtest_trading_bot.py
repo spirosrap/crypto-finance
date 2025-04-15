@@ -285,7 +285,11 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                 current_trade['mfe'] = max(current_trade['mfe'], price_change_percent)
             
             # Check for TP or SL
-            if current_price >= tp_price:
+            current_high = df.iloc[i]['high']
+            current_low = df.iloc[i]['low']
+            
+            # Check if high price reached take profit
+            if current_high >= tp_price:
                 profit = (tp_price - current_trade['entry_price']) * current_trade['size'] * config.leverage
                 balance += profit
                 trades.append(Trade(
@@ -310,7 +314,8 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                 current_trade = None
                 position = 0
                 
-            elif current_price <= current_trade['sl_price']:
+            # Check if low price reached stop loss
+            elif current_low <= current_trade['sl_price']:
                 loss = (current_trade['sl_price'] - current_trade['entry_price']) * current_trade['size'] * config.leverage
                 balance += loss
                 trades.append(Trade(
