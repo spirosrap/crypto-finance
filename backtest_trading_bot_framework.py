@@ -115,7 +115,7 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
     # Set default date range if not provided
     if not config.start_date or not config.end_date:
         end = datetime.now(UTC)
-        start = end - timedelta(days=30)  # Default to last 30 days
+        start = end - timedelta(minutes=5 * 8000)  # Default to last 30 days
     else:
         # Validate date range
         try:
