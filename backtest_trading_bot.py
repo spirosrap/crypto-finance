@@ -56,6 +56,7 @@ class Trade:
     market_regime: str  # New field for market regime
     mae: float = 0.0  # Maximum Adverse Excursion
     mfe: float = 0.0  # Maximum Favorable Excursion
+    exit_reason: str = ""  # Detailed exit reason (TP WICK HIT, SL WICK HIT, etc.)
 
 @dataclass
 class BacktestResults:
@@ -216,7 +217,12 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
         trades_df['RSI at Entry'] = trades_df['rsi_at_entry'].round(2)
         trades_df['Relative Volume'] = trades_df['relative_volume'].round(2)
         trades_df['Trend Slope'] = trades_df['trend_slope'].round(4)
-        trades_df['Exit Reason'] = trades_df['type'].apply(lambda x: 'TP HIT' if x == 'TP' else 'SL HIT')
+        # Use the new exit_reason field if available, otherwise fall back to type
+        trades_df['Exit Reason'] = trades_df.apply(
+            lambda row: row['exit_reason'] if row['exit_reason'] else 
+                       ('TP HIT' if row['type'] == 'TP' else 'SL HIT'), 
+            axis=1
+        )
         trades_df['Duration'] = ((trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 3600).round(2)
         
         # Reorder columns to match automated_trades.csv
@@ -270,28 +276,30 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
         # Handle open position
         if current_trade:
             current_price = df.iloc[i]['close']
+            current_high = df.iloc[i]['high']
+            current_low = df.iloc[i]['low']
             atr = ta.compute_atr(historical_df.to_dict('records'))
             tp_mode, tp_price, market_regime = determine_tp_mode(current_trade['entry_price'], atr, None, historical_df)
             
             # Calculate MAE and MFE for the current trade
-            price_change_percent = (current_price - current_trade['entry_price']) / current_trade['entry_price'] * 100
+            # Check high for maximum favorable excursion
+            high_change_percent = (current_high - current_trade['entry_price']) / current_trade['entry_price'] * 100
+            # Check low for maximum adverse excursion
+            low_change_percent = (current_low - current_trade['entry_price']) / current_trade['entry_price'] * 100
             
-            # Update MAE (negative price change)
-            if price_change_percent < 0:
-                current_trade['mae'] = min(current_trade['mae'], price_change_percent)
+            # Update MFE (maximum favorable excursion using high price)
+            current_trade['mfe'] = max(current_trade['mfe'], high_change_percent)
             
-            # Update MFE (positive price change)
-            if price_change_percent > 0:
-                current_trade['mfe'] = max(current_trade['mfe'], price_change_percent)
+            # Update MAE (maximum adverse excursion using low price)
+            if low_change_percent < 0:
+                current_trade['mae'] = min(current_trade['mae'], low_change_percent)
             
-            # Check for TP or SL
-            current_high = df.iloc[i]['high']
-            current_low = df.iloc[i]['low']
-            
-            # Check if high price reached take profit
+            # Check if high price reached or exceeded take profit
             if current_high >= tp_price:
                 profit = (tp_price - current_trade['entry_price']) * current_trade['size'] * config.leverage
                 balance += profit
+                # Determine if TP was hit by wick or close
+                exit_reason = "TP WICK HIT" if current_price < tp_price else "TP HIT"
                 trades.append(Trade(
                     entry_time=current_trade['entry_time'],
                     exit_time=df.index[i],
@@ -307,17 +315,20 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     trend_slope=current_trade['trend_slope'],
                     market_regime=current_trade['market_regime'],
                     mae=current_trade['mae'],
-                    mfe=current_trade['mfe']
+                    mfe=current_trade['mfe'],
+                    exit_reason=exit_reason
                 ))
                 if len(trades) >= 200:
                     break
                 current_trade = None
                 position = 0
                 
-            # Check if low price reached stop loss
+            # Check if low price reached or exceeded stop loss
             elif current_low <= current_trade['sl_price']:
                 loss = (current_trade['sl_price'] - current_trade['entry_price']) * current_trade['size'] * config.leverage
                 balance += loss
+                # Determine if SL was hit by wick or close
+                exit_reason = "SL WICK HIT" if current_price > current_trade['sl_price'] else "SL HIT"
                 trades.append(Trade(
                     entry_time=current_trade['entry_time'],
                     exit_time=df.index[i],
@@ -333,7 +344,8 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     trend_slope=current_trade['trend_slope'],
                     market_regime=current_trade['market_regime'],
                     mae=current_trade['mae'],
-                    mfe=current_trade['mfe']
+                    mfe=current_trade['mfe'],
+                    exit_reason=exit_reason
                 ))
                 if len(trades) >= 200:
                     break
