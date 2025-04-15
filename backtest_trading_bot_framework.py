@@ -222,7 +222,11 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
             current_trade.mfe = max(current_trade.mfe, current_mfe)
             
             # Check for take profit
-            if current_price >= current_trade.take_profit:
+            current_high = df['high'].iloc[i]
+            current_low = df['low'].iloc[i]
+            
+            # Check if high price reached take profit
+            if current_high >= current_trade.take_profit:
                 # Calculate profit with leverage using take profit price
                 profit = (current_trade.take_profit - current_trade.entry_price) * position
                 balance += profit
@@ -244,8 +248,8 @@ def run_backtest(config: BacktestConfig) -> BacktestResults:
                     adaptive_tp_wins += 1
                 continue
             
-            # Check for stop loss
-            if current_price <= current_trade.stop_loss:
+            # Check if low price reached stop loss
+            if current_low <= current_trade.stop_loss:
                 # Calculate loss with leverage
                 loss = (current_trade.stop_loss - current_trade.entry_price) * position
                 balance += loss
