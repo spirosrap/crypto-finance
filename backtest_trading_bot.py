@@ -318,8 +318,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     mfe=current_trade['mfe'],
                     exit_reason=exit_reason
                 ))
-                if len(trades) >= 200:
-                    break
+
                 current_trade = None
                 position = 0
                 
@@ -347,8 +346,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     mfe=current_trade['mfe'],
                     exit_reason=exit_reason
                 ))
-                if len(trades) >= 200:
-                    break
+
                 current_trade = None
                 position = 0
         
