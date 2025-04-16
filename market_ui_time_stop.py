@@ -15,6 +15,7 @@ import tkinter.messagebox as messagebox
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
 import gc
+import pandas as pd
 
 class MarketAnalyzerUI:
     def __init__(self):
@@ -559,12 +560,14 @@ class MarketAnalyzerUI:
         self.last_time_stop_check = None
         
         self.time_stop_btn = ctk.CTkButton(
-            sidebar_container,
+            trading_frame,
             text="Start Time Stop Monitor",
             command=self.toggle_time_stop_monitor,
-            fg_color="#4682B4"  # Steel Blue
+            fg_color="#4682B4",  # Steel Blue
+            hover_color="#36648B",  # Dark Steel Blue
+            height=32
         )
-        self.time_stop_btn.pack(pady=(5, 10), padx=5, fill="x")
+        self.time_stop_btn.pack(pady=5, padx=10, fill="x")
 
     def update_leverage_label(self, value):
         """Update the leverage label when slider moves"""
@@ -3026,16 +3029,33 @@ class MarketAnalyzerUI:
         """Background loop for time stop monitoring"""
         while self.time_stop_monitoring:
             try:
-                # Check if we have any open positions before running the monitor
+                # STEP 1: First check the automated_trades.csv file directly
+                csv_has_pending_trades = False
+                try:
+                    if os.path.exists('automated_trades.csv'):
+                        self.queue.put(("append", "\nChecking automated_trades.csv for pending trades...\n"))
+                        trades_df = pd.read_csv('automated_trades.csv')
+                        pending_trades = trades_df[trades_df['Outcome'] == 'PENDING']
+                        if not pending_trades.empty:
+                            csv_has_pending_trades = True
+                            self.queue.put(("append", f"\nFound {len(pending_trades)} pending trades in CSV file\n"))
+                            # Show details of the pending trade(s)
+                            for i, trade in pending_trades.iterrows():
+                                self.queue.put(("append", f"Trade {i+1}: Entry: {trade['ENTRY']}, Timestamp: {trade['Timestamp']}\n"))
+                except Exception as e:
+                    self.queue.put(("append", f"\nError reading CSV file: {str(e)}\n"))
+                
+                # STEP 2: Also check API for positions
                 has_open_orders, has_positions = self.check_for_open_orders_and_positions()
                 
-                if not has_positions:
+                # STEP 3: Proceed if either source has positions/trades
+                if not has_positions and not csv_has_pending_trades:
                     # No positions to monitor
-                    self.queue.put(("append", "\nNo open positions to monitor for time stops. Waiting...\n"))
+                    self.queue.put(("append", "\nNo open positions or pending trades to monitor for time stops. Waiting...\n"))
                     time.sleep(60)  # Check every minute
                     continue
                 
-                # Only run the time stop monitor if we have positions
+                # Only run the time stop monitor if we have positions or pending trades
                 self.queue.put(("append", "\nRunning time stop monitor check...\n"))
                 
                 # Create and run the time stop monitor process

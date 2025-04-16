@@ -21,6 +21,7 @@ import subprocess
 import argparse
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
+import os
 
 # Import the time stop parameters from simplified_trading_bot
 from simplified_trading_bot import TIME_STOP_BARS, TIME_STOP_THRESHOLD, GRANULARITY
@@ -123,17 +124,34 @@ def get_entry_time_from_csv(product_symbol):
     """Get the entry time of a position from the automated_trades.csv file."""
     try:
         trades_df = pd.read_csv('automated_trades.csv')
-        # Find the most recent trade with PENDING outcome for this symbol
-        pending_trades = trades_df[
-            (trades_df['Outcome'] == 'PENDING') & 
-            (trades_df['SIDE'] == 'LONG')
-        ]
+        # Log all pending trades for diagnosis
+        pending_trades = trades_df[trades_df['Outcome'] == 'PENDING']
+        
+        logger.info(f"Found {len(pending_trades)} pending trades in CSV")
+        if not pending_trades.empty:
+            for i, trade in pending_trades.iterrows():
+                logger.info(f"Pending trade: Entry price: {trade['ENTRY']}, Timestamp: {trade['Timestamp']}")
+                if 'Setup Type' in trade:
+                    logger.info(f"Setup: {trade['Setup Type']}, Leverage: {trade['Leverage']}")
         
         if pending_trades.empty:
+            logger.warning("No pending trades found in automated_trades.csv")
             return None
             
+        # Convert product symbol from perp format to spot format for matching
+        # Example: BTC-PERP-INTX -> BTC-USDC
+        if '-PERP-INTX' in product_symbol:
+            spot_symbol = product_symbol.replace('-PERP-INTX', '-USDC')
+            logger.info(f"Converted product symbol from {product_symbol} to {spot_symbol}")
+        else:
+            spot_symbol = product_symbol
+        
+        # Note: CSV might not have the product explicitly listed, so we're using the most recent PENDING
         # Get the most recent entry (last row)
         latest_trade = pending_trades.iloc[-1]
+        
+        # Log details for diagnosis
+        logger.info(f"Using most recent pending trade: {latest_trade['Timestamp']}")
         
         # Convert timestamp to datetime
         try:
@@ -141,8 +159,14 @@ def get_entry_time_from_csv(product_symbol):
             entry_time = entry_time.replace(tzinfo=UTC)
         except:
             # Try alternative timestamp format
-            entry_time = datetime.strptime(latest_trade['Timestamp'], '%Y-%m-%d %H:%M:%S')
-            entry_time = entry_time.replace(tzinfo=UTC)
+            try:
+                entry_time = datetime.strptime(latest_trade['Timestamp'], '%Y-%m-%d %H:%M:%S')
+                entry_time = entry_time.replace(tzinfo=UTC)
+            except Exception as e:
+                logger.error(f"Failed to parse timestamp: {latest_trade['Timestamp']}, Error: {e}")
+                return None
+        
+        logger.info(f"Extracted entry time: {entry_time}, entry price: {latest_trade['ENTRY']}")
         
         return {
             'entry_time': entry_time,
@@ -291,20 +315,97 @@ def main():
     
     while True:
         try:
-            # Get open positions
-            positions = get_open_positions(cb)
+            # STEP 1: First check for PENDING trades in the CSV file
+            csv_positions = []
+            try:
+                if os.path.exists('automated_trades.csv'):
+                    trades_df = pd.read_csv('automated_trades.csv')
+                    pending_trades = trades_df[trades_df['Outcome'] == 'PENDING']
+                    
+                    if not pending_trades.empty:
+                        logger.info(f"Found {len(pending_trades)} pending trades in CSV file")
+                        
+                        # Convert each pending trade to a synthetic position
+                        for _, trade in pending_trades.iterrows():
+                            # Use BTC-PERP-INTX as default symbol if not specified
+                            symbol = 'BTC-PERP-INTX'  # Default
+                            
+                            # Create synthetic position from CSV data
+                            synthetic_position = {
+                                'symbol': symbol,
+                                'size': float(trade.get('Margin', 100)),
+                                'entry_price': float(trade['ENTRY']),
+                                'mark_price': float(trade.get('Exit Trade', trade['ENTRY'])),
+                                'position_side': 'LONG',  # We only monitor LONG positions
+                                'unrealized_pnl': 0.0,
+                                # Store trade info directly in the position object
+                                'csv_trade_info': {
+                                    'entry_time': pd.to_datetime(trade['Timestamp']).to_pydatetime().replace(tzinfo=UTC),
+                                    'entry_price': float(trade['ENTRY'])
+                                }
+                            }
+                            csv_positions.append(synthetic_position)
+                            
+                            logger.info(f"Created position from CSV: Entry: {synthetic_position['entry_price']}, "
+                                        f"Time: {synthetic_position['csv_trade_info']['entry_time']}")
+                else:
+                    logger.warning("automated_trades.csv not found")
+            except Exception as e:
+                logger.error(f"Error reading CSV file: {e}")
             
-            if not positions:
-                logger.info("No open positions found. Waiting...")
+            # STEP 2: Also get positions from the exchange API as backup
+            api_positions = []
+            try:
+                api_positions = get_open_positions(cb)
+                if api_positions:
+                    logger.info(f"Found {len(api_positions)} positions from exchange API")
+                    
+                    # For each API position, try to find its trade info in the CSV
+                    for position in api_positions:
+                        # Skip non-LONG positions
+                        if position['position_side'] != 'LONG':
+                            continue
+                            
+                        # Try to get trade info from CSV
+                        trade_info = get_entry_time_from_csv(position['symbol'])
+                        if trade_info:
+                            # Store trade info directly in the position object
+                            position['csv_trade_info'] = trade_info
+                        else:
+                            logger.warning(f"No CSV trade info found for API position: {position['symbol']}")
+            except Exception as e:
+                logger.error(f"Error getting positions from exchange API: {e}")
+            
+            # STEP 3: Combine positions from both sources (prioritize CSV for duplicates)
+            # Use a dictionary to track positions by symbol to avoid duplicates
+            position_dict = {}
+            
+            # First add CSV positions (higher priority)
+            for position in csv_positions:
+                position_dict[position['symbol']] = position
+            
+            # Then add API positions if not already present
+            for position in api_positions:
+                if position['symbol'] not in position_dict:
+                    position_dict[position['symbol']] = position
+            
+            # Convert back to list
+            all_positions = list(position_dict.values())
+            
+            # STEP 4: Process positions and apply time stop logic
+            if not all_positions:
+                logger.info("No positions to monitor. Waiting...")
                 time.sleep(check_interval)
                 continue
+            
+            logger.info(f"Monitoring {len(all_positions)} positions for time stop")
+            for position in all_positions:
+                # Get trade info - either from the position object or from CSV
+                trade_info = position.get('csv_trade_info') or get_entry_time_from_csv(position['symbol'])
                 
-            # Check each position for time stop
-            for position in positions:
-                logger.info(f"Checking position: {position['symbol']}, Size: {position['size']}, Entry: {position['entry_price']}")
-                
-                # Get trade information from CSV
-                trade_info = get_entry_time_from_csv(position['symbol'])
+                if not trade_info:
+                    logger.warning(f"No trade info found for position: {position['symbol']}")
+                    continue
                 
                 # Check if time stop should be applied
                 if should_apply_time_stop(cb, position, trade_info):
