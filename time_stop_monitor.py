@@ -245,6 +245,31 @@ def close_position(position, reason="TIME STOP"):
     try:
         logger.info(f"Closing position {position['symbol']} - Reason: {reason}")
         
+        # Get the current market price for more accurate P&L calculation
+        entry_price = position['entry_price']
+        exit_price = position['mark_price']  # Current market price
+        
+        # Calculate estimated profit/loss
+        size = position['size']
+        pnl = (exit_price - entry_price) * size
+        pnl_percent = ((exit_price - entry_price) / entry_price) * 100
+        
+        # Calculate profit/loss percentage
+        entry_price = position['entry_price']
+        exit_price = position['mark_price']
+        
+        # Basic price change percentage
+        price_change_pct = ((exit_price - entry_price) / entry_price) * 100
+        
+        # Apply leverage multiplier (5x)
+        leveraged_pct = price_change_pct * 5
+        
+        # Determine outcome based on profit
+        outcome = 'WIN' if leveraged_pct > 0 else 'LOSS'
+        
+        logger.info(f"Entry: {entry_price}, Exit: {exit_price}")
+        logger.info(f"P&L: {pnl:.2f} ({pnl_percent:.2f}%)")
+        
         # Execute the close_positions.py script
         cmd = ['python', 'close_positions.py']
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -275,16 +300,16 @@ def close_position(position, reason="TIME STOP"):
                     entry_time = entry_time.replace(tzinfo=UTC)
                     duration_hours = (current_time - entry_time).total_seconds() / 3600
                     
-                    # Update the trade
-                    trades_df.loc[idx, 'Outcome'] = 'LOSS'
-                    trades_df.loc[idx, 'Exit Trade'] = position['mark_price']
-                    trades_df.loc[idx, 'Outcome %'] = (position['mark_price'] - trades_df.loc[idx, 'ENTRY']) / trades_df.loc[idx, 'ENTRY'] * 100
+                    # Update the trade with actual exit price and calculated P&L
+                    trades_df.loc[idx, 'Outcome'] = outcome
+                    trades_df.loc[idx, 'Exit Trade'] = exit_price
+                    trades_df.loc[idx, 'Outcome %'] = round(leveraged_pct, 2)  # Leveraged percentage
                     trades_df.loc[idx, 'Exit Reason'] = reason
                     trades_df.loc[idx, 'Duration'] = round(duration_hours, 2)
                     
                     # Save the updated dataframe
                     trades_df.to_csv('automated_trades.csv', index=False)
-                    logger.info(f"Updated trade in automated_trades.csv - Exit reason: {reason}")
+                    logger.info(f"Updated trade in automated_trades.csv - Exit price: {exit_price}, Exit reason: {reason}, Outcome: {outcome}")
                     break
         except Exception as e:
             logger.error(f"Error updating trade in automated_trades.csv: {e}")

@@ -200,8 +200,18 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
                                 "Moderate" if atr_percent > mean_atr_percent - std_atr_percent else 
                                 "Weak"
         )
-        trades_df['Outcome'] = trades_df['type'].apply(lambda x: 'SUCCESS' if x == 'TP' else 'STOP LOSS')
-        trades_df['Outcome %'] = trades_df['profit'].apply(lambda x: 7.5 if x > 0 else -3.5)
+        # Set outcome based on exit type and calculate accurate outcome percentages
+        trades_df['Outcome'] = trades_df.apply(
+            lambda row: 'SUCCESS' if row['profit'] > 0 else 
+                       ('TIME STOP' if row['type'] == 'TIME_STOP' else 'STOP LOSS'),
+            axis=1
+        )
+        
+        # Calculate accurate outcome percentage based on entry/exit prices
+        trades_df['Outcome %'] = trades_df.apply(
+            lambda row: round(((row['exit_price'] - row['entry_price']) / row['entry_price'] * 100 * 5), 2),
+            axis=1
+        )
         trades_df['Leverage'] = '5x'
         trades_df['Margin'] = 50.0
         trades_df['Session'] = trades_df['entry_time'].apply(lambda x: 
@@ -313,7 +323,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     
                     # Check if price didn't reach the time stop threshold
                     if (highest_price - current_trade['entry_price']) / current_trade['entry_price'] < TIME_STOP_THRESHOLD:
-                        # Apply time stop
+                        # Apply time stop at CURRENT MARKET PRICE (not TP)
                         profit = (current_price - current_trade['entry_price']) * current_trade['size'] * config.leverage
                         balance += profit
                         
@@ -321,7 +331,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                             entry_time=current_trade['entry_time'],
                             exit_time=df.index[i],
                             entry_price=current_trade['entry_price'],
-                            exit_price=current_price,
+                            exit_price=current_price,  # Use current market price
                             profit=profit,
                             type='TIME_STOP',
                             atr=atr,
