@@ -174,7 +174,7 @@ def calculate_trade_metrics(trades: List[Trade]) -> Dict:
         'adaptive_tp_win_rate': adaptive_tp_win_rate
     }
 
-def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
+def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5) -> str:
     """Export trade history to CSV file."""
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     csv_filename = f"backtest_trades_{product_id}_{timestamp}.csv"
@@ -201,8 +201,20 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
                                 "Weak"
         )
         trades_df['Outcome'] = trades_df['type'].apply(lambda x: 'SUCCESS' if x == 'TP' else 'STOP LOSS')
-        trades_df['Outcome %'] = trades_df['profit'].apply(lambda x: 7.5 if x > 0 else -3.5)
-        trades_df['Leverage'] = '5x'
+        
+        # Fix for outcome percentages - use Take Profit or Stop Loss prices directly
+        trades_df['Exit Trade'] = trades_df.apply(
+            lambda row: row['Take Profit'] if row['type'] == 'TP' else row['Stop Loss'], 
+            axis=1
+        )
+        
+        # Calculate Outcome % based on the correct exit price
+        trades_df['Outcome %'] = trades_df.apply(
+            lambda row: round((row['Exit Trade'] - row['ENTRY']) / row['ENTRY'] * 100 * leverage, 2),
+            axis=1
+        )
+        
+        trades_df['Leverage'] = f"{leverage}x"
         trades_df['Margin'] = 50.0
         trades_df['Session'] = trades_df['entry_time'].apply(lambda x: 
             'Asia' if 0 <= x.hour < 9 else 
@@ -212,17 +224,11 @@ def export_trades_to_csv(trades: List[Trade], product_id: str) -> str:
         trades_df['Setup Type'] = 'RSI Dip'
         trades_df['MAE'] = trades_df['mae'].round(2)
         trades_df['MFE'] = trades_df['mfe'].round(2)
-        trades_df['Exit Trade'] = trades_df['exit_price'].round(2)
         trades_df['Trend Regime'] = trades_df['market_regime']
         trades_df['RSI at Entry'] = trades_df['rsi_at_entry'].round(2)
         trades_df['Relative Volume'] = trades_df['relative_volume'].round(2)
         trades_df['Trend Slope'] = trades_df['trend_slope'].round(4)
-        # Use the new exit_reason field if available, otherwise fall back to type
-        trades_df['Exit Reason'] = trades_df.apply(
-            lambda row: row['exit_reason'] if row['exit_reason'] else 
-                       ('TP HIT' if row['type'] == 'TP' else 'SL HIT'), 
-            axis=1
-        )
+        trades_df['Exit Reason'] = trades_df['exit_reason']
         trades_df['Duration'] = ((trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 3600).round(2)
         
         # Reorder columns to match automated_trades.csv
@@ -404,7 +410,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
     
     # Calculate metrics and export results
     metrics = calculate_trade_metrics(trades)
-    csv_filename = export_trades_to_csv(trades, config.product_id)
+    csv_filename = export_trades_to_csv(trades, config.product_id, config.leverage)
     
     # Add drawdown metrics
     metrics['max_drawdown'] = max_drawdown * 100  # Convert to percentage
