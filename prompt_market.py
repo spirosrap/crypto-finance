@@ -47,7 +47,9 @@ MODEL_CONFIG = {
     'o1-mini': 'o1-mini',
     'o3-mini': 'o3-mini',  # Add O3 Mini model
     'o3-mini-effort': 'o3-mini-2025-01-31',  # Add new O3 Mini model with effort
+    'o4-mini': 'o4-mini',  # Add O4 Mini model
     'gpt4o': 'gpt-4o',
+    'gpt41': 'gpt-4.1',  # Add GPT-4.1 Turbo model
     'deepseek-r1': 'deepseek/deepseek-r1',  # Add DeepSeek R1 model
     'ollama': 'deepseek-r1:7b',  # Add Ollama model
     'hyperbolic': 'deepseek-ai/DeepSeek-R1',  # Add Hyperbolic model
@@ -395,8 +397,8 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                               use_grok: bool = False, use_gpt45_preview: bool = False, 
                               use_o1: bool = False, use_o1_mini: bool = False, 
                               use_o3_mini: bool = False, use_o3_mini_effort: bool = False, 
-                              use_gpt4o: bool = False, use_deepseek_r1: bool = False, 
-                              use_ollama: bool = False, use_ollama_1_5b: bool = False,
+                              use_o4_mini: bool = False, use_gpt4o: bool = False, use_gpt41: bool = False, 
+                              use_deepseek_r1: bool = False, use_ollama: bool = False, use_ollama_1_5b: bool = False,
                               use_ollama_8b: bool = False, use_ollama_14b: bool = False,
                               use_ollama_32b: bool = False, use_ollama_70b: bool = False,
                               use_ollama_671b: bool = False, use_hyperbolic: bool = False,
@@ -655,8 +657,12 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             model = MODEL_CONFIG['o3-mini']
         elif use_o3_mini_effort:
             model = MODEL_CONFIG['o3-mini-effort']
+        elif use_o4_mini:
+            model = MODEL_CONFIG['o4-mini']
         elif use_gpt4o:
             model = MODEL_CONFIG['gpt4o']
+        elif use_gpt41:
+            model = MODEL_CONFIG['gpt41']
         elif use_deepseek_r1:
             model = MODEL_CONFIG['deepseek-r1']
             
@@ -667,7 +673,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         messages = []
         user_content = f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nTimeframe alignment score: {alignment_score}/100\nBased on this analysis and the timeframe alignment score, provide a trading recommendation."
         
-        if model in [MODEL_CONFIG['o1-mini'], MODEL_CONFIG['o3-mini'], MODEL_CONFIG['o3-mini-effort']]:  # Add o3-mini-effort to the list of models that need combined messages
+        if model in [MODEL_CONFIG['o1-mini'], MODEL_CONFIG['o3-mini'], MODEL_CONFIG['o3-mini-effort'], MODEL_CONFIG['o4-mini']]:  # Add o4-mini to the list of models that need combined messages
             messages = [
                 {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{user_content}"}
             ]
@@ -1604,8 +1610,12 @@ def main():
                         help='Use o3 Mini model for enhanced performance')
     model_group.add_argument('--use_o3_mini_effort', action='store_true',
                         help='Use o3-mini-2025-01-31 model with medium reasoning effort')
+    model_group.add_argument('--use_o4_mini', action='store_true',
+                        help='Use O4-mini model for advanced reasoning')
     model_group.add_argument('--use_gpt4o', action='store_true',
                         help='Use GPT-4o model for advanced analysis')
+    model_group.add_argument('--use_gpt41', action='store_true',
+                        help='Use GPT-4.1 Turbo model for enhanced analysis')
     model_group.add_argument('--use_deepseek_r1', action='store_true',
                         help='Use DeepSeek R1 model via OpenRouter API')
     model_group.add_argument('--use_ollama', action='store_true',
@@ -1638,11 +1648,11 @@ def main():
 
     if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_gpt45_preview, 
             args.use_o1, args.use_o1_mini, args.use_o3_mini, args.use_o3_mini_effort, 
-            args.use_gpt4o, args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
+            args.use_o4_mini, args.use_gpt4o, args.use_gpt41, args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
             args.use_ollama_8b, args.use_ollama_14b, args.use_ollama_32b, args.use_ollama_70b,
             args.use_ollama_671b, args.use_hyperbolic]) > 1:
         print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_gpt45_preview, " +
-              "--use_o1, --use_o1_mini, --use_o3_mini, --use_o3_mini_effort, --use_gpt4o, " +
+              "--use_o1, --use_o1_mini, --use_o3_mini, --use_o3_mini_effort, --use_o4_mini, --use_gpt4o, --use_gpt41, " +
               "--use_deepseek_r1, --use_ollama, --use_ollama_1_5b, --use_ollama_8b, " +
               "--use_ollama_14b, --use_ollama_32b, --use_ollama_70b, --use_ollama_671b, or --use_hyperbolic.")
         exit(1)
@@ -1727,8 +1737,8 @@ def main():
             client, analysis_result['data'], args.product_id, 
             args.use_deepseek, args.use_reasoner, args.use_grok, 
             args.use_gpt45_preview, args.use_o1, args.use_o1_mini, 
-            args.use_o3_mini, args.use_o3_mini_effort, args.use_gpt4o, 
-            args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
+            args.use_o3_mini, args.use_o3_mini_effort, args.use_o4_mini, 
+            args.use_gpt4o, args.use_gpt41, args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
             args.use_ollama_8b, args.use_ollama_14b, args.use_ollama_32b,
             args.use_ollama_70b, args.use_ollama_671b, args.use_hyperbolic,
             alignment_score=alignment_score
