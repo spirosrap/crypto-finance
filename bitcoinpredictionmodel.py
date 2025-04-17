@@ -425,20 +425,39 @@ class BitcoinPredictionModel:
             self.logger.error("No features have been selected. The model may not have been properly trained.")
             return None
 
-        # Create a new DataFrame with only the selected features, filling missing ones with 0
-        # Use float64 dtype to avoid issues with integer/float incompatibility
-        features_selected = pd.DataFrame(0.0, index=features.index, columns=self.selected_features, dtype=np.float64)
-        
-        # Update the features, ensuring all values are converted to float
-        for col in self.selected_features:
-            if col in features.columns:
-                features_selected[col] = features[col].astype(np.float64)
-
-        features_scaled = self.scaler_X.transform(features_selected)
-        
         try:
+            # Create a new DataFrame with only the selected features, filling missing ones with 0
+            # Use float64 dtype to avoid issues with integer/float incompatibility
+            features_selected = pd.DataFrame(0.0, index=features.index, columns=self.selected_features, dtype=np.float64)
+            
+            # Update the features, ensuring all values are converted to float
+            for col in self.selected_features:
+                if col in features.columns:
+                    # Convert to numeric and handle any errors by filling with 0.0
+                    features_selected[col] = pd.to_numeric(features[col], errors='coerce').fillna(0.0).astype(np.float64)
+            
+            # Ensure no NaN or infinity values exist
+            features_selected = features_selected.replace([np.inf, -np.inf], 0.0).fillna(0.0)
+            
+            # Log feature shapes for debugging
+            self.logger.debug(f"Features shape: {features_selected.shape}")
+            self.logger.debug(f"Selected features: {self.selected_features}")
+            
+            # Transform the features
+            features_scaled = self.scaler_X.transform(features_selected)
+            
+            # Make prediction
             predictions_scaled = self.ensemble.predict(features_scaled)
-            return self.scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()
+            
+            # Convert predictions back to original scale
+            predictions = self.scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()
+            
+            return predictions
+            
         except Exception as e:
             self.logger.error(f"Error in prediction: {str(e)}")
-            return None
+            # Return a default prediction (current price) to avoid breaking downstream processes
+            if 'close' in features.columns:
+                self.logger.warning("Using current price as fallback prediction")
+                return np.array([features['close'].iloc[-1]])
+            return np.array([0.0])

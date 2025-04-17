@@ -15,6 +15,7 @@ import numpy.typing as npt
 from enum import Enum
 from time import perf_counter
 from contextlib import contextmanager
+import signal
 
 # Move these error classes to the top, before any class that uses them
 class TechnicalAnalysisError(Exception):
@@ -102,36 +103,48 @@ class TechnicalAnalysis:
 
     def __init__(self, coinbase_service: CoinbaseService, config: Optional[TechnicalAnalysisConfig] = None, candle_interval: str = 'ONE_HOUR', product_id: str = 'BTC-USDC', force_retrain: bool = False):
         """
-        Initialize the TechnicalAnalysis class.
+        Initialize the technical analysis system with Coinbase service and optional configuration.
 
         Args:
-            coinbase_service (CoinbaseService): An instance of the CoinbaseService class.
-            config (Optional[TechnicalAnalysisConfig]): Configuration for the technical analysis.
-            candle_interval (str): The interval for candle data.
-            product_id (str): The product ID to analyze.
-            force_retrain (bool): Whether to force retrain the models.
+            coinbase_service (CoinbaseService): A service instance for fetching Coinbase data
+            config (TechnicalAnalysisConfig, optional): Custom configuration parameters
+            candle_interval (str, optional): The candle interval to use for analysis
+            product_id (str, optional): The product ID to analyze
+            force_retrain (bool, optional): Force ML models to retrain
         """
         self.coinbase_service = coinbase_service
         self.config = config or TechnicalAnalysisConfig()
-        self.signal_history = []
-        self.volatility_history = []
         self.logger = logging.getLogger(__name__)
         self.candle_interval = candle_interval
         self.product_id = product_id
-        self.intervals_per_day = self.calculate_intervals_per_day()
         self.force_retrain = force_retrain
         
-        # Initialize model instances but don't load them yet
-        historical_data = HistoricalData(coinbase_service.client)
-        self.ml_signal = MLSignal(self.logger, historical_data, product_id=self.product_id, granularity=self.candle_interval, force_retrain=force_retrain)
-        self.scaler = StandardScaler()
-        self.bitcoin_prediction_model = BitcoinPredictionModel(coinbase_service, product_id=self.product_id, granularity=self.candle_interval, force_retrain=force_retrain)
-        
-        # Set product-specific parameters
+        # Now that product_id is set, we can set product-specific parameters
         self.set_product_specific_parameters()
+        
+        # Set up models based on product_id and granularity
+        try:
+            # Create historical data service with the client from coinbase_service
+            historical_data = HistoricalData(self.coinbase_service.client)
+            self.ml_signal = MLSignal(self.logger, historical_data, product_id, candle_interval, force_retrain)
+            self.bitcoin_prediction_model = BitcoinPredictionModel(self.coinbase_service, product_id, candle_interval, force_retrain)
+            self._models_loaded = False
+        except Exception as e:
+            self.logger.error(f"Error initializing ML models: {str(e)}")
+            self._models_loaded = False
+            self.ml_signal = None
+            self.bitcoin_prediction_model = None
 
-        # Add signal stability tracking
+        # Calculate intervals per day for this candle interval
+        self.intervals_per_day = self.calculate_intervals_per_day()
+        
+        # Historical volatility tracking
+        self.volatility_history = []
+        self.max_volatility_history = 100  # Keep last 100 volatility readings
+        
+        # Signal stability tracking
         self.last_signal = None
+        self.latest_candles = []
         self.last_signal_time = None
         self.signal_history = []  # Store recent signals
         self.min_signal_duration = 4  # Minimum candles before signal can change
@@ -141,11 +154,63 @@ class TechnicalAnalysis:
         """Ensure both ML models are loaded."""
         if not hasattr(self, '_models_loaded') or not self._models_loaded or self.force_retrain:
             self.logger.info("Loading ML models...")
-            if self.force_retrain:
-                self.logger.info("Force retrain requested, retraining models...")
-            self.ml_signal.load_model()
-            self.bitcoin_prediction_model.load_model()
-            self._models_loaded = True
+            try:
+                if self.force_retrain:
+                    self.logger.info("Force retrain requested, retraining models...")
+                
+                # Context manager for handling timeouts
+                @contextmanager
+                def timeout_handler(timeout_seconds=60):
+                    """Context manager that times out after timeout_seconds."""
+                    def signal_handler(signum, frame):
+                        raise TimeoutError(f"Operation timed out after {timeout_seconds} seconds")
+                    
+                    # Set signal handler
+                    old_handler = signal.getsignal(signal.SIGALRM)
+                    signal.signal(signal.SIGALRM, signal_handler)
+                    
+                    # Set alarm
+                    signal.alarm(timeout_seconds)
+                    
+                    try:
+                        yield
+                    finally:
+                        # Reset alarm and restore old handler
+                        signal.alarm(0)
+                        signal.signal(signal.SIGALRM, old_handler)
+                
+                # Check if ML signal model is available
+                if hasattr(self, 'ml_signal') and self.ml_signal is not None:
+                    try:
+                        with timeout_handler(timeout_seconds=120):  # Allow 2 minutes for model loading
+                            self.logger.info("Loading ML signal model...")
+                            self.ml_signal.load_model()
+                            self.logger.info("ML signal model loaded successfully")
+                    except TimeoutError as te:
+                        self.logger.error(f"Timeout loading ML signal model: {str(te)}")
+                    except Exception as e:
+                        self.logger.error(f"Error loading ML signal model: {str(e)}")
+                else:
+                    self.logger.warning("ML signal model not initialized properly")
+                
+                # Check if Bitcoin prediction model is available
+                if hasattr(self, 'bitcoin_prediction_model') and self.bitcoin_prediction_model is not None:
+                    try:
+                        with timeout_handler(timeout_seconds=120):  # Allow 2 minutes for model loading
+                            self.logger.info("Loading Bitcoin prediction model...")
+                            self.bitcoin_prediction_model.load_model()
+                            self.logger.info("Bitcoin prediction model loaded successfully")
+                    except TimeoutError as te:
+                        self.logger.error(f"Timeout loading Bitcoin prediction model: {str(te)}")
+                    except Exception as e:
+                        self.logger.error(f"Error loading Bitcoin prediction model: {str(e)}")
+                else:
+                    self.logger.warning("Bitcoin prediction model not initialized properly")
+                
+                self._models_loaded = True
+            except Exception as e:
+                self.logger.error(f"Error ensuring models are loaded: {str(e)}")
+                self._models_loaded = False
 
     def set_product_weights(self):
         """Set product-specific signal weights."""
@@ -912,32 +977,63 @@ class TechnicalAnalysis:
 
     def get_bitcoin_prediction_signal(self, candles: List[Dict]) -> int:
         try:
-            self._ensure_models_loaded()
+            if not self._models_loaded or self.bitcoin_prediction_model is None:
+                self.logger.warning("Bitcoin prediction model not loaded. Loading model...")
+                try:
+                    self._ensure_models_loaded()
+                except Exception as e:
+                    self.logger.error(f"Error loading prediction model: {str(e)}")
+                    return 0  # Neutral signal if model can't be loaded
+            
             # Prepare the data for prediction
-            df, X, _ = self.bitcoin_prediction_model.prepare_data(candles)
-            
-            # Make prediction
-            prediction = self.bitcoin_prediction_model.predict(X.iloc[-1:])
-            
-            # Convert prediction to signal
-            current_price = float(candles[-1]['close'])
-            predicted_price = prediction[0]
-            
-            if predicted_price > current_price * 1.01:  # 1% increase
-                return 1  # Buy signal
-            elif predicted_price < current_price * 0.99:  # 1% decrease
-                return -1  # Sell signal
-            else:
-                return 0  # Hold signal
+            self.logger.debug("Preparing data for Bitcoin prediction")
+            try:
+                df, X, _ = self.bitcoin_prediction_model.prepare_data(candles)
+                
+                if X is None or df is None or X.empty or df.empty:
+                    self.logger.error("Failed to prepare data for prediction")
+                    return 0
+                
+                # Log shape and data types for debugging
+                self.logger.debug(f"X shape: {X.shape}, dtypes: {X.dtypes}")
+                
+                # Make prediction
+                self.logger.debug("Making Bitcoin price prediction")
+                prediction = self.bitcoin_prediction_model.predict(X.iloc[-1:])
+                
+                if prediction is None or len(prediction) == 0:
+                    self.logger.error("Received empty prediction")
+                    return 0
+                
+                # Convert prediction to signal
+                current_price = float(candles[-1]['close'])
+                predicted_price = float(prediction[0])  # Ensure it's a simple float
+                
+                self.logger.debug(f"Current price: {current_price}, Predicted price: {predicted_price}")
+                
+                if predicted_price > current_price * 1.01:  # 1% increase
+                    return 1  # Buy signal
+                elif predicted_price < current_price * 0.99:  # 1% decrease
+                    return -1  # Sell signal
+                else:
+                    return 0  # Hold signal
+                    
+            except Exception as e:
+                self.logger.error(f"Error in prediction data preparation: {str(e)}")
+                return 0
+                
         except Exception as e:
             self.logger.error(f"Error in BitcoinPredictionModel prediction: {str(e)}. Returning neutral signal.")
-            return 0
+            return 0  # Neutral signal
 
     def get_combined_signal(self, candles: List[Dict]) -> SignalResult:
         """
         Generate a comprehensive trading signal with confidence level.
         """
         try:
+            # Store candles for error recovery
+            self.latest_candles = candles
+            
             # Calculate all indicators
             indicators = self._calculate_all_indicators(candles)
             
@@ -1190,53 +1286,87 @@ class TechnicalAnalysis:
     def _calculate_weighted_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
         """Calculate weighted signal with stability checks."""
         try:
-            # Calculate base signal (existing code)
-            signal_strength = self._calculate_base_signal(indicators, market_condition)
-            
-            # Get current time
-            current_time = time.time()
-            
-            # Check if we have a previous signal
-            if self.last_signal is not None and self.last_signal_time is not None:
-                # Calculate time since last signal change
-                time_since_last_signal = current_time - self.last_signal_time
+            # Create the same timeout handler as in _ensure_models_loaded
+            @contextmanager
+            def timeout_handler(timeout_seconds=30):
+                """Context manager that times out after timeout_seconds."""
+                def signal_handler(signum, frame):
+                    raise TimeoutError(f"Operation timed out after {timeout_seconds} seconds")
                 
-                # If not enough time has passed, bias towards previous signal
-                if time_since_last_signal < (self.min_signal_duration * self.get_candle_duration()):
-                    # Bias towards previous signal
-                    if (signal_strength > 0 and self.last_signal < 0) or (signal_strength < 0 and self.last_signal > 0):
-                        # Potential signal flip - require stronger confirmation
-                        signal_strength *= 0.5  # Reduce strength of new opposing signal
+                # Set signal handler
+                old_handler = signal.getsignal(signal.SIGALRM)
+                signal.signal(signal.SIGALRM, signal_handler)
+                
+                # Set alarm
+                signal.alarm(timeout_seconds)
+                
+                try:
+                    yield
+                finally:
+                    # Reset alarm and restore old handler
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
+            
+            try:
+                with timeout_handler(timeout_seconds=30):  # Increased to 30 seconds
+                    # Calculate base signal
+                    signal_strength = self._calculate_base_signal(indicators, market_condition)
+                    
+                    # Get current time
+                    current_time = time.time()
+                    
+                    # Check if we have a previous signal
+                    if self.last_signal is not None and self.last_signal_time is not None:
+                        # Calculate time since last signal change
+                        time_since_last_signal = current_time - self.last_signal_time
                         
-            # Add to signal history
-            self.signal_history.append({
-                'time': current_time,
-                'strength': signal_strength
-            })
-            
-            # Keep only recent history
-            self.signal_history = self.signal_history[-self.trend_confirmation_period:]
-            
-            # Check for trend confirmation
-            if len(self.signal_history) >= self.trend_confirmation_period:
-                recent_signals = [s['strength'] for s in self.signal_history]
+                        # If not enough time has passed, bias towards previous signal
+                        if time_since_last_signal < (self.min_signal_duration * self.get_candle_duration()):
+                            # Bias towards previous signal
+                            if (signal_strength > 0 and self.last_signal < 0) or (signal_strength < 0 and self.last_signal > 0):
+                                # Potential signal flip - require stronger confirmation
+                                signal_strength *= 0.5  # Reduce strength of new opposing signal
+                                
+                    # Add to signal history
+                    self.signal_history.append({
+                        'time': current_time,
+                        'strength': signal_strength
+                    })
+                    
+                    # Keep only recent history
+                    self.signal_history = self.signal_history[-self.trend_confirmation_period:]
+                    
+                    # Check for trend confirmation
+                    if len(self.signal_history) >= self.trend_confirmation_period:
+                        recent_signals = [s['strength'] for s in self.signal_history]
+                        
+                        # Check if all recent signals are in the same direction
+                        if all(s > 0 for s in recent_signals) or all(s < 0 for s in recent_signals):
+                            # Trend is confirmed - strengthen signal
+                            signal_strength *= 1.2
+                        else:
+                            # Mixed signals - reduce strength
+                            signal_strength *= 0.8
+                    
+                    # Update last signal tracking
+                    self.last_signal = signal_strength
+                    self.last_signal_time = current_time
+                    
+                    return signal_strength
                 
-                # Check if all recent signals are in the same direction
-                if all(s > 0 for s in recent_signals) or all(s < 0 for s in recent_signals):
-                    # Trend is confirmed - strengthen signal
-                    signal_strength *= 1.2
-                else:
-                    # Mixed signals - reduce strength
-                    signal_strength *= 0.8
-            
-            # Update last signal tracking
-            self.last_signal = signal_strength
-            self.last_signal_time = current_time
-            
-            return signal_strength
-            
+            except TimeoutError:
+                self.logger.error("Analysis timed out")
+                # Return the last known signal or a neutral signal
+                if self.last_signal is not None:
+                    self.logger.warning("Using previous signal due to timeout")
+                    return self.last_signal
+                return 0.0
+                
         except Exception as e:
             self.logger.error(f"Error calculating weighted signal: {str(e)}")
+            if self.last_signal is not None:
+                self.logger.warning("Using previous signal due to error")
+                return self.last_signal
             return 0.0
 
     def get_candle_duration(self) -> int:
@@ -1255,16 +1385,125 @@ class TechnicalAnalysis:
 
     def _calculate_base_signal(self, indicators: Dict[str, float], market_condition: str) -> float:
         """Calculate the base signal without stability checks."""
-        # Ensure models are loaded before calculating signal
-        self._ensure_models_loaded()
-        
-        # Move the original signal calculation logic here
-        weights = self.set_product_weights()
-        signal_strength = 0.0
-        
-        # ... (existing indicator calculations) ...
-        
-        return signal_strength
+        try:
+            # Get product-specific weights
+            weights = self.set_product_weights()
+            signal_strength = 0.0
+            
+            # Technical indicators signaling
+            # RSI
+            if 'rsi' in indicators:
+                rsi = indicators['rsi']
+                rsi_signal = ((rsi - 50) / 25) * weights['rsi']  # Normalize to -1 to 1 range
+                signal_strength += rsi_signal
+                
+            # MACD
+            if all(k in indicators for k in ['macd', 'macd_signal', 'macd_histogram']):
+                macd = indicators['macd']
+                macd_signal = indicators['macd_signal']
+                histogram = indicators['macd_histogram']
+                
+                # Normalize histogram to -1 to 1 range
+                norm_factor = max(0.001, abs(macd))
+                macd_signal_val = (histogram / norm_factor) * weights['macd']
+                signal_strength += macd_signal_val
+                
+            # Bollinger Bands
+            if all(k in indicators for k in ['bollinger_upper', 'bollinger_middle', 'bollinger_lower']) and 'current_price' in indicators:
+                current_price = indicators['current_price']
+                bb_upper = indicators['bollinger_upper']
+                bb_lower = indicators['bollinger_lower']
+                bb_middle = indicators['bollinger_middle']
+                
+                if bb_upper != bb_lower:  # Prevent division by zero
+                    bb_position = (current_price - bb_lower) / (bb_upper - bb_lower)
+                    bb_signal = (0.5 - bb_position) * 2 * weights['bollinger']  # Normalize to -1 to 1
+                    signal_strength += bb_signal
+                    
+            # Add ML model signal if enabled and working
+            if weights['ml_model'] > 0:
+                ml_model_weight_applied = False
+                try:
+                    # Try to ensure models are loaded, but don't crash if it fails
+                    try:
+                        if not self._models_loaded:
+                            self._ensure_models_loaded()
+                    except:
+                        pass
+                        
+                    if hasattr(self, 'ml_signal') and self.ml_signal is not None:
+                        ml_signal = 0.0
+                        try:
+                            if self.latest_candles and len(self.latest_candles) > 0:
+                                ml_signal = self.ml_signal.predict_signal(self.latest_candles)
+                                self.logger.debug(f"ML signal: {ml_signal}")
+                                signal_strength += weights['ml_model'] * ml_signal
+                                ml_model_weight_applied = True
+                        except Exception as ml_err:
+                            self.logger.error(f"Error getting ML prediction: {str(ml_err)}")
+                except Exception as model_err:
+                    self.logger.error(f"Error loading ML models: {str(model_err)}")
+                
+                # If ML model failed, add more weight to traditional indicators
+                if not ml_model_weight_applied and 'rsi' in indicators:
+                    self.logger.info("Compensating for missing ML signal with traditional indicators")
+                    # Add the ML model weight to RSI and MACD instead
+                    additional_rsi_weight = weights['ml_model'] * 0.5
+                    rsi = indicators['rsi']
+                    additional_rsi_signal = ((rsi - 50) / 25) * additional_rsi_weight
+                    signal_strength += additional_rsi_signal
+            
+            # Add BitcoinPredictionModel signal if enabled and working
+            if weights['bitcoin_prediction'] > 0:
+                bitcoin_model_weight_applied = False
+                try:
+                    try:
+                        if not self._models_loaded:
+                            self._ensure_models_loaded()
+                    except:
+                        pass
+                        
+                    if hasattr(self, 'bitcoin_prediction_model') and self.bitcoin_prediction_model is not None:
+                        bitcoin_signal = 0.0
+                        try:
+                            if self.latest_candles and len(self.latest_candles) > 0:
+                                bitcoin_signal = self.get_bitcoin_prediction_signal(self.latest_candles)
+                                self.logger.debug(f"Bitcoin prediction signal: {bitcoin_signal}")
+                                signal_strength += weights['bitcoin_prediction'] * bitcoin_signal
+                                bitcoin_model_weight_applied = True
+                        except Exception as btc_err:
+                            self.logger.error(f"Error getting Bitcoin prediction: {str(btc_err)}")
+                except Exception as model_err:
+                    self.logger.error(f"Error loading Bitcoin prediction model: {str(model_err)}")
+                
+                # If Bitcoin model failed, add more weight to traditional indicators
+                if not bitcoin_model_weight_applied and 'macd' in indicators and 'macd_signal' in indicators and 'macd_histogram' in indicators:
+                    self.logger.info("Compensating for missing Bitcoin prediction with traditional indicators")
+                    # Add the Bitcoin model weight to MACD instead
+                    additional_macd_weight = weights['bitcoin_prediction'] * 0.5
+                    macd = indicators['macd']
+                    macd_signal = indicators['macd_signal']
+                    histogram = indicators['macd_histogram']
+                    
+                    # Normalize histogram to -1 to 1 range
+                    norm_factor = max(0.001, abs(macd))
+                    additional_macd_signal = (histogram / norm_factor) * additional_macd_weight
+                    signal_strength += additional_macd_signal
+                    
+            # Adjust signal based on market conditions
+            if market_condition == "Bull Market":
+                signal_strength *= 1.2  # Amplify in bull markets
+            elif market_condition == "Bear Market":
+                signal_strength *= 0.8  # Reduce in bear markets
+                
+            # Ensure signal strength is within bounds (-10 to 10)
+            signal_strength = max(-10.0, min(10.0, signal_strength))
+            
+            return signal_strength
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating base signal: {str(e)}")
+            return 0.0  # Neutral signal in case of error
 
     def _determine_signal_type(self, signal_strength: float) -> SignalType:
         """
