@@ -6,6 +6,10 @@ def load_and_process_data(file_path):
     # Read the CSV file
     df = pd.read_csv(file_path)
     
+    # Convert 'Exit Trade' and 'ENTRY' to numeric
+    df['Exit Trade'] = pd.to_numeric(df['Exit Trade'], errors='coerce')
+    df['ENTRY'] = pd.to_numeric(df['ENTRY'], errors='coerce')
+    
     # Calculate PnL for each trade
     df['PnL'] = (df['Exit Trade'] - df['ENTRY']) / df['ENTRY'] * 100
     
@@ -60,7 +64,7 @@ def find_optimal_threshold(results_df):
 
 def main():
     # Load and process data
-    df = load_and_process_data('backtest_trades_BTC-USDC_20250409_110355.csv')
+    df = load_and_process_data('automated_trades.csv')
     
     # Analyze volume buckets
     results = analyze_volume_buckets(df)
