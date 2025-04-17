@@ -85,14 +85,16 @@ class HistoricalData:
 
     def _convert_candle_to_dict(self, candle) -> dict:
         """Convert a Candle object to a dictionary."""
-        return {
+        candle_dict = {
             'start': candle.start,
+            'time': candle.start,  # Add time field for compatibility
             'low': candle.low,
             'high': candle.high,
             'open': candle.open,
             'close': candle.close,
             'volume': candle.volume
         }
+        return candle_dict
 
     def _cache_data(self, cache_key: str, candles: List[dict]):
         """Cache the candle data to a file."""

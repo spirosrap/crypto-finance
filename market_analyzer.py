@@ -84,28 +84,59 @@ class MLModel:
             
     def prepare_features(self, candles: List[Dict]) -> np.ndarray:
         """Prepare features for ML model."""
-        df = pd.DataFrame(candles)
-        
-        # Technical indicators as features
-        features = []
-        prices = df['close'].values
-        volumes = df['volume'].values
-        
-        # Price-based features
-        features.append(np.gradient(prices))  # Price momentum
-        features.append(np.std(prices[-20:]))  # Volatility
-        
-        # Volume-based features
-        features.append(np.gradient(volumes))  # Volume momentum
-        features.append(volumes[-1] / np.mean(volumes[-20:]))  # Relative volume
-        
-        # Trend features
-        sma_20 = np.mean(prices[-20:])
-        sma_50 = np.mean(prices[-50:])
-        features.append((prices[-1] - sma_20) / sma_20)  # Price vs SMA20
-        features.append((sma_20 - sma_50) / sma_50)  # SMA20 vs SMA50
-        
-        return np.array(features).reshape(1, -1)
+        try:
+            # Make a deep copy to avoid modifying the original candles
+            processed_candles = []
+            for candle in candles:
+                candle_copy = candle.copy()
+                # Ensure we have all required keys with proper mapping
+                if 'start' not in candle_copy and 'time' in candle_copy:
+                    candle_copy['start'] = candle_copy['time']
+                # Ensure numeric values
+                for key in ['close', 'high', 'low', 'open', 'volume']:
+                    if key in candle_copy:
+                        candle_copy[key] = float(candle_copy[key])
+                processed_candles.append(candle_copy)
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(processed_candles)
+            
+            # Ensure we have all required columns
+            required_cols = ['close', 'volume']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            if missing_cols:
+                raise ValueError(f"Required columns {missing_cols} not found in candle data. Available columns: {df.columns.tolist()}")
+            
+            # Technical indicators as features
+            features = []
+            prices = df['close'].values
+            volumes = df['volume'].values
+            
+            # Ensure we have enough data
+            if len(prices) < 50:
+                raise ValueError(f"Not enough price data: got {len(prices)} candles, need at least 50")
+            
+            # Price-based features - store scalar values only
+            gradient_prices = np.gradient(prices)
+            features.append(np.mean(gradient_prices))  # Average price momentum
+            features.append(np.std(prices[-20:]))  # Volatility
+            
+            # Volume-based features - store scalar values only
+            gradient_volumes = np.gradient(volumes)
+            features.append(np.mean(gradient_volumes))  # Average volume momentum
+            features.append(volumes[-1] / np.mean(volumes[-20:]) if np.mean(volumes[-20:]) > 0 else 1.0)  # Relative volume
+            
+            # Trend features
+            sma_20 = np.mean(prices[-20:])
+            sma_50 = np.mean(prices[-50:])
+            features.append((prices[-1] - sma_20) / sma_20 if sma_20 > 0 else 0)  # Price vs SMA20
+            features.append((sma_20 - sma_50) / sma_50 if sma_50 > 0 else 0)  # SMA20 vs SMA50
+            
+            return np.array(features).reshape(1, -1)
+        except Exception as e:
+            logging.error(f"Error in prepare_features: {str(e)}")
+            # Return a default feature set (all zeros) in case of error
+            return np.zeros((1, 6))
         
     def train(self, candles: List[Dict], labels: List[int]):
         """Train the ML model."""
@@ -115,15 +146,26 @@ class MLModel:
         
     def predict(self, candles: List[Dict]) -> float:
         """Predict market direction."""
-        if self.model is None:
-            return 0.0
+        try:
+            if self.model is None:
+                return 0.0
             
-        X = self.prepare_features(candles)
-        X_scaled = self.scaler.transform(X)
-        probabilities = self.model.predict_proba(X_scaled)[0]
-        
-        # Convert probabilities to signal strength (-1 to 1)
-        return (probabilities[1] - probabilities[0]) * 2 - 1
+            # Initialize the scaler if it hasn't been fitted yet
+            if not hasattr(self.scaler, 'mean_') or self.scaler.mean_ is None:
+                # If not fitted, use a simple identity transform
+                X = self.prepare_features(candles)
+                return 0.0  # Return neutral prediction
+            
+            X = self.prepare_features(candles)
+            X_scaled = self.scaler.transform(X)
+            probabilities = self.model.predict_proba(X_scaled)[0]
+            
+            # Convert probabilities to signal strength (-1 to 1)
+            return (probabilities[1] - probabilities[0]) * 2 - 1
+        except Exception as e:
+            logging.error(f"Error getting ML prediction: {str(e)}")
+            # Return neutral prediction in case of error
+            return 0.0
         
     def save_model(self, path: str):
         """Save model to file."""
@@ -1433,11 +1475,24 @@ class MarketAnalyzer:
         return formatted_candles
 
     def _generate_recommendation(self, signal_type: SignalType) -> str:
-        """Generate a detailed trading recommendation including consolidation patterns and bias."""
         try:
-            if not self._current_candles:
-                return "No market data available for recommendation"
+            # Ensure we have valid candles data
+            if not self._current_candles or len(self._current_candles) < 20:
+                self.logger.error(f"Insufficient candle data for recommendation: only {len(self._current_candles) if self._current_candles else 0} candles available")
+                return "Insufficient market data available for meaningful recommendation."
+                
+            # Preprocess candles to ensure consistent structure
+            preprocessed_candles = []
+            for candle in self._current_candles:
+                candle_copy = candle.copy()
+                # Map 'time' to 'start' if needed
+                if 'time' in candle_copy and 'start' not in candle_copy:
+                    candle_copy['start'] = candle_copy['time']
+                preprocessed_candles.append(candle_copy)
             
+            # Use preprocessed candles for analysis
+            self._current_candles = preprocessed_candles
+        
             # Get current price and indicators
             current_price = float(self._current_candles[-1]['close'])
             atr = self.technical_analysis.compute_atr(self._current_candles)
@@ -1446,12 +1501,30 @@ class MarketAnalyzer:
             
             # Calculate market bias with enhanced indicators
             rsi = self.technical_analysis.compute_rsi(self.product_id, self._current_candles)
-            macd, signal, histogram = self.technical_analysis.compute_macd(self.product_id, self._current_candles)
+            
+            # Safe MACD calculation with fallback
+            try:
+                macd, signal, histogram = self.technical_analysis.compute_macd(self.product_id, self._current_candles)
+            except Exception as e:
+                self.logger.warning(f"MACD calculation failed: {e}. Using neutral values.")
+                macd, signal, histogram = 0.0, 0.0, 0.0
+            
             adx_value, trend_direction = self.technical_analysis.get_trend_strength(self._current_candles)
             
-            # Get additional indicators for better market view
-            stoch_k, stoch_d = self.technical_analysis.compute_stochastic(self._current_candles, 14, 3)
-            bb_upper, bb_middle, bb_lower = self.technical_analysis.compute_bollinger_bands(self._current_candles)
+            # Get additional indicators for better market view - safe calculation with fallback
+            try:
+                stoch_k, stoch_d = self.technical_analysis.compute_stochastic_oscillator(self._current_candles, 14, 3)
+            except Exception as e:
+                self.logger.warning(f"Stochastic oscillator calculation failed: {e}. Using neutral values.")
+                stoch_k, stoch_d = 50.0, 50.0  # Neutral values
+                
+            try:
+                bb_upper, bb_middle, bb_lower = self.technical_analysis.compute_bollinger_bands(self._current_candles)
+            except Exception as e:
+                self.logger.warning(f"Bollinger bands calculation failed: {e}. Using price-based values.")
+                bb_middle = current_price
+                bb_upper = current_price * 1.02  # 2% above
+                bb_lower = current_price * 0.98  # 2% below
             
             # Calculate price change over different periods
             prices = self.technical_analysis.extract_prices(self._current_candles)

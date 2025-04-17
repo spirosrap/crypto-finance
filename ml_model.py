@@ -20,6 +20,7 @@ from sklearn.inspection import permutation_importance
 import matplotlib.pyplot as plt
 from sklearn.feature_selection import SelectFromModel
 from sklearn.inspection import permutation_importance
+import time
 
 # Add these constants near the top of the file
 GRANULARITY_SETTINGS = {
@@ -148,14 +149,36 @@ class MLSignal:
             # Convert the list of dictionaries to a list of lists for DataFrame creation
             candle_data = []
             for i, candle in enumerate(candles):
-                candle_data.append([
-                    float(candle['close']),
-                    float(candle['high']),
-                    float(candle['low']),
-                    float(candle['volume']),
-                    float(candle['open']),
-                    candle['start']
-                ])
+                # Create a copy to avoid modifying original
+                candle_copy = candle.copy()
+                
+                # Map 'time' to 'start' if needed
+                if 'time' in candle_copy and 'start' not in candle_copy:
+                    candle_copy['start'] = candle_copy['time']
+                
+                # Generate timestamp if 'start' is missing
+                if 'start' not in candle_copy:
+                    if i == 0:
+                        # For first candle, use current time
+                        candle_copy['start'] = time.time()
+                    else:
+                        # For subsequent candles, increment based on last candle
+                        last_start = candle_data[-1][5]  # Get the timestamp from the last processed candle
+                        candle_copy['start'] = last_start + 3600  # Add 1 hour (adjust based on granularity)
+                
+                # Ensure all numeric values are properly parsed
+                try:
+                    close_val = float(candle_copy.get('close', 0))
+                    high_val = float(candle_copy.get('high', 0))
+                    low_val = float(candle_copy.get('low', 0))
+                    volume_val = float(candle_copy.get('volume', 0))
+                    open_val = float(candle_copy.get('open', 0))
+                    start_val = candle_copy['start']
+                    
+                    candle_data.append([close_val, high_val, low_val, volume_val, open_val, start_val])
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(f"Skipping candle {i} due to value conversion error: {e}")
+                    continue
             
             # print("Creating DataFrame...")
             df = pd.DataFrame(
@@ -236,7 +259,8 @@ class MLSignal:
         
         except Exception as e:
             self.logger.error(f"Error in prepare_features: {str(e)}")
-            raise  # Re-raise the exception to see the full traceback
+            # Return empty arrays instead of raising to prevent cascade failures
+            return np.array([]), np.array([])
 
     def train_model(self):
         # Get historical data for the specified number of days

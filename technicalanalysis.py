@@ -372,65 +372,58 @@ class TechnicalAnalysis:
 
     # MACD Methods
     def compute_macd(self, product_id: str, candles: List[Dict]) -> Tuple[float, float, float]:
-        """Compute MACD values."""
+        """
+        Calculate MACD (Moving Average Convergence Divergence) for given candles.
+        
+        Returns:
+            Tuple of (MACD, Signal, Histogram)
+        """
         try:
-            prices = self.extract_prices(candles)
-            self.logger.debug(f"Number of prices for MACD calculation: {len(prices)}")
+            required_periods = self.config.macd_slow + self.config.macd_signal + 1
+            if len(candles) < required_periods:
+                self.logger.error(f"Insufficient data for MACD calculation. Need {required_periods} periods, got {len(candles)}")
+                
+                # If we have enough data for a simple EMA calculation, use a simplified approach
+                if len(candles) >= 5:
+                    prices = np.array([float(candle['close']) for candle in candles])
+                    short_ema = np.mean(prices[-3:])  # Simple short period average
+                    long_ema = np.mean(prices)        # Simple long period average
+                    macd_line = short_ema - long_ema
+                    signal_line = macd_line  # Without enough data, use MACD as signal
+                    histogram = 0.0
+                    
+                    self.logger.info(f"Using simplified MACD calculation due to insufficient data")
+                    return macd_line, signal_line, histogram
+                else:
+                    return 0.0, 0.0, 0.0  # Return neutral values when too little data
             
-            # MACD requires at least slow period + signal period candles
-            min_periods = self.config.macd_slow + self.config.macd_signal
-            if len(prices) < min_periods:
-                self.logger.error(f"Insufficient data for MACD calculation. Need {min_periods} periods, got {len(prices)}")
-                raise InsufficientDataError(f"Need at least {min_periods} candles for MACD calculation")
-            
-            # Convert prices to numpy array and check for valid values
-            prices_array = np.array(prices, dtype=float)
-            if np.any(np.isnan(prices_array)) or np.any(np.isinf(prices_array)):
-                self.logger.error("Invalid price values detected in MACD calculation")
-                raise ValueError("Invalid price values in data")
-            
-            # Log some price statistics for debugging
-            self.logger.debug(f"Price range: {min(prices_array)} to {max(prices_array)}")
+            prices = np.array([float(candle['close']) for candle in candles])
             
             # Calculate EMAs
-            ema_fast = talib.EMA(prices_array, timeperiod=self.config.macd_fast)
-            ema_slow = talib.EMA(prices_array, timeperiod=self.config.macd_slow)
+            ema_fast = talib.EMA(prices, timeperiod=self.config.macd_fast)
+            ema_slow = talib.EMA(prices, timeperiod=self.config.macd_slow)
             
-            # Calculate MACD line (the absolute difference between EMAs)
+            # MACD Line
             macd_line = ema_fast - ema_slow
             
-            # Calculate signal line
+            # Signal Line
             signal_line = talib.EMA(macd_line, timeperiod=self.config.macd_signal)
             
-            # Calculate histogram
+            # Histogram
             histogram = macd_line - signal_line
             
-            # Get the last valid values
-            macd_value = float(macd_line[-1])
-            signal_value = float(signal_line[-1])
-            histogram_value = float(histogram[-1])
+            # Get the most recent values
+            macd = macd_line[-1]
+            signal = signal_line[-1]
+            hist = histogram[-1]
             
-            # Log raw values for debugging
-            self.logger.debug(f"Last price: {prices_array[-1]}")
-            self.logger.debug(f"Fast EMA: {ema_fast[-1]}")
-            self.logger.debug(f"Slow EMA: {ema_slow[-1]}")
-            self.logger.debug(f"Raw MACD values - Last 5 entries:")
-            self.logger.debug(f"MACD: {macd_line[-5:]}")
-            self.logger.debug(f"Signal: {signal_line[-5:]}")
-            self.logger.debug(f"Histogram: {histogram[-5:]}")
+            self.logger.info(f"Final MACD values - MACD: {macd:.2f}, Signal: {signal:.2f}, Histogram: {hist:.2f}")
             
-            # Scale the values to be more meaningful (as a percentage of price)
-            price_scale = prices_array[-1] * 0.01  # 1% of current price as scale
-            macd_value = macd_value / price_scale
-            signal_value = signal_value / price_scale
-            histogram_value = histogram_value / price_scale
-            
-            self.logger.info(f"Final MACD values - MACD: {macd_value:.2f}, Signal: {signal_value:.2f}, Histogram: {histogram_value:.2f}")
-            return macd_value, signal_value, histogram_value
+            return macd, signal, hist
             
         except Exception as e:
             self.logger.error(f"Error computing MACD: {str(e)}")
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0  # Return neutral values
 
     def generate_macd_signal(self, macd: float, signal: float, histogram: float) -> str:
         if macd > signal or histogram >= 0:
@@ -506,6 +499,7 @@ class TechnicalAnalysis:
 
     # Stochastic Oscillator Methods
     def compute_stochastic_oscillator(self, candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
+        """Calculate the stochastic oscillator."""
         high = self.extract_prices(candles, 'high')
         low = self.extract_prices(candles, 'low')
         close = self.extract_prices(candles)
@@ -513,6 +507,11 @@ class TechnicalAnalysis:
         k, d = talib.STOCH(high, low, close, fastk_period=k_period, slowk_period=d_period, slowd_period=d_period)
         
         return k[-1], d[-1]
+
+    def compute_stochastic(self, candles: List[Dict], k_period: int = 14, d_period: int = 3) -> Tuple[float, float]:
+        """Alias for compute_stochastic_oscillator for backward compatibility."""
+        self.logger.warning("compute_stochastic is deprecated, use compute_stochastic_oscillator instead")
+        return self.compute_stochastic_oscillator(candles, k_period, d_period)
 
     def evaluate_stochastic_signal(self, candles: List[Dict]) -> int:
         stochastic_k, stochastic_d = self.compute_stochastic_oscillator(candles)
@@ -983,16 +982,32 @@ class TechnicalAnalysis:
                     self._ensure_models_loaded()
                 except Exception as e:
                     self.logger.error(f"Error loading prediction model: {str(e)}")
+                    self.logger.info("Compensating for missing ML signal with traditional indicators")
                     return 0  # Neutral signal if model can't be loaded
+            
+            # Ensure we have enough data for analysis
+            if len(candles) < 50:  # Need at least 50 candles for reliable prediction
+                self.logger.warning(f"Insufficient candle data for prediction: {len(candles)} candles")
+                return self.get_fallback_signal(candles)
+            
+            # Make a deep copy of candles to avoid modifying the original
+            preprocessed_candles = []
+            for candle in candles:
+                candle_copy = candle.copy()
+                # Map 'time' to 'start' if needed
+                if 'time' in candle_copy and 'start' not in candle_copy:
+                    candle_copy['start'] = candle_copy['time']
+                preprocessed_candles.append(candle_copy)
             
             # Prepare the data for prediction
             self.logger.debug("Preparing data for Bitcoin prediction")
             try:
-                df, X, _ = self.bitcoin_prediction_model.prepare_data(candles)
+                df, X, _ = self.bitcoin_prediction_model.prepare_data(preprocessed_candles)
                 
                 if X is None or df is None or X.empty or df.empty:
                     self.logger.error("Failed to prepare data for prediction")
-                    return 0
+                    self.logger.info("Compensating for missing ML signal with traditional indicators")
+                    return self.get_fallback_signal(candles)
                 
                 # Log shape and data types for debugging
                 self.logger.debug(f"X shape: {X.shape}, dtypes: {X.dtypes}")
@@ -1003,7 +1018,8 @@ class TechnicalAnalysis:
                 
                 if prediction is None or len(prediction) == 0:
                     self.logger.error("Received empty prediction")
-                    return 0
+                    self.logger.info("Compensating for missing ML signal with traditional indicators")
+                    return self.get_fallback_signal(candles)
                 
                 # Convert prediction to signal
                 current_price = float(candles[-1]['close'])
@@ -1019,12 +1035,59 @@ class TechnicalAnalysis:
                     return 0  # Hold signal
                     
             except Exception as e:
-                self.logger.error(f"Error in prediction data preparation: {str(e)}")
-                return 0
+                self.logger.error(f"Error in prepare_features: {str(e)}")
+                self.logger.info("Compensating for missing ML signal with traditional indicators")
+                return self.get_fallback_signal(candles)
                 
         except Exception as e:
             self.logger.error(f"Error in BitcoinPredictionModel prediction: {str(e)}. Returning neutral signal.")
-            return 0  # Neutral signal
+            self.logger.info("Compensating for missing ML signal with traditional indicators")
+            return self.get_fallback_signal(candles)
+            
+    def get_fallback_signal(self, candles: List[Dict]) -> int:
+        """Generate a fallback signal based on traditional indicators when ML prediction fails."""
+        try:
+            # Make sure we have enough candles for analysis
+            if len(candles) < 30:
+                self.logger.warning(f"Insufficient candles for fallback signal: {len(candles)}")
+                return 0  # Neutral signal with very limited data
+                
+            # Use RSI as a primary fallback if possible
+            try:
+                rsi = self.compute_rsi(self.product_id, candles)
+                
+                # Simple RSI-based signal
+                if rsi < 30:  # Oversold
+                    return 1  # Buy signal
+                elif rsi > 70:  # Overbought
+                    return -1  # Sell signal
+            except Exception as e:
+                self.logger.error(f"Error computing RSI for fallback: {str(e)}")
+            
+            # If RSI fails, try a simple moving average strategy
+            try:
+                prices = [float(candle['close']) for candle in candles]
+                if len(prices) < 20:
+                    return 0  # Not enough data for MA
+                    
+                # Calculate short and long-term moving averages
+                short_ma = sum(prices[-5:]) / 5  # 5-period MA
+                long_ma = sum(prices[-20:]) / 20  # 20-period MA
+                
+                # Generate signal based on MA crossover
+                if short_ma > long_ma:
+                    return 1  # Bullish
+                elif short_ma < long_ma:
+                    return -1  # Bearish
+            except Exception as e:
+                self.logger.error(f"Error computing MA for fallback: {str(e)}")
+            
+            # Default to neutral signal if all else fails
+            return 0
+            
+        except Exception as e:
+            self.logger.error(f"Error generating fallback signal: {str(e)}")
+            return 0  # Neutral as last resort
 
     def get_combined_signal(self, candles: List[Dict]) -> SignalResult:
         """

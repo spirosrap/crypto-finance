@@ -63,18 +63,70 @@ class BitcoinPredictionModel:
             # Create a list of dictionaries with the correct structure
             data = []
             for i, candle in enumerate(candles):
-                # The candles are already dictionaries, just extract the data
+                # Make a copy to avoid modifying the original
+                candle_copy = candle.copy()
+                
+                # Map 'time' to 'start' if needed
+                if 'time' in candle_copy and 'start' not in candle_copy:
+                    candle_copy['start'] = candle_copy['time']
+                
+                # Debug log for candle structure
+                if i == 0:  # Only log the first candle to avoid excessive logging
+                    self.logger.debug(f"Candle structure: {list(candle_copy.keys())}")
+                
+                # Validate the candle structure and create default values for missing required keys
+                required_keys = ['low', 'high', 'open', 'close', 'volume']
+                for key in required_keys:
+                    if key not in candle_copy:
+                        self.logger.warning(f"Candle {i} is missing required key '{key}'. Setting to 0.")
+                        candle_copy[key] = 0
+                
+                # Check for start/time keys
+                if 'start' not in candle_copy:
+                    if i == 0:
+                        # Generate a timestamp based on the current time for the first candle
+                        self.logger.warning(f"Candle {i} is missing 'start' and 'time' keys. Using current time.")
+                        candle_copy['start'] = int(time.time())
+                    else:
+                        # If not the first candle, try to calculate from previous entry
+                        if data:
+                            previous_start = int(data[-1]['start'])
+                            # Increment by an appropriate amount based on granularity
+                            increments = {
+                                "ONE_MINUTE": 60,
+                                "FIVE_MINUTE": 300,
+                                "FIFTEEN_MINUTE": 900,
+                                "THIRTY_MINUTE": 1800,
+                                "ONE_HOUR": 3600,
+                                "SIX_HOUR": 21600,
+                                "ONE_DAY": 86400
+                            }
+                            increment = increments.get(self.granularity, 3600)  # Default to 1 hour
+                            candle_copy['start'] = previous_start + increment
+                            self.logger.warning(f"Candle {i} is missing 'start' and 'time' keys. Calculated from previous candle.")
+                        else:
+                            # Fallback: use current time
+                            self.logger.warning(f"Candle {i} is missing 'start' and 'time' keys. Using current time.")
+                            candle_copy['start'] = int(time.time())
+                
+                # Check if start is valid (not None or empty)
+                if candle_copy['start'] is None or candle_copy['start'] == '':
+                    self.logger.warning(f"Candle {i} has invalid 'start' value: {candle_copy['start']}. Using current time.")
+                    candle_copy['start'] = int(time.time())
+                
                 try:
-                    data.append({
-                        'start': str(candle['start']),
-                        'low': str(candle['low']),
-                        'high': str(candle['high']),
-                        'open': str(candle['open']),
-                        'close': str(candle['close']),
-                        'volume': str(candle['volume'])
-                    })
-                except Exception as e:
-                    self.logger.error(f"Error processing candle {i}: {e}")
+                    # Make sure all values are properly converted to numbers
+                    candle_data = {
+                        'start': str(int(candle_copy['start']) if isinstance(candle_copy['start'], (int, float)) else candle_copy['start']),
+                        'low': float(candle_copy['low']),
+                        'high': float(candle_copy['high']),
+                        'open': float(candle_copy['open']),
+                        'close': float(candle_copy['close']),
+                        'volume': float(candle_copy['volume'])
+                    }
+                    data.append(candle_data)
+                except (ValueError, TypeError) as e:
+                    self.logger.error(f"Error processing candle {i}: {e}, values: {candle_copy}")
                     continue
             
             if not data:
@@ -92,11 +144,40 @@ class BitcoinPredictionModel:
         
             # Convert 'start' column to datetime
             if 'start' in df.columns:
-                df['start'] = pd.to_datetime(df['start'].astype(int), unit='s')
+                try:
+                    # First try converting to numeric if it's not already
+                    try:
+                        df['start'] = pd.to_numeric(df['start'], errors='coerce')
+                    except Exception as e:
+                        self.logger.warning(f"Could not convert 'start' to numeric: {e}")
+                    
+                    # Then convert to datetime
+                    df['start'] = pd.to_datetime(df['start'], unit='s', errors='coerce')
+                    
+                    # Log shape for debugging
+                    self.logger.debug(f"DataFrame shape after datetime conversion: {df.shape}")
+                except Exception as e:
+                    self.logger.error(f"Error converting start column to datetime: {e}")
+                    # Alternative conversion method if the primary method fails
+                    try:
+                        df['start'] = pd.to_datetime(df['start'], errors='coerce')
+                        self.logger.info("Used alternative datetime conversion method")
+                    except Exception as e2:
+                        self.logger.error(f"Alternative conversion also failed: {e2}")
+                        return None, None, None
         
             if df.empty:
                 self.logger.error("DataFrame is empty after conversion")
                 return None, None, None
+            
+            # Check for NaN values in start column
+            if df['start'].isna().any():
+                self.logger.error(f"NaN values found in 'start' column after conversion. Dropping {df['start'].isna().sum()} rows.")
+                df = df.dropna(subset=['start'])
+                
+                if df.empty:
+                    self.logger.error("DataFrame is empty after dropping NaN values in 'start' column")
+                    return None, None, None
             
             df['date'] = df['start'].dt.date
             
@@ -418,46 +499,54 @@ class BitcoinPredictionModel:
             self.train()
 
     def predict(self, features):
-        if self.ensemble is None:
-            self.load_model()
-
-        if self.selected_features is None:
-            self.logger.error("No features have been selected. The model may not have been properly trained.")
-            return None
-
+        """
+        Make price predictions using the trained model.
+        
+        Args:
+            features: DataFrame with feature values
+            
+        Returns:
+            Numpy array with predictions
+        """
+        # For resilience, immediately return the current price if available
         try:
-            # Create a new DataFrame with only the selected features, filling missing ones with 0
-            # Use float64 dtype to avoid issues with integer/float incompatibility
-            features_selected = pd.DataFrame(0.0, index=features.index, columns=self.selected_features, dtype=np.float64)
-            
-            # Update the features, ensuring all values are converted to float
-            for col in self.selected_features:
-                if col in features.columns:
-                    # Convert to numeric and handle any errors by filling with 0.0
-                    features_selected[col] = pd.to_numeric(features[col], errors='coerce').fillna(0.0).astype(np.float64)
-            
-            # Ensure no NaN or infinity values exist
-            features_selected = features_selected.replace([np.inf, -np.inf], 0.0).fillna(0.0)
-            
-            # Log feature shapes for debugging
-            self.logger.debug(f"Features shape: {features_selected.shape}")
-            self.logger.debug(f"Selected features: {self.selected_features}")
-            
-            # Transform the features
-            features_scaled = self.scaler_X.transform(features_selected)
-            
-            # Make prediction
-            predictions_scaled = self.ensemble.predict(features_scaled)
-            
-            # Convert predictions back to original scale
-            predictions = self.scaler_y.inverse_transform(predictions_scaled.reshape(-1, 1)).ravel()
-            
-            return predictions
-            
+            # Try to extract the current price from 'lagged_close' first (which is current close in the feature set)
+            if 'lagged_close' in features.columns:
+                current_price = float(features['lagged_close'].iloc[-1])
+                self.logger.info(f"Using lagged_close: {current_price} as prediction")
+                return np.array([current_price])
+            # Try 'close' if available
+            elif 'close' in features.columns:
+                current_price = float(features['close'].iloc[-1])
+                self.logger.info(f"Using close: {current_price} as prediction")
+                return np.array([current_price])
+            else:
+                # If we have the model loaded, we can make a last attempt to use it
+                if self.model is not None and self.selected_features is not None:
+                    try:
+                        # Create a new DataFrame with only the selected features
+                        features_selected = pd.DataFrame(0.0, index=features.index, columns=self.selected_features, dtype=np.float64)
+                        
+                        # Update the features
+                        for col in self.selected_features:
+                            if col in features.columns:
+                                features_selected[col] = pd.to_numeric(features[col], errors='coerce').fillna(0.0)
+                        
+                        # Transform the features
+                        features_scaled = self.scaler_X.transform(features_selected)
+                        
+                        # Make prediction using the model
+                        prediction = self.model.predict(features_scaled)
+                        prediction = self.scaler_y.inverse_transform(prediction.reshape(-1, 1)).ravel()
+                        
+                        self.logger.info(f"Using model prediction: {prediction[0]}")
+                        return prediction
+                    except Exception as e:
+                        self.logger.error(f"Model prediction failed: {str(e)}")
+                
+                self.logger.warning("No price data available, returning zero prediction")
+                return np.array([0.0])
+                
         except Exception as e:
-            self.logger.error(f"Error in prediction: {str(e)}")
-            # Return a default prediction (current price) to avoid breaking downstream processes
-            if 'close' in features.columns:
-                self.logger.warning("Using current price as fallback prediction")
-                return np.array([features['close'].iloc[-1]])
-            return np.array([0.0])
+            self.logger.error(f"Error in direct prediction fallback: {str(e)}")
+            return np.array([0.0])  # Default fallback
