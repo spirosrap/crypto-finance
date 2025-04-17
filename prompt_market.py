@@ -313,7 +313,7 @@ def calculate_alignment_score(results: Dict[str, str]) -> int:
         logging.error(f"Error calculating alignment score: {str(e)}")
         return 50  # Default to moderate score on error
 
-def get_ollama_response(prompt: str, model: str = "deepseek-r1:7b") -> Optional[str]:
+def get_ollama_response(prompt: str, model: str = "deepseek-r1:7b", **kwargs) -> Optional[str]:
     """Get response from Ollama API."""
     try:
         data = {
@@ -321,6 +321,14 @@ def get_ollama_response(prompt: str, model: str = "deepseek-r1:7b") -> Optional[
             "prompt": prompt,
             "stream": True
         }
+        
+        # Add deterministic parameters if provided
+        if 'temperature' in kwargs:
+            data["temperature"] = kwargs.get("temperature", 0.0)
+        if 'top_p' in kwargs:
+            data["top_p"] = kwargs.get("top_p", 0.0)
+        if 'seed' in kwargs:
+            data["seed"] = kwargs.get("seed", 42)
         
         response = requests.post(OLLAMA_API_URL, json=data, stream=True)
         response.raise_for_status()
@@ -345,7 +353,7 @@ def get_ollama_response(prompt: str, model: str = "deepseek-r1:7b") -> Optional[
         logging.error(f"Unexpected error in Ollama API call: {str(e)}")
         return None
 
-def get_hyperbolic_response(messages: list, model: str = "deepseek-ai/DeepSeek-R1") -> Optional[str]:
+def get_hyperbolic_response(messages: list, model: str = "deepseek-ai/DeepSeek-R1", **kwargs) -> Optional[str]:
     """Get response from Hyperbolic API."""
     try:
         headers = {
@@ -355,11 +363,16 @@ def get_hyperbolic_response(messages: list, model: str = "deepseek-ai/DeepSeek-R
         
         data = {
             "messages": messages,
-            "model": model,
-            # "max_tokens": 508,
-            # "temperature": 0.1,
-            # "top_p": 0.9
+            "model": model
         }
+        
+        # Add deterministic parameters if provided
+        if 'temperature' in kwargs:
+            data["temperature"] = kwargs.get("temperature", 0.0)
+        if 'top_p' in kwargs:
+            data["top_p"] = kwargs.get("top_p", 0.0)
+        if 'seed' in kwargs:
+            data["seed"] = kwargs.get("seed", 42)
         
         response = requests.post(HYPERBOLIC_API_URL, headers=headers, json=data)
         response.raise_for_status()
@@ -403,7 +416,16 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                               use_ollama_32b: bool = False, use_ollama_70b: bool = False,
                               use_ollama_671b: bool = False, use_hyperbolic: bool = False,
                               alignment_score: int = 50) -> tuple[Optional[str], Optional[str]]:
-    """Get trading recommendation with improved retry logic and debug output."""
+    """
+    Get trading recommendation with improved retry logic and debug output.
+    
+    This function enforces deterministic behavior using temperature=0, top_p=0 and a fixed seed=42
+    for models that support these parameters. For models that don't support these parameters
+    (like o4-mini), it falls back to using default values.
+    
+    Note that even with these settings, LLMs may produce slightly different outputs between runs,
+    though critical trading fields (signal type, prices, stop loss) should remain consistent.
+    """
     # Debug output moved to logging
     logging.debug("Starting trading recommendation request")
     """Get trading recommendation with improved retry logic."""
@@ -419,6 +441,26 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
               use_ollama_8b or use_ollama_14b or use_ollama_32b or use_ollama_70b or 
               use_ollama_671b) else ('OpenRouter' if use_deepseek_r1 else ('X AI' if use_grok else 
               ('DeepSeek' if (use_deepseek or use_reasoner) else 'OpenAI'))))
+
+    # Models that don't support certain deterministic parameters
+    # Based on error: "temperature does not support 0.0 with this model. Only the default (1) value is supported."
+    models_without_deterministic_support = {
+        'o4-mini': ['temperature', 'top_p']
+    }
+
+    # Check if the current model doesn't support deterministic parameters
+    current_model_key = None
+    if use_o4_mini:
+        current_model_key = 'o4-mini'
+    # Add other model checks as needed...
+    
+    # List of parameters not supported by the current model
+    unsupported_params = []
+    if current_model_key and current_model_key in models_without_deterministic_support:
+        unsupported_params = models_without_deterministic_support[current_model_key]
+        logging.warning(f"Model {current_model_key} doesn't support deterministic parameters: {', '.join(unsupported_params)}")
+        print(f"{COLORS['yellow']}Note: Model {current_model_key} doesn't fully support deterministic parameters.{COLORS['end']}")
+        print(f"{COLORS['yellow']}Using default values for: {', '.join(unsupported_params)}{COLORS['end']}")
 
     # SYSTEM_PROMPT = """
     # You are a professional crypto trading advisor with expertise in technical analysis and market psychology.
@@ -605,7 +647,16 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                 {"role": "user", "content": f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nTimeframe alignment score: {alignment_score}/100\nBased on this analysis and the timeframe alignment score, provide a trading recommendation."}
             ]
             logging.debug("Calling Hyperbolic API...")
-            recommendation = get_hyperbolic_response(messages, MODEL_CONFIG['hyperbolic'])
+            # Set deterministic parameters for Hyperbolic
+            hyperbolic_params = {}
+            if 'temperature' not in unsupported_params:
+                hyperbolic_params["temperature"] = 0
+            if 'top_p' not in unsupported_params:
+                hyperbolic_params["top_p"] = 0
+            if 'seed' not in unsupported_params:
+                hyperbolic_params["seed"] = 42
+            
+            recommendation = get_hyperbolic_response(messages, MODEL_CONFIG['hyperbolic'], **hyperbolic_params)
             logging.debug("Hyperbolic API response received")
             if recommendation is None:
                 raise Exception("Failed to get response from Hyperbolic API")
@@ -631,8 +682,17 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                 model_key = 'ollama-70b'
             elif use_ollama_671b:
                 model_key = 'ollama-671b'
+            
+            # Deterministic parameters for Ollama
+            ollama_params = {}
+            if 'temperature' not in unsupported_params:
+                ollama_params["temperature"] = 0.0
+            if 'top_p' not in unsupported_params:
+                ollama_params["top_p"] = 0.0
+            if 'seed' not in unsupported_params:
+                ollama_params["seed"] = 42
                 
-            recommendation = get_ollama_response(full_prompt, MODEL_CONFIG[model_key])
+            recommendation = get_ollama_response(full_prompt, MODEL_CONFIG[model_key], **ollama_params)
             logging.debug("Ollama API response received")
             if recommendation is None:
                 raise Exception("Failed to get response from Ollama API")
@@ -683,12 +743,20 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                 {"role": "user", "content": user_content}
             ]
             
-        # Print what model and parameters we're using for diagnostics
+        # Set up parameters for the API call
         params = {
             "model": model,
             "messages": messages,
             "timeout": TIMEOUT
         }
+
+        # Add deterministic parameters if supported by the model
+        if 'temperature' not in unsupported_params:
+            params["temperature"] = 0.0  # Set temperature to 0 for deterministic output
+        if 'top_p' not in unsupported_params:
+            params["top_p"] = 0.0        # Set top_p to 0 for deterministic output
+        if 'seed' not in unsupported_params:
+            params["seed"] = 42           # Set fixed seed for deterministic output
 
         # Add reasoning_effort parameter for o3-mini-effort model
         if use_o3_mini_effort:
@@ -697,6 +765,20 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         # Log debug info before API call
         logging.debug(f"Making API request to {provider} with model {model}")
         logging.debug(f"Request timeout: {TIMEOUT}s")
+        
+        # Log which deterministic parameters are being used
+        deterministic_params_used = []
+        if 'temperature' in params:
+            deterministic_params_used.append(f"temperature={params['temperature']}")
+        if 'top_p' in params:
+            deterministic_params_used.append(f"top_p={params['top_p']}")
+        if 'seed' in params:
+            deterministic_params_used.append(f"seed={params['seed']}")
+            
+        if deterministic_params_used:
+            logging.debug(f"Using deterministic parameters: {', '.join(deterministic_params_used)}")
+        else:
+            logging.debug("No deterministic parameters set for this model")
         
         # Make the API call with timing
         import time
