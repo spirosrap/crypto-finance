@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from sklearn.feature_selection import SelectFromModel
 from sklearn.inspection import permutation_importance
 import time
+from sklearn.exceptions import NotFittedError
 
 # Add these constants near the top of the file
 GRANULARITY_SETTINGS = {
@@ -483,22 +484,46 @@ class MLSignal:
         try:
             self.logger.debug(f"X shape: {X.shape}")
             
-            X_processed = self.ml_model.named_steps['preprocessor'].transform(X)
-            
-            probability = self.ml_model.predict_proba(X_processed)
-            
-            # Use the last prediction (most recent)
-            last_probability = probability[-1]
-            self.logger.debug(f"Last ML Prediction probability: {last_probability}")
-            
-            # Adjust scaling to make signal more pronounced and ensure it can be negative
-            signal = int((last_probability[1] - 0.5) * 20)  # Scale from -10 to 10
-            
-            self.logger.debug(f"ML signal: {signal}")
-            return signal
+            # Check if the pipeline's preprocessor is fitted before trying to transform
+            try:
+                # Access the named_steps to check if preprocessor is fitted
+                preprocessor = self.ml_model.named_steps['preprocessor']
+                # Check if the SimpleImputer (first step in preprocessor) is fitted
+                _ = preprocessor.named_steps['imputer'].statistics_
+                
+                # If we get here, the preprocessor is fitted
+                X_processed = preprocessor.transform(X)
+                
+                probability = self.ml_model.predict_proba(X_processed)
+                
+                # Use the last prediction (most recent)
+                last_probability = probability[-1]
+                self.logger.debug(f"Last ML Prediction probability: {last_probability}")
+                
+                # Adjust scaling to make signal more pronounced and ensure it can be negative
+                signal = int((last_probability[1] - 0.5) * 20)  # Scale from -10 to 10
+                
+                self.logger.debug(f"ML signal: {signal}")
+                return signal
+                
+            except (AttributeError, KeyError, NotFittedError) as e:
+                # This means the preprocessor is not fitted yet
+                self.logger.warning(f"ML model pipeline is not fully fitted: {str(e)}. Retraining model.")
+                self.train_model()  # Train the model
+                
+                # Try again with the newly trained model
+                try:
+                    X_processed = self.ml_model.named_steps['preprocessor'].transform(X)
+                    probability = self.ml_model.predict_proba(X_processed)
+                    last_probability = probability[-1]
+                    signal = int((last_probability[1] - 0.5) * 20)
+                    return signal
+                except Exception as inner_e:
+                    self.logger.error(f"Error in ML prediction after retraining: {str(inner_e)}. Returning neutral signal.")
+                    return 0
+                
         except Exception as e:
-            self.logger.exception(f"Error in ML prediction: {str(e)}. Returning neutral signal.")
-            raise  # Re-raise the exception for debugging
+            self.logger.error(f"Error in ML prediction: {str(e)}. Returning neutral signal.")
             return 0
 
     def evaluate_performance(self, candles: List[Dict]) -> float:

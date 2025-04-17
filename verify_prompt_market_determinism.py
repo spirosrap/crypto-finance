@@ -20,7 +20,8 @@ def test_deterministic_parameters():
         "top_p=0": any(["top_p=0" in source_code, "top_p=0.0" in source_code]),
         "seed=42": "seed=42" in source_code,
         "hyperbolic deterministic": "hyperbolic_params" in source_code,
-        "ollama deterministic": "ollama_params" in source_code
+        "ollama deterministic": "ollama_params" in source_code,
+        "model compatibility check": "models_without_deterministic_support" in source_code
     }
     
     # Print results
@@ -32,16 +33,35 @@ def test_deterministic_parameters():
         print(f"{check_name}: {status}")
         all_checks_passed = all_checks_passed and passed
     
-    # Check for specific parameters in API calls
-    openai_params_check = '"temperature": 0' in source_code and '"top_p": 0' in source_code and '"seed": 42' in source_code
-    status = f"{COLORS['green']}✅ Pass{COLORS['end']}" if openai_params_check else f"{COLORS['red']}❌ Fail{COLORS['end']}"
+    # Check for specific parameters in API calls, considering conditional inclusion for model compatibility
+    api_params_check = (
+        # Check for temperature parameter with model compatibility checks
+        ("if 'temperature' not in unsupported_params:" in source_code and 
+         "params[\"temperature\"] = 0.0" in source_code) and
+        
+        # Check for top_p parameter with model compatibility checks
+        ("if 'top_p' not in unsupported_params:" in source_code and 
+         "params[\"top_p\"] = 0.0" in source_code) and
+        
+        # Check for seed parameter with model compatibility checks
+        ("if 'seed' not in unsupported_params:" in source_code and 
+         "params[\"seed\"] = 42" in source_code) and
+        
+        # Check for model compatibility handling
+        "models_without_deterministic_support = {" in source_code and
+        "'o4-mini': ['temperature', 'top_p']" in source_code
+    )
+    
+    status = f"{COLORS['green']}✅ Pass{COLORS['end']}" if api_params_check else f"{COLORS['red']}❌ Fail{COLORS['end']}"
     print(f"API parameter settings: {status}")
-    all_checks_passed = all_checks_passed and openai_params_check
+    all_checks_passed = all_checks_passed and api_params_check
     
     print(f"\n{COLORS['cyan']}--- Conclusion ---{COLORS['end']}")
     if all_checks_passed:
         print(f"{COLORS['green']}All deterministic parameters are properly set in the get_trading_recommendation function.{COLORS['end']}")
         print(f"{COLORS['green']}The function should now produce more consistent results.{COLORS['end']}")
+        if "models_without_deterministic_support" in source_code:
+            print(f"{COLORS['green']}The function gracefully handles models that don't support deterministic parameters.{COLORS['end']}")
     else:
         print(f"{COLORS['yellow']}Some deterministic parameters may not be properly set.{COLORS['end']}")
         print(f"{COLORS['yellow']}Please check the function implementation to ensure deterministic behavior.{COLORS['end']}")
@@ -50,6 +70,8 @@ def test_deterministic_parameters():
     print("Even with temperature=0, top_p=0, and a fixed seed, LLMs may still produce")
     print("slightly different outputs across invocations. However, the critical decision")
     print("fields (like signal type, prices, and stop loss) should remain consistent.")
+    print("Some models like o4-mini don't support certain deterministic parameters and")
+    print("will use default values instead, which may result in more varied responses.")
     
     # Return overall result
     return all_checks_passed

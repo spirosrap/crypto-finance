@@ -12,6 +12,7 @@ import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import openai
 from coinbaseservice import CoinbaseService
+import re
 # Use environment variables or config.py
 try:
     from config import OPENAI_KEY, DEEPSEEK_KEY, XAI_KEY, OPENROUTER_API_KEY, HYPERBOLIC_KEY, API_KEY_PERPS, API_SECRET_PERPS
@@ -28,7 +29,7 @@ if not (OPENAI_KEY and DEEPSEEK_KEY and XAI_KEY and OPENROUTER_API_KEY and HYPER
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO,  # Back to INFO level for normal use
     format='%(asctime)s - %(levelname)s - %(message)s',
     filename='prompt_market.log'
 )
@@ -76,6 +77,116 @@ COLORS = {
     'bold': '\033[1m',
     'end': '\033[0m'
 }
+
+# Define the function calling schema
+FUNCTION_SCHEMA = [{
+    "name": "trade_signal",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "SIGNAL_TYPE":       {"type": "string", "enum": ["BUY","SELL","HOLD"]},
+            "BUY AT":            {"type": "number"},
+            "SELL BACK AT":      {"type": "number"},
+            "SELL AT":           {"type": "number"},       # for SELL
+            "BUY BACK AT":       {"type": "number"},       # for SELL
+            "STOP LOSS":         {"type": "number"},
+            "PRICE":             {"type": "number"},       # for HOLD
+            "PROBABILITY":       {"type": "number"},
+            "CONFIDENCE":        {"type": "string"},
+            "R/R_RATIO":         {"type": "number"},
+            "VOLUME_STRENGTH":   {"type": "string"},
+            "VOLATILITY":        {"type": "string"},
+            "MARKET_REGIME":     {"type": "string"},
+            "REGIME_CONFIDENCE": {"type": "string"},
+            "TIMEFRAME_ALIGNMENT": {"type": "number"},
+            "REASONING":         {"type": "string"},
+            "IS_VALID":          {"type": "boolean"}
+        },
+        "required": ["SIGNAL_TYPE","IS_VALID"]
+    }
+}]
+
+# System prompt for the trading recommendation
+SYSTEM_PROMPT = """
+You are a professional crypto trading advisor with expertise in technical analysis and market psychology.
+
+Your task is to evaluate BOTH long and short opportunities based on the data. You must return ONE valid JSON object in a single line representing a BUY, SELL, or HOLD recommendation.
+
+Avoid directional bias. Assess both sides, then select the most favorable setup. If neither meets criteria, return HOLD.
+
+Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals:
+
+For a SELL signal: 
+{
+    "SIGNAL_TYPE": "SELL",
+    "SELL AT": <PRICE>,
+    "BUY BACK AT": <PRICE>,
+    "STOP LOSS": <PRICE>,
+    "PROBABILITY": <PROBABILITY_0_TO_100>,
+    "CONFIDENCE": "<CONFIDENCE>",
+    "R/R_RATIO": <R/R_RATIO>,
+    "VOLUME_STRENGTH": "<VOLUME_STRENGTH>",
+    "VOLATILITY": "<VOLATILITY>",
+    "MARKET_REGIME": "<MARKET_REGIME>",
+    "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
+    "TIMEFRAME_ALIGNMENT": <TIMEFRAME_ALIGNMENT_SCORE>,
+    "REASONING": "<CONCISE_REASONING>",
+    "IS_VALID": <IS_VALID>
+}
+
+For a BUY signal:
+{
+    "SIGNAL_TYPE": "BUY", 
+    "BUY AT": <PRICE>,
+    "SELL BACK AT": <PRICE>,
+    "STOP LOSS": <PRICE>,
+    "PROBABILITY": <PROBABILITY_0_TO_100>,
+    "CONFIDENCE": "<CONFIDENCE>",
+    "R/R_RATIO": <R/R_RATIO>,
+    "VOLUME_STRENGTH": "<VOLUME_STRENGTH>",
+    "VOLATILITY": "<VOLATILITY>",
+    "MARKET_REGIME": "<MARKET_REGIME>",
+    "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
+    "TIMEFRAME_ALIGNMENT": <TIMEFRAME_ALIGNMENT_SCORE>,
+    "REASONING": "<CONCISE_REASONING>",
+    "IS_VALID": <IS_VALID>
+}
+
+For a HOLD recommendation when no trade is advisable:
+{
+    "SIGNAL_TYPE": "HOLD",
+    "PRICE": <CURRENT_PRICE>,
+    "PROBABILITY": <PROBABILITY_0_TO_100>,
+    "CONFIDENCE": "<CONFIDENCE>",
+    "MARKET_REGIME": "<MARKET_REGIME>",
+    "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
+    "REASONING": "<CONCISE_REASONING>",
+    "IS_VALID": true
+}
+
+Key Adjustments:
+1. Market Regime Rules (revised)
+- BUY signals are favored in Bullish/Strong Bullish regimes  
+- SELL signals are favored in Bearish/Strong Bearish regimes  
+- In Choppy regimes, assess both sides. Choose the one with better PROBABILITY and R/R.  
+- Reversal trades are allowed in any regime if pattern confidence ≥ 75% and pattern completion ≥ 70%.
+
+2. Conflict Resolution (adjusted)
+- If RSI > 75 AND falling volume → downgrade confidence by one level  
+- Remove automatic override to HOLD  
+- Do not subtract from PROBABILITY unless multiple indicators conflict
+
+3. Risk/Reward + Filtering (unchanged)
+- Maintain R/R > 1.0 generally, > 2.0 in Choppy  
+- Reject trades with invalid STOP/ENTRY logic  
+- Return HOLD if PROBABILITY < 50 or IS_VALID = false
+
+4. Selection Logic (new rule)
+- After evaluating both BUY and SELL opportunities, return only the higher-quality signal  
+- Use REASONING field to explain why the chosen side is better
+
+All other formatting, validation, and scoring rules remain unchanged.
+"""
 
 def initialize_client(use_deepseek: bool = False, use_reasoner: bool = False, use_grok: bool = False, use_deepseek_r1: bool = False, use_ollama: bool = False):
     global client
@@ -415,13 +526,17 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                               use_ollama_8b: bool = False, use_ollama_14b: bool = False,
                               use_ollama_32b: bool = False, use_ollama_70b: bool = False,
                               use_ollama_671b: bool = False, use_hyperbolic: bool = False,
-                              alignment_score: int = 50) -> tuple[Optional[str], Optional[str]]:
+                              alignment_score: int = 50, no_function_call: bool = False) -> tuple[Optional[str], Optional[str]]:
     """
     Get trading recommendation with improved retry logic and debug output.
     
     This function enforces deterministic behavior using temperature=0, top_p=0 and a fixed seed=42
     for models that support these parameters. For models that don't support these parameters
     (like o4-mini), it falls back to using default values.
+    
+    When no_function_call is False (default), this function uses OpenAI function calling
+    for more reliable structured outputs. When set to True, it falls back to the legacy
+    free-text JSON parsing approach.
     
     Note that even with these settings, LLMs may produce slightly different outputs between runs,
     though critical trading fields (signal type, prices, stop loss) should remain consistent.
@@ -463,180 +578,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         print(f"{COLORS['yellow']}Using default values for: {', '.join(unsupported_params)}{COLORS['end']}")
 
     # SYSTEM_PROMPT = """
-    # You are a professional crypto trading advisor with expertise in technical analysis and market psychology.
-
-    # Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals:
-
-    # For a SELL signal: 
-    # {
-    #     "SIGNAL_TYPE": "SELL",
-    #     "SELL AT": <PRICE>,
-    #     "BUY BACK AT": <PRICE>,
-    #     "STOP LOSS": <PRICE>,
-    #     "PROBABILITY": <PROBABILITY_0_TO_100>,
-    #     "CONFIDENCE": "<CONFIDENCE>",
-    #     "R/R_RATIO": <R/R_RATIO>,
-    #     "VOLUME_STRENGTH": "<VOLUME_STRENGTH>",
-    #     "VOLATILITY": "<VOLATILITY>",
-    #     "MARKET_REGIME": "<MARKET_REGIME>",
-    #     "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
-    #     "TIMEFRAME_ALIGNMENT": <TIMEFRAME_ALIGNMENT_SCORE>,
-    #     "REASONING": "<CONCISE_REASONING>",
-    #     "IS_VALID": <IS_VALID>
-    # }
-
-    # For a BUY signal:
-    # {
-    #     "SIGNAL_TYPE": "BUY", 
-    #     "BUY AT": <PRICE>,
-    #     "SELL BACK AT": <PRICE>,
-    #     "STOP LOSS": <PRICE>,
-    #     "PROBABILITY": <PROBABILITY_0_TO_100>,
-    #     "CONFIDENCE": "<CONFIDENCE>",
-    #     "R/R_RATIO": <R/R_RATIO>,
-    #     "VOLUME_STRENGTH": "<VOLUME_STRENGTH>",
-    #     "VOLATILITY": "<VOLATILITY>",
-    #     "MARKET_REGIME": "<MARKET_REGIME>",
-    #     "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
-    #     "TIMEFRAME_ALIGNMENT": <TIMEFRAME_ALIGNMENT_SCORE>,
-    #     "REASONING": "<CONCISE_REASONING>",
-    #     "IS_VALID": <IS_VALID>
-    # }
-
-    # For a HOLD recommendation when no trade is advisable:
-    # {
-    #     "SIGNAL_TYPE": "HOLD",
-    #     "PRICE": <CURRENT_PRICE>,
-    #     "PROBABILITY": <PROBABILITY_0_TO_100>,
-    #     "CONFIDENCE": "<CONFIDENCE>",
-    #     "MARKET_REGIME": "<MARKET_REGIME>",
-    #     "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
-    #     "REASONING": "<CONCISE_REASONING>",
-    #     "IS_VALID": true
-    # }
-
-    # ## Market Analysis Requirements
-
-    # 1. **Market Regime Analysis**
-    # - Identify the current market regime as one of: 'Strong Bullish', 'Bullish', 'Choppy Bullish', 'Choppy', 'Choppy Bearish', 'Bearish', or 'Strong Bearish'
-    # - Set REGIME_CONFIDENCE as: 'Very High', 'High', 'Moderate', 'Low', 'Very Low'
-    # - Only generate BUY signals in Bullish or Strong Bullish regimes unless a clear reversal pattern is detected
-    # - Only generate SELL signals in Bearish or Strong Bearish regimes unless a clear reversal pattern is detected
-    # - Reversal patterns must have pattern confidence ≥ 70% and pattern completion ≥ 70%
-    # - Reject any trade signal if pattern completion is < 70%
-    # - In Choppy regimes, require PROBABILITY ≥ 80 and R/R_RATIO ≥ 2.0
-
-    # 2. **Conflict Resolution Rules**
-    # - If RSI > 70 and volume change < -50%, subtract 15 from PROBABILITY and downgrade CONFIDENCE by one level
-    # - If RSI > 75 and volume is falling, override any BUY or SELL signal with HOLD unless all other indicators are strongly aligned
-    # - If a detected pattern conflicts with the active trend or market regime, downgrade CONFIDENCE by one level
-
-    # 3. **Risk/Reward Calculation**
-    # - For a SELL signal: R/R_RATIO = (SELL AT - BUY BACK AT) / (STOP LOSS - SELL AT)
-    # - For a BUY signal: R/R_RATIO = (SELL BACK AT - BUY AT) / (BUY AT - STOP LOSS)
-    # - Ensure R/R ratio > 1.0 for valid trades, and > 2.0 in choppy regimes
-    # - Target a realistic profit zone of 1.5–3% under most conditions
-
-    # 4. **Timeframe Alignment**
-    # - Provide a TIMEFRAME_ALIGNMENT score between 0–100
-    # - 100 = all timeframes align in signal direction; 0 = fully conflicted timeframes
-
-    # 5. **Validation Criteria**
-    # - For SELL: STOP LOSS > SELL AT
-    # - For BUY: STOP LOSS < BUY AT
-    # - Set IS_VALID to false if these conditions are not met
-    # - Return HOLD if IS_VALID = false or PROBABILITY < 50
-    # - Provide a concise REASONING (30–50 words) that explains the signal
-
-    # 6. **Rating System**
-    # - CONFIDENCE: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'
-    # - VOLUME_STRENGTH: 'Very Strong', 'Strong', 'Moderate', 'Weak', 'Very Weak'
-    # - VOLATILITY: 'Very Low', 'Low', 'Medium', 'High', 'Very High'
-    # - PROBABILITY: 0–100 (% chance of success)
-
-    # Remember to reply with only one JSON object (no markdown or explanation) and follow the format strictly.
-    # """
-
-    SYSTEM_PROMPT = """
-    You are a professional crypto trading advisor with expertise in technical analysis and market psychology.
-
-    Your task is to evaluate BOTH long and short opportunities based on the data. You must return ONE valid JSON object in a single line representing a BUY, SELL, or HOLD recommendation.
-
-    Avoid directional bias. Assess both sides, then select the most favorable setup. If neither meets criteria, return HOLD.
-
-    Reply only with a valid JSON object in a single line (without any markdown code block) representing one of the following signals:
-
-    For a SELL signal: 
-    {
-        "SIGNAL_TYPE": "SELL",
-        "SELL AT": <PRICE>,
-        "BUY BACK AT": <PRICE>,
-        "STOP LOSS": <PRICE>,
-        "PROBABILITY": <PROBABILITY_0_TO_100>,
-        "CONFIDENCE": "<CONFIDENCE>",
-        "R/R_RATIO": <R/R_RATIO>,
-        "VOLUME_STRENGTH": "<VOLUME_STRENGTH>",
-        "VOLATILITY": "<VOLATILITY>",
-        "MARKET_REGIME": "<MARKET_REGIME>",
-        "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
-        "TIMEFRAME_ALIGNMENT": <TIMEFRAME_ALIGNMENT_SCORE>,
-        "REASONING": "<CONCISE_REASONING>",
-        "IS_VALID": <IS_VALID>
-    }
-
-    For a BUY signal:
-    {
-        "SIGNAL_TYPE": "BUY", 
-        "BUY AT": <PRICE>,
-        "SELL BACK AT": <PRICE>,
-        "STOP LOSS": <PRICE>,
-        "PROBABILITY": <PROBABILITY_0_TO_100>,
-        "CONFIDENCE": "<CONFIDENCE>",
-        "R/R_RATIO": <R/R_RATIO>,
-        "VOLUME_STRENGTH": "<VOLUME_STRENGTH>",
-        "VOLATILITY": "<VOLATILITY>",
-        "MARKET_REGIME": "<MARKET_REGIME>",
-        "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
-        "TIMEFRAME_ALIGNMENT": <TIMEFRAME_ALIGNMENT_SCORE>,
-        "REASONING": "<CONCISE_REASONING>",
-        "IS_VALID": <IS_VALID>
-    }
-
-    For a HOLD recommendation when no trade is advisable:
-    {
-        "SIGNAL_TYPE": "HOLD",
-        "PRICE": <CURRENT_PRICE>,
-        "PROBABILITY": <PROBABILITY_0_TO_100>,
-        "CONFIDENCE": "<CONFIDENCE>",
-        "MARKET_REGIME": "<MARKET_REGIME>",
-        "REGIME_CONFIDENCE": "<REGIME_CONFIDENCE>",
-        "REASONING": "<CONCISE_REASONING>",
-        "IS_VALID": true
-    }
-
-    Key Adjustments:
-    1. Market Regime Rules (revised)
-    - BUY signals are favored in Bullish/Strong Bullish regimes  
-    - SELL signals are favored in Bearish/Strong Bearish regimes  
-    - In Choppy regimes, assess both sides. Choose the one with better PROBABILITY and R/R.  
-    - Reversal trades are allowed in any regime if pattern confidence ≥ 75% and pattern completion ≥ 70%.
-
-    2. Conflict Resolution (adjusted)
-    - If RSI > 75 AND falling volume → downgrade confidence by one level  
-    - Remove automatic override to HOLD  
-    - Do not subtract from PROBABILITY unless multiple indicators conflict
-
-    3. Risk/Reward + Filtering (unchanged)
-    - Maintain R/R > 1.0 generally, > 2.0 in Choppy  
-    - Reject trades with invalid STOP/ENTRY logic  
-    - Return HOLD if PROBABILITY < 50 or IS_VALID = false
-
-    4. Selection Logic (new rule)
-    - After evaluating both BUY and SELL opportunities, return only the higher-quality signal  
-    - Use REASONING field to explain why the chosen side is better
-
-    All other formatting, validation, and scoring rules remain unchanged.
-    """    
+    # ... existing code ...
     
     try:
         logging.debug("Starting recommendation - checking model type")
@@ -761,6 +703,13 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         # Add reasoning_effort parameter for o3-mini-effort model
         if use_o3_mini_effort:
             params["reasoning_effort"] = "medium"
+        
+        # Add function calling parameters if not using no_function_call
+        # Only add for OpenAI models (not for DeepSeek, Grok, etc.)
+        if not no_function_call and provider == 'OpenAI':
+            params["functions"] = FUNCTION_SCHEMA
+            params["function_call"] = {"name": "trade_signal"}
+            logging.debug("Using function calling for structured output")
             
         # Log debug info before API call
         logging.debug(f"Making API request to {provider} with model {model}")
@@ -798,12 +747,30 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             
         # Handle different response formats
         reasoning = None
+        
         if use_reasoner:
             recommendation = response.choices[0].message.content
             reasoning = response.choices[0].message.reasoning_content
             logging.info(f"Reasoning behind recommendation: {reasoning}")
         else:
-            recommendation = response.choices[0].message.content
+            # Check if using function calling
+            if not no_function_call and provider == 'OpenAI' and response.choices[0].message.function_call:
+                # Extract structured data from function call
+                function_args = response.choices[0].message.function_call.arguments
+                logging.debug(f"Function call arguments: {function_args}")
+                
+                # Parse the function arguments as JSON
+                try:
+                    data = json.loads(function_args)
+                    # Convert the structured data back to a JSON string to maintain compatibility
+                    recommendation = json.dumps(data)
+                    logging.debug(f"Parsed function call data: {recommendation}")
+                except json.JSONDecodeError as e:
+                    logging.error(f"Failed to parse function call arguments as JSON: {e}")
+                    return None, None
+            else:
+                # Fall back to content for free-text responses
+                recommendation = response.choices[0].message.content
 
         # Validate recommendation format
         if not (("BUY AT" in recommendation and "SELL BACK AT" in recommendation) or 
@@ -1641,6 +1608,114 @@ def record_trade_to_history(side: str, entry_price: float, target_price: float,
         logging.error(f"Error recording trade to history: {str(e)}")
         # Don't raise the exception since this is a non-critical operation
 
+def run_function_call_acceptance_test(product_id: str = 'BTC-USDC', granularity: str = 'ONE_HOUR'):
+    """
+    Run an acceptance test for function calling to verify deterministic behavior.
+    
+    This test calls the get_trading_recommendation function twice with identical inputs
+    and verifies that critical fields like SIGNAL_TYPE, prices, and IS_VALID are identical
+    across runs.
+    
+    Args:
+        product_id: The product ID to use for the test
+        granularity: The granularity to use for the test
+    
+    Returns:
+        bool: True if the test passes, False otherwise
+    """
+    print(f"\n{COLORS['cyan']}===== Running Function Call Acceptance Test ====={COLORS['end']}")
+    print(f"Testing deterministic behavior with function calling for {product_id} on {granularity} timeframe...")
+    
+    # Initialize the client
+    if not initialize_client():
+        print(f"{COLORS['red']}Failed to initialize client for acceptance test{COLORS['end']}")
+        return False
+    
+    # Run market analysis
+    print("Running market analysis...")
+    analysis_result = run_market_analysis(product_id, granularity)
+    if not analysis_result['success']:
+        print(f"{COLORS['red']}Error running market analyzer: {analysis_result['error']}{COLORS['end']}")
+        return False
+    
+    # Get trading recommendation with function calling (first run)
+    print("Getting first trading recommendation...")
+    recommendation1, _ = get_trading_recommendation(
+        client, 
+        analysis_result['data'], 
+        product_id,
+        alignment_score=analysis_result.get('alignment_score', 50),
+        no_function_call=False  # Use function calling
+    )
+    
+    if recommendation1 is None:
+        print(f"{COLORS['red']}Failed to get first trading recommendation{COLORS['end']}")
+        return False
+    
+    # Parse the first recommendation
+    try:
+        data1 = json.loads(recommendation1)
+        print(f"First recommendation: SIGNAL_TYPE={data1.get('SIGNAL_TYPE', 'N/A')}")
+        
+        # Get trading recommendation with function calling (second run)
+        print("Getting second trading recommendation...")
+        recommendation2, _ = get_trading_recommendation(
+            client, 
+            analysis_result['data'], 
+            product_id,
+            alignment_score=analysis_result.get('alignment_score', 50),
+            no_function_call=False  # Use function calling
+        )
+        
+        if recommendation2 is None:
+            print(f"{COLORS['red']}Failed to get second trading recommendation{COLORS['end']}")
+            return False
+        
+        # Parse the second recommendation
+        data2 = json.loads(recommendation2)
+        print(f"Second recommendation: SIGNAL_TYPE={data2.get('SIGNAL_TYPE', 'N/A')}")
+        
+        # Compare critical fields
+        critical_fields = ['SIGNAL_TYPE', 'IS_VALID']
+        price_fields = []
+        
+        # Determine which price fields to check based on signal type
+        signal_type = data1.get('SIGNAL_TYPE')
+        if signal_type == 'BUY':
+            price_fields = ['BUY AT', 'SELL BACK AT', 'STOP LOSS']
+        elif signal_type == 'SELL':
+            price_fields = ['SELL AT', 'BUY BACK AT', 'STOP LOSS']
+        elif signal_type == 'HOLD':
+            price_fields = ['PRICE']
+        
+        # Check all fields
+        all_fields_match = True
+        for field in critical_fields + price_fields:
+            if field in data1 and field in data2:
+                if data1[field] != data2[field]:
+                    print(f"{COLORS['red']}Field '{field}' differs: {data1[field]} vs {data2[field]}{COLORS['end']}")
+                    all_fields_match = False
+                else:
+                    print(f"{COLORS['green']}Field '{field}' matches: {data1[field]}{COLORS['end']}")
+            else:
+                if field in data1:
+                    print(f"{COLORS['red']}Field '{field}' missing in second recommendation{COLORS['end']}")
+                elif field in data2:
+                    print(f"{COLORS['red']}Field '{field}' missing in first recommendation{COLORS['end']}")
+                all_fields_match = False
+        
+        # Print test result
+        if all_fields_match:
+            print(f"\n{COLORS['green']}✅ ACCEPTANCE TEST PASSED: Critical fields are identical across runs{COLORS['end']}")
+            return True
+        else:
+            print(f"\n{COLORS['red']}❌ ACCEPTANCE TEST FAILED: Critical fields differ across runs{COLORS['end']}")
+            return False
+        
+    except json.JSONDecodeError as e:
+        print(f"{COLORS['red']}Error parsing recommendation JSON: {str(e)}{COLORS['end']}")
+        return False
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(
@@ -1663,6 +1738,8 @@ def main():
     trading_group = parser.add_argument_group('Trading Parameters')
     trading_group.add_argument('--product_id', type=str, default='BTC-USDC',
                         help='Trading pair to analyze (e.g., BTC-USDC, ETH-USDC, SOL-USDC, DOGE-USDC, SHIB-USDC)')
+    trading_group.add_argument('--symbol', type=str,
+                        help='Alternative way to specify trading pair (e.g., BTCUSDT), will override --product_id')
     trading_group.add_argument('--granularity', type=str, default='ONE_HOUR',
                         help='Time granularity for analysis (ONE_MINUTE, FIVE_MINUTE, FIFTEEN_MINUTE, ONE_HOUR, TWO_HOUR, SIX_HOUR, ONE_DAY)')
     trading_group.add_argument('--margin', type=float, default=100,
@@ -1673,6 +1750,12 @@ def main():
                         help='Execute trades automatically when probability exceeds 60%% and other conditions are met')
     trading_group.add_argument('--limit_order', action='store_true',
                         help='Use limit orders instead of market orders, using the SELL_AT or BUY_AT price from the recommendation')
+    trading_group.add_argument('--no_function_call', action='store_true',
+                        help='Disable OpenAI function calling and fall back to free-text JSON extraction')
+    trading_group.add_argument('--run_acceptance_test', action='store_true',
+                        help='Run an acceptance test for function calling deterministic behavior')
+    trading_group.add_argument('--dry-run', action='store_true',
+                        help='Print the raw response from the API without formatting')
 
     # AI Model Selection
     model_group = parser.add_argument_group('AI Model Selection (choose one)')
@@ -1740,6 +1823,22 @@ def main():
         exit(1)
 
     try:
+        # If acceptance test flag is provided, run the test and exit
+        if args.run_acceptance_test:
+            success = run_function_call_acceptance_test(args.product_id, args.granularity)
+            exit(0 if success else 1)
+        
+        # Handle the symbol parameter if provided
+        if args.symbol:
+            # Convert from exchange format (like BTCUSDT) to product_id format (like BTC-USDC)
+            symbol_parts = args.symbol.upper().split('USDT')
+            if len(symbol_parts) == 2 and symbol_parts[0]:
+                args.product_id = f"{symbol_parts[0]}-USDC"
+                print(f"Using product_id: {args.product_id}")
+            else:
+                print(f"{COLORS['red']}Invalid symbol format: {args.symbol}. Expected format like BTCUSDT.{COLORS['end']}")
+                exit(1)
+            
         # Validate API key first
         if not validate_api_key(args.use_deepseek, args.use_reasoner, args.use_grok, args.use_deepseek_r1, args.use_hyperbolic):
             provider = 'OpenRouter' if args.use_deepseek_r1 else ('X AI' if args.use_grok else ('DeepSeek' if (args.use_deepseek or args.use_reasoner) else 'OpenAI'))
@@ -1816,18 +1915,53 @@ def main():
         # Get trading recommendation
         alignment_score = analysis_result.get('alignment_score', 50)
         recommendation, reasoning = get_trading_recommendation(
-            client, analysis_result['data'], args.product_id, 
-            args.use_deepseek, args.use_reasoner, args.use_grok, 
-            args.use_gpt45_preview, args.use_o1, args.use_o1_mini, 
-            args.use_o3_mini, args.use_o3_mini_effort, args.use_o4_mini, 
-            args.use_gpt4o, args.use_gpt41, args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
-            args.use_ollama_8b, args.use_ollama_14b, args.use_ollama_32b,
-            args.use_ollama_70b, args.use_ollama_671b, args.use_hyperbolic,
-            alignment_score=alignment_score
+            client, 
+            analysis_result['data'], 
+            args.product_id, 
+            use_deepseek=args.use_deepseek, 
+            use_reasoner=args.use_reasoner, 
+            use_grok=args.use_grok, 
+            use_gpt45_preview=args.use_gpt45_preview, 
+            use_o1=args.use_o1, 
+            use_o1_mini=args.use_o1_mini, 
+            use_o3_mini=args.use_o3_mini, 
+            use_o3_mini_effort=args.use_o3_mini_effort, 
+            use_o4_mini=args.use_o4_mini, 
+            use_gpt4o=args.use_gpt4o, 
+            use_gpt41=args.use_gpt41, 
+            use_deepseek_r1=args.use_deepseek_r1, 
+            use_ollama=args.use_ollama, 
+            use_ollama_1_5b=args.use_ollama_1_5b,
+            use_ollama_8b=args.use_ollama_8b, 
+            use_ollama_14b=args.use_ollama_14b, 
+            use_ollama_32b=args.use_ollama_32b,
+            use_ollama_70b=args.use_ollama_70b, 
+            use_ollama_671b=args.use_ollama_671b, 
+            use_hyperbolic=args.use_hyperbolic,
+            alignment_score=alignment_score, 
+            no_function_call=args.no_function_call
         )
         if recommendation is None:
             print("Failed to get trading recommendation. Check the logs for details.")
             exit(1)
+
+        # Handle dry-run mode
+        if args.dry_run:
+            print("\n=== RAW API RESPONSE ===")
+            
+            # Determine whether function calling was used based on the recommendation format
+            try:
+                parsed_json = json.loads(recommendation)
+                print(f"Mode: {'Function Calling' if not args.no_function_call else 'Free-text JSON'}")
+                print(f"\nJSON Output:")
+                print(json.dumps(parsed_json, indent=2))
+            except json.JSONDecodeError:
+                print("Warning: Could not parse response as JSON")
+                print(f"\nRaw Output:")
+                print(recommendation)
+                
+            # Skip the rest of the processing
+            exit(0)
 
         # Format and display the output with recommendation
         format_output(recommendation, analysis_result, reasoning)
