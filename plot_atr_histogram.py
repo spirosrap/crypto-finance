@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Read the CSV file
-df = pd.read_csv('backtest_trades_BTC-USDC_20250408_134033.csv')
+df = pd.read_csv('automated_trades.csv')
 
 # Create a figure with a larger size
 plt.figure(figsize=(12, 6))
