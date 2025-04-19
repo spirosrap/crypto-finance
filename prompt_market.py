@@ -1096,7 +1096,7 @@ def validate_model_availability(model: str, provider: str) -> bool:
         logging.warning(f"Could not validate model availability for {provider}: {str(e)}")
         return True  # Default to True if check fails
 
-def execute_trade(recommendation: str, product_id: str, margin: float = 100, leverage: int = 20, use_limit_order: bool = False) -> None:
+def execute_trade(recommendation: str, product_id: str, margin: float = 100, leverage: int = 20, use_limit_order: bool = False, paper_trading: bool = False) -> None:
     """
     Execute trade based on model recommendation and advanced trade filters.
     
@@ -1106,6 +1106,7 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         margin: Initial margin amount in USD
         leverage: Leverage multiplier (1-20)
         use_limit_order: Whether to use limit orders instead of market orders
+        paper_trading: If True, simulate the trade without executing real orders
     """
     try:
         # Parse the JSON recommendation
@@ -1412,26 +1413,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         cmd_stop_loss = format_price_by_asset(stop_loss, product_id)
         cmd_entry_price = format_price_by_asset(entry_price, product_id)
         
-        # Execute trade using subprocess
-        cmd = [
-            'python', 'trade_btc_perp.py',
-            '--product', perp_product,
-            '--side', side,
-            '--size', str(size_usd),
-            '--leverage', str(leverage),
-            '--tp', str(cmd_target_price),
-            '--sl', str(cmd_stop_loss)
-        ]
-        
-        # Add limit price only if using limit order and conditions are met
-        if use_limit_order and not should_use_market:
-            cmd.extend(['--limit', str(cmd_entry_price)])
-        
-        # Add no-confirm flag
-        cmd.append('--no-confirm')
-        
         # Print trade details with enhanced information
-        print(f"\n{COLORS['cyan']}===== Trade Execution Summary ====={COLORS['end']}")
+        print(f"\n{COLORS['cyan']}===== Trade {'Simulation' if paper_trading else 'Execution'} Summary ====={COLORS['end']}")
         print(f"{COLORS['bold']}Asset & Market:{COLORS['end']}")
         print(f"  Product: {perp_product}")
         print(f"  Market Regime: {market_regime} (Confidence: {regime_confidence})")
@@ -1458,6 +1441,94 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
         print(f"  Volume Strength: {volume_strength}")
         print(f"  Timeframe Alignment: {timeframe_alignment}/100")
         
+        # Handle paper trading mode
+        if paper_trading:
+            print(f"\n{COLORS['cyan']}[PAPER TRADING MODE - NO REAL ORDERS EXECUTED]{COLORS['end']}")
+            
+            # Generate a unique simulated order ID
+            import uuid
+            order_id = f"paper_{uuid.uuid4().hex[:16]}"
+            
+            # Create simulated execution summary
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            execution_summary = f"[PAPER TRADING MODE - NO REAL TRADES EXECUTED]\n\n"
+            
+            if use_limit_order and not should_use_market:
+                execution_summary += f"Simulated limit order placed at ${entry_price:.2f}\n"
+            else:
+                execution_summary += f"Simulated market order placed at ${current_price:.2f}\n"
+                
+            # Add execution parameters
+            execution_summary += f"\nSimulated trade with parameters:\n"
+            execution_summary += f"Product: {perp_product}\n"
+            execution_summary += f"Side: {side}\n"
+            execution_summary += f"Market Regime: {market_regime}\n"
+            execution_summary += f"Regime Confidence: {regime_confidence}\n"
+            execution_summary += f"Initial Margin: ${margin:.2f}\n"
+            execution_summary += f"Leverage: {leverage}x\n"
+            
+            # Add position sizing info
+            sizing_message = "Using standard position sizing (full margin)"
+            if stop_loss_pct <= 1.5:
+                sizing_message += " - SL ≤ 1.5%"
+            elif stop_loss_pct <= 3.0:
+                sizing_message += " - Medium SL"
+            else:
+                sizing_message += " - Wide SL"
+            execution_summary += f"{sizing_message}\n"
+            
+            # Add trade details
+            execution_summary += f"Position Size: ${size_usd:.2f}\n"
+            execution_summary += f"Entry Price: ${entry_price:.2f}\n"
+            execution_summary += f"Current Price: ${current_price:.2f}\n"
+            execution_summary += f"Price Deviation: {price_deviation:.2f}%\n"
+            execution_summary += f"Take Profit: ${target_price:.2f} ({profit_pct:.2f}% / ${profit_usd:.2f})\n"
+            execution_summary += f"Stop Loss: ${stop_loss:.2f} ({stop_loss_pct:.2f}% / ${loss_usd:.2f})\n"
+            execution_summary += f"Probability: {prob:.1f}%\n"
+            execution_summary += f"Signal Confidence: {confidence}\n"
+            execution_summary += f"R/R Ratio: {rr_ratio:.3f}\n"
+            execution_summary += f"Volume Strength: {volume_strength}\n"
+            execution_summary += f"Order Type: {'Limit' if (use_limit_order and not should_use_market) else 'Market'}\n"
+            execution_summary += f"Simulated Order ID: {order_id}\n"
+            
+            # Add success message
+            print(f"\n{COLORS['green']}✅ Trade simulated successfully!{COLORS['end']}")
+            print(f"Simulated Order ID: {order_id}")
+            
+            # Record trade to history file
+            record_trade_to_history(side, entry_price, target_price, stop_loss, 
+                                   prob, rr_ratio, product_id, market_regime)
+                                   
+            # Record trade to automated_trades.csv
+            record_trade_to_automated_trades(side, entry_price, target_price, stop_loss, 
+                                           prob, rr_ratio, product_id, market_regime,
+                                           leverage=leverage, margin=margin, 
+                                           setup_type="Paper AI Signal")
+                                   
+            # Record to trade_output.txt
+            record_trade_to_output_txt(recommendation, timestamp, execution_summary)
+            
+            return
+        
+        # Execute the trade (only if not paper trading)
+        # Execute trade using subprocess
+        cmd = [
+            'python', 'trade_btc_perp.py',
+            '--product', perp_product,
+            '--side', side,
+            '--size', str(size_usd),
+            '--leverage', str(leverage),
+            '--tp', str(cmd_target_price),
+            '--sl', str(cmd_stop_loss)
+        ]
+        
+        # Add limit price only if using limit order and conditions are met
+        if use_limit_order and not should_use_market:
+            cmd.extend(['--limit', str(cmd_entry_price)])
+        
+        # Add no-confirm flag
+        cmd.append('--no-confirm')
+        
         # Execute the trade
         print(f"\n{COLORS['cyan']}Executing trade...{COLORS['end']}")
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -1472,7 +1543,8 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             # Record trade to automated_trades.csv
             record_trade_to_automated_trades(side, entry_price, target_price, stop_loss, 
                                            prob, rr_ratio, product_id, market_regime,
-                                           leverage=leverage, margin=margin, setup_type="AI Signal")
+                                           leverage=leverage, margin=margin, 
+                                           setup_type="AI Signal")
                                    
             # Record trade to trade_output.txt with the requested format
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1892,6 +1964,8 @@ def main():
                         help='Leverage multiplier for trading (default: 20, range: 1-20)')
     trading_group.add_argument('--execute_trades', action='store_true',
                         help='Execute trades automatically when probability exceeds 60%% and other conditions are met')
+    trading_group.add_argument('--paper_trading', action='store_true',
+                        help='Enable paper trading mode (simulate trades without executing real orders)')
     trading_group.add_argument('--limit_order', action='store_true',
                         help='Use limit orders instead of market orders, using the SELL_AT or BUY_AT price from the recommendation')
     trading_group.add_argument('--no_function_call', action='store_true',
@@ -2125,7 +2199,7 @@ def main():
 
         # Execute trade only if --execute_trades flag is provided
         if recommendation and args.execute_trades:
-            execute_trade(recommendation, args.product_id, args.margin, args.leverage, args.limit_order)
+            execute_trade(recommendation, args.product_id, args.margin, args.leverage, args.limit_order, args.paper_trading)
         # elif recommendation and not args.execute_trades:
         #     print(f"\n{COLORS['yellow']}Trade not executed: --execute_trades flag not provided{COLORS['end']}")
         #     print(f"{COLORS['yellow']}To execute trades automatically, run with --execute_trades flag{COLORS['end']}")
