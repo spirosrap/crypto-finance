@@ -18,6 +18,9 @@ from config import API_KEY_PERPS, API_SECRET_PERPS
 import time
 import numpy as np
 import talib
+import random
+import sys
+
 # Constants
 STATE_FILE_PATH = 'data/trade_state_tracker.json'
 CSV_FILE_PATH = 'automated_trades.csv'
@@ -60,6 +63,9 @@ def load_api_keys() -> Tuple[str, str]:
 
 def get_current_btc_price_from_candles(client: CoinbaseService) -> float:
     """Get current BTC price from historical candles with retry logic"""
+    last_error = None
+    backoff = RETRY_DELAY
+    
     for attempt in range(MAX_RETRIES):
         try:
             # Get current timestamp and timestamp from 5 minutes ago
@@ -76,11 +82,18 @@ def get_current_btc_price_from_candles(client: CoinbaseService) -> float:
             latest_candle = candles[-1]
             return float(latest_candle['close'])
         except Exception as e:
+            last_error = e
             if attempt == MAX_RETRIES - 1:
                 logger.error(f"Error getting current BTC price from candles after {MAX_RETRIES} attempts: {str(e)}")
+                logger.error(f"Last error: {str(last_error)}")
                 raise
+            
+            # Exponential backoff with some jitter
+            jitter = random.uniform(0.5, 1.5)
+            backoff_time = backoff * (2 ** attempt) * jitter
             logger.warning(f"Attempt {attempt + 1} failed to get BTC price from candles: {str(e)}")
-            time.sleep(RETRY_DELAY)
+            logger.warning(f"Retrying in {backoff_time:.2f} seconds...")
+            time.sleep(backoff_time)
 
 def get_historical_candles(
     client: CoinbaseService,
@@ -89,6 +102,9 @@ def get_historical_candles(
     granularity: str = DEFAULT_GRANULARITY
 ) -> List[Dict[str, Any]]:
     """Get historical candles for calculating MAE and MFE with retry logic"""
+    last_error = None
+    backoff = RETRY_DELAY
+    
     for attempt in range(MAX_RETRIES):
         try:
             product_id = "BTC-PERP-INTX"
@@ -107,11 +123,21 @@ def get_historical_candles(
             logger.info(f"Retrieved {len(candles)} candles")
             return candles
         except Exception as e:
+            last_error = e
             if attempt == MAX_RETRIES - 1:
                 logger.error(f"Error getting historical candles after {MAX_RETRIES} attempts: {str(e)}")
+                logger.error(f"Last error: {str(last_error)}")
                 return []
+            
+            # Exponential backoff with some jitter
+            jitter = random.uniform(0.5, 1.5)
+            backoff_time = backoff * (2 ** attempt) * jitter
             logger.warning(f"Attempt {attempt + 1} failed to get historical candles: {str(e)}")
-            time.sleep(RETRY_DELAY)
+            logger.warning(f"Retrying in {backoff_time:.2f} seconds...")
+            time.sleep(backoff_time)
+    
+    # This should never be reached, but just in case
+    return []
 
 def calculate_ema200(candles: List[Dict[str, Any]]) -> float:
     """Calculate EMA200 from candle data"""
@@ -566,8 +592,13 @@ def update_pending_trades() -> None:
         client = CoinbaseService(api_key, api_secret)
         
         # Get current BTC price from historical candles
-        current_price = get_current_btc_price_from_candles(client)
-        logger.info(f"Current BTC price: {current_price}")
+        try:
+            current_price = get_current_btc_price_from_candles(client)
+            logger.info(f"Current BTC price: {current_price}")
+        except Exception as e:
+            logger.error(f"Failed to get current BTC price: {str(e)}")
+            logger.error("Cannot continue without current price data")
+            raise
         
         # Load persistent state tracker
         state_tracker = load_state_tracker()
@@ -714,10 +745,50 @@ def update_pending_trades() -> None:
         
         # Save the state tracker
         save_state_tracker(state_tracker)
+        
+        # Return success indicator
+        return True
             
     except Exception as e:
         logger.error(f"Error updating trades: {str(e)}")
-        raise
+        # Log the full traceback for debugging
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # Return failure indicator
+        return False
 
 if __name__ == "__main__":
-    update_pending_trades() 
+    # When run as a script, add retry logic at the top level
+    MAX_SCRIPT_RETRIES = 5
+    SCRIPT_RETRY_DELAY = 5  # seconds
+    
+    success = False
+    last_error = None
+    
+    for attempt in range(MAX_SCRIPT_RETRIES):
+        try:
+            logger.info(f"Starting trade update attempt {attempt + 1}/{MAX_SCRIPT_RETRIES}")
+            if update_pending_trades():
+                logger.info("Trade update completed successfully")
+                success = True
+                break
+            else:
+                logger.warning(f"Trade update attempt {attempt + 1} failed")
+        except Exception as e:
+            last_error = e
+            logger.error(f"Error during trade update attempt {attempt + 1}: {str(e)}")
+        
+        if attempt < MAX_SCRIPT_RETRIES - 1:
+            # Exponential backoff with jitter for script retries
+            jitter = random.uniform(0.5, 1.5)
+            backoff_time = SCRIPT_RETRY_DELAY * (2 ** attempt) * jitter
+            logger.info(f"Retrying in {backoff_time:.2f} seconds...")
+            time.sleep(backoff_time)
+    
+    if not success:
+        logger.error(f"All trade update attempts failed after {MAX_SCRIPT_RETRIES} retries")
+        if last_error:
+            logger.error(f"Last error: {str(last_error)}")
+        sys.exit(1)  # Exit with error code
+    
+    sys.exit(0)  # Exit with success code 
