@@ -47,8 +47,13 @@ Use one of these flags to select the AI model:
 python prompt_market.py --use_deepseek  # Use DeepSeek Chat model
 python prompt_market.py --use_grok  # Use X AI Grok model
 python prompt_market.py --use_gpt4o  # Use GPT-4o model
-python prompt_market.py --use_o1_mini  # Use Claude o1-mini model (faster)
-python prompt_market.py --use_o3_mini  # Use Claude o3-mini model (balanced)
+python prompt_market.py --use_o1  # Use OPENAI o1 model
+python prompt_market.py --use_o1_mini  # Use OPENAI o1-mini model (faster)
+python prompt_market.py --use_o3  # Use OPENAI o3 model (full version)
+python prompt_market.py --use_o3_mini  # Use OPENAI o3-mini model (balanced)
+python prompt_market.py --use_o3_mini_effort  # Use OPENAI o3-mini model with reasoning effort
+python prompt_market.py --use_o4_mini  # Use OPENAI o4-mini model (advanced)
+python prompt_market.py --use_o4_mini_effort  # Use OPENAI o4-mini model with reasoning effort
 python prompt_market.py --use_ollama  # Use local Ollama DeepSeek R1 7B model
 python prompt_market.py --use_ollama_1_5b  # Use local Ollama DeepSeek R1 1.5B model
 python prompt_market.py --use_ollama_8b  # Use local Ollama DeepSeek R1 8B model
@@ -171,9 +176,9 @@ For executing trades, the tool:
 ```
 usage: prompt_market.py [-h] [--product_id PRODUCT_ID] [--granularity GRANULARITY] [--margin MARGIN] [--leverage LEVERAGE]
                         [--execute_trades] [--limit_order] [--use_deepseek] [--use_reasoner] [--use_grok] [--use_gpt45_preview]
-                        [--use_o1] [--use_o1_mini] [--use_o3_mini] [--use_o3_mini_effort] [--use_gpt4o] [--use_deepseek_r1]
-                        [--use_ollama] [--use_ollama_1_5b] [--use_ollama_8b] [--use_ollama_14b] [--use_ollama_32b] 
-                        [--use_ollama_70b] [--use_ollama_671b] [--use_hyperbolic]
+                        [--use_o1] [--use_o1_mini] [--use_o3] [--use_o3_mini] [--use_o3_mini_effort] [--use_o4_mini] [--use_o4_mini_effort]
+                        [--use_gpt4o] [--use_deepseek_r1] [--use_ollama] [--use_ollama_1_5b] [--use_ollama_8b] [--use_ollama_14b]
+                        [--use_ollama_32b] [--use_ollama_70b] [--use_ollama_671b] [--use_hyperbolic]
 
 AI-Powered Crypto Market Analyzer and Trading Recommendation System
 

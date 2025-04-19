@@ -46,9 +46,11 @@ MODEL_CONFIG = {
     'gpt45-preview': 'gpt-4.5-preview',  # Add GPT-4.5 Preview model
     'o1': 'o1',  # Add O1 model
     'o1-mini': 'o1-mini',
+    'o3': 'o3',  # Add O3 model
     'o3-mini': 'o3-mini',  # Add O3 Mini model
     'o3-mini-effort': 'o3-mini-2025-01-31',  # Add new O3 Mini model with effort
     'o4-mini': 'o4-mini',  # Add O4 Mini model
+    'o4-mini-effort': 'o4-mini',  # Add O4 Mini model with effort
     'gpt4o': 'gpt-4o',
     'gpt41': 'gpt-4.1',  # Add GPT-4.1 Turbo model
     'deepseek-r1': 'deepseek/deepseek-r1',  # Add DeepSeek R1 model
@@ -520,8 +522,8 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
                               use_deepseek: bool = False, use_reasoner: bool = False, 
                               use_grok: bool = False, use_gpt45_preview: bool = False, 
                               use_o1: bool = False, use_o1_mini: bool = False, 
-                              use_o3_mini: bool = False, use_o3_mini_effort: bool = False, 
-                              use_o4_mini: bool = False, use_gpt4o: bool = False, use_gpt41: bool = False, 
+                              use_o3: bool = False, use_o3_mini: bool = False, use_o3_mini_effort: bool = False, 
+                              use_o4_mini: bool = False, use_o4_mini_effort: bool = False, use_gpt4o: bool = False, use_gpt41: bool = False, 
                               use_deepseek_r1: bool = False, use_ollama: bool = False, use_ollama_1_5b: bool = False,
                               use_ollama_8b: bool = False, use_ollama_14b: bool = False,
                               use_ollama_32b: bool = False, use_ollama_70b: bool = False,
@@ -560,13 +562,19 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
     # Models that don't support certain deterministic parameters
     # Based on error: "temperature does not support 0.0 with this model. Only the default (1) value is supported."
     models_without_deterministic_support = {
-        'o4-mini': ['temperature', 'top_p']
+        'o3': ['temperature', 'top_p'],
+        'o4-mini': ['temperature', 'top_p'],
+        'o4-mini-effort': ['temperature', 'top_p']
     }
 
     # Check if the current model doesn't support deterministic parameters
     current_model_key = None
-    if use_o4_mini:
+    if use_o3:
+        current_model_key = 'o3'
+    elif use_o4_mini:
         current_model_key = 'o4-mini'
+    elif use_o4_mini_effort:
+        current_model_key = 'o4-mini-effort'
     # Add other model checks as needed...
     
     # List of parameters not supported by the current model
@@ -655,12 +663,16 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
             model = MODEL_CONFIG['o1']
         elif use_o1_mini:
             model = MODEL_CONFIG['o1-mini']
+        elif use_o3:
+            model = MODEL_CONFIG['o3']
         elif use_o3_mini:
             model = MODEL_CONFIG['o3-mini']
         elif use_o3_mini_effort:
             model = MODEL_CONFIG['o3-mini-effort']
         elif use_o4_mini:
             model = MODEL_CONFIG['o4-mini']
+        elif use_o4_mini_effort:
+            model = MODEL_CONFIG['o4-mini-effort']
         elif use_gpt4o:
             model = MODEL_CONFIG['gpt4o']
         elif use_gpt41:
@@ -675,7 +687,7 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
         messages = []
         user_content = f"Here's the latest market analysis for {product_id}:\n{market_analysis}\nTimeframe alignment score: {alignment_score}/100\nBased on this analysis and the timeframe alignment score, provide a trading recommendation."
         
-        if model in [MODEL_CONFIG['o1-mini'], MODEL_CONFIG['o3-mini'], MODEL_CONFIG['o3-mini-effort'], MODEL_CONFIG['o4-mini']]:  # Add o4-mini to the list of models that need combined messages
+        if model in [MODEL_CONFIG['o1-mini'], MODEL_CONFIG['o3'], MODEL_CONFIG['o3-mini'], MODEL_CONFIG['o3-mini-effort'], MODEL_CONFIG['o4-mini'], MODEL_CONFIG['o4-mini-effort']]:  # Add o3 to the list of models that need combined messages
             messages = [
                 {"role": "user", "content": f"{SYSTEM_PROMPT}\n\n{user_content}"}
             ]
@@ -702,6 +714,10 @@ def get_trading_recommendation(client: OpenAI, market_analysis: str, product_id:
 
         # Add reasoning_effort parameter for o3-mini-effort model
         if use_o3_mini_effort:
+            params["reasoning_effort"] = "medium"
+        
+        # Add reasoning_effort parameter for o4-mini-effort model
+        if use_o4_mini_effort:
             params["reasoning_effort"] = "medium"
         
         # Add function calling parameters if not using no_function_call
@@ -1771,12 +1787,16 @@ def main():
                         help='Use o1 model for analysis')
     model_group.add_argument('--use_o1_mini', action='store_true',
                         help='Use o1 Mini model for faster, lighter analysis')
+    model_group.add_argument('--use_o3', action='store_true',
+                        help='Use o3 model for high-quality analysis')
     model_group.add_argument('--use_o3_mini', action='store_true',
                         help='Use o3 Mini model for enhanced performance')
     model_group.add_argument('--use_o3_mini_effort', action='store_true',
                         help='Use o3-mini-2025-01-31 model with medium reasoning effort')
     model_group.add_argument('--use_o4_mini', action='store_true',
                         help='Use O4-mini model for advanced reasoning')
+    model_group.add_argument('--use_o4_mini_effort', action='store_true',
+                        help='Use O4-mini model with medium reasoning effort')
     model_group.add_argument('--use_gpt4o', action='store_true',
                         help='Use GPT-4o model for advanced analysis')
     model_group.add_argument('--use_gpt41', action='store_true',
@@ -1812,12 +1832,12 @@ def main():
     args = parser.parse_args()
 
     if sum([args.use_deepseek, args.use_reasoner, args.use_grok, args.use_gpt45_preview, 
-            args.use_o1, args.use_o1_mini, args.use_o3_mini, args.use_o3_mini_effort, 
-            args.use_o4_mini, args.use_gpt4o, args.use_gpt41, args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
+            args.use_o1, args.use_o1_mini, args.use_o3, args.use_o3_mini, args.use_o3_mini_effort, 
+            args.use_o4_mini, args.use_o4_mini_effort, args.use_gpt4o, args.use_gpt41, args.use_deepseek_r1, args.use_ollama, args.use_ollama_1_5b,
             args.use_ollama_8b, args.use_ollama_14b, args.use_ollama_32b, args.use_ollama_70b,
             args.use_ollama_671b, args.use_hyperbolic]) > 1:
         print("Please choose only one of --use_deepseek, --use_reasoner, --use_grok, --use_gpt45_preview, " +
-              "--use_o1, --use_o1_mini, --use_o3_mini, --use_o3_mini_effort, --use_o4_mini, --use_gpt4o, --use_gpt41, " +
+              "--use_o1, --use_o1_mini, --use_o3, --use_o3_mini, --use_o3_mini_effort, --use_o4_mini, --use_o4_mini_effort, --use_gpt4o, --use_gpt41, " +
               "--use_deepseek_r1, --use_ollama, --use_ollama_1_5b, --use_ollama_8b, " +
               "--use_ollama_14b, --use_ollama_32b, --use_ollama_70b, --use_ollama_671b, or --use_hyperbolic.")
         exit(1)
@@ -1924,9 +1944,11 @@ def main():
             use_gpt45_preview=args.use_gpt45_preview, 
             use_o1=args.use_o1, 
             use_o1_mini=args.use_o1_mini, 
+            use_o3=args.use_o3, 
             use_o3_mini=args.use_o3_mini, 
             use_o3_mini_effort=args.use_o3_mini_effort, 
             use_o4_mini=args.use_o4_mini, 
+            use_o4_mini_effort=args.use_o4_mini_effort,
             use_gpt4o=args.use_gpt4o, 
             use_gpt41=args.use_gpt41, 
             use_deepseek_r1=args.use_deepseek_r1, 
