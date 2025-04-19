@@ -7,7 +7,7 @@ import time
 import requests
 import csv
 from typing import Dict, Optional, Tuple, List, Union
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import openai
@@ -1469,6 +1469,11 @@ def execute_trade(recommendation: str, product_id: str, margin: float = 100, lev
             record_trade_to_history(side, entry_price, target_price, stop_loss, 
                                    prob, rr_ratio, product_id, market_regime)
                                    
+            # Record trade to automated_trades.csv
+            record_trade_to_automated_trades(side, entry_price, target_price, stop_loss, 
+                                           prob, rr_ratio, product_id, market_regime,
+                                           leverage=leverage, margin=margin, setup_type="AI Signal")
+                                   
             # Record trade to trade_output.txt with the requested format
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             execution_summary = ""
@@ -1616,12 +1621,96 @@ def record_trade_to_history(side: str, entry_price: float, target_price: float,
                 f"{probability:.1f}", 
                 f"{rr_ratio:.2f}", 
                 market_regime, 
-                'OPEN'  # Initial status is OPEN
+                'PENDING'
             ])
             
-        logging.info(f"Trade recorded to history: {side} {product_id} at {entry_price:.2f}")
+        logging.info(f"Trade recorded to trade_history.csv: {timestamp}")
     except Exception as e:
-        logging.error(f"Error recording trade to history: {str(e)}")
+        logging.error(f"Error recording trade to trade_history.csv: {str(e)}")
+        # Don't raise the exception since this is a non-critical operation
+
+def record_trade_to_automated_trades(side: str, entry_price: float, target_price: float, 
+                                    stop_loss: float, probability: float, rr_ratio: float,
+                                    product_id: str, market_regime: str, leverage: int = 5, 
+                                    margin: float = 50.0, setup_type: str = "AI Signal") -> None:
+    """Record trade details to automated_trades.csv for tracking and analysis"""
+    try:
+        import pandas as pd
+        from datetime import datetime, timezone
+
+        # Create a timestamp for the trade in UTC
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        
+        # Calculate session based on UTC time
+        hour = datetime.now(timezone.utc).hour
+        if 0 <= hour < 8:
+            session = "Asia"
+        elif 8 <= hour < 16:
+            session = "EU"
+        else:
+            session = "US"
+            
+        # Determine volatility level based on probability
+        if probability >= 90:
+            volatility_level = "Very Strong"
+        elif probability >= 70:
+            volatility_level = "Strong"
+        elif probability >= 50:
+            volatility_level = "Moderate"
+        else:
+            volatility_level = "Weak"
+            
+        # Check if file exists to get next trade number
+        if os.path.isfile('automated_trades.csv'):
+            try:
+                trades_df = pd.read_csv('automated_trades.csv')
+                next_trade_no = len(trades_df) + 1
+            except Exception as e:
+                logging.error(f"Error reading automated_trades.csv: {str(e)}")
+                next_trade_no = 1
+        else:
+            next_trade_no = 1
+            
+        # Create DataFrame for the new trade
+        new_trade = pd.DataFrame([{
+            'No.': next_trade_no,
+            'Timestamp': timestamp,
+            'SIDE': side.upper(),
+            'ENTRY': entry_price,
+            'Take Profit': target_price,
+            'Stop Loss': stop_loss,
+            'R/R Ratio': round(rr_ratio, 2),
+            'Volatility Level': volatility_level,
+            'Outcome': 'PENDING',
+            'Outcome %': 0.0,
+            'Leverage': f"{leverage}x",
+            'Margin': margin,
+            'Session': session,
+            'TP Mode': 'FIXED',
+            'ATR %': 0.0,  # No ATR calculation in prompt_market.py
+            'Setup Type': setup_type,
+            'MAE': 0.0,
+            'MFE': 0.0,
+            'Exit Trade': 0.0,
+            'Trend Regime': market_regime,
+            'RSI at Entry': 0.0,
+            'Relative Volume': 0.0,
+            'Trend Slope': 0.0,
+            'Exit Reason': 'PENDING',
+            'Duration': 0.0,
+            'Market Trend': 'PENDING'
+        }])
+        
+        # Create file with headers if it doesn't exist
+        if not os.path.isfile('automated_trades.csv'):
+            new_trade.to_csv('automated_trades.csv', index=False)
+        else:
+            # Append to existing file without headers
+            new_trade.to_csv('automated_trades.csv', mode='a', header=False, index=False)
+            
+        logging.info(f"Trade recorded to automated_trades.csv: {timestamp}")
+    except Exception as e:
+        logging.error(f"Error recording trade to automated_trades.csv: {str(e)}")
         # Don't raise the exception since this is a non-critical operation
 
 def run_function_call_acceptance_test(product_id: str = 'BTC-USDC', granularity: str = 'ONE_HOUR'):
@@ -1732,6 +1821,45 @@ def run_function_call_acceptance_test(product_id: str = 'BTC-USDC', granularity:
         print(f"{COLORS['red']}Error parsing recommendation JSON: {str(e)}{COLORS['end']}")
         return False
 
+def test_record_to_automated_trades():
+    """A test function to verify that the record_trade_to_automated_trades function works correctly."""
+    try:
+        print(f"{COLORS['cyan']}Testing record_trade_to_automated_trades function...{COLORS['end']}")
+        
+        # Test recording a trade
+        side = "BUY"
+        entry_price = 76000.50
+        target_price = 78500.25
+        stop_loss = 74500.75
+        probability = 85.5
+        rr_ratio = 2.34
+        product_id = "BTC-USDC"
+        market_regime = "TRENDING"
+        leverage = 10
+        margin = 100.0
+        
+        # Call the function
+        record_trade_to_automated_trades(
+            side, entry_price, target_price, stop_loss, 
+            probability, rr_ratio, product_id, market_regime,
+            leverage=leverage, margin=margin, setup_type="Test Signal"
+        )
+        
+        # Verify the file exists
+        if os.path.exists('automated_trades.csv'):
+            print(f"{COLORS['green']}✅ Test successful: Trade recorded to automated_trades.csv{COLORS['end']}")
+            # Print the last line of the file
+            import subprocess
+            result = subprocess.run(['tail', '-n', '1', 'automated_trades.csv'], 
+                                   capture_output=True, text=True)
+            print(f"{COLORS['cyan']}Last line of automated_trades.csv:{COLORS['end']}")
+            print(result.stdout)
+        else:
+            print(f"{COLORS['red']}❌ Test failed: automated_trades.csv not created{COLORS['end']}")
+            
+    except Exception as e:
+        print(f"{COLORS['red']}❌ Test failed with error: {str(e)}{COLORS['end']}")
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(
@@ -1770,6 +1898,8 @@ def main():
                         help='Disable OpenAI function calling and fall back to free-text JSON extraction')
     trading_group.add_argument('--run_acceptance_test', action='store_true',
                         help='Run an acceptance test for function calling deterministic behavior')
+    trading_group.add_argument('--test_automated_trades', action='store_true',
+                        help='Run a test to verify the automated_trades.csv logging functionality')
     trading_group.add_argument('--dry-run', action='store_true',
                         help='Print the raw response from the API without formatting')
 
@@ -1847,6 +1977,11 @@ def main():
         if args.run_acceptance_test:
             success = run_function_call_acceptance_test(args.product_id, args.granularity)
             exit(0 if success else 1)
+        
+        # If automated trades test flag is provided, run that test and exit
+        if args.test_automated_trades:
+            test_record_to_automated_trades()
+            exit(0)
         
         # Handle the symbol parameter if provided
         if args.symbol:
