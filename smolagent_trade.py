@@ -41,6 +41,11 @@ def get_model(model_name):
             model_id="gpt-4.1",
             api_key=os.environ["OPENAI_API_KEY"],
         )
+    elif model_name == "o3":
+        return OpenAIServerModel(
+            model_id="o3",
+            api_key=os.environ["OPENAI_API_KEY"],
+        )
     elif model_name == "deepseek-chat":
         return OpenAIServerModel(
             model_id="deepseek-chat",
@@ -319,7 +324,7 @@ if __name__ == "__main__":
     parser.add_argument('--granularity', type=str, default='ONE_HOUR',
                       help='Candle interval (default: ONE_HOUR)')
     parser.add_argument('--model', type=str, default='o3-mini',
-                      choices=['o3-mini', 'o4-mini', 'gpt-4.1', 'deepseek-chat', 'deepseek-reasoner'],
+                      choices=['o3-mini', 'o3', 'o4-mini', 'gpt-4.1', 'deepseek-chat', 'deepseek-reasoner'],
                       help='Model to use for analysis (default: o3-mini)')
     parser.add_argument('--search-tool', type=str, default='duckduckgo',
                       choices=['duckduckgo', 'serpapi', 'none'],
