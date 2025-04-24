@@ -187,6 +187,10 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
         logger.info(f"[FILTERED] Rejected trade: Low volatility, flat trend, RSI > 25 (ATR %={atr_percent:.2f}, Trend Slope={trend_slope:.4f}, RSI={rsi_current:.2f})")
         return False, None, None, None, None
 
+    # ENABLE FILTERS IF CONDITIONS DETERIORATE
+    # if trend_slope < -0.002 and rsi_current < 28:
+    #     return False,None,None,None,None
+
     # RSI 1-bar confirmation logic
     rsi_triggered = rsi_previous < RSI_THRESHOLD
     rsi_confirmed = rsi_current < RSI_THRESHOLD
