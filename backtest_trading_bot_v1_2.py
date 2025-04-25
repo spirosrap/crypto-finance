@@ -1,4 +1,4 @@
-from simplified_trading_bot import (
+from simplified_trading_bot_v1_2_filters import (
     CoinbaseService, TechnicalAnalysis, GRANULARITY, RSI_THRESHOLD,
     VOLUME_LOOKBACK, TP_PERCENT, SL_PERCENT, get_perp_product,
     get_price_precision, analyze, determine_tp_mode
