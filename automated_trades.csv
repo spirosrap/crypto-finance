@@ -1,2 +1,2 @@
 No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,R/R Ratio,Volatility Level,Outcome,Outcome %,Leverage,Margin,Session,TP Mode,ATR %,Setup Type,MAE,MFE,Exit Trade,Trend Regime,RSI at Entry,Relative Volume,Trend Slope,Exit Reason,Duration,Market Trend
-1,2025-04-25 03:01:30 UTC,LONG,92915.9,94309.6,92265.5,2.14,Moderate,PENDING,0.0,5x,50.0,Asia,FIXED,0.18,RSI Dip,0.0,1.11,0.0,TRENDING,25.58,0.74,-0.0011,PENDING,5.08,Bearish
+1,2025-04-25 03:01:30 UTC,LONG,92915.9,94309.6,92265.5,2.14,Moderate,SUCCESS,7.5,5x,50.0,Asia,FIXED,0.18,RSI Dip,0.03,1.7,2025-04-25 11:36:35 UTC,TRENDING,25.58,0.74,-0.0011,TP HIT (wick),8.58,Bearish
