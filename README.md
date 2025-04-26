@@ -352,12 +352,39 @@ python base.py
 
 ### Simplified Trading Bot
 
-```bash
-# Basic usage with default settings
-python simplified_trading_bot.py
+A cryptocurrency trading bot that focuses on BTC-USDC trading using RSI, EMA, and volume indicators.
 
-# Custom configuration
-python simplified_trading_bot.py --product_id BTC-USDC --margin 100 --leverage 5
+## Version History
+
+### v1.0
+- Initial release
+- Basic RSI and EMA-based strategy
+- Single coin (BTC-USDC) and single timeframe (5-minute)
+- Manual trade execution
+
+### v1.1
+- Added 1-bar confirmation delay for RSI entries
+- Improved entry filtering
+- Added automated trade logging
+- Integrated with Coinbase API
+
+### v1.1b
+- Bug fixes and stability improvements
+- Enhanced trade logging capabilities
+- Adjusted volatility thresholds
+
+### v1.2
+- Added adaptive take profit based on market volatility
+- Implemented market regime detection (Trending/Chop/Uncertain)
+- Added trend slope calculation
+- Enhanced filtering system using ATR percentage
+- Improved trade outcome analytics
+- Added tools for recalculating key parameters (plot_atr_histogram.py, analyze_volume_thresholds.py, volatility_threshold.py)
+
+### Usage
+
+```bash
+python simplified_trading_bot.py
 ```
 
 The simplified trading bot provides a streamlined trading experience with:

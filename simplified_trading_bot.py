@@ -42,7 +42,7 @@ VOLUME_THRESHOLD = 1.4
 # Recalculate this value every 50 trades using volatility_threshold.py
 VOLATILITY_THRESHOLD = 0.25 
 # Use trend_threshold.py to inform about this value
-TREND_THRESHOLD = 0.001  # 1% per bar threshold
+TREND_THRESHOLD = 0.001  # 1% per bar thresholid
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Simplified Trading Bot')
