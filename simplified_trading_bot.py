@@ -1,7 +1,8 @@
-# Simplified Trading Bot v1.1
+# Simplified Trading Bot v1.2
 # Single coin (BTC-USDC), single timeframe (5-min), single logic (RSI + EMA + volume)
 # No AI prompts, no ML classifiers, no market regimes
 # Added 1-bar confirmation delay for RSI entries
+# Added filters to reject trades in uncertain regimes
 
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
