@@ -212,7 +212,7 @@ def determine_tp_mode(entry_price: float, atr: float, price_precision: float = N
     Args:
         entry_price: Current entry price
         atr: Average True Range value
-        price_precision: Precision for rounding the price
+        price_precision: Precision for rounding the price (e.g., 0.1 for ETH)
         df: DataFrame containing price data (optional)
         trend_slope: Pre-calculated trend slope (optional)
         
@@ -229,7 +229,6 @@ def determine_tp_mode(entry_price: float, atr: float, price_precision: float = N
     
     # If we have a trend slope, determine market regime
     if trend_slope is not None:
-
         # Check if we have a strong trend
         if abs(trend_slope) > TREND_THRESHOLD:
             market_regime = "TRENDING"
@@ -261,7 +260,11 @@ def determine_tp_mode(entry_price: float, atr: float, price_precision: float = N
     
     # Round the price if precision is provided
     if price_precision is not None:
-        tp_price = round(tp_price, price_precision)
+        # Convert precision to number of decimal places
+        decimal_places = 0
+        if price_precision < 1:
+            decimal_places = len(str(price_precision).split('.')[1])
+        tp_price = round(tp_price, decimal_places)
     
     return tp_mode, tp_price, market_regime
 
