@@ -1750,6 +1750,7 @@ class MarketAnalyzerUI:
     def get_truly_open_orders(self, service):
         """
         Get only truly open orders, filtering out any that are filled or canceled.
+        Also checks if the orders are for the currently selected market.
         
         Args:
             service: CoinbaseService instance
@@ -1777,17 +1778,34 @@ class MarketAnalyzerUI:
             
             # Filter out orders that are not actually open
             active_orders = []
+            current_product = self.product_var.get()
+            
+            # Map spot product to perpetual product
+            perp_product_map = {
+                'BTC-USDC': 'BTC-PERP-INTX',
+                'ETH-USDC': 'ETH-PERP-INTX',
+                'DOGE-USDC': 'DOGE-PERP-INTX',
+                'SOL-USDC': 'SOL-PERP-INTX',
+                'SHIB-USDC': '1000SHIB-PERP-INTX'
+            }
+            current_perp_product = perp_product_map.get(current_product)
+            
             for order in orders:
-                # Extract status from order
+                # Extract status and product from order
                 status = None
+                product = None
+                
                 if isinstance(order, dict):
                     status = order.get('status')
+                    product = order.get('product_id')
                 elif hasattr(order, 'status'):
                     status = order.status
+                    product = order.product_id
                 
-                # Only count orders with status "OPEN"
+                # Only count orders with status "OPEN" and matching the current product
                 if status and status.upper() == 'OPEN':
-                    active_orders.append(order)
+                    if product == current_perp_product:
+                        active_orders.append(order)
             
             return active_orders
         except Exception as e:
