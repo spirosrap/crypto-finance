@@ -35,7 +35,7 @@ VALID_PRODUCTS = ['BTC-PERP-INTX', 'ETH-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-
 EMA_PERIODS = 200
 CANDLE_MINUTES = 5  # for FIVE_MINUTE granularity
 MIN_REQUIRED_CANDLES = EMA_PERIODS + 50  # Add buffer for better accuracy
-MIN_HISTORICAL_HOURS = (MIN_REQUIRED_CANDLES * CANDLE_MINUTES) // 60
+MIN_HISTORICAL_HOURS = 48  # Request 48 hours of data to ensure we get enough candles
 
 # Configure logging
 logging.basicConfig(
@@ -127,7 +127,12 @@ def get_historical_candles(
         start_timestamp = int(start_date.timestamp())
         logger.info(f"Extending historical data range to ensure enough candles for EMA calculation. New start date: {start_date}")
     
-    for attempt in range(MAX_RETRIES):
+    # If we still don't have enough candles, extend further back
+    max_attempts = 3
+    current_attempt = 0
+    all_candles = []
+    
+    while current_attempt < max_attempts:
         try:
             logger.info(f"Fetching historical candles from {start_date} to {end_date}")
             
@@ -143,8 +148,10 @@ def get_historical_candles(
             
             if num_candles < MIN_REQUIRED_CANDLES:
                 logger.warning(f"Insufficient candles ({num_candles}) for EMA calculation. Minimum required: {MIN_REQUIRED_CANDLES}")
-                # Try to fetch more historical data
-                extended_start = start_date - timedelta(hours=24)  # Extend by 24 hours
+                
+                # Extend the time range by 24 hours for each attempt
+                extended_hours = 24 * (current_attempt + 1)
+                extended_start = start_date - timedelta(hours=extended_hours)
                 logger.info(f"Attempting to fetch more historical data from {extended_start}")
                 
                 extended_candles = client.historical_data.get_historical_data(
@@ -156,25 +163,30 @@ def get_historical_candles(
                 
                 if len(extended_candles) > num_candles:
                     candles = extended_candles
-                    logger.info(f"Successfully retrieved {len(candles)} candles after extending time range")
+                    logger.info(f"Successfully retrieved {len(candles)} candles after extending time range by {extended_hours} hours")
                 else:
-                    logger.warning("Could not retrieve additional historical data")
+                    logger.warning(f"Could not retrieve additional historical data after extending by {extended_hours} hours")
+                
+                current_attempt += 1
+                start_date = extended_start
+                continue
             
             return candles
             
         except Exception as e:
             last_error = e
-            if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error getting historical candles after {MAX_RETRIES} attempts: {str(e)}")
+            if current_attempt == max_attempts - 1:
+                logger.error(f"Error getting historical candles after {max_attempts} attempts: {str(e)}")
                 logger.error(f"Last error: {str(last_error)}")
                 return []
             
             # Exponential backoff with some jitter
             jitter = random.uniform(0.5, 1.5)
-            backoff_time = backoff * (2 ** attempt) * jitter
-            logger.warning(f"Attempt {attempt + 1} failed to get historical candles: {str(e)}")
+            backoff_time = backoff * (2 ** current_attempt) * jitter
+            logger.warning(f"Attempt {current_attempt + 1} failed to get historical candles: {str(e)}")
             logger.warning(f"Retrying in {backoff_time:.2f} seconds...")
             time.sleep(backoff_time)
+            current_attempt += 1
     
     return []
 
@@ -496,27 +508,31 @@ def process_pending_trade(
         
         logger.info(f"Trade {trade_no} duration: {trade['Duration']} hours (from {entry_dt} to {current_dt})")
         
-        # Get historical candles for the entire trade period
-        candles = get_historical_candles(client, product_id, trade_timestamp, current_time)
+        # Get candles for trade analysis (only after entry)
+        trade_candles = get_historical_candles(client, product_id, trade_timestamp, current_time)
+        
+        # Get additional candles for EMA calculation
+        ema_start_time = current_time - (MIN_HISTORICAL_HOURS * 3600)  # Convert hours to seconds
+        ema_candles = get_historical_candles(client, product_id, ema_start_time, current_time)
         
         # Calculate EMA200 and determine trend regime
-        ema200 = calculate_ema200(candles)
+        ema200 = calculate_ema200(ema_candles)
         market_trend = determine_trend_regime(current_price, ema200)
         trade['Market Trend'] = market_trend
         
         # Check if entry price changed, if so reset state
         if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
             logger.info(f"Trade {trade_no} state reset - Entry price changed from {trade_state['entry_price']} to {entry_price} or side changed from {trade_state['side']} to {side}")
-            trade_state = reset_state_for_trade(trade_no, trade_state, entry_price, side, leverage, candles)
+            trade_state = reset_state_for_trade(trade_no, trade_state, entry_price, side, leverage, trade_candles)
         
         # Update MAE/MFE based on current price
         update_mae_mfe(trade, current_price, trade_state)
         
         # Process all candles to update min_price and max_price
-        if candles:
-            logger.info(f"Processing {len(candles)} candles for trade {trade_no}")
+        if trade_candles:
+            logger.info(f"Processing {len(trade_candles)} candles for trade {trade_no}")
             
-            for candle in candles:
+            for candle in trade_candles:
                 candle_time = datetime.fromtimestamp(int(candle['time']), UTC)
                 
                 # Skip candles before trade entry
