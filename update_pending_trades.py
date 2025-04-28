@@ -8,7 +8,7 @@ import csv
 import os
 import json
 import hashlib
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timedelta
 import logging
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
@@ -30,6 +30,12 @@ DEFAULT_GRANULARITY = "FIVE_MINUTE"
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # seconds
 VALID_PRODUCTS = ['BTC-PERP-INTX', 'ETH-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'XRP-PERP-INTX', '1000SHIB-PERP-INTX']
+
+# EMA calculation constants
+EMA_PERIODS = 200
+CANDLE_MINUTES = 5  # for FIVE_MINUTE granularity
+MIN_REQUIRED_CANDLES = EMA_PERIODS + 50  # Add buffer for better accuracy
+MIN_HISTORICAL_HOURS = (MIN_REQUIRED_CANDLES * CANDLE_MINUTES) // 60
 
 # Configure logging
 logging.basicConfig(
@@ -108,11 +114,21 @@ def get_historical_candles(
     last_error = None
     backoff = RETRY_DELAY
     
+    # Ensure we have enough historical data for EMA calculation
+    end_date = datetime.fromtimestamp(end_timestamp, UTC)
+    start_date = datetime.fromtimestamp(start_timestamp, UTC)
+    
+    # Calculate the minimum required start date
+    min_start_date = end_date - timedelta(hours=MIN_HISTORICAL_HOURS)
+    
+    # If the provided start_date is too recent, extend it
+    if start_date > min_start_date:
+        start_date = min_start_date
+        start_timestamp = int(start_date.timestamp())
+        logger.info(f"Extending historical data range to ensure enough candles for EMA calculation. New start date: {start_date}")
+    
     for attempt in range(MAX_RETRIES):
         try:
-            start_date = datetime.fromtimestamp(start_timestamp)
-            end_date = datetime.fromtimestamp(end_timestamp)
-            
             logger.info(f"Fetching historical candles from {start_date} to {end_date}")
             
             candles = client.historical_data.get_historical_data(
@@ -122,8 +138,30 @@ def get_historical_candles(
                 granularity
             )
             
-            logger.info(f"Retrieved {len(candles)} candles")
+            num_candles = len(candles)
+            logger.info(f"Retrieved {num_candles} candles")
+            
+            if num_candles < MIN_REQUIRED_CANDLES:
+                logger.warning(f"Insufficient candles ({num_candles}) for EMA calculation. Minimum required: {MIN_REQUIRED_CANDLES}")
+                # Try to fetch more historical data
+                extended_start = start_date - timedelta(hours=24)  # Extend by 24 hours
+                logger.info(f"Attempting to fetch more historical data from {extended_start}")
+                
+                extended_candles = client.historical_data.get_historical_data(
+                    product_id,
+                    extended_start,
+                    end_date,
+                    granularity
+                )
+                
+                if len(extended_candles) > num_candles:
+                    candles = extended_candles
+                    logger.info(f"Successfully retrieved {len(candles)} candles after extending time range")
+                else:
+                    logger.warning("Could not retrieve additional historical data")
+            
             return candles
+            
         except Exception as e:
             last_error = e
             if attempt == MAX_RETRIES - 1:
@@ -138,14 +176,23 @@ def get_historical_candles(
             logger.warning(f"Retrying in {backoff_time:.2f} seconds...")
             time.sleep(backoff_time)
     
-    # This should never be reached, but just in case
     return []
 
 def calculate_ema200(candles: List[Dict[str, Any]]) -> float:
     """Calculate EMA200 from candle data"""
     try:
+        if len(candles) < MIN_REQUIRED_CANDLES:
+            logger.error(f"Insufficient candles ({len(candles)}) for EMA calculation. Minimum required: {MIN_REQUIRED_CANDLES}")
+            return 0.0
+            
         prices = [float(candle['close']) for candle in candles]
         ema200 = talib.EMA(np.array(prices), timeperiod=200)
+        
+        # Check if we have a valid EMA value
+        if np.isnan(ema200[-1]):
+            logger.error("EMA calculation resulted in NaN value")
+            return 0.0
+            
         return ema200[-1]
     except Exception as e:
         logger.error(f"Error calculating EMA200: {str(e)}")
