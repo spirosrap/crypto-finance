@@ -2450,8 +2450,18 @@ class MarketAnalyzerUI:
             # Now run update_pending_trades.py
             self.queue.put(("status", "Updating pending trades..."))
             
+            # Map UI product to update_pending_trades.py format
+            product_map = {
+                "BTC-USDC": "BTC-PERP-INTX",
+                "ETH-USDC": "ETH-PERP-INTX",
+                "DOGE-USDC": "DOGE-PERP-INTX",
+                "SOL-USDC": "SOL-PERP-INTX",
+                "SHIB-USDC": "1000SHIB-PERP-INTX"
+            }
+            product = product_map.get(self.product_var.get(), "BTC-PERP-INTX")
+            
             pending_process = subprocess.Popen(
-                ["python", "update_pending_trades.py"],
+                ["python", "update_pending_trades.py", "--product", product],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
