@@ -20,14 +20,16 @@ import numpy as np
 import talib
 import random
 import sys
+import argparse
 
 # Constants
 STATE_FILE_PATH = 'data/trade_state_tracker.json'
-CSV_FILE_PATH = 'automated_trades.csv'
+DEFAULT_CSV_FILE_PATH = 'automated_trades.csv'
 LOG_FILE_PATH = 'logs/pending_trades_updates.log'
 DEFAULT_GRANULARITY = "FIVE_MINUTE"
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # seconds
+VALID_PRODUCTS = ['BTC-PERP-INTX', 'ETH-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'XRP-PERP-INTX', '1000SHIB-PERP-INTX']
 
 # Configure logging
 logging.basicConfig(
@@ -61,8 +63,8 @@ def load_api_keys() -> Tuple[str, str]:
         raise ValueError("API keys not found in .env file")
     return api_key, api_secret
 
-def get_current_btc_price_from_candles(client: CoinbaseService) -> float:
-    """Get current BTC price from historical candles with retry logic"""
+def get_current_price_from_candles(client: CoinbaseService, product_id: str) -> float:
+    """Get current price from historical candles with retry logic"""
     last_error = None
     backoff = RETRY_DELAY
     
@@ -73,7 +75,7 @@ def get_current_btc_price_from_candles(client: CoinbaseService) -> float:
             five_minutes_ago = current_time - 300  # 5 minutes in seconds
             
             # Get historical candles for the last 5 minutes
-            candles = get_historical_candles(client, five_minutes_ago, current_time)
+            candles = get_historical_candles(client, product_id, five_minutes_ago, current_time)
             
             if not candles:
                 raise ValueError("No candle data available")
@@ -84,19 +86,20 @@ def get_current_btc_price_from_candles(client: CoinbaseService) -> float:
         except Exception as e:
             last_error = e
             if attempt == MAX_RETRIES - 1:
-                logger.error(f"Error getting current BTC price from candles after {MAX_RETRIES} attempts: {str(e)}")
+                logger.error(f"Error getting current price from candles after {MAX_RETRIES} attempts: {str(e)}")
                 logger.error(f"Last error: {str(last_error)}")
                 raise
             
             # Exponential backoff with some jitter
             jitter = random.uniform(0.5, 1.5)
             backoff_time = backoff * (2 ** attempt) * jitter
-            logger.warning(f"Attempt {attempt + 1} failed to get BTC price from candles: {str(e)}")
+            logger.warning(f"Attempt {attempt + 1} failed to get price from candles: {str(e)}")
             logger.warning(f"Retrying in {backoff_time:.2f} seconds...")
             time.sleep(backoff_time)
 
 def get_historical_candles(
     client: CoinbaseService,
+    product_id: str,
     start_timestamp: int,
     end_timestamp: int,
     granularity: str = DEFAULT_GRANULARITY
@@ -107,7 +110,6 @@ def get_historical_candles(
     
     for attempt in range(MAX_RETRIES):
         try:
-            product_id = "BTC-PERP-INTX"
             start_date = datetime.fromtimestamp(start_timestamp)
             end_date = datetime.fromtimestamp(end_timestamp)
             
@@ -312,6 +314,7 @@ def update_mae_mfe(
 def process_closed_trade(
     trade: Dict[str, Any],
     client: CoinbaseService,
+    product_id: str,
     entry_timestamp: int,
     exit_timestamp: int
 ) -> Dict[str, Any]:
@@ -354,7 +357,7 @@ def process_closed_trade(
             duration_hours = (exit_timestamp - entry_timestamp) / 3600
             trade['Duration'] = str(round(duration_hours, 2))
         
-        candles = get_historical_candles(client, entry_timestamp, exit_timestamp)
+        candles = get_historical_candles(client, product_id, entry_timestamp, exit_timestamp)
         
         if not candles:
             logger.warning(f"No candle data available for closed trade {trade_no}. Skipping.")
@@ -404,6 +407,7 @@ def process_pending_trade(
     current_price: float,
     trade_state: Dict[str, Any],
     client: CoinbaseService,
+    product_id: str,
     take_profit: float,
     stop_loss: float
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -444,7 +448,7 @@ def process_pending_trade(
         logger.info(f"Trade {trade_no} duration: {trade['Duration']} hours (from {entry_dt} to {current_dt})")
         
         # Get historical candles for the entire trade period
-        candles = get_historical_candles(client, trade_timestamp, current_time)
+        candles = get_historical_candles(client, product_id, trade_timestamp, current_time)
         
         # Calculate EMA200 and determine trend regime
         ema200 = calculate_ema200(candles)
@@ -584,19 +588,61 @@ def process_pending_trade(
         logger.error(f"Error processing pending trade {trade.get('No.', 'unknown')}: {str(e)}")
         return trade, trade_state
 
-def update_pending_trades() -> None:
+def get_csv_file_path(product_id: str) -> str:
+    """Get the appropriate CSV file path based on the product"""
+    if product_id == 'BTC-PERP-INTX':
+        return DEFAULT_CSV_FILE_PATH
+    else:
+        # Extract the base symbol from the product ID (e.g., ETH from ETH-PERP-INTX)
+        base_symbol = product_id.split('-')[0]
+        return f'automated_trades_{base_symbol}.csv'
+
+def create_initial_csv_file(csv_file_path: str) -> None:
+    """Create a new CSV file with the required fields if it doesn't exist"""
+    if not os.path.exists(csv_file_path):
+        logger.info(f"Creating new CSV file: {csv_file_path}")
+        # Define the required fields
+        fields = [
+            'No.', 'Timestamp', 'SIDE', 'ENTRY', 'Take Profit', 'Stop Loss', 
+            'Leverage', 'Outcome', 'Exit Trade', 'Exit Reason', 'Outcome %',
+            'MAE', 'MFE', 'Market Trend', 'Duration'
+        ]
+        
+        # Create the directory if it doesn't exist and the path contains directory components
+        dir_path = os.path.dirname(csv_file_path)
+        if dir_path:  # Only create directory if path contains directory components
+            os.makedirs(dir_path, exist_ok=True)
+        
+        # Create the file with headers
+        with open(csv_file_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(fields)
+        logger.info(f"Created new CSV file with headers: {csv_file_path}")
+
+def update_pending_trades(product_id: str = 'BTC-PERP-INTX') -> None:
     """Update pending trades based on current price"""
     try:
+        # Validate product_id
+        if product_id not in VALID_PRODUCTS:
+            raise ValueError(f"Invalid product_id. Must be one of: {', '.join(VALID_PRODUCTS)}")
+            
+        # Get the appropriate CSV file path
+        csv_file_path = get_csv_file_path(product_id)
+        logger.info(f"Using CSV file: {csv_file_path}")
+        
+        # Create the CSV file if it doesn't exist
+        create_initial_csv_file(csv_file_path)
+            
         # Load API keys and initialize Coinbase client
         api_key, api_secret = load_api_keys()
         client = CoinbaseService(api_key, api_secret)
         
-        # Get current BTC price from historical candles
+        # Get current price from historical candles
         try:
-            current_price = get_current_btc_price_from_candles(client)
-            logger.info(f"Current BTC price: {current_price}")
+            current_price = get_current_price_from_candles(client, product_id)
+            logger.info(f"Current {product_id} price: {current_price}")
         except Exception as e:
-            logger.error(f"Failed to get current BTC price: {str(e)}")
+            logger.error(f"Failed to get current {product_id} price: {str(e)}")
             logger.error("Cannot continue without current price data")
             raise
         
@@ -605,13 +651,11 @@ def update_pending_trades() -> None:
         
         # Read the CSV file
         trades = []
-        file_exists = os.path.isfile(CSV_FILE_PATH)
         headers = []
         
-        if file_exists:
-            with open(CSV_FILE_PATH, 'r') as f:
-                reader = csv.reader(f)
-                headers = next(reader)
+        with open(csv_file_path, 'r') as f:
+            reader = csv.reader(f)
+            headers = next(reader)
         
         # Check if MAE, MFE, and Market Trend columns exist
         mae_index = headers.index('MAE') if 'MAE' in headers else -1
@@ -621,7 +665,7 @@ def update_pending_trades() -> None:
         duration_index = headers.index('Duration') if 'Duration' in headers else -1
         
         # Read the trades
-        with open(CSV_FILE_PATH, 'r') as f:
+        with open(csv_file_path, 'r') as f:
             reader = csv.DictReader(f)
             trades = list(reader)
         
@@ -666,7 +710,7 @@ def update_pending_trades() -> None:
                             entry_timestamp = int(datetime.strptime(trade['Timestamp'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
                             exit_timestamp = int(datetime.strptime(trade['Exit Trade'], "%Y-%m-%d %H:%M:%S UTC").timestamp())
                         
-                        trade = process_closed_trade(trade, client, entry_timestamp, exit_timestamp)
+                        trade = process_closed_trade(trade, client, product_id, entry_timestamp, exit_timestamp)
                         updated = True
                     
                 except Exception as e:
@@ -717,6 +761,7 @@ def update_pending_trades() -> None:
                         current_price,
                         state_tracker[unique_id],
                         client,
+                        product_id,
                         take_profit,
                         stop_loss
                     )
@@ -730,16 +775,16 @@ def update_pending_trades() -> None:
         if updated:
             if mae_index == -1 or mfe_index == -1 or exit_trade_index == -1 or trend_regime_index == -1 or duration_index == -1:
                 all_fields = list(trades[0].keys())
-                with open(CSV_FILE_PATH, 'w', newline='') as f:
+                with open(csv_file_path, 'w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=all_fields)
                     writer.writeheader()
                     writer.writerows(trades)
             else:
-                with open(CSV_FILE_PATH, 'w', newline='') as f:
+                with open(csv_file_path, 'w', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=trades[0].keys())
                     writer.writeheader()
                     writer.writerows(trades)
-            logger.info("Updated trades saved to automated_trades.csv")
+            logger.info(f"Updated trades saved to {csv_file_path}")
         else:
             logger.info("No pending trades needed updating")
         
@@ -758,6 +803,13 @@ def update_pending_trades() -> None:
         return False
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Update pending trades based on current price')
+    parser.add_argument('--product', type=str, default='BTC-PERP-INTX',
+                      choices=VALID_PRODUCTS,
+                      help='Trading product (default: BTC-PERP-INTX)')
+    args = parser.parse_args()
+    
     # When run as a script, add retry logic at the top level
     MAX_SCRIPT_RETRIES = 5
     SCRIPT_RETRY_DELAY = 5  # seconds
@@ -768,7 +820,7 @@ if __name__ == "__main__":
     for attempt in range(MAX_SCRIPT_RETRIES):
         try:
             logger.info(f"Starting trade update attempt {attempt + 1}/{MAX_SCRIPT_RETRIES}")
-            if update_pending_trades():
+            if update_pending_trades(args.product):
                 logger.info("Trade update completed successfully")
                 success = True
                 break
