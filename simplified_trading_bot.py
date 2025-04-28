@@ -1,8 +1,8 @@
 # Simplified Trading Bot v1.2
 # Single coin (BTC-USDC), single timeframe (5-min), single logic (RSI + EMA + volume)
-# No AI prompts, no ML classifiers, no market regimes
 # Added 1-bar confirmation delay for RSI entries
 # Added filters to reject trades in uncertain regimes
+# Mostly fixed TP/SL logic. Slight variation in the logic for determining TP based on ATR.
 
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
@@ -13,6 +13,7 @@ import logging
 import argparse
 import subprocess
 import numpy as np
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -330,11 +331,15 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         logger.info("Order placed successfully!")
         logger.info(f"Command output: {result.stdout}")
 
-        # Log trade to automated_trades.csv
+        # Determine the trades file name based on the product
+        base_symbol = product_id.split('-')[0]  # Get the base symbol (e.g., 'BTC' from 'BTC-USDC')
+        trades_file = 'automated_trades.csv' if base_symbol == 'BTC' else f'automated_trades_{base_symbol}.csv'
+
+        # Log trade to the appropriate CSV file
         try:
             # Read existing trades to get the next trade number
-            trades_df = pd.read_csv('automated_trades.csv')
-            next_trade_no = len(trades_df) + 1
+            trades_df = pd.read_csv(trades_file) if os.path.exists(trades_file) else pd.DataFrame()
+            next_trade_no = len(trades_df) + 1 if not trades_df.empty else 1
             
             # Calculate R/R ratio
             rr_ratio = (tp_price - entry_price) / (entry_price - sl_price)
@@ -379,11 +384,11 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             }])
             
             # Append new trade to CSV
-            new_trade.to_csv('automated_trades.csv', mode='a', header=False, index=False)
-            logger.info("Trade logged to automated_trades.csv")
+            new_trade.to_csv(trades_file, mode='a', header=not os.path.exists(trades_file), index=False)
+            logger.info(f"Trade logged to {trades_file}")
             
         except Exception as e:
-            logger.error(f"Error logging trade to automated_trades.csv: {e}")
+            logger.error(f"Error logging trade to {trades_file}: {e}")
         
         return True
         
