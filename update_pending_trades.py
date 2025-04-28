@@ -465,6 +465,8 @@ def process_pending_trade(
         side = trade['SIDE']
         leverage = float(trade['Leverage'].replace('x', ''))
         
+        logger.info(f"Processing trade {trade_no} - Side: {side}, Entry: {entry_price}, TP: {take_profit}, SL: {stop_loss}, Current Price: {current_price}")
+        
         # Get historical candles for EMA200 calculation
         try:
             # Parse the timestamp and ensure it's in UTC
@@ -504,6 +506,7 @@ def process_pending_trade(
         
         # Check if entry price changed, if so reset state
         if abs(trade_state['entry_price'] - entry_price) > 0.01 or trade_state['side'] != side:
+            logger.info(f"Trade {trade_no} state reset - Entry price changed from {trade_state['entry_price']} to {entry_price} or side changed from {trade_state['side']} to {side}")
             trade_state = reset_state_for_trade(trade_no, trade_state, entry_price, side, leverage, candles)
         
         # Update MAE/MFE based on current price
@@ -514,24 +517,35 @@ def process_pending_trade(
             logger.info(f"Processing {len(candles)} candles for trade {trade_no}")
             
             for candle in candles:
+                candle_time = datetime.fromtimestamp(int(candle['time']), UTC)
+                
+                # Skip candles before trade entry
+                if candle_time < entry_dt:
+                    continue
+                    
                 high = float(candle['high'])
                 low = float(candle['low'])
                 
                 # Update min_price and max_price from candle data
                 if side == 'LONG':
                     if low < trade_state['min_price']:
+                        logger.info(f"Trade {trade_no} new min price: {low} (previous: {trade_state['min_price']}) at {candle_time}")
                         trade_state['min_price'] = low
                     if high > trade_state['max_price']:
+                        logger.info(f"Trade {trade_no} new max price: {high} (previous: {trade_state['max_price']}) at {candle_time}")
                         trade_state['max_price'] = high
                 else:  # SHORT
                     if high > trade_state['max_price']:
+                        logger.info(f"Trade {trade_no} new max price: {high} (previous: {trade_state['max_price']}) at {candle_time}")
                         trade_state['max_price'] = high
                     if low < trade_state['min_price']:
+                        logger.info(f"Trade {trade_no} new min price: {low} (previous: {trade_state['min_price']}) at {candle_time}")
                         trade_state['min_price'] = low
                 
                 # Check for TP/SL hits in candle wicks
                 if side == 'LONG':
                     if high >= take_profit:
+                        logger.info(f"Trade {trade_no} TP HIT in candle wick - High: {high}, TP: {take_profit} at {candle_time}")
                         # Before exiting, ensure MAE/MFE are calculated from all candles
                         calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
                         
@@ -541,6 +555,7 @@ def process_pending_trade(
                         trade['Outcome %'] = str(round(((take_profit - entry_price) / entry_price) * leverage * 100, 2))
                         return trade, trade_state
                     elif low <= stop_loss:
+                        logger.info(f"Trade {trade_no} SL HIT in candle wick - Low: {low}, SL: {stop_loss} at {candle_time}")
                         # Before exiting, ensure MAE/MFE are calculated from all candles
                         calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
                         
@@ -553,6 +568,7 @@ def process_pending_trade(
                         return trade, trade_state
                 else:  # SHORT
                     if low <= take_profit:
+                        logger.info(f"Trade {trade_no} TP HIT in candle wick - Low: {low}, TP: {take_profit} at {candle_time}")
                         # Before exiting, ensure MAE/MFE are calculated from all candles
                         calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
                         
@@ -564,6 +580,7 @@ def process_pending_trade(
                         trade['Outcome %'] = str(round(profit_pct, 2))
                         return trade, trade_state
                     elif high >= stop_loss:
+                        logger.info(f"Trade {trade_no} SL HIT in candle wick - High: {high}, SL: {stop_loss} at {candle_time}")
                         # Before exiting, ensure MAE/MFE are calculated from all candles
                         calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
                         
@@ -579,6 +596,7 @@ def process_pending_trade(
         # This ensures we prioritize current price conditions over historical wicks
         if side == 'LONG':
             if current_price >= take_profit:
+                logger.info(f"Trade {trade_no} TP HIT in current price - Current: {current_price}, TP: {take_profit}")
                 # Before exiting, ensure MAE/MFE are calculated from all candles
                 calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
                 
@@ -589,6 +607,7 @@ def process_pending_trade(
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
                 return trade, trade_state
             elif current_price <= stop_loss:
+                logger.info(f"Trade {trade_no} SL HIT in current price - Current: {current_price}, SL: {stop_loss}")
                 # Before exiting, ensure MAE/MFE are calculated from all candles
                 calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
                 
@@ -602,6 +621,7 @@ def process_pending_trade(
                 return trade, trade_state
         else:  # SHORT
             if current_price <= take_profit:
+                logger.info(f"Trade {trade_no} TP HIT in current price - Current: {current_price}, TP: {take_profit}")
                 # Before exiting, ensure MAE/MFE are calculated from all candles
                 calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
                 
@@ -614,6 +634,7 @@ def process_pending_trade(
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
                 return trade, trade_state
             elif current_price >= stop_loss:
+                logger.info(f"Trade {trade_no} SL HIT in current price - Current: {current_price}, SL: {stop_loss}")
                 # Before exiting, ensure MAE/MFE are calculated from all candles
                 calculate_final_mae_mfe(trade, trade_state, entry_price, side, leverage)
                 
