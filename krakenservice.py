@@ -688,4 +688,48 @@ class KrakenService:
             
         except Exception as e:
             self.logger.error(f"Error making Kraken API request: {str(e)}")
-            return {'error': str(e)} 
+            return {'error': str(e)}
+
+    def check_open_orders_and_positions(self) -> Tuple[bool, bool]:
+        """
+        Check if there are any open orders or positions.
+        
+        Returns:
+            Tuple[bool, bool]: (has_open_orders, has_positions)
+        """
+        try:
+            # Check for open orders
+            has_open_orders = False
+            try:
+                # Get open orders
+                response = self._api_request("POST", "/private/OpenOrders", {})
+                
+                if 'error' in response and response['error']:
+                    self.logger.error(f"Error getting open orders: {response['error']}")
+                else:
+                    result = response.get('result', {})
+                    open_orders = result.get('open', {})
+                    has_open_orders = len(open_orders) > 0
+                    
+                    if has_open_orders:
+                        self.logger.info(f"Found {len(open_orders)} open orders")
+            except Exception as e:
+                self.logger.error(f"Error checking for open orders: {str(e)}")
+            
+            # Check for open positions
+            has_positions = False
+            try:
+                # Get portfolio info for futures
+                usd_balance, position_size = self.get_portfolio_info(portfolio_type="FUTURES")
+                has_positions = abs(position_size) > 0
+                
+                if has_positions:
+                    self.logger.info(f"Found open position with size: {position_size}")
+            except Exception as e:
+                self.logger.error(f"Error checking for open positions: {str(e)}")
+            
+            return has_open_orders, has_positions
+            
+        except Exception as e:
+            self.logger.error(f"Error checking for open orders and positions: {str(e)}")
+            return False, False 

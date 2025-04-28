@@ -38,12 +38,14 @@ def main():
     # # Test getting BTC prices
     test_get_btc_prices(kraken)
     
-    
     # Test getting OHLC data
     test_get_ohlc_data(kraken)
     
     # Test getting recent trades
     test_get_recent_trades(kraken)
+    
+    # Test checking for open orders and positions
+    test_check_open_orders_and_positions(kraken)
 
     # # Test placing orders with stop loss and take profit
     # test_place_orders_with_sl_tp(kraken)
@@ -204,6 +206,29 @@ def test_close_positions(kraken):
     # Cancel all orders
     cancel_result = kraken.cancel_all_orders(pair="XBTUSD", is_futures=True)
     logger.info(f"Cancel orders result: {cancel_result}")
+
+def test_check_open_orders_and_positions(kraken):
+    """Test checking for open orders and positions."""
+    logger.info("Testing check_open_orders_and_positions...")
+    
+    # Check for open orders and positions
+    has_open_orders, has_positions = kraken.check_open_orders_and_positions()
+    
+    logger.info(f"Open Orders: {'Yes' if has_open_orders else 'No'}")
+    logger.info(f"Open Positions: {'Yes' if has_positions else 'No'}")
+    
+    if has_open_orders:
+        # Get details of open orders
+        response = kraken._api_request("POST", "/private/OpenOrders", {})
+        if 'error' not in response or not response['error']:
+            result = response.get('result', {})
+            open_orders = result.get('open', {})
+            logger.info(f"Open Orders Details: {open_orders}")
+    
+    if has_positions:
+        # Get details of positions
+        usd_balance, position_size = kraken.get_portfolio_info(portfolio_type="FUTURES")
+        logger.info(f"Position Details - USD Balance: {usd_balance}, Position Size: {position_size}")
 
 if __name__ == "__main__":
     main() 
