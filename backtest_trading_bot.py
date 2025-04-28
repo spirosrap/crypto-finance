@@ -182,15 +182,21 @@ def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5
     try:
         trades_df = pd.DataFrame([vars(t) for t in trades])
         
+        # Get price precision for the product
+        price_precision = get_price_precision(get_perp_product(product_id))
+        decimal_places = 0
+        if price_precision < 1:
+            decimal_places = len(str(price_precision).split('.')[1])
+        
         # Add columns to match automated_trades.csv format
         trades_df['No.'] = range(1, len(trades_df) + 1)
         trades_df['SIDE'] = 'LONG'  # All trades are long in this backtest
-        trades_df['ENTRY'] = trades_df['entry_price'].round(2)
+        trades_df['ENTRY'] = trades_df['entry_price'].round(decimal_places)
         trades_df['Take Profit'] = trades_df.apply(
-            lambda row: determine_tp_mode(row['entry_price'], row['atr'], None, None, row['trend_slope'])[1], 
+            lambda row: determine_tp_mode(row['entry_price'], row['atr'], price_precision, None, row['trend_slope'])[1], 
             axis=1
-        ).round(2)
-        trades_df['Stop Loss'] = (trades_df['entry_price'] * (1 - SL_PERCENT)).round(2)
+        ).round(decimal_places)
+        trades_df['Stop Loss'] = (trades_df['entry_price'] * (1 - SL_PERCENT)).round(decimal_places)
         trades_df['R/R Ratio'] = ((trades_df['Take Profit'] - trades_df['ENTRY']) / 
                                  (trades_df['ENTRY'] - trades_df['Stop Loss'])).round(2)
 
@@ -362,16 +368,21 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
             atr = ta.compute_atr(historical_df.to_dict('records'))
             
             # Get dynamic TP based on market conditions
+            price_precision = get_price_precision(get_perp_product(config.product_id))
+            # Convert precision to number of decimal places
+            decimal_places = 0
+            if price_precision < 1:
+                decimal_places = len(str(price_precision).split('.')[1])
             tp_mode, tp_price, market_regime = determine_tp_mode(
                 current_price, 
                 atr, 
-                get_price_precision(get_perp_product(config.product_id)),
+                price_precision,
                 historical_df,
                 trend_slope
             )
             
             # Keep SL fixed at 0.7% for now
-            sl_price = round(current_price * (1 - SL_PERCENT), get_price_precision(get_perp_product(config.product_id)))
+            sl_price = round(current_price * (1 - SL_PERCENT), decimal_places)
             
             position_size = balance * 0.1  # Use 10% of balance per trade
             size = position_size / current_price
