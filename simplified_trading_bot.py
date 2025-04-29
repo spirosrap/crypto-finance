@@ -14,6 +14,7 @@ import argparse
 import subprocess
 import numpy as np
 import os
+from asset_params import get_asset_params, ASSET_PARAMS, DEFAULT_PARAMS
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -28,23 +29,6 @@ logging.getLogger('ml_model').setLevel(logging.WARNING)
 
 # Parameters
 GRANULARITY = "FIVE_MINUTE"
-RSI_THRESHOLD = 30
-RSI_CONFIRMATION_THRESHOLD = 35  # New parameter for confirmation bar
-VOLUME_LOOKBACK = 20
-TP_PERCENT = 0.015
-SL_PERCENT = 0.007
-LEVERAGE = 5  # Conservative leverage
-POSITION_SIZE_USD = 100  # Position size in USD
-
-# Recalculate these values every 50 trades using plot_atr_histogram.py
-mean_atr_percent = 0.284
-std_atr_percent = 0.148
-# Recalculate this value every 50 trades using analyze_volume_thresholds.py
-VOLUME_THRESHOLD = 1.4
-# Recalculate this value every 50 trades using volatility_threshold.py
-VOLATILITY_THRESHOLD = 0.25 
-# Use trend_threshold.py to inform about this value
-TREND_THRESHOLD = 0.001  # 1% per bar thresholid
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Simplified Trading Bot')
@@ -130,6 +114,9 @@ def calculate_trend_slope(df: pd.DataFrame) -> float:
     return normalized_slope
 
 def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
+    # Get asset-specific parameters
+    params = get_asset_params(product_id)
+    
     # Convert DataFrame to list of dictionaries for the technical analysis methods
     candles = df.to_dict('records')
     
@@ -146,7 +133,7 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     # Get current and previous values
     current = df.iloc[-1]
     previous = df.iloc[-2]
-    avg_volume = df["volume"].tail(VOLUME_LOOKBACK).mean()
+    avg_volume = df["volume"].tail(params['VOLUME_LOOKBACK']).mean()
     
     # Calculate relative volume (current volume / average volume)
     relative_volume = current['volume'] / avg_volume if avg_volume > 0 else 0
@@ -168,30 +155,33 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     
     # Determine market regime based on trend slope
     market_regime = "UNCERTAIN"
-    if abs(trend_slope) > TREND_THRESHOLD:
+    if abs(trend_slope) > params['TREND_THRESHOLD']:
         market_regime = "TRENDING"
-    elif atr_percent > VOLATILITY_THRESHOLD:
+    elif atr_percent > params['VOLATILITY_THRESHOLD']:
         market_regime = "CHOP"
         
     # New trade entry filters
-    # Filter 1: Reject trades if Trend Regime == "UNCERTAIN" and RSI at Entry > 27
-    if market_regime == "UNCERTAIN" and rsi_current > 27:
-        logger.info(f"[FILTERED] Rejected trade: RSI > 27 in Uncertain regime (RSI={rsi_current:.2f})")
+    # Filter 1: Reject trades if Trend Regime == "UNCERTAIN" and RSI at Entry > asset-specific threshold
+    if market_regime == "UNCERTAIN" and rsi_current > params['UNCERTAIN_RSI_FILTER']:
+        logger.info(f"[FILTERED] Rejected trade: RSI > {params['UNCERTAIN_RSI_FILTER']} in Uncertain regime (RSI={rsi_current:.2f})")
         return False, None, None, None, None
         
-    # Filter 2: Reject trades if Trend Regime == "UNCERTAIN" and Relative Volume < 1.5
-    if market_regime == "UNCERTAIN" and relative_volume < 1.5:
-        logger.info(f"[FILTERED] Rejected trade: Low volume in Uncertain regime (Rel Vol={relative_volume:.2f})")
+    # Filter 2: Reject trades if Trend Regime == "UNCERTAIN" and Relative Volume < asset-specific threshold
+    if market_regime == "UNCERTAIN" and relative_volume < params['UNCERTAIN_VOLUME_FILTER']:
+        logger.info(f"[FILTERED] Rejected trade: Low volume in Uncertain regime (Rel Vol={relative_volume:.2f} < {params['UNCERTAIN_VOLUME_FILTER']})")
         return False, None, None, None, None
         
-    # Filter 3: Reject trades if ATR % < 0.2 and abs(Trend Slope) < 0.001 and RSI at Entry > 25
-    if atr_percent < 0.2 and abs(trend_slope) < 0.001 and rsi_current > 25:
-        logger.info(f"[FILTERED] Rejected trade: Low volatility, flat trend, RSI > 25 (ATR %={atr_percent:.2f}, Trend Slope={trend_slope:.4f}, RSI={rsi_current:.2f})")
+    # Filter 3: Reject trades with asset-specific thresholds for ATR, Trend Slope, and RSI
+    if atr_percent < params['LOW_VOL_ATR_FILTER'] and abs(trend_slope) < params['LOW_VOL_TREND_FILTER'] and rsi_current > params['LOW_VOL_RSI_FILTER']:
+        logger.info(f"[FILTERED] Rejected trade: Low volatility, flat trend, RSI > {params['LOW_VOL_RSI_FILTER']} "
+                   f"(ATR %={atr_percent:.2f} < {params['LOW_VOL_ATR_FILTER']}, "
+                   f"Trend Slope={abs(trend_slope):.4f} < {params['LOW_VOL_TREND_FILTER']}, "
+                   f"RSI={rsi_current:.2f})")
         return False, None, None, None, None
 
     # RSI 1-bar confirmation logic
-    rsi_triggered = rsi_previous < RSI_THRESHOLD
-    rsi_confirmed = rsi_current < RSI_THRESHOLD
+    rsi_triggered = rsi_previous < params['RSI_THRESHOLD']
+    rsi_confirmed = rsi_current < params['RSI_THRESHOLD']
 
     if rsi_triggered and rsi_confirmed:
         logger.info(f"[SIGNAL] BUY {product_id} at {current['close']:.2f} "
@@ -204,7 +194,7 @@ def analyze(df: pd.DataFrame, ta: TechnicalAnalysis, product_id: str):
     return False, None, None, None, None
 
 def determine_tp_mode(entry_price: float, atr: float, price_precision: float = None, 
-                     df: pd.DataFrame = None, trend_slope: float = None) -> tuple[str, float, str]:
+                     df: pd.DataFrame = None, trend_slope: float = None, product_id: str = None) -> tuple[str, float, str]:
     """
     Determine take profit mode and price based on ATR volatility and market regime.
     Also determines the market regime internally.
@@ -215,10 +205,14 @@ def determine_tp_mode(entry_price: float, atr: float, price_precision: float = N
         price_precision: Precision for rounding the price (e.g., 0.1 for ETH)
         df: DataFrame containing price data (optional)
         trend_slope: Pre-calculated trend slope (optional)
+        product_id: Product ID for asset-specific parameters
         
     Returns:
         tuple: (tp_mode, tp_price, market_regime)
     """
+    # Get asset-specific parameters
+    params = get_asset_params(product_id)
+    
     atr_percent = (atr / entry_price) * 100
     # Determine market regime internally
     market_regime = "UNCERTAIN"  # Default
@@ -230,15 +224,15 @@ def determine_tp_mode(entry_price: float, atr: float, price_precision: float = N
     # If we have a trend slope, determine market regime
     if trend_slope is not None:
         # Check if we have a strong trend
-        if abs(trend_slope) > TREND_THRESHOLD:
+        if abs(trend_slope) > params['TREND_THRESHOLD']:
             market_regime = "TRENDING"
         
         # Check if we're in a choppy market (low trend, moderate volatility)
-        elif atr_percent > VOLATILITY_THRESHOLD:
+        elif atr_percent > params['VOLATILITY_THRESHOLD']:
             market_regime = "CHOP"
     
     # High volatility → Use adaptive TP (2.5x ATR handles volatility better)
-    adaptive_trigger = mean_atr_percent + std_atr_percent
+    adaptive_trigger = params['mean_atr_percent'] + params['std_atr_percent']
 
     if atr_percent > adaptive_trigger and market_regime == "TRENDING":
         tp_mode = "ADAPTIVE"
@@ -250,13 +244,13 @@ def determine_tp_mode(entry_price: float, atr: float, price_precision: float = N
         # Regime-based TP logic
         if market_regime == "TRENDING":
             # Trending regime → TP = 1.5% or higher
-            tp_price = entry_price * (1 + 0.015)  # 1.5% fixed TP
+            tp_price = entry_price * (1 + params['TP_PERCENT'])  # 1.5% fixed TP
         elif market_regime == "CHOP":
             # Chop/news/noise → TP = 1.1%
-            tp_price = entry_price * (1 + 0.011)  # 1.1% fixed TP
+            tp_price = entry_price * (1 + (params['TP_PERCENT'] * 0.733))  # 1.1% fixed TP
         else:
             # Default fallback → TP = 1.1% if uncertain
-            tp_price = entry_price * (1 + 0.011)  # 1.1% fixed TP
+            tp_price = entry_price * (1 + (params['TP_PERCENT'] * 0.733))  # 1.1% fixed TP
     
     # Round the price if precision is provided
     if price_precision is not None:
@@ -271,6 +265,9 @@ def determine_tp_mode(entry_price: float, atr: float, price_precision: float = N
 def execute_trade(cb, entry_price: float, product_id: str, margin: float, leverage: int, trend_slope: float = None):
     """Execute the trade using trade_btc_perp.py functions"""
     try:
+        # Get asset-specific parameters
+        params = get_asset_params(product_id)
+        
         # Convert to perpetual futures product ID
         perp_product = get_perp_product(product_id)
         price_precision = get_price_precision(perp_product)
@@ -282,10 +279,10 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
         # Calculate ATR percentage
         atr_percent = (atr / entry_price) * 100
         # Determine TP mode, price, and market regime using centralized function
-        tp_mode, tp_price, market_regime = determine_tp_mode(entry_price, atr, price_precision, pd.DataFrame(candles), trend_slope)
+        tp_mode, tp_price, market_regime = determine_tp_mode(entry_price, atr, price_precision, pd.DataFrame(candles), trend_slope, product_id)
         
         # Fixed stop loss
-        sl_price = round(entry_price * (1 - SL_PERCENT), price_precision)              
+        sl_price = round(entry_price * (1 - params['SL_PERCENT']), price_precision)              
         # Calculate size in USD
         size_usd = margin * leverage
         
@@ -347,11 +344,11 @@ def execute_trade(cb, entry_price: float, product_id: str, margin: float, levera
             # Calculate R/R ratio
             rr_ratio = (tp_price - entry_price) / (entry_price - sl_price)
             
-            if atr_percent > mean_atr_percent + std_atr_percent:
+            if atr_percent > params['mean_atr_percent'] + params['std_atr_percent']:
                 volatility_level = "Very Strong"
-            elif atr_percent > mean_atr_percent:
+            elif atr_percent > params['mean_atr_percent']:
                 volatility_level = "Strong"
-            elif atr_percent > mean_atr_percent - std_atr_percent:
+            elif atr_percent > params['mean_atr_percent'] - params['std_atr_percent']:
                 volatility_level = "Moderate"
             else:
                 volatility_level = "Weak"                

@@ -1,7 +1,6 @@
 from simplified_trading_bot import (
-    CoinbaseService, TechnicalAnalysis, GRANULARITY, RSI_THRESHOLD,
-    VOLUME_LOOKBACK, TP_PERCENT, SL_PERCENT, get_perp_product,
-    get_price_precision, analyze, determine_tp_mode
+    CoinbaseService, TechnicalAnalysis, GRANULARITY, get_perp_product,
+    get_price_precision, analyze, determine_tp_mode, get_asset_params
 )
 from datetime import datetime, timedelta, UTC
 import pandas as pd
@@ -86,7 +85,7 @@ def parse_args() -> BacktestConfig:
     parser.add_argument('--product_id', type=str, default='BTC-USDC',
                       help='Product ID to trade (e.g., BTC-USDC)')
     parser.add_argument('--initial_balance', type=float, default=10000,
-                      help='Initial balance for backtesting')
+                      help='Initial balance in USD')
     parser.add_argument('--leverage', type=int, default=5,
                       help='Trading leverage')
     parser.add_argument('--start_date', type=str, default=None,
@@ -95,7 +94,13 @@ def parse_args() -> BacktestConfig:
                       help='End date for backtest (format: YYYY-MM-DD)')
     
     args = parser.parse_args()
-    return BacktestConfig(**vars(args))
+    return BacktestConfig(
+        product_id=args.product_id,
+        initial_balance=args.initial_balance,
+        leverage=args.leverage,
+        start_date=args.start_date,
+        end_date=args.end_date
+    )
 
 def fetch_candles(cb: CoinbaseService, product_id: str, 
                  start_date: Optional[str] = None, 
@@ -176,6 +181,9 @@ def calculate_trade_metrics(trades: List[Trade]) -> Dict:
 
 def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5) -> str:
     """Export trade history to CSV file."""
+    # Get asset-specific parameters
+    params = get_asset_params(product_id)
+    
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     csv_filename = f"backtest_trades_{product_id}_{timestamp}.csv"
     
@@ -193,17 +201,17 @@ def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5
         trades_df['SIDE'] = 'LONG'  # All trades are long in this backtest
         trades_df['ENTRY'] = trades_df['entry_price'].round(decimal_places)
         trades_df['Take Profit'] = trades_df.apply(
-            lambda row: determine_tp_mode(row['entry_price'], row['atr'], price_precision, None, row['trend_slope'])[1], 
+            lambda row: determine_tp_mode(row['entry_price'], row['atr'], price_precision, None, row['trend_slope'], product_id)[1], 
             axis=1
         ).round(decimal_places)
-        trades_df['Stop Loss'] = (trades_df['entry_price'] * (1 - SL_PERCENT)).round(decimal_places)
+        trades_df['Stop Loss'] = (trades_df['entry_price'] * (1 - params['SL_PERCENT'])).round(decimal_places)
         trades_df['R/R Ratio'] = ((trades_df['Take Profit'] - trades_df['ENTRY']) / 
                                  (trades_df['ENTRY'] - trades_df['Stop Loss'])).round(2)
 
         trades_df['Volatility Level'] = trades_df['atr_percent'].apply(
-            lambda atr_percent: "Very Strong" if atr_percent > mean_atr_percent + std_atr_percent else 
-                                "Strong" if atr_percent > mean_atr_percent else 
-                                "Moderate" if atr_percent > mean_atr_percent - std_atr_percent else 
+            lambda atr_percent: "Very Strong" if atr_percent > params['mean_atr_percent'] + params['std_atr_percent'] else 
+                                "Strong" if atr_percent > params['mean_atr_percent'] else 
+                                "Moderate" if atr_percent > params['mean_atr_percent'] - params['std_atr_percent'] else 
                                 "Weak"
         )
         trades_df['Outcome'] = trades_df['type'].apply(lambda x: 'SUCCESS' if x == 'TP' else 'STOP LOSS')
@@ -262,6 +270,9 @@ def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5
 
 def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) -> BacktestResults:
     """Run backtest on historical data and return results."""
+    # Get asset-specific parameters
+    params = get_asset_params(config.product_id)
+    
     balance = config.initial_balance
     position = 0
     trades = []
@@ -291,7 +302,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
             current_high = df.iloc[i]['high']
             current_low = df.iloc[i]['low']
             atr = ta.compute_atr(historical_df.to_dict('records'))
-            tp_mode, tp_price, market_regime = determine_tp_mode(current_trade['entry_price'], atr, None, historical_df)
+            tp_mode, tp_price, market_regime = determine_tp_mode(current_trade['entry_price'], atr, None, historical_df, trend_slope, config.product_id)
             
             # Calculate MAE and MFE for the current trade
             # Check high for maximum favorable excursion
@@ -378,11 +389,12 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                 atr, 
                 price_precision,
                 historical_df,
-                trend_slope
+                trend_slope,
+                config.product_id
             )
             
-            # Keep SL fixed at 0.7% for now
-            sl_price = round(current_price * (1 - SL_PERCENT), decimal_places)
+            # Use asset-specific SL percentage
+            sl_price = round(current_price * (1 - params['SL_PERCENT']), decimal_places)
             
             position_size = balance * 0.1  # Use 10% of balance per trade
             size = position_size / current_price
