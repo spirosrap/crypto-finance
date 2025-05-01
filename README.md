@@ -381,6 +381,15 @@ A cryptocurrency trading bot that focuses on BTC-USDC trading using RSI, EMA, an
 - Improved trade outcome analytics
 - Added tools for recalculating key parameters (plot_atr_histogram.py, analyze_volume_thresholds.py, volatility_threshold.py)
 
+### v1.2.1 (Current)
+- Fixed stability issues in market regime detection
+- Optimized volatility thresholds for improved performance
+- Enhanced risk management with dynamic position sizing
+- Improved logging and error handling
+- Added additional safeguards for volatile market conditions
+- Performance optimizations for faster execution
+- Added new filter to reject RSI dip entries in strong bearish trends with weak volume
+
 ### Usage
 
 ```bash
