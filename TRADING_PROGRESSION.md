@@ -84,3 +84,4 @@ This scaling ladder provides a systematic approach to growing account size and e
 - With full account usage per trade, position management is critical
 - Ensure proper margin maintenance to avoid liquidation
 - Fixed 0.7% stop loss means consistent risk per trade 
+- Implementation of additional filters reduced trading frequency but significantly improved trade quality by avoiding potential traps 
