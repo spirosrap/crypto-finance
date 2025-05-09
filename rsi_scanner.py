@@ -6,7 +6,13 @@ import time
 from config import ALPHA_VANTAGE_API_KEY
 BASE_URL = "https://www.alphavantage.co/query"
 
-stock_list = ['AAPL', 'MSFT', 'GOOGL', 'NVDA', 'TSLA']
+stock_list = [
+    'AAPL', 'MSFT', 'GOOGL', 'NVDA', 'TSLA', 'AMZN', 'META', 'NFLX', 'AMD', 'INTC',
+    'JPM', 'BAC', 'WFC', 'V', 'MA', 'PYPL', 'BRK.B', 'UNH', 'JNJ', 'PFE',
+    'XOM', 'CVX', 'COP', 'T', 'VZ', 'KO', 'PEP', 'MCD', 'WMT', 'COST',
+    'DIS', 'NKE', 'HD', 'LOW', 'BA', 'CRM', 'ABBV', 'TMO', 'MRK', 'LLY',
+    'ORCL', 'IBM', 'QCOM', 'TXN', 'AVGO', 'ADBE', 'GE', 'GS', 'BKNG', 'SBUX'
+]
 rsi_threshold = 30
 volume_filter = 1.5
 atr_pct_threshold = 0.2
