@@ -6,6 +6,58 @@ import time
 from config import ALPHA_VANTAGE_API_KEY
 BASE_URL = "https://www.alphavantage.co/query"
 
+# List of stocks to scan with their full company names:
+# AAPL - Apple Inc.
+# MSFT - Microsoft Corporation
+# GOOGL - Alphabet Inc. (Google)
+# NVDA - NVIDIA Corporation
+# TSLA - Tesla, Inc.
+# AMZN - Amazon.com Inc.
+# META - Meta Platforms Inc. (Facebook)
+# NFLX - Netflix, Inc.
+# AMD - Advanced Micro Devices, Inc.
+# INTC - Intel Corporation
+# JPM - JPMorgan Chase & Co.
+# BAC - Bank of America Corporation
+# WFC - Wells Fargo & Company
+# V - Visa Inc.
+# MA - Mastercard Incorporated
+# PYPL - PayPal Holdings, Inc.
+# BRK.B - Berkshire Hathaway Inc. Class B
+# UNH - UnitedHealth Group Incorporated
+# JNJ - Johnson & Johnson
+# PFE - Pfizer Inc.
+# XOM - Exxon Mobil Corporation
+# CVX - Chevron Corporation
+# COP - ConocoPhillips
+# T - AT&T Inc.
+# VZ - Verizon Communications Inc.
+# KO - The Coca-Cola Company
+# PEP - PepsiCo, Inc.
+# MCD - McDonald's Corporation
+# WMT - Walmart Inc.
+# COST - Costco Wholesale Corporation
+# DIS - The Walt Disney Company
+# NKE - NIKE, Inc.
+# HD - The Home Depot, Inc.
+# LOW - Lowe's Companies, Inc.
+# BA - The Boeing Company
+# CRM - Salesforce, Inc.
+# ABBV - AbbVie Inc.
+# TMO - Thermo Fisher Scientific Inc.
+# MRK - Merck & Co., Inc.
+# LLY - Eli Lilly and Company
+# ORCL - Oracle Corporation
+# IBM - International Business Machines Corporation
+# QCOM - QUALCOMM Incorporated
+# TXN - Texas Instruments Incorporated
+# AVGO - Broadcom Inc.
+# ADBE - Adobe Inc.
+# GE - General Electric Company
+# GS - The Goldman Sachs Group, Inc.
+# BKNG - Booking Holdings Inc.
+# SBUX - Starbucks Corporation
+
 stock_list = [
     'AAPL', 'MSFT', 'GOOGL', 'NVDA', 'TSLA', 'AMZN', 'META', 'NFLX', 'AMD', 'INTC',
     'JPM', 'BAC', 'WFC', 'V', 'MA', 'PYPL', 'BRK.B', 'UNH', 'JNJ', 'PFE',
