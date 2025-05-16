@@ -196,3 +196,5 @@ This scaling ladder provides a systematic approach to growing account size and e
 - Fixed 0.7% stop loss means consistent risk per trade 
 - Implementation of additional filters reduced trading frequency but significantly improved trade quality by avoiding potential traps
 - Despite experiencing 4 consecutive losses, decided to maintain current filter settings to observe system performance without further modifications 
+- After several stop losses hit and noticing a numbing of wins, removed the fourth filter to increase trading opportunities
+- Current system version: 1.2.1f 
