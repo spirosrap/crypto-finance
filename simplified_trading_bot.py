@@ -448,7 +448,12 @@ def main():
                         trades_df.iloc[-1, trades_df.columns.get_loc('RSI at Entry')] = round(rsi_value, 2)
                         trades_df.iloc[-1, trades_df.columns.get_loc('Relative Volume')] = round(relative_volume, 2)
                         trades_df.iloc[-1, trades_df.columns.get_loc('Trend Slope')] = round(trend_slope, 4)
+                        
+                        # Check if Confidence Score column exists, if not add it
+                        if 'Confidence Score' not in trades_df.columns:
+                            trades_df['Confidence Score'] = 0.0
                         trades_df.iloc[-1, trades_df.columns.get_loc('Confidence Score')] = round(confidence_score, 2)
+                        
                         trades_df.to_csv('automated_trades.csv', index=False)
                         logger.info(f"Updated trade with RSI: {rsi_value:.2f}, Rel Volume: {relative_volume:.2f}, Trend Slope: {trend_slope:.4f}, Confidence: {confidence_score:.2f}")
                 except Exception as e:
