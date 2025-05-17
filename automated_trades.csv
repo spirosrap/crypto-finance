@@ -1,2 +1,2 @@
-No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,R/R Ratio,Volatility Level,Outcome,Outcome %,Leverage,Margin,Session,TP Mode,ATR %,Setup Type,MAE,MFE,Exit Trade,Trend Regime,RSI at Entry,Relative Volume,Trend Slope,Exit Reason,Duration,Market Trend,Unnamed: 26,Confidence Score
-1,2025-05-16 08:24:52 UTC,LONG,103188.0,104736.0,102465.7,2.14,Weak,PENDING,0.0,5x,100.0,Asia,FIXED,0.13,RSI Dip,0.03,0.13,0.0,TRENDING,0.0,0.0,-0.0010086135617501,PENDING,0.1,Bearish,['1.0'],0.0
+No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,R/R Ratio,Volatility Level,Outcome,Outcome %,Leverage,Margin,Session,TP Mode,ATR %,Setup Type,MAE,MFE,Exit Trade,Trend Regime,RSI at Entry,Relative Volume,Trend Slope,Exit Reason,Duration,Market Trend,Confidence Score
+1,2025-05-16 08:24:52 UTC,LONG,103188.0,104736.0,102465.7,2.14,Weak,PENDING,0.0,5x,100.0,Asia,FIXED,0.13,RSI Dip,0.54,1.39,0.0,TRENDING,0.0,0.0,-0.0010086135617501,PENDING,28.64,Bearish,0.0
