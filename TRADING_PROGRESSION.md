@@ -198,3 +198,5 @@ This scaling ladder provides a systematic approach to growing account size and e
 - Despite experiencing 4 consecutive losses, decided to maintain current filter settings to observe system performance without further modifications 
 - After several stop losses hit and noticing a numbing of wins, removed the fourth filter to increase trading opportunities
 - Current system version: 1.2.1f 
+- System performance improved after filter removal - no longer avoiding winning trades
+- Currently holding a long position for over 24 hours with positive performance 
