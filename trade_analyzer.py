@@ -260,7 +260,7 @@ class TradingAnalyzer:
         print(f"Total Trades: {GREEN}{total_trades}{END}")
         print(f"Win Rate: {GREEN if win_rate >= 0.5 else RED}{win_rate:.2%}{END}")
         print(f"Total Dollar Profit: {GREEN if dollar_profits['Total Dollar Profit'] >= 0 else RED}${dollar_profits['Total Dollar Profit']:.2f}{END}")
-        print(f"Average Trade Duration: {duration_stats['Average Duration (minutes)']:.0f} minutes")
+        print(f"Average Trade Duration: {duration_stats['Average Duration (minutes)'] / 60:.2f} hours")
         print(f"Trades per Day: {BLUE}{duration_stats['Trades per Day']:.1f}{END}")
         print(f"{'=' * 50}\n")
         
