@@ -78,6 +78,13 @@
 - Learn to read market structure
 - Develop multi-timeframe analysis skills
 
+### Trade Pattern Recognition
+- First trade after a win or series of wins often results in a loss due to premature entry
+- Subsequent trades after the initial loss tend to be more successful
+- Pattern suggests waiting for confirmation after winning trades
+- Important to maintain discipline and not chase obvious setups immediately after wins
+- Consider implementing a cooling-off period after consecutive wins
+
 ### Fundamental Analysis
 - Track key economic indicators
 - Monitor sector rotation
