@@ -54,6 +54,7 @@ class Trade:
     relative_volume: float  # New field for relative volume
     trend_slope: float  # New field for trend slope
     market_regime: str  # New field for market regime
+    confidence_score: float  # New field for confidence score
     mae: float = 0.0  # Maximum Adverse Excursion
     mfe: float = 0.0  # Maximum Favorable Excursion
     exit_reason: str = ""  # Detailed exit reason (TP WICK HIT, SL WICK HIT, etc.)
@@ -174,7 +175,7 @@ def calculate_trade_metrics(trades: List[Trade]) -> Dict:
         'adaptive_tp_win_rate': adaptive_tp_win_rate
     }
 
-def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5) -> str:
+def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5, price_df: pd.DataFrame = None) -> str:
     """Export trade history to CSV file."""
     timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     csv_filename = f"backtest_trades_{product_id}_{timestamp}.csv"
@@ -199,6 +200,8 @@ def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5
         trades_df['Stop Loss'] = (trades_df['entry_price'] * (1 - SL_PERCENT)).round(decimal_places)
         trades_df['R/R Ratio'] = ((trades_df['Take Profit'] - trades_df['ENTRY']) / 
                                  (trades_df['ENTRY'] - trades_df['Stop Loss'])).round(2)
+        # Format confidence score as decimal number (e.g., 0.5, 0.8, 1.0)
+        trades_df['Confidence Score'] = trades_df['confidence_score'].round(1)
 
         trades_df['Volatility Level'] = trades_df['atr_percent'].apply(
             lambda atr_percent: "Very Strong" if atr_percent > mean_atr_percent + std_atr_percent else 
@@ -236,14 +239,30 @@ def export_trades_to_csv(trades: List[Trade], product_id: str, leverage: int = 5
         trades_df['Trend Slope'] = trades_df['trend_slope'].round(4)
         trades_df['Exit Reason'] = trades_df['exit_reason']
         trades_df['Duration'] = ((trades_df['exit_time'] - trades_df['entry_time']).dt.total_seconds() / 3600).round(2)
-        
-        # Reorder columns to match automated_trades.csv
+
+        # --- Market Trend (Bullish/Bearish) ---
+        def get_ema200_at_time(entry_time):
+            if price_df is None or len(price_df) == 0:
+                return np.nan
+            # Find the closest time in the DataFrame
+            if entry_time in price_df.index:
+                idx = price_df.index.get_loc(entry_time)
+            else:
+                idx = price_df.index.get_indexer([entry_time], method='nearest')[0]
+            closes = price_df.iloc[:idx+1]['close']
+            if len(closes) < 200:
+                return closes.mean()  # fallback if not enough data
+            return closes.ewm(span=200, adjust=False).mean().iloc[-1]
+        trades_df['EMA200'] = trades_df['entry_time'].apply(get_ema200_at_time)
+        trades_df['Market Trend'] = trades_df.apply(lambda row: 'Bullish' if row['ENTRY'] > row['EMA200'] else 'Bearish', axis=1)
+
+        # Reorder columns to match automated_trades.csv exactly
         columns = [
             'No.', 'Timestamp', 'SIDE', 'ENTRY', 'Take Profit', 'Stop Loss', 
             'R/R Ratio', 'Volatility Level', 'Outcome', 'Outcome %', 
             'Leverage', 'Margin', 'Session', 'TP Mode', 'ATR %', 
             'Setup Type', 'MAE', 'MFE', 'Exit Trade', 'Trend Regime',
-            'RSI at Entry', 'Relative Volume', 'Trend Slope', 'Exit Reason', 'Duration'
+            'RSI at Entry', 'Relative Volume', 'Trend Slope', 'Exit Reason', 'Duration', 'Market Trend', 'Confidence Score'
         ]
         
         # Rename entry_time to Timestamp
@@ -326,6 +345,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     relative_volume=current_trade['relative_volume'],
                     trend_slope=current_trade['trend_slope'],
                     market_regime=current_trade['market_regime'],
+                    confidence_score=current_trade['confidence_score'],
                     mae=current_trade['mae'],
                     mfe=current_trade['mfe'],
                     exit_reason=exit_reason
@@ -354,6 +374,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                     relative_volume=current_trade['relative_volume'],
                     trend_slope=current_trade['trend_slope'],
                     market_regime=current_trade['market_regime'],
+                    confidence_score=current_trade['confidence_score'],
                     mae=current_trade['mae'],
                     mfe=current_trade['mfe'],
                     exit_reason=exit_reason
@@ -400,9 +421,9 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
                 'relative_volume': relative_volume,
                 'trend_slope': trend_slope,
                 'market_regime': market_regime,
+                'confidence_score': confidence_score,
                 'mae': 0.0,
-                'mfe': 0.0,
-                'confidence_score': confidence_score
+                'mfe': 0.0
             }
             position = size
         
@@ -422,7 +443,7 @@ def backtest(df: pd.DataFrame, ta: TechnicalAnalysis, config: BacktestConfig) ->
     
     # Calculate metrics and export results
     metrics = calculate_trade_metrics(trades)
-    csv_filename = export_trades_to_csv(trades, config.product_id, config.leverage)
+    csv_filename = export_trades_to_csv(trades, config.product_id, config.leverage, df)
     
     # Add drawdown metrics
     metrics['max_drawdown'] = max_drawdown * 100  # Convert to percentage
