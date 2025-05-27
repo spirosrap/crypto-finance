@@ -1,0 +1,47 @@
+import pandas as pd
+import os
+
+def generate_margin_files(input_file, margin_values):
+    """
+    Generate new CSV files with different margin values from the input file.
+    
+    Args:
+        input_file (str): Path to the input CSV file
+        margin_values (list): List of margin values to generate files for
+    """
+    try:
+        # Read the original CSV file
+        df = pd.read_csv(input_file)
+        
+        # Generate a new file for each margin value
+        for margin in margin_values:
+            # Create a copy of the dataframe
+            df_new = df.copy()
+            
+            # Update the margin value
+            df_new['Margin'] = margin
+            
+            # Generate output filename
+            output_file = f"automated_trades_{int(margin)}.csv"
+            
+            # Save to CSV
+            df_new.to_csv(output_file, index=False)
+            print(f"Created {output_file} with margin {margin}")
+            
+    except FileNotFoundError:
+        print(f"Error: Could not find the input file '{input_file}'")
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+
+if __name__ == "__main__":
+    # Input file
+    input_file = "automated_trades.csv"
+    
+    # Margin values to generate
+    margin_values = [500, 1000, 2000, 5000]
+    
+    # Check if input file exists
+    if not os.path.exists(input_file):
+        print(f"Error: Input file '{input_file}' not found!")
+    else:
+        generate_margin_files(input_file, margin_values) 
