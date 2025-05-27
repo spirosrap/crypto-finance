@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import argparse
 
 def generate_margin_files(input_file, margin_values):
     """
@@ -34,14 +35,20 @@ def generate_margin_files(input_file, margin_values):
         print(f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
-    # Input file
-    input_file = "automated_trades.csv"
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Generate CSV files with different margin values')
+    parser.add_argument('-i', '--input', 
+                      default="automated_trades.csv",
+                      help='Input CSV file (default: automated_trades.csv)')
+    
+    # Parse arguments
+    args = parser.parse_args()
     
     # Margin values to generate
     margin_values = [500, 1000, 2000, 5000]
     
     # Check if input file exists
-    if not os.path.exists(input_file):
-        print(f"Error: Input file '{input_file}' not found!")
+    if not os.path.exists(args.input):
+        print(f"Error: Input file '{args.input}' not found!")
     else:
-        generate_margin_files(input_file, margin_values) 
+        generate_margin_files(args.input, margin_values) 
