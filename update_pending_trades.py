@@ -672,14 +672,14 @@ def process_pending_trade(
         logger.error(f"Error processing pending trade {trade.get('No.', 'unknown')}: {str(e)}")
         return trade, trade_state
 
-def get_csv_file_path(product_id: str) -> str:
+def get_csv_file_path(product_id: str, is_paper_trading: bool = False) -> str:
     """Get the appropriate CSV file path based on the product"""
     if product_id == 'BTC-PERP-INTX':
-        return DEFAULT_CSV_FILE_PATH
+        return 'automated_trades_paper.csv' if is_paper_trading else DEFAULT_CSV_FILE_PATH
     else:
         # Extract the base symbol from the product ID (e.g., ETH from ETH-PERP-INTX)
         base_symbol = product_id.split('-')[0]
-        return f'automated_trades_{base_symbol}.csv'
+        return f'automated_trades_{base_symbol}_paper.csv' if is_paper_trading else f'automated_trades_{base_symbol}.csv'
 
 def create_initial_csv_file(csv_file_path: str) -> None:
     """Create a new CSV file with the required fields if it doesn't exist"""
@@ -703,7 +703,7 @@ def create_initial_csv_file(csv_file_path: str) -> None:
             writer.writerow(fields)
         logger.info(f"Created new CSV file with headers: {csv_file_path}")
 
-def update_pending_trades(product_id: str = 'BTC-PERP-INTX') -> None:
+def update_pending_trades(product_id: str = 'BTC-PERP-INTX', is_paper_trading: bool = False) -> None:
     """Update pending trades based on current price"""
     try:
         # Validate product_id
@@ -711,7 +711,7 @@ def update_pending_trades(product_id: str = 'BTC-PERP-INTX') -> None:
             raise ValueError(f"Invalid product_id. Must be one of: {', '.join(VALID_PRODUCTS)}")
             
         # Get the appropriate CSV file path
-        csv_file_path = get_csv_file_path(product_id)
+        csv_file_path = get_csv_file_path(product_id, is_paper_trading)
         logger.info(f"Using CSV file: {csv_file_path}")
         
         # Create the CSV file if it doesn't exist
@@ -892,6 +892,8 @@ if __name__ == "__main__":
     parser.add_argument('--product', type=str, default='BTC-PERP-INTX',
                       choices=VALID_PRODUCTS,
                       help='Trading product (default: BTC-PERP-INTX)')
+    parser.add_argument('--paper', action='store_true',
+                      help='Use paper trading mode')
     args = parser.parse_args()
     
     # When run as a script, add retry logic at the top level
@@ -904,7 +906,7 @@ if __name__ == "__main__":
     for attempt in range(MAX_SCRIPT_RETRIES):
         try:
             logger.info(f"Starting trade update attempt {attempt + 1}/{MAX_SCRIPT_RETRIES}")
-            if update_pending_trades(args.product):
+            if update_pending_trades(args.product, args.paper):
                 logger.info("Trade update completed successfully")
                 success = True
                 break

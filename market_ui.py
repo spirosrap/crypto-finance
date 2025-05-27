@@ -1,3 +1,5 @@
+import tkinter as tk
+from tkinter import filedialog
 import customtkinter as ctk
 import subprocess
 import threading
@@ -148,6 +150,12 @@ class MarketAnalyzerUI:
         self.simplified_trading = False
         self.simplified_trading_thread = None
         self.last_simplified_check = None
+        
+        # Add paper trading variables
+        self.paper_trading = False
+        self.paper_trading_thread = None
+        self.last_paper_check = None
+        self.paper_trading_bot_path = "simplified_trading_bot_v_1_b_paper.py"  # Default path
         
         # Create main container with padding
         self.create_gui()
@@ -454,6 +462,36 @@ class MarketAnalyzerUI:
             height=32
         )
         self.simplified_trade_btn.pack(pady=(0, 5), padx=10, fill="x")
+        
+        # Add Paper Trading Button
+        self.paper_trade_btn = ctk.CTkButton(
+            trading_frame,
+            text="Start Paper Trading",
+            command=self.toggle_paper_trading,
+            fg_color="#FF8C00",  # Dark Orange
+            hover_color="#FF4500",  # Orange Red
+            height=32
+        )
+        self.paper_trade_btn.pack(pady=(0, 5), padx=10, fill="x")
+        
+        # Add Paper Trading Bot Selection Button
+        self.paper_bot_select_btn = ctk.CTkButton(
+            trading_frame,
+            text="Select Paper Trading Bot",
+            command=self.select_paper_trading_bot,
+            fg_color="#4682B4",  # Steel Blue
+            hover_color="#36648B",  # Dark Steel Blue
+            height=32
+        )
+        self.paper_bot_select_btn.pack(pady=(0, 5), padx=10, fill="x")
+        
+        # Add Paper Trading Bot Path Label
+        self.paper_bot_path_label = ctk.CTkLabel(
+            trading_frame,
+            text=f"Current Bot: {self.paper_trading_bot_path}",
+            font=ctk.CTkFont(size=12)
+        )
+        self.paper_bot_path_label.pack(pady=(0, 5))
         
         # Quick Market Order Buttons
         market_buttons_frame = ctk.CTkFrame(trading_frame)
@@ -871,9 +909,30 @@ class MarketAnalyzerUI:
         self.status_var.set("Closing positions...")
         self.close_positions_btn.configure(state="disabled")
         
-        # Submit the close positions task to the thread pool
-        self.submit_task("close_positions", self._close_positions_thread)
-        
+        if self.paper_trading:
+            # Clear paper trading positions
+            try:
+                with open('paper_trading_state.json', 'r') as f:
+                    state = json.load(f)
+                
+                # Clear positions array
+                state['positions'] = []
+                
+                # Save updated state
+                with open('paper_trading_state.json', 'w') as f:
+                    json.dump(state, f, indent=4)
+                
+                self.queue.put(("append", "\nPaper trading positions cleared.\n"))
+                self.queue.put(("status", "Ready"))
+                self.close_positions_btn.configure(state="normal")
+            except Exception as e:
+                self.queue.put(("append", f"\nError clearing paper trading positions: {str(e)}\n"))
+                self.queue.put(("status", "Error"))
+                self.close_positions_btn.configure(state="normal")
+        else:
+            # Submit the close positions task to the thread pool for real trading
+            self.submit_task("close_positions", self._close_positions_thread)
+    
     def _close_positions_thread(self):
         """Thread function to close positions"""
         try:
@@ -1820,36 +1879,47 @@ class MarketAnalyzerUI:
             tuple: (has_open_orders, has_positions)
         """
         try:
-            # Load API keys
-            api_key, api_secret = self.load_api_keys()
-            if not api_key or not api_secret:
-                self.queue.put(("append", "\nError: Failed to load API keys\n"))
-                return False, False
-            
-            # Initialize Coinbase service
-            service = CoinbaseService(api_key, api_secret)
-            
-            # Check for open orders using the more robust method
-            active_orders = self.get_truly_open_orders(service)
-            has_open_orders = len(active_orders) > 0
-            
-            if has_open_orders:
-                self.queue.put(("append", f"\nFound {len(active_orders)} truly open orders\n"))
-            
-            # Check for open positions
-            has_positions = False
-            try:
-                # Get portfolio info for INTX (perpetuals)
-                usd_balance, perp_position_size = service.get_portfolio_info(portfolio_type="INTX")
+            if self.paper_trading:
+                # Check paper trading state
+                try:
+                    with open('paper_trading_state.json', 'r') as f:
+                        state = json.load(f)
+                        has_positions = len(state.get('positions', [])) > 0
+                        has_open_orders = len(state.get('orders', [])) > 0
+                        return has_open_orders, has_positions
+                except (FileNotFoundError, json.JSONDecodeError):
+                    return False, False
+            else:
+                # Load API keys
+                api_key, api_secret = self.load_api_keys()
+                if not api_key or not api_secret:
+                    self.queue.put(("append", "\nError: Failed to load API keys\n"))
+                    return False, False
                 
-                has_positions = abs(perp_position_size) > 0
-                if has_positions:
-                    self.queue.put(("append", f"\nFound open position with size: {perp_position_size}\n"))
-            except Exception as e:
-                self.queue.put(("append", f"\nError checking for open positions: {str(e)}\n"))
-            
-            return has_open_orders, has_positions
-            
+                # Initialize Coinbase service
+                service = CoinbaseService(api_key, api_secret)
+                
+                # Check for open orders using the more robust method
+                active_orders = self.get_truly_open_orders(service)
+                has_open_orders = len(active_orders) > 0
+                
+                if has_open_orders:
+                    self.queue.put(("append", f"\nFound {len(active_orders)} truly open orders\n"))
+                
+                # Check for open positions
+                has_positions = False
+                try:
+                    # Get portfolio info for INTX (perpetuals)
+                    usd_balance, perp_position_size = service.get_portfolio_info(portfolio_type="INTX")
+                    
+                    has_positions = abs(perp_position_size) > 0
+                    if has_positions:
+                        self.queue.put(("append", f"\nFound open position with size: {perp_position_size}\n"))
+                except Exception as e:
+                    self.queue.put(("append", f"\nError checking for open positions: {str(e)}\n"))
+                
+                return has_open_orders, has_positions
+                
         except Exception as e:
             self.queue.put(("append", f"\nError checking for open orders and positions: {str(e)}\n"))
             return False, False
@@ -2478,8 +2548,13 @@ class MarketAnalyzerUI:
             }
             product = product_map.get(self.product_var.get(), "BTC-PERP-INTX")
             
+            # Add --paper flag if paper trading is enabled
+            cmd = ["python", "update_pending_trades.py", "--product", product]
+            if self.paper_trading:
+                cmd.append("--paper")
+            
             pending_process = subprocess.Popen(
-                ["python", "update_pending_trades.py", "--product", product],
+                cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -2841,6 +2916,199 @@ class MarketAnalyzerUI:
             self.queue.put(("append", "\nSimplified trading stopped.\n"))
             self.queue.put(("status", "Simplified trading stopped"))
 
+    def toggle_paper_trading(self):
+        """Toggle paper trading on/off"""
+        if not self.paper_trading:
+            # Start paper trading
+            self.paper_trading = True
+            self.paper_trade_btn.configure(
+                text="Stop Paper Trading",
+                fg_color="#B22222"  # Fire Brick Red
+            )
+            self.root.title("Crypto Market Analyzer [Paper Trading ON]")
+            self.queue.put(("append", "\nPaper trading started. Using FIVE_MINUTE timeframe with 2-minute checks...\n"))
+            self.queue.put(("append", "Strategy: RSI + EMA + Volume analysis (Paper Trading Mode)\n"))
+            self.queue.put(("append", "Trades will be simulated without real execution.\n"))
+            
+            # Start the paper trading process using the thread pool
+            self.submit_task("paper_trading", self._paper_trading_loop)
+        else:
+            # Stop paper trading immediately
+            self.paper_trading = False
+            
+            # Force stop any running process
+            if self.current_process and self.current_process.poll() is None:
+                try:
+                    self.current_process.terminate()
+                except:
+                    pass
+                self.current_process = None
+            
+            # Cancel the paper trading task without waiting
+            with self.thread_lock:
+                if "paper_trading" in self.active_futures:
+                    future = self.active_futures["paper_trading"]
+                    if not future.done():
+                        future.cancel()
+                    del self.active_futures["paper_trading"]
+            
+            # Update UI immediately
+            self.paper_trade_btn.configure(
+                text="Start Paper Trading",
+                fg_color="#FF8C00"  # Back to Dark Orange
+            )
+            self.root.title("Crypto Market Analyzer")
+            self.queue.put(("append", "\nPaper trading stopped.\n"))
+            self.queue.put(("status", "Paper trading stopped"))
+
+    def _paper_trading_loop(self):
+        """Background loop for paper trading"""
+        while self.paper_trading:
+            try:
+                # Check if trading is allowed based on time
+                current_time = datetime.now()
+                if not self.is_trading_allowed():
+                    if not hasattr(self, '_paper_trading_paused_logged'):
+                        if current_time.weekday() >= 5:
+                            self.queue.put(("append", "\nTrading paused: Weekend trading is not allowed. Will resume on Monday at 00:00 AM (Greece time) / 10:00 AM Sunday (NYSE time).\n"))
+                        else:
+                            self.queue.put(("append", "\nTrading paused: Current time is outside trading hours (2:00 PM - 6:00 PM Greece time). Will resume at 6:00 PM (Greece time).\n"))
+                        self._paper_trading_paused_logged = True
+                    time.sleep(60)  # Check every minute
+                    continue
+                else:
+                    # Reset the logged flag when we're out of the pause period
+                    if hasattr(self, '_paper_trading_paused_logged'):
+                        del self._paper_trading_paused_logged
+                        self.queue.put(("append", "\nTrading resumed: Current time is within trading hours (6:00 PM - 2:00 PM).\n"))
+
+                # Check for open orders or positions
+                has_open_orders, has_positions = self.check_for_open_orders_and_positions()
+                
+                if has_positions:
+                    # Wait when there are open positions
+                    self.queue.put(("append", "\nFound open positions. Waiting for them to close before continuing...\n"))
+                    time.sleep(60)  # Check every minute
+                    continue
+                    
+                if has_open_orders:
+                    # Wait if there are any open orders
+                    self.queue.put(("append", "\nFound open orders. Waiting for all orders to close before continuing...\n"))
+                    time.sleep(60)  # Check every minute
+                    continue
+                
+                # Run paper trading bot
+                self.queue.put(("append", "\nRunning paper trading analysis...\n"))
+                
+                # Create and run the paper trading process
+                cmd = [
+                    "python",
+                    self.paper_trading_bot_path,
+                    "--product_id",
+                    self.product_var.get(),
+                    "--margin",
+                    self.margin_var.get(),
+                    "--leverage",
+                    str(self.leverage_var.get())
+                ]
+                
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                # Store the process
+                self.current_process = process
+                
+                # Read output and check for trade execution
+                output = ""
+                order_placed = False
+                trade_output_buffer = ""
+                capturing_trade_output = False
+                trade_completed = False
+                
+                while True:
+                    line = process.stdout.readline()
+                    if line == '' and process.poll() is not None:
+                        break
+                    if line:
+                        output += line
+                        self.queue.put(("append", line))
+                        
+                        # Start capturing trade output when we see a signal
+                        if "[SIGNAL]" in line:
+                            capturing_trade_output = True
+                            trade_output_buffer = line
+                        # Continue capturing trade output
+                        elif capturing_trade_output:
+                            trade_output_buffer += line
+                        
+                        # Check if a trade was executed
+                        if "Paper trade executed" in line:
+                            self.queue.put(("append", "\nPaper trade executed! Waiting for trade to close before continuing...\n"))
+                            order_placed = True
+                            
+                            # Save the trade output to file
+                            if trade_output_buffer:
+                                self.save_trade_output(trade_output_buffer)
+                        
+                        # Check for trade completion indicators
+                        if "Take profit hit" in line or "TP hit" in line:
+                            self.queue.put(("status", "Paper trade completed - Take Profit hit"))
+                            trade_completed = True
+                            # Record as a win
+                            self.record_trade_result("win")
+                        elif "Stop loss hit" in line or "SL hit" in line:
+                            self.queue.put(("status", "Paper trade completed - Stop Loss hit"))
+                            trade_completed = True
+                            # Record as a loss
+                            self.record_trade_result("loss")
+                        elif "Position closed" in line:
+                            # Try to determine if it was a win or loss
+                            result = self.detect_trade_result(trade_output_buffer)
+                            if result:
+                                self.record_trade_result(result)
+                                trade_completed = True
+                
+                # Get any remaining output
+                stdout, stderr = process.communicate()
+                if stdout:
+                    output += stdout
+                    self.queue.put(("append", stdout))
+                    
+                    # Check for trade completion in final output if not already detected
+                    if not trade_completed and order_placed:
+                        result = self.detect_trade_result(output)
+                        if result:
+                            self.record_trade_result(result)
+                            trade_completed = True
+                            
+                if stderr:
+                    # Check if stderr contains actual error messages (not just INFO logs)
+                    error_lines = [line for line in stderr.splitlines() if 'ERROR' in line or 'CRITICAL' in line]
+                    if error_lines:
+                        self.queue.put(("append", f"\nErrors:\n{stderr}"))
+                    else:
+                        # If it's just INFO logs, append them without the Errors header
+                        self.queue.put(("append", stderr))
+                
+                # Clear current process
+                self.current_process = None
+                
+                # Wait 2 minutes before next check
+                for _ in range(2):
+                    if not self.paper_trading:
+                        return
+                    time.sleep(60)  # 1 minute intervals
+                
+            except Exception as e:
+                self.queue.put(("append", f"\nError in paper trading loop: {str(e)}\nTraceback:\n{traceback.format_exc()}\n"))
+                # Don't exit the thread on error, just wait a bit and continue
+                time.sleep(60)  # Wait 1 minute before retrying on error
+                continue
+
     def _simplified_trading_loop(self):
         """Background loop for simplified trading"""
         while self.simplified_trading:
@@ -2988,6 +3256,20 @@ class MarketAnalyzerUI:
                 # Don't exit the thread on error, just wait a bit and continue
                 time.sleep(60)  # Wait 1 minute before retrying on error
                 continue
+
+    def select_paper_trading_bot(self):
+        """Select a paper trading bot from a file dialog"""
+        try:
+            file_path = filedialog.askopenfilename(
+                title="Select Paper Trading Bot",
+                filetypes=[("Python files", "*.py")],
+                initialdir=os.path.dirname(os.path.abspath(__file__))
+            )
+            if file_path:
+                self.paper_trading_bot_path = file_path
+                self.paper_bot_path_label.configure(text=f"Current Bot: {self.paper_trading_bot_path}")
+        except Exception as e:
+            print(f"Error selecting paper trading bot: {str(e)}")
 
 if __name__ == "__main__":
     app = MarketAnalyzerUI()
