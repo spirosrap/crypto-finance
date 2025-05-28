@@ -1,1 +1,2 @@
-No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,R/R Ratio,Volatility Level,Outcome,Outcome %,Leverage,Margin,Session,TP Mode,ATR %,Setup Type,MAE,MFE,Exit Trade,Trend Regime,RSI at Entry,Relative Volume,Trend Slope,Exit Reason,Duration,Market Trend,Confidence Score
+No.,Timestamp,SIDE,ENTRY,Take Profit,Stop Loss,R/R Ratio,Volatility Level,Outcome,Outcome %,Leverage,Margin,Session,TP Mode,ATR %,Setup Type,MAE,MFE,Exit Trade,Trend Regime,RSI at Entry,Relative Volume,Trend Slope,Exit Reason,Duration,Market Trend,Confidence Score,product
+1,2025-05-27 21:05:16 UTC,LONG,109500.01,110704.5,108733.5,1.57,Weak,STOP LOSS,-3.5,5x,250.0,US,FIXED,0.12,RSI Dip,0.71,0.23,2025-05-28 07:44:54 UTC,0.0,0.0,-0.0006152194225739264,PENDING,SL HIT (wick),10.66,Bearish,,BTC-PERP-INTX

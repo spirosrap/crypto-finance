@@ -1,0 +1,26 @@
+{
+    "balance": 956.2494332192301,
+    "positions": [],
+    "trade_history": [
+        {
+            "timestamp": "2025-05-27 21:05:16 UTC",
+            "product": "BTC-PERP-INTX",
+            "side": "BUY",
+            "entry_price": 109500.01,
+            "tp_price": 110704.5,
+            "sl_price": 108733.5,
+            "size_usd": 1250.0,
+            "leverage": 5,
+            "session": "US",
+            "tp_mode": "FIXED",
+            "market_regime": "UNCERTAIN",
+            "atr_percent": 0.12042796076652794,
+            "trend_slope": -0.0006152194225739264,
+            "status": "CLOSED",
+            "exit_price": 108733.5,
+            "exit_time": "2025-05-28 07:44:54 UTC",
+            "outcome": "STOP LOSS",
+            "pnl": -3.5
+        }
+    ]
+}

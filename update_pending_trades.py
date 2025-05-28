@@ -461,6 +461,77 @@ def process_closed_trade(
         logger.error(f"Error processing closed trade {trade.get('No.', 'unknown')}: {str(e)}")
         return trade
 
+def update_paper_trading_state(trade: Dict[str, Any], outcome: str, exit_price: float) -> None:
+    """Update paper trading state when a trade is closed"""
+    try:
+        logger.info(f"Starting update_paper_trading_state for trade {trade.get('No.', 'unknown')}")
+        logger.info(f"Trade data: {trade}")
+        logger.info(f"Outcome: {outcome}")
+        logger.info(f"Exit price: {exit_price}")
+        
+        # Load current paper trading state
+        with open('paper_trading_state.json', 'r') as f:
+            state = json.load(f)
+            logger.info(f"Current paper trading state: {json.dumps(state, indent=2)}")
+        
+        # Find the matching position
+        for position in state['positions']:
+            # Convert entry price to float for comparison
+            position_entry = float(position['entry_price'])
+            trade_entry = float(trade['ENTRY'])
+            
+            logger.info(f"Comparing position: {position}")
+            logger.info(f"Position entry: {position_entry}, Trade entry: {trade_entry}")
+            logger.info(f"Product match: {position['product'] == trade['product']}")
+            logger.info(f"Entry price match: {abs(position_entry - trade_entry) < 0.01}")
+            logger.info(f"Status match: {position['status'] == 'OPEN'}")
+            
+            # Match based on product, entry price (with small tolerance), and status
+            if (position['product'] == trade['product'] and 
+                abs(position_entry - trade_entry) < 0.01 and  # Allow small floating point differences
+                position['status'] == 'OPEN'):
+                
+                logger.info(f"Found matching position in paper trading state: {position}")
+                
+                # Update position status
+                position['status'] = 'CLOSED'
+                position['exit_price'] = exit_price
+                position['exit_time'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
+                position['outcome'] = outcome
+                
+                # Calculate PnL
+                if position['side'] == 'BUY':
+                    pnl = ((exit_price - position['entry_price']) / position['entry_price']) * position['leverage'] * 100
+                else:
+                    pnl = ((position['entry_price'] - exit_price) / position['entry_price']) * position['leverage'] * 100
+                
+                position['pnl'] = round(pnl, 2)
+                
+                # Move to trade history
+                state['trade_history'].append(position)
+                state['positions'].remove(position)
+                
+                # Update balance
+                state['balance'] += (pnl / 100) * position['size_usd']
+                
+                # Save updated state
+                with open('paper_trading_state.json', 'w') as f:
+                    json.dump(state, f, indent=4)
+                
+                logger.info(f"Updated paper trading state for trade {trade['No.']} - Outcome: {outcome}, PnL: {pnl}%")
+                logger.info(f"New paper trading state: {json.dumps(state, indent=2)}")
+                return
+                
+        logger.warning(f"No matching open position found in paper trading state for trade {trade['No.']}")
+                
+    except Exception as e:
+        logger.error(f"Error updating paper trading state: {str(e)}")
+        logger.error(f"Trade data: {trade}")
+        logger.error(f"Outcome: {outcome}")
+        logger.error(f"Exit price: {exit_price}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+
 def process_pending_trade(
     trade: Dict[str, Any],
     current_price: float,
@@ -468,7 +539,8 @@ def process_pending_trade(
     client: CoinbaseService,
     product_id: str,
     take_profit: float,
-    stop_loss: float
+    stop_loss: float,
+    is_paper_trading: bool = False
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Process a pending trade to update its state and check for exit conditions"""
     try:
@@ -477,7 +549,11 @@ def process_pending_trade(
         side = trade['SIDE']
         leverage = float(trade['Leverage'].replace('x', ''))
         
+        # Add product_id to trade data for paper trading state updates
+        trade['product'] = product_id
+        
         logger.info(f"Processing trade {trade_no} - Side: {side}, Entry: {entry_price}, TP: {take_profit}, SL: {stop_loss}, Current Price: {current_price}")
+        logger.info(f"Paper trading mode: {is_paper_trading}")
         
         # Get historical candles for EMA200 calculation
         try:
@@ -569,6 +645,12 @@ def process_pending_trade(
                         trade['Exit Trade'] = datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')
                         trade['Outcome'] = 'SUCCESS'
                         trade['Outcome %'] = str(round(((take_profit - entry_price) / entry_price) * leverage * 100, 2))
+                        
+                        # Update paper trading state if in paper trading mode
+                        if is_paper_trading:
+                            logger.info(f"Calling update_paper_trading_state for trade {trade_no} with SUCCESS outcome")
+                            update_paper_trading_state(trade, 'SUCCESS', take_profit)
+                        
                         return trade, trade_state
                     elif low <= stop_loss:
                         logger.info(f"Trade {trade_no} SL HIT in candle wick - Low: {low}, SL: {stop_loss} at {candle_time}")
@@ -581,6 +663,12 @@ def process_pending_trade(
                         # For long positions, loss percentage is (stop_loss - entry) / entry * leverage
                         loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage
                         trade['Outcome %'] = str(round(loss_pct, 2))
+                        
+                        # Update paper trading state if in paper trading mode
+                        if is_paper_trading:
+                            logger.info(f"Calling update_paper_trading_state for trade {trade_no} with STOP LOSS outcome")
+                            update_paper_trading_state(trade, 'STOP LOSS', stop_loss)
+                        
                         return trade, trade_state
                 else:  # SHORT
                     if low <= take_profit:
@@ -594,6 +682,12 @@ def process_pending_trade(
                         # For short positions, profit percentage is (entry - take_profit) / entry * leverage
                         profit_pct = ((entry_price - take_profit) / entry_price) * 100 * leverage
                         trade['Outcome %'] = str(round(profit_pct, 2))
+                        
+                        # Update paper trading state if in paper trading mode
+                        if is_paper_trading:
+                            logger.info(f"Calling update_paper_trading_state for trade {trade_no} with SUCCESS outcome")
+                            update_paper_trading_state(trade, 'SUCCESS', take_profit)
+                        
                         return trade, trade_state
                     elif high >= stop_loss:
                         logger.info(f"Trade {trade_no} SL HIT in candle wick - High: {high}, SL: {stop_loss} at {candle_time}")
@@ -606,6 +700,12 @@ def process_pending_trade(
                         # For short positions, loss percentage is (stop_loss - entry) / entry * leverage
                         loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage * -1
                         trade['Outcome %'] = str(round(loss_pct, 2))
+                        
+                        # Update paper trading state if in paper trading mode
+                        if is_paper_trading:
+                            logger.info(f"Calling update_paper_trading_state for trade {trade_no} with STOP LOSS outcome")
+                            update_paper_trading_state(trade, 'STOP LOSS', stop_loss)
+                        
                         return trade, trade_state
         
         # FIRST: Check current price against take profit and stop loss levels
@@ -621,6 +721,12 @@ def process_pending_trade(
                 trade['Exit Reason'] = 'TP HIT'
                 trade['Outcome %'] = str(round(((take_profit - entry_price) / entry_price) * leverage * 100, 2))
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
+                
+                # Update paper trading state if in paper trading mode
+                if is_paper_trading:
+                    logger.info(f"Calling update_paper_trading_state for trade {trade_no} with SUCCESS outcome")
+                    update_paper_trading_state(trade, 'SUCCESS', take_profit)
+                
                 return trade, trade_state
             elif current_price <= stop_loss:
                 logger.info(f"Trade {trade_no} SL HIT in current price - Current: {current_price}, SL: {stop_loss}")
@@ -634,6 +740,12 @@ def process_pending_trade(
                 loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage
                 trade['Outcome %'] = str(round(loss_pct, 2))
                 logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
+                
+                # Update paper trading state if in paper trading mode
+                if is_paper_trading:
+                    logger.info(f"Calling update_paper_trading_state for trade {trade_no} with STOP LOSS outcome")
+                    update_paper_trading_state(trade, 'STOP LOSS', stop_loss)
+                
                 return trade, trade_state
         else:  # SHORT
             if current_price <= take_profit:
@@ -648,6 +760,12 @@ def process_pending_trade(
                 profit_pct = ((entry_price - take_profit) / entry_price) * 100 * leverage
                 trade['Outcome %'] = str(round(profit_pct, 2))
                 logger.info(f"Trade {trade_no} marked as SUCCESS - Take Profit hit at {current_price}")
+                
+                # Update paper trading state if in paper trading mode
+                if is_paper_trading:
+                    logger.info(f"Calling update_paper_trading_state for trade {trade_no} with SUCCESS outcome")
+                    update_paper_trading_state(trade, 'SUCCESS', take_profit)
+                
                 return trade, trade_state
             elif current_price >= stop_loss:
                 logger.info(f"Trade {trade_no} SL HIT in current price - Current: {current_price}, SL: {stop_loss}")
@@ -661,6 +779,12 @@ def process_pending_trade(
                 loss_pct = ((stop_loss - entry_price) / entry_price) * 100 * leverage * -1
                 trade['Outcome %'] = str(round(loss_pct, 2))
                 logger.info(f"Trade {trade_no} marked as STOP LOSS - Stop Loss hit at {current_price}")
+                
+                # Update paper trading state if in paper trading mode
+                if is_paper_trading:
+                    logger.info(f"Calling update_paper_trading_state for trade {trade_no} with STOP LOSS outcome")
+                    update_paper_trading_state(trade, 'STOP LOSS', stop_loss)
+                
                 return trade, trade_state
         
         # Calculate final MAE and MFE
@@ -847,7 +971,8 @@ def update_pending_trades(product_id: str = 'BTC-PERP-INTX', is_paper_trading: b
                         client,
                         product_id,
                         take_profit,
-                        stop_loss
+                        stop_loss,
+                        is_paper_trading
                     )
                     updated = True
                     
