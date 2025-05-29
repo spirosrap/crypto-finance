@@ -173,7 +173,7 @@ This scaling ladder provides a systematic approach to growing account size and e
 |------|--------|----------|----------|----------------------|-------|
 | Start | $50 | 5x | $250 | $12-25/month | System sandbox — no expectations |
 | Step 1 | $100 | 5x | $500 | $25-50/month | Stability check, tiny slippage impact |
-| Step 2 | $250 | 5x | $1,250 | $62-125/month | Emotional friction starts here |
+| Step 2 | $250 | 5x | $1,250 | $62-125/month | Emotional friction starts here. Four consecutive losses after increasing margin is a stress test |
 | Step 3 | $500 | 5x | $2,500 | $125-250/month | Small mistakes start to hurt |
 | Step 4 | $1,000 | 5x | $5,000 | $250-500/month | Minimum viable lifestyle begins |
 | Step 5 | $2,000 | 5x | $10,000 | $500-1,000/month | System must handle scale stress |
