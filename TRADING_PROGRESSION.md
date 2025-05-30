@@ -23,11 +23,13 @@
 
 ### Step 1: Real Trading Implementation
 - Initial capital: $100
+- Total required capital: $300 (margin x 3)
 - Leverage: 5x
 - Position sizing: $100 per trade (full account)
 - Position value with leverage: $500 (5x)
 - Fixed stop loss: 0.7% of position value ($3.50)
 - Maximum risk per trade: $3.50 (0.7% of $500)
+- Maximum gain target: $7.00 (2x risk)
 
 ### Key Considerations for Step 1
 - Maintain detailed trade journal
@@ -43,6 +45,10 @@
 - Scale position size based on account growth
 - Adjust leverage based on market volatility
 - Consider correlation between positions
+- Initial capital: $250
+- Total required capital: $750 (margin x 3)
+- Maximum loss per trade: $8.75 (0.7% of $1,250 exposure)
+- Maximum gain target: $17.50 (2x risk)
 
 ### Stop Loss Strategy
 - Use ATR-based stops for volatility adjustment
@@ -63,6 +69,12 @@
 - Take breaks after consecutive losses
 - Celebrate wins but stay grounded
 - Practice mindfulness and stress management
+- Initial capital: $500
+- Total required capital: $1,500 (margin x 3)
+- Leverage: 5x
+- Position value with leverage: $2,500 (5x)
+- Maximum loss per trade: $17.50 (0.7% of $2,500 exposure)
+- Maximum gain target: $35.00 (2x risk)
 
 ### Trading Routine
 - Pre-market preparation checklist
@@ -77,6 +89,12 @@
 - Understand chart patterns and formations
 - Learn to read market structure
 - Develop multi-timeframe analysis skills
+- Initial capital: $1,000
+- Total required capital: $3,000 (margin x 3)
+- Leverage: 5x
+- Position value with leverage: $5,000 (5x)
+- Maximum loss per trade: $35.00 (0.7% of $5,000 exposure)
+- Maximum gain target: $70.00 (2x risk)
 
 ### Trade Pattern Recognition
 - First trade after a win or series of wins often results in a loss due to premature entry
@@ -98,12 +116,34 @@
 - Correlation analysis
 - Position sizing optimization
 - Risk-adjusted return metrics
+- Initial capital: $2,000
+- Total required capital: $6,000 (margin x 3)
+- Leverage: 5x
+- Position value with leverage: $10,000 (5x)
+- Maximum loss per trade: $70.00 (0.7% of $10,000 exposure)
+- Maximum gain target: $140.00 (2x risk)
+
+### Step 6: Full-Time Trading
 
 ### Market Analysis
 - Sector rotation analysis
 - Market breadth indicators
 - Volume analysis
 - Order flow understanding
+- Initial capital: $5,000
+- Total required capital: $15,000 (margin x 3)
+- Leverage: 5x
+- Position value with leverage: $25,000 (5x)
+- Maximum loss per trade: $175.00 (0.7% of $25,000 exposure)
+- Maximum gain target: $350.00 (2x risk)
+
+### Full-Time Considerations
+- Daily trading schedule
+- Work-life balance
+- Tax planning
+- Business structure
+- Health and wellness management
+- Continuous education
 
 ## Progress Tracking
 
@@ -169,15 +209,15 @@ Trading involves significant risk of loss and is not suitable for all investors.
 
 This scaling ladder provides a systematic approach to growing account size and exposure as performance metrics are achieved.
 
-| Step | Margin | Leverage | Exposure | Target Profit (5-10%) | Notes |
-|------|--------|----------|----------|----------------------|-------|
-| Start | $50 | 5x | $250 | $12-25/month | System sandbox — no expectations |
-| Step 1 | $100 | 5x | $500 | $25-50/month | Stability check, tiny slippage impact |
-| Step 2 | $250 | 5x | $1,250 | $62-125/month | Emotional friction starts here. Four consecutive losses after increasing margin is a stress test |
-| Step 3 | $500 | 5x | $2,500 | $125-250/month | Small mistakes start to hurt |
-| Step 4 | $1,000 | 5x | $5,000 | $250-500/month | Minimum viable lifestyle begins |
-| Step 5 | $2,000 | 5x | $10,000 | $500-1,000/month | System must handle scale stress |
-| Step 6 | $5,000 | 5x | $25,000 | $1,250-2,500/month | Tokyo tier, full-time freedom path |
+| Step | Margin | Leverage | Exposure | Target Profit (5-10%) | Max Loss/Gain | Notes |
+|------|--------|----------|----------|----------------------|---------------|-------|
+| Start | $50 | 5x | $250 | $12-25/month | $1.75/$3.50 | System sandbox — no expectations |
+| Step 1 | $100 | 5x | $500 | $25-50/month | $3.50/$7.00 | Stability check, tiny slippage impact |
+| Step 2 | $250 | 5x | $1,250 | $62-125/month | $8.75/$17.50 | Emotional friction starts here. Four consecutive losses after increasing margin is a stress test |
+| Step 3 | $500 | 5x | $2,500 | $125-250/month | $17.50/$35.00 | Small mistakes start to hurt |
+| Step 4 | $1,000 | 5x | $5,000 | $250-500/month | $35.00/$70.00 | Minimum viable lifestyle begins |
+| Step 5 | $2,000 | 5x | $10,000 | $500-1,000/month | $70.00/$140.00 | System must handle scale stress |
+| Step 6 | $5,000 | 5x | $25,000 | $1,250-2,500/month | $175.00/$350.00 | Tokyo tier, full-time freedom path |
 
 ### Progression Guidelines:
 - Only move to the next step after consistently achieving target profit for at least one month
