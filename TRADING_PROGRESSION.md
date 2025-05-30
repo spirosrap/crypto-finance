@@ -1,5 +1,11 @@
 # Trading Progression Guide
 
+## Important System Events
+- 5 consecutive losses occurred, indicating potential market regime change
+- System under stress test with new drawdown period
+- Monitoring system's resilience during this challenging period
+- Will assess if current filters and risk parameters remain effective
+
 ## Step 1: Moving from Sandbox to Real Trading
 
 ### Initial Sandbox Testing (Completed)
