@@ -108,6 +108,7 @@
 - Pattern suggests waiting for confirmation after winning trades
 - Important to maintain discipline and not chase obvious setups immediately after wins
 - Consider implementing a cooling-off period after consecutive wins
+- Trade 28 (v1.2.1f) shows similar extended duration pattern as Trade 1, taking nearly two days to complete
 
 ### Fundamental Analysis
 - Track key economic indicators
