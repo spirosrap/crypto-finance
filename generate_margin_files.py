@@ -45,7 +45,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Margin values to generate
-    margin_values = [500, 1000, 2000, 5000]
+    margin_values = [250, 500, 1000, 2000, 5000]
     
     # Check if input file exists
     if not os.path.exists(args.input):
