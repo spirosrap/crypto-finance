@@ -55,6 +55,8 @@
 - Total required capital: $750 (margin x 3)
 - Maximum loss per trade: $8.75 (0.7% of $1,250 exposure)
 - Maximum gain target: $17.50 (2x risk)
+- Note: Experiencing increased impatience due to slower progress and underperformance since margin increase
+- Important to maintain discipline and stick to the system despite emotional challenges
 
 ### Stop Loss Strategy
 - Use ATR-based stops for volatility adjustment
