@@ -1,5 +1,12 @@
 # Trading Progression Guide
 
+## System Transition Update (March 19, 2024)
+- Transitioning from previous trading system to stock/crypto trading
+- First trade initiated: TSLA long position
+- Maintaining disciplined risk management approach
+- Documenting trades in new STOCK_CRYPTO_LOG.md
+- Continuing to track performance and system evolution
+
 ## Important System Events
 - 5 consecutive losses occurred, indicating potential market regime change
 - System under stress test with new drawdown period
