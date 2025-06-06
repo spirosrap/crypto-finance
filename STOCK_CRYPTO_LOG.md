@@ -1,6 +1,6 @@
 # Stock & Crypto Trading Log
 
-## Trade Entry: TSLA - March 19, 2024
+## Trade Entry: TSLA - June 6, 2025
 
 ### Trade Details
 - Symbol: TSLA
@@ -27,4 +27,4 @@
 - Risk parameters locked in
 
 ## Trade History
-1. TSLA Long @ $298.28 (March 19, 2024) - Active 
+1. TSLA Long @ $298.28 (June 6, 2025) - Active 

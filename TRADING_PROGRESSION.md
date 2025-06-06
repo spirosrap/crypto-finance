@@ -1,6 +1,6 @@
 # Trading Progression Guide
 
-## System Transition Update (March 19, 2024)
+## System Transition Update (June 6, 2025)
 - Transitioning from previous trading system to stock/crypto trading
 - First trade initiated: TSLA long position
 - Maintaining disciplined risk management approach
