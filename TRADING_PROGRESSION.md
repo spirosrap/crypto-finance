@@ -7,6 +7,16 @@
 - Documenting trades in new STOCK_CRYPTO_LOG.md
 - Continuing to track performance and system evolution
 
+## Friday Session Update (June 7, 2025)
+- Trade experienced significant intraday volatility
+- Position moved from +1% to -1% during regular market hours
+- Ended post-market session at break-even level
+- Demonstrating the importance of maintaining composure during intraday swings
+- Transition from automated Bitcoin RSI-dip system has been particularly challenging
+- Trading has become more emotionally charged, feeling like a test of personal identity
+- Need to refocus on system performance rather than personal validation
+- Important reminder: trading is about following a system, not proving oneself
+
 ## Important System Events
 - 5 consecutive losses occurred, indicating potential market regime change
 - System under stress test with new drawdown period
