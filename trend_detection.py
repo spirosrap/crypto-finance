@@ -34,27 +34,83 @@ def fetch_coinbase_data(product_id: str = 'BTC-USDC',
     else:
         # Default to last 8000 5-minute candles
         now = datetime.now(UTC)
-        start = now - timedelta(minutes=5 * 8000)
         end = now
+        start = now - timedelta(minutes=5 * 8000)
     
     logger.info(f"Fetching data from {start} to {end}")
-    raw_data = cb.historical_data.get_historical_data(product_id, start, end, "FIVE_MINUTE")
-    df = pd.DataFrame(raw_data)
+    
+    # Initialize empty list to store all candles
+    all_candles = []
+    current_end = end
+    
+    # Fetch data in chunks of 350 candles (maximum allowed by API)
+    while current_end > start:
+        # Calculate start time for this chunk (350 candles * 5 minutes = 1750 minutes)
+        chunk_start = current_end - timedelta(minutes=1750)
+        if chunk_start < start:
+            chunk_start = start
+            
+        # Get raw data for this chunk
+        chunk_data = cb.client.get_public_candles(
+            product_id=product_id,
+            start=int(chunk_start.timestamp()),
+            end=int(current_end.timestamp()),
+            granularity='FIVE_MINUTE'
+        )
+        
+        # Add chunk data to our list
+        if isinstance(chunk_data, dict) and 'candles' in chunk_data:
+            all_candles.extend(chunk_data['candles'])
+        elif isinstance(chunk_data, list):
+            all_candles.extend(chunk_data)
+        
+        # Update end time for next chunk
+        current_end = chunk_start
+        
+        # If we've reached the start time, break
+        if chunk_start <= start:
+            break
+    
+    # Create DataFrame from all candles
+    # First, convert the data to the correct format
+    formatted_candles = []
+    for candle in all_candles:
+        if isinstance(candle, (list, tuple)) and len(candle) >= 6:
+            formatted_candles.append({
+                'start': candle[0],
+                'open': candle[1],
+                'high': candle[2],
+                'low': candle[3],
+                'close': candle[4],
+                'volume': candle[5]
+            })
+        elif isinstance(candle, dict):
+            formatted_candles.append({
+                'start': candle.get('start', candle.get('time', candle.get('timestamp'))),
+                'open': candle.get('open'),
+                'high': candle.get('high'),
+                'low': candle.get('low'),
+                'close': candle.get('close'),
+                'volume': candle.get('volume')
+            })
+    
+    # Create DataFrame from formatted candles
+    df = pd.DataFrame(formatted_candles)
+    
+    if df.empty:
+        logger.error("No valid candles found in the data")
+        return pd.DataFrame(columns=['open', 'high', 'low', 'close', 'volume'])
     
     # Convert string columns to numeric
     numeric_columns = ['open', 'high', 'low', 'close', 'volume']
     for col in numeric_columns:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    # Handle timestamp conversion
-    timestamp_columns = ['start', 'timestamp', 'time']
-    for col in timestamp_columns:
         if col in df.columns:
-            # First convert to numeric, then to datetime
             df[col] = pd.to_numeric(df[col], errors='coerce')
-            df[col] = pd.to_datetime(df[col], unit='s', utc=True)
-            df.set_index(col, inplace=True)
-            break
+    
+    # Handle timestamp conversion - convert to numeric first to avoid warning
+    df['start'] = pd.to_numeric(df['start'], errors='coerce')
+    df['start'] = pd.to_datetime(df['start'], unit='s', utc=True)
+    df.set_index('start', inplace=True)
     
     logger.info(f"Fetched {len(df)} candles")
     return df
