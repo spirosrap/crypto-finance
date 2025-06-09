@@ -1,4 +1,29 @@
-# Trading Progression Guide
+# Trading Journal
+
+## June 9, 2025 - TSLA Trading Observation
+
+### Market Context
+- TSLA opened approximately 3.5% down in premarket and at market open
+- Notable social media activity: A Tesla influencer on Twitter reported that people were liquidating their positions
+
+### Personal Analysis & Decision
+- Considered buying more TSLA shares given the price drop
+- Decided to maintain trading discipline and wait for a more obvious opportunity
+- Rationale: Avoided emotional trading based on social media sentiment and short-term price movements
+
+### Key Takeaways
+1. Maintained discipline by not immediately reacting to price movements
+2. Recognized the importance of waiting for clear opportunities rather than following social media sentiment
+3. Demonstrated risk management by not increasing position size during uncertain market conditions
+
+### Follow-up Actions
+- Monitor TSLA price action and fundamentals
+- Look for clear technical or fundamental signals before considering new positions
+- Continue to evaluate market sentiment vs. actual company performance
+
+---
+
+# Trading System Analysis
 
 ## System Transition Update (June 6, 2025)
 - Transitioning from previous trading system to stock/crypto trading
@@ -275,6 +300,11 @@ This scaling ladder provides a systematic approach to growing account size and e
 - Current system version: 1.2.1f 
 - System performance improved after filter removal - no longer avoiding winning trades
 - Currently holding a long position for over 24 hours with positive performance 
+
+## Conclusion
+System stopped. No sustainable edge found after X trades. Refuse to tweak further without new, evidence-based hypothesis.
+
+# Trading System Analysis
 
 ## Conclusion
 System stopped. No sustainable edge found after X trades. Refuse to tweak further without new, evidence-based hypothesis. 
