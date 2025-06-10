@@ -1,5 +1,34 @@
 # Trading Journal
 
+## June 10, 2025 - TSLA Position Management
+
+### Market Context
+- TSLA approaching target level of $320
+- Position showing strong performance
+
+### Position Management Plan
+- Planning to sell 50% of position at $320 target
+- Remaining 50% to be held with:
+  - New target: $350
+  - Stop loss: $300
+- Strategy demonstrates proper risk management by:
+  - Taking partial profits at initial target
+  - Letting winners run with trailing stop
+  - Maintaining clear exit levels
+
+### Key Takeaways
+1. Implementing partial profit-taking strategy
+2. Using trailing stop to protect gains
+3. Maintaining clear risk management parameters
+
+### Follow-up Actions
+- Execute partial sale at $320
+- Monitor remaining position
+- Adjust stop loss if market conditions change
+- Document final outcome of both positions
+
+---
+
 ## June 9, 2025 - TSLA Trading Observation
 
 ### Market Context
