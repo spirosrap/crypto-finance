@@ -278,4 +278,5 @@ if __name__ == "__main__":
         for key, value in oversold_metrics.items():
             logger.info(f"{key}: {value}")
     else:
-        logger.info("✗ No oversold reversal detected") 
+        logger.info("✗ No oversold reversal detected")
+        logger.info(f"Current RSI: {oversold_metrics['current_rsi']:.2f}") 
