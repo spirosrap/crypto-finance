@@ -1,5 +1,34 @@
 # Trading Journal
 
+## June 11, 2025 - TSLA Price Movement Analysis
+
+### Market Context
+- TSLA showing strong premarket movement, reaching $332
+- Building on previous day's momentum
+- Potential path to $350 target by Friday becoming more visible
+- Following successful partial exit at $320 on June 10 (50% of position)
+
+### Position Analysis
+- Current position showing continued strength
+- Previous partial profit-taking strategy at $320 proving effective
+- Remaining position approaching new target of $350
+- Stop loss at $300 providing adequate protection
+- Managing remaining 50% of original position
+
+### Key Takeaways
+1. Market momentum aligning with trading thesis
+2. Initial partial profit-taking strategy validated
+3. Remaining position showing potential for extended gains
+4. Successful execution of planned exit strategy
+
+### Follow-up Actions
+- Monitor price action throughout the day
+- Consider adjusting stop loss if momentum continues
+- Document final outcome of position
+- Review trading strategy effectiveness
+
+---
+
 ## June 10, 2025 - TSLA Position Management
 
 ### Market Context
