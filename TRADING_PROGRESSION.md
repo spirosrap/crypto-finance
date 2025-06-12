@@ -1,5 +1,30 @@
 # Trading Journal
 
+## June 12, 2025 - TSLA Target Not Yet Reached
+
+### Market Context
+- TSLA has not yet reached the $350 target
+- Market momentum has slowed
+- Increased uncertainty ahead of Friday's session
+
+### Position Analysis
+- Still holding remaining 50% of original position
+- No further profit-taking executed
+- Stop loss at $300 remains in place
+- Monitoring for signs of reversal or renewed strength
+
+### Key Takeaways
+1. Patience required as target remains unhit
+2. Prepared for potential downside risk on Friday
+3. Importance of sticking to the plan and risk management
+
+### Follow-up Actions
+- Closely monitor price action on Friday
+- Be ready to act if downside accelerates
+- Reassess position if market conditions change
+
+---
+
 ## June 11, 2025 - TSLA Price Movement Analysis
 
 ### Market Context
