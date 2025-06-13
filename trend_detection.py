@@ -33,10 +33,10 @@ def fetch_coinbase_data(product_id: str = 'BTC-USDC',
         start = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=UTC)
         end = datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=UTC)
     else:
-        # Default to last 8000 5-minute candles
+        # Default to last 8000 1-hour candles
         now = datetime.now(UTC)
         end = now
-        start = now - timedelta(minutes=5 * 8000)
+        start = now - timedelta(hours=8000)
     
     logger.info(f"Fetching data from {start} to {end}")
     
@@ -50,8 +50,8 @@ def fetch_coinbase_data(product_id: str = 'BTC-USDC',
         retries = 0
         while retries < max_retries:
             try:
-                # Calculate start time for this chunk (350 candles * 5 minutes = 1750 minutes)
-                chunk_start = current_end - timedelta(minutes=1750)
+                # Calculate start time for this chunk (350 candles * 1 hour = 350 hours)
+                chunk_start = current_end - timedelta(hours=350)
                 if chunk_start < start:
                     chunk_start = start
                     
@@ -60,7 +60,7 @@ def fetch_coinbase_data(product_id: str = 'BTC-USDC',
                     product_id=product_id,
                     start=int(chunk_start.timestamp()),
                     end=int(current_end.timestamp()),
-                    granularity='FIVE_MINUTE'
+                    granularity='ONE_HOUR'
                 )
                 
                 # Handle the Coinbase API response
