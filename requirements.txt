@@ -2,7 +2,8 @@ coinbase-advanced-py
 numpy>=1.24.0
 nltk
 scikit-learn
-pandas>=1.5.0
+pandas>=2.0.0
+pandas-ta>=0.3.14b0
 git+https://github.com/TA-Lib/ta-lib-python.git
 # in linux do this instead:
 # $ python -m pip install TA-Lib
@@ -10,7 +11,7 @@ xgboost
 imblearn
 matplotlib>=3.7.0
 statsmodels
-yfinance
+yfinance>=0.2.36
 newsapi-python
 schedule
 websockets<14

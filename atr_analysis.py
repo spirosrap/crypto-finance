@@ -9,6 +9,9 @@ import logging
 from coinbaseservice import CoinbaseService
 from technicalanalysis import TechnicalAnalysis
 from config import API_KEY_PERPS, API_SECRET_PERPS
+import pandas_ta as ta
+import yfinance as yf
+from typing import Tuple
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -99,6 +102,35 @@ def calculate_percentiles(df, percentiles=[70, 90]):
     
     return results
 
+def check_atr_expansion(symbol: str = "BTC-USD", lookback: int = 5) -> Tuple[bool, float, float]:
+    """
+    Check if the ATR (Average True Range) is expanding by comparing current value with historical value.
+    
+    Args:
+        symbol (str): Trading pair symbol (default: "BTC-USD")
+        lookback (int): Number of periods to look back for comparison (default: 5)
+    
+    Returns:
+        Tuple[bool, float, float]: A tuple containing:
+            - Boolean indicating if ATR is expanding
+            - Current ATR value
+            - Historical ATR value (lookback periods ago)
+    """
+    # Download hourly data
+    df = yf.download(symbol, interval="1h", period="1mo")
+    
+    # Calculate 14-period ATR
+    df['ATR'] = df.ta.atr(length=14)
+    
+    # Get current and historical ATR values
+    current_atr = df['ATR'].iloc[-1]
+    historical_atr = df['ATR'].iloc[-(lookback + 1)]
+    
+    # Check if ATR is expanding
+    is_expanding = current_atr > historical_atr
+    
+    return is_expanding, current_atr, historical_atr
+
 def main():
     # Initialize services
     cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
@@ -148,4 +180,12 @@ def main():
     logger.info(f"\nDetailed data saved to {product_id}_atr_analysis.csv")
 
 if __name__ == "__main__":
+    # Example usage
+    is_expanding, current_atr, historical_atr = check_atr_expansion()
+    
+    print(f"BTC/USD ATR Analysis:")
+    print(f"Current ATR: {current_atr:.2f}")
+    print(f"ATR 5 periods ago: {historical_atr:.2f}")
+    print(f"ATR is expanding: {is_expanding}")
+    
     main() 
