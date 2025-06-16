@@ -1,5 +1,31 @@
 # Trading Journal
 
+## June 16, 2025 - TSLA and Bitcoin Market Update
+
+### Market Context
+- TSLA trading around $330, still below $350 target
+- Bitcoin showing significant strength, reaching $107,700
+- Market showing mixed signals with crypto strength but TSLA target not yet reached
+
+### Position Analysis
+- TSLA position still in play with $350 target
+- Stop loss at $300 remains in place
+- Monitoring for potential correlation between crypto strength and TSLA movement
+- Position showing resilience despite target not being reached
+
+### Key Takeaways
+1. Patience required as TSLA target remains unhit
+2. Notable divergence between crypto and TSLA performance
+3. Importance of maintaining discipline with existing targets
+
+### Follow-up Actions
+- Continue monitoring TSLA price action
+- Assess potential impact of Bitcoin's strength on overall market sentiment
+- Maintain existing stop loss and target levels
+- Document any significant market correlation patterns
+
+---
+
 ## June 12, 2025 - TSLA Target Not Yet Reached
 
 ### Market Context
