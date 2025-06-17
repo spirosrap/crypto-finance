@@ -43,6 +43,7 @@ def get_hourly_candle(cb_service):
         logger.info(f"Unix timestamps: {start_ts} to {end_ts}")
         
         # Get candles directly from the client
+        logger.info("Making API call...")
         response = cb_service.client.get_public_candles(
             product_id=PRODUCT_ID,
             start=start_ts,
@@ -50,37 +51,38 @@ def get_hourly_candle(cb_service):
             granularity='ONE_HOUR'
         )
         
-        logger.info(f"Received response: {response}")
+        logger.info("API call completed")
         
-        if not response or 'candles' not in response or len(response['candles']) < 2:
-            logger.error("Not enough candle data available")
+        # Convert response to dict if it's a Coinbase response type
+        if hasattr(response, 'candles'):
+            candles = response.candles
+        else:
+            candles = response.get('candles', [])
+            
+        if not candles or len(candles) < 2:
+            logger.error(f"Not enough candles in response: {len(candles) if candles else 0}")
             return None
             
-        # Convert to DataFrame
-        df = pd.DataFrame(response['candles'])
-        logger.info(f"DataFrame columns: {df.columns.tolist()}")
-        logger.info(f"DataFrame head:\n{df.head()}")
+        # Get the most recent complete candle (second to last in the list)
+        last_candle = candles[-2]  # Get the second to last candle
+        logger.info(f"Selected candle: {last_candle}")
         
-        # Convert string columns to numeric
-        numeric_columns = ['open', 'high', 'low', 'close', 'volume']
-        for col in numeric_columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-        
-        # Convert timestamp to datetime - explicitly convert start to numeric first
-        df['start'] = pd.to_numeric(df['start'])
-        df['timestamp'] = pd.to_datetime(df['start'], unit='s', utc=True)
-        df.set_index('timestamp', inplace=True)
-        
-        # Get the most recent complete candle
-        last_candle = df.iloc[-2]
-        last_candle_time = last_candle.name
-        
-        # Check if the candle is from the previous hour
-        if last_candle_time.hour == (now - timedelta(hours=1)).hour:
-            logger.info(f"Using completed candle from {last_candle_time}")
-            return last_candle.to_dict()
-        else:
-            logger.info(f"Most recent candle is not complete yet (from {last_candle_time})")
+        # Convert the candle data to the required format
+        try:
+            # Access dictionary values directly
+            candle_dict = {
+                'timestamp': datetime.fromtimestamp(int(last_candle['start']), UTC),
+                'open': float(last_candle['open']),
+                'high': float(last_candle['high']),
+                'low': float(last_candle['low']),
+                'close': float(last_candle['close']),
+                'volume': float(last_candle['volume'])
+            }
+            logger.info(f"Processed candle data: {candle_dict}")
+            return candle_dict
+        except (KeyError, ValueError) as e:
+            logger.error(f"Error processing candle data: {e}")
+            logger.error(f"Problematic candle data: {last_candle}")
             return None
         
     except Exception as e:
@@ -116,43 +118,70 @@ def place_buy_stop_order(size_usd=4000, leverage=20, tp_price=112000, sl_price=1
     except Exception as e:
         logger.error(f"Error executing trade_btc_perp.py: {e}")
 
+def get_next_poll_time():
+    """Calculate the next time to poll based on the current time."""
+    now = datetime.now(UTC)
+    # If we're in the first minute of the hour, wait until next hour
+    if now.minute == 0:
+        next_time = now.replace(minute=1, second=0, microsecond=0)
+    else:
+        next_time = (now + timedelta(hours=1)).replace(minute=1, second=0, microsecond=0)        
+    
+    # Calculate seconds until next poll
+    wait_seconds = (next_time - now).total_seconds()
+    return wait_seconds
+
 def main():
     logger.info("Starting BTC buy-stop strategy")
     logger.info("Monitoring for hourly close above $107,000")
-    logger.info("Strategy will abort if price closes below $106,000")
+    logger.info("Strategy requires price to first close above $106,000 (guard level)")
     
     cb_service = setup_coinbase()
     order_placed = False
-    
+    guard_armed = False  # Track if price has broken above guard level
+    last_candle_ts = None  # Track last processed candle timestamp
     while not order_placed:
         try:
-            # Get current time
-            current_time = datetime.now(UTC)
-            
             # Get hourly candle
             candle = get_hourly_candle(cb_service)
-            
+
             if candle:
+                current_ts = candle['timestamp']
+                
+                # Skip if we've already processed this candle
+                if current_ts == last_candle_ts:
+                    logger.info("Skipping already processed candle")
+                    time.sleep(get_next_poll_time())
+                    continue
+                
                 close_price = float(candle['close'])
-                logger.info(f"Current hourly close: ${close_price:,.2f}")
+                logger.info(f"Processing new candle at {current_ts} with close: ${close_price:,.2f}")
                 
-                # Check if price closed below $106,000 (cancel condition)
-                if close_price < 106000:
-                    logger.info("Price closed below $106,000 - aborting strategy")
-                    return
-                
-                # Check if price closed above $107,000
-                if close_price > 107000:
-                    logger.info("Hourly close above $107,000 detected!")
+                # 1. Entry test first (using previous guard state)
+                if guard_armed and close_price >= 107000:
+                    logger.info("Entry condition met! Price closed above $107,000 with armed guard from previous candle")
                     place_buy_stop_order()
                     order_placed = True
+                    guard_armed = False  # Reset guard after entry
                 else:
-                    logger.info("Waiting for price to close above $107,000...")
+                    logger.info("Waiting for price to close above $107,000 (guard armed: {})".format(guard_armed))
+                
+                # 2. Guard update second (for next candle)
+                guard_armed = close_price >= 106000
+                if guard_armed:
+                    logger.info("Guard armed for next candle (price closed above $106,000)")
+                else:
+                    logger.info("Guard disarmed for next candle (price closed below $106,000)")
+                
+                # Update last processed timestamp
+                last_candle_ts = current_ts
             else:
                 logger.info("Waiting for current hour to complete...")
             
-            # Wait for 5 minutes before next check
-            time.sleep(300)
+            # Calculate and wait until next optimal poll time
+            wait_time = get_next_poll_time()
+            logger.info(f"Waiting {wait_time:.0f} seconds until next poll")
+            time.sleep(wait_time)
             
         except KeyboardInterrupt:
             logger.info("Strategy stopped by user")
