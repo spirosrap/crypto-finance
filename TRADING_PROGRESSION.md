@@ -416,4 +416,58 @@ System stopped. No sustainable edge found after X trades. Refuse to tweak furthe
 # Trading System Analysis
 
 ## Conclusion
-System stopped. No sustainable edge found after X trades. Refuse to tweak further without new, evidence-based hypothesis. 
+System stopped. No sustainable edge found after X trades. Refuse to tweak further without new, evidence-based hypothesis.
+
+## Buy-Stop Limit Strategy Implementation
+
+### Strategy Overview
+- **Entry Condition**: Hourly close above $107,000
+- **Position Size**: $4,000 with 20x leverage
+- **Take Profit**: $112,000
+- **Stop Loss**: $104,900
+- **Risk/Reward Ratio**: Approximately 1:2.5
+
+### Technical Implementation
+The strategy is implemented in `btc_buy_stop_strategy.py` with the following key features:
+
+1. **Candle Data Management**
+   - Fetches hourly candles from Coinbase API
+   - Ensures only completed hourly candles are used for decision making
+   - Implements proper timestamp handling and data validation
+
+2. **Automated Monitoring**
+   - Continuously monitors BTC price
+   - Checks for completed hourly candles
+   - Automatically places buy-stop limit order when conditions are met
+
+3. **Order Placement**
+   - Uses `trade_btc_perp.py` for order execution
+   - Implements proper error handling and logging
+   - Includes safety checks for sufficient funds and valid parameters
+
+### How to Run
+1. Ensure all dependencies are installed
+2. Configure API credentials in `config.py`
+3. Run the strategy:
+   ```bash
+   python btc_buy_stop_strategy.py
+   ```
+
+### Safety Features
+- Validates candle data before making decisions
+- Implements proper error handling and logging
+- Includes fund sufficiency checks
+- Uses proper timestamp handling to ensure accurate candle data
+
+### Monitoring and Logging
+- Detailed logging of all operations
+- Price monitoring and candle completion status
+- Order placement confirmation
+- Error tracking and reporting
+
+### Next Steps
+1. Implement additional risk management features
+2. Add email/SMS notifications for order execution
+3. Consider adding multiple timeframe analysis
+4. Implement backtesting capabilities
+5. Add performance tracking and reporting 
