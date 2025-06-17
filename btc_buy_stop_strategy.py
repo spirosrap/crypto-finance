@@ -119,6 +119,7 @@ def place_buy_stop_order(size_usd=4000, leverage=20, tp_price=112000, sl_price=1
 def main():
     logger.info("Starting BTC buy-stop strategy")
     logger.info("Monitoring for hourly close above $107,000")
+    logger.info("Strategy will abort if price closes below $106,000")
     
     cb_service = setup_coinbase()
     order_placed = False
@@ -134,6 +135,11 @@ def main():
             if candle:
                 close_price = float(candle['close'])
                 logger.info(f"Current hourly close: ${close_price:,.2f}")
+                
+                # Check if price closed below $106,000 (cancel condition)
+                if close_price < 106000:
+                    logger.info("Price closed below $106,000 - aborting strategy")
+                    return
                 
                 # Check if price closed above $107,000
                 if close_price > 107000:
