@@ -1,5 +1,31 @@
 # Trading Journal
 
+## June 17, 2025 - Bitcoin RSI Dip Trading
+
+### Market Context
+- Executed RSI dip strategy using btc_entry_conditions.py
+- Initial trade exited at break-even
+- Re-entered position and achieved profitable outcome
+- Using 20x leverage with $300 margin
+
+### Position Analysis
+- Initial entry based on RSI dip conditions
+- First position closed at break-even
+- Second entry proved successful with profit
+- Position size: $300 with 20x leverage ($6,000 exposure)
+
+### Key Takeaways
+1. Strategy demonstrated resilience with successful re-entry
+2. Break-even exit on first attempt showed good risk management
+3. Second entry capitalized on continued market opportunity
+
+### Follow-up Actions
+- Monitor RSI conditions for future entries
+- Document any pattern improvements in the strategy
+- Continue tracking performance of RSI dip strategy
+
+---
+
 ## June 16, 2025 - TSLA and Bitcoin Market Update
 
 ### Market Context
