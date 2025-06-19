@@ -57,12 +57,54 @@ def process_candle(candle):
     }
 
 
+def fartcoin_daily_alert(cb_service):
+    PRODUCT_ID = "FARTCOIN-PERP-INTX"
+    GRANULARITY = "ONE_DAY"
+    BREAKOUT_THRESHOLD = 1.10
+    BREAKOUT_VOLUME_MULTIPLIER = 1.2  # 20% above average
+
+    now = datetime.now(UTC)
+    now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = now - timedelta(days=21)
+    end = now
+    start_ts = int(start.timestamp())
+    end_ts = int(end.timestamp())
+    logger.info(f"Fetching last 21 daily candles for FARTCOIN from {start} to {end}")
+    response = cb_service.client.get_public_candles(
+        product_id=PRODUCT_ID,
+        start=start_ts,
+        end=end_ts,
+        granularity=GRANULARITY
+    )
+    if hasattr(response, 'candles'):
+        candles = response.candles
+    else:
+        candles = response.get('candles', [])
+    if not candles or len(candles) < 2:
+        logger.warning("Not enough FARTCOIN daily candle data.")
+        return
+    # Assume most recent is ongoing, so use candles[1] as last closed
+    last_candle = candles[1]
+    session_candles = candles[1:21]  # last 20 closed daily candles
+    session_volumes = [float(c['volume']) for c in session_candles]
+    avg_volume = sum(session_volumes) / 20 if len(session_volumes) == 20 else sum(session_volumes) / len(session_volumes)
+    close = float(last_candle['close'])
+    volume = float(last_candle['volume'])
+    ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
+    logger.info(f"FARTCOIN last daily close: {close}, volume: {volume}, avg_volume: {avg_volume}")
+    if close > BREAKOUT_THRESHOLD and volume >= BREAKOUT_VOLUME_MULTIPLIER * avg_volume:
+        logger.info(f"FARTCOIN ALERT: Daily close > {BREAKOUT_THRESHOLD} and volume ≥ 20% above 20-day average!")
+        logger.info(f"Timestamp: {ts}, Close: {close}, Volume: {volume}, Avg Volume: {avg_volume}")
+
+
 def main():
     logger.info("Starting BTC hourly close alert script")
+    logger.info("Monitoring for hourly close breakout/breakdown and FARTCOIN daily breakout")
     cb_service = setup_coinbase()
     last_alert_ts = None
     while True:
         try:
+            # BTC hourly alert logic
             candles = get_recent_hourly_candles(cb_service, num_candles=25)
             if not candles or len(candles) < 2:
                 logger.warning("Not enough candle data.")
@@ -101,6 +143,10 @@ def main():
             else:
                 logger.info("No alert condition met.")
                 last_alert_ts = ts
+
+            # FARTOIN daily alert
+            fartcoin_daily_alert(cb_service)
+
             # Wait until next hour + 1 minute
             now = datetime.now(UTC)
             next_poll = (now + timedelta(hours=1)).replace(minute=1, second=0, microsecond=0)
