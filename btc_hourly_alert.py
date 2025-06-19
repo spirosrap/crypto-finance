@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 
 GRANULARITY = "ONE_HOUR"
 PRODUCT_ID = "BTC-PERP-INTX"
-CLOSE_THRESHOLD = 105500
+BREAKOUT_THRESHOLD = 105500
+BREAKDOWN_THRESHOLD = 104000
+BREAKOUT_VOLUME_MULTIPLIER = 1.0  # Can be set higher for extra confirmation
+BREAKDOWN_VOLUME_MULTIPLIER = 1.2  # 20% above average, adjust per risk tolerance
 
 
 def setup_coinbase():
@@ -76,9 +79,9 @@ def main():
 
             # The most recent complete candle is the second in the list (index 1)
             last_candle = process_candle(candles[1])
-            session_candles = [process_candle(c) for c in candles[1:]]  # exclude the most recent (ongoing) candle
+            session_candles = [process_candle(c) for c in candles[1:21]]  # last 20 closed candles
             session_volumes = [c['volume'] for c in session_candles]
-            avg_volume = sum(session_volumes) / len(session_volumes)
+            avg_volume = sum(session_volumes) / 20 if len(session_volumes) == 20 else sum(session_volumes) / len(session_volumes)
             close = last_candle['close']
             volume = last_candle['volume']
             ts = last_candle['timestamp']
@@ -87,8 +90,12 @@ def main():
                 logger.info("No new candle. Waiting...")
                 time.sleep(60)
                 continue
-            if close > CLOSE_THRESHOLD and volume > avg_volume:
-                logger.info(f"ALERT: Hourly close above {CLOSE_THRESHOLD} and volume above session average!")
+            if close >= BREAKOUT_THRESHOLD and volume >= BREAKOUT_VOLUME_MULTIPLIER * avg_volume:
+                logger.info(f"ALERT: Hourly close ≥ {BREAKOUT_THRESHOLD} and volume ≥ session average!")
+                logger.info(f"Timestamp: {ts}, Close: {close}, Volume: {volume}, Avg Volume: {avg_volume}")
+                last_alert_ts = ts
+            elif close <= BREAKDOWN_THRESHOLD and volume >= BREAKDOWN_VOLUME_MULTIPLIER * avg_volume:
+                logger.info(f"BREAKDOWN ALERT: Hourly close ≤ {BREAKDOWN_THRESHOLD} and volume ≥ {(BREAKDOWN_VOLUME_MULTIPLIER-1)*100:.0f}% above avg!")
                 logger.info(f"Timestamp: {ts}, Close: {close}, Volume: {volume}, Avg Volume: {avg_volume}")
                 last_alert_ts = ts
             else:
