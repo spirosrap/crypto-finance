@@ -166,13 +166,13 @@ def fartcoin_daily_alert(cb_service, last_alert_ts=None):
     GRANULARITY = "ONE_HOUR"  # Get 1-hour candles to aggregate
     
     # Alert thresholds
-    ALERT_1_00 = 1.00
-    ALERT_0_95 = 0.95
-    ALERT_0_90 = 0.90
+    RECOVERY_THRESHOLD = 0.90
+    SUPPORT_LOW = 0.78
+    SUPPORT_HIGH = 0.80
     RSI_THRESHOLD = 30
     RSI_PERIOD = 14
-    VOLUME_PERIOD = 15  # Reduced from 20 to 15 for 6-hour candles
-    CONSECUTIVE_RSI_PERIODS = 2  # Need 2 consecutive periods with RSI < 30
+    VOLUME_PERIOD = 15  # For volume confirmation
+    CONSECUTIVE_CLOSES_NEEDED = 2  # Need 2 consecutive 6-hour closes for support confirmation
 
     try:
         now = datetime.now(UTC)
@@ -251,47 +251,55 @@ def fartcoin_daily_alert(cb_service, last_alert_ts=None):
         rsi = ta.rsi(df['close'], length=RSI_PERIOD)
         current_rsi = rsi.iloc[-1]
         
-        # Check momentum signal: RSI < 30 for at least 2 consecutive periods
-        momentum_signal = False
-        if len(rsi) >= CONSECUTIVE_RSI_PERIODS:
-            recent_rsi_values = rsi.iloc[-CONSECUTIVE_RSI_PERIODS:].dropna()
-            if len(recent_rsi_values) >= CONSECUTIVE_RSI_PERIODS:
-                momentum_signal = all(rsi_val < RSI_THRESHOLD for rsi_val in recent_rsi_values)
-        
-        # Calculate volume confirmation: Current volume >= 20-period average
-        volume_confirmation = False
-        if len(six_hour_candles) >= VOLUME_PERIOD + 1:
-            volume_period_candles = six_hour_candles[1:VOLUME_PERIOD + 1]  # Exclude current candle
-            avg_volume = sum(float(c['volume']) for c in volume_period_candles) / len(volume_period_candles)
-            volume_confirmation = current_volume >= avg_volume
-        
         logger.info(f"FARTCOIN Check (6H): Close=${close:.5f}, RSI={current_rsi:.2f}, Volume={current_volume:,.0f}")
-        logger.info(f"Momentum Signal (RSI<30 for 2 periods): {momentum_signal}")
-        logger.info(f"Volume Confirmation (≥20-period avg): {volume_confirmation}")
         
-        # Alert conditions with momentum and volume confirmation
+        # Alert conditions
         alert_triggered = False
         
-        # Alert 1: $1.00 with momentum and volume confirmation
-        if close >= ALERT_1_00 and momentum_signal and volume_confirmation:
-            logger.info(f"--- FARTCOIN ALERT 1 (6H) ---")
-            logger.info(f"Price >= ${ALERT_1_00} with momentum signal and volume confirmation!")
+        # Alert 1: Recovery above $0.90 with RSI < 30 still intact
+        if close >= RECOVERY_THRESHOLD and current_rsi < RSI_THRESHOLD:
+            logger.info(f"--- FARTCOIN RECOVERY ALERT (6H) ---")
+            logger.info(f"Recovery above ${RECOVERY_THRESHOLD} with RSI < {RSI_THRESHOLD} still intact!")
             logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
             alert_triggered = True
         
-        # Alert 2: Below $0.95 with momentum and volume confirmation
-        elif close < ALERT_0_95 and momentum_signal and volume_confirmation:
-            logger.info(f"--- FARTCOIN ALERT 2 (6H) ---")
-            logger.info(f"Price < ${ALERT_0_95} with momentum signal and volume confirmation!")
-            logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
-            alert_triggered = True
-        
-        # Alert 3: $0.90 (regardless of RSI/volume - emergency alert)
-        elif close <= ALERT_0_90:
-            logger.info(f"--- FARTCOIN ALERT 3 (6H) - EMERGENCY ---")
-            logger.info(f"Price <= ${ALERT_0_90} - Emergency alert triggered!")
-            logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
-            alert_triggered = True
+        # Alert 2: Hold at new support $0.78-$0.80 confirmed by two consecutive 6 hr closes and RSI divergence
+        elif SUPPORT_LOW <= close <= SUPPORT_HIGH:
+            # Check for two consecutive closes in support zone
+            if len(six_hour_candles) >= CONSECUTIVE_CLOSES_NEEDED + 1:
+                recent_closes = []
+                recent_rsi_values = []
+                
+                # Get the last 3 candles for analysis (current + 2 previous)
+                for i in range(1, min(4, len(six_hour_candles))):
+                    candle_close = float(six_hour_candles[i]['close'])
+                    recent_closes.append(candle_close)
+                    if i < len(rsi):
+                        recent_rsi_values.append(rsi.iloc[-i])
+                
+                # Check if we have enough data for RSI divergence analysis
+                if len(recent_closes) >= 3 and len(recent_rsi_values) >= 3:
+                    # Check for two consecutive closes in support zone
+                    consecutive_support_closes = 0
+                    for i in range(min(2, len(recent_closes))):
+                        if SUPPORT_LOW <= recent_closes[i] <= SUPPORT_HIGH:
+                            consecutive_support_closes += 1
+                        else:
+                            break
+                    
+                    # Check for RSI divergence (price makes lower low, RSI makes higher low)
+                    price_lower_low = recent_closes[0] < recent_closes[2]  # Current close < 2 periods ago
+                    rsi_higher_low = recent_rsi_values[0] > recent_rsi_values[2]  # Current RSI > 2 periods ago
+                    
+                    if consecutive_support_closes >= CONSECUTIVE_CLOSES_NEEDED and price_lower_low and rsi_higher_low:
+                        logger.info(f"--- FARTCOIN SUPPORT ALERT (6H) ---")
+                        logger.info(f"Hold at new support ${SUPPORT_LOW}-${SUPPORT_HIGH} confirmed!")
+                        logger.info(f"Two consecutive closes in support zone: {consecutive_support_closes}")
+                        logger.info(f"RSI divergence detected: Price lower low, RSI higher low")
+                        logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
+                        logger.info(f"Recent closes: {recent_closes[:3]}")
+                        logger.info(f"Recent RSI values: {[f'{r:.2f}' for r in recent_rsi_values[:3]]}")
+                        alert_triggered = True
         
         if alert_triggered:
             logger.info("")  # Empty line for visual separation
