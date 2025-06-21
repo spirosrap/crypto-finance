@@ -5,7 +5,7 @@
   "limit_order": false,
   "product": "BTC-USDC",
   "model": "reasoner",
-  "granularity": "ONE_HOUR",
+  "granularity": "FIVE_MINUTE",
   "execute_trades": true,
   "alignment_enabled": false
 }
