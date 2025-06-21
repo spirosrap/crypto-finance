@@ -7,6 +7,8 @@ import pandas as pd
 import pandas_ta as ta
 import subprocess
 import sys
+import platform
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -22,6 +24,34 @@ BTC_BREAKOUT_MARGIN = 300  # USD
 BTC_BREAKOUT_LEVERAGE = 20  # 20x leverage
 BTC_BREAKOUT_STOP_LOSS = 102000  # Stop-loss at $102,000
 BTC_BREAKOUT_TAKE_PROFIT = 108000  # First profit target at $108,000
+
+def play_alert_sound(filename="alert_sound.wav"):
+    """
+    Play the alert sound using system commands
+    """
+    try:
+        system = platform.system()
+        
+        if system == "Darwin":  # macOS
+            cmd = ["afplay", filename]
+        elif system == "Linux":
+            cmd = ["aplay", filename]
+        elif system == "Windows":
+            cmd = ["start", "/min", "cmd", "/c", f"powershell -c \"(New-Object Media.SoundPlayer '{filename}').PlaySync()\""]
+        else:
+            logger.warning(f"Unknown operating system: {system}. Cannot play sound.")
+            return False
+        
+        subprocess.run(cmd, check=True, timeout=5)
+        logger.info("Alert sound played successfully")
+        return True
+        
+    except subprocess.TimeoutExpired:
+        logger.error("Sound playback timed out")
+        return False
+    except Exception as e:
+        logger.error(f"Error playing alert sound: {e}")
+        return False
 
 def setup_coinbase():
     api_key = API_KEY_PERPS
@@ -133,14 +163,22 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
 
 def fartcoin_daily_alert(cb_service, last_alert_ts=None):
     PRODUCT_ID = "FARTCOIN-PERP-INTX"
-    GRANULARITY = "ONE_DAY"
-    BREAKOUT_THRESHOLD = 1.10
-    BREAKOUT_VOLUME_MULTIPLIER = 1.2  # 20% above average
+    GRANULARITY = "ONE_HOUR"  # Get 1-hour candles to aggregate
+    
+    # Alert thresholds
+    ALERT_1_00 = 1.00
+    ALERT_0_95 = 0.95
+    ALERT_0_90 = 0.90
+    RSI_THRESHOLD = 30
+    RSI_PERIOD = 14
+    VOLUME_PERIOD = 15  # Reduced from 20 to 15 for 6-hour candles
+    CONSECUTIVE_RSI_PERIODS = 2  # Need 2 consecutive periods with RSI < 30
 
     try:
         now = datetime.now(UTC)
-        now = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        start = now - timedelta(days=21)
+        now = now.replace(minute=0, second=0, microsecond=0)  # Round to hour
+        # Get more hourly data to aggregate into 6-hour candles
+        start = now - timedelta(hours=150)  # Increased from 120 to 150 hours (6.25 days)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
@@ -155,29 +193,115 @@ def fartcoin_daily_alert(cb_service, last_alert_ts=None):
             candles = response.candles
         else:
             candles = response.get('candles', [])
-        if not candles or len(candles) < 2:
-            logger.warning("Not enough FARTCOIN daily candle data.")
+        if not candles or len(candles) < max(RSI_PERIOD * 6 + 1, VOLUME_PERIOD * 6 + 1):  # Need enough 1-hour candles
+            logger.warning("Not enough FARTCOIN hourly candle data for 6-hour aggregation and analysis.")
             return last_alert_ts
         
-        last_candle = candles[1]
+        # Aggregate 1-hour candles into 6-hour candles
+        six_hour_candles = []
+        for i in range(0, len(candles) - 5, 6):  # Step by 6 hours
+            if i + 5 < len(candles):
+                hour_candles = candles[i:i+6]  # Get 6 consecutive 1-hour candles
+                
+                # Aggregate into 6-hour candle
+                opens = [float(c['open']) for c in hour_candles]
+                highs = [float(c['high']) for c in hour_candles]
+                lows = [float(c['low']) for c in hour_candles]
+                closes = [float(c['close']) for c in hour_candles]
+                volumes = [float(c['volume']) for c in hour_candles]
+                
+                six_hour_candle = {
+                    'open': opens[0],  # First hour's open
+                    'high': max(highs),  # Highest high
+                    'low': min(lows),    # Lowest low
+                    'close': closes[-1],  # Last hour's close
+                    'volume': sum(volumes),  # Sum of volumes
+                    'start': hour_candles[0]['start']  # Start time of first hour
+                }
+                six_hour_candles.append(six_hour_candle)
+        
+        if len(six_hour_candles) < max(RSI_PERIOD + 1, VOLUME_PERIOD + 1):
+            logger.warning(f"Not enough 6-hour candles for analysis. Need {max(RSI_PERIOD + 1, VOLUME_PERIOD + 1)}, got {len(six_hour_candles)}.")
+            return last_alert_ts
+        
+        # Use the most recent 6-hour candle
+        last_candle = six_hour_candles[1]  # Second most recent (most recent completed)
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
 
         if ts == last_alert_ts:
             return last_alert_ts
 
-        session_candles = candles[1:21]
-        session_volumes = [float(c['volume']) for c in session_candles]
-        avg_volume = sum(session_volumes) / 20 if len(session_volumes) == 20 else sum(session_volumes) / len(session_volumes)
         close = float(last_candle['close'])
-        volume = float(last_candle['volume'])
+        current_volume = float(last_candle['volume'])
         
-        logger.info(f"FARTCOIN Check: Last Daily Close=${close:.5f}, Volume={volume:,.0f}, Avg Volume={avg_volume:,.0f}")
+        # Calculate RSI using 6-hour candles
+        candle_data = []
+        for candle in six_hour_candles:
+            candle_data.append({
+                'close': float(candle['close']),
+                'high': float(candle['high']),
+                'low': float(candle['low']),
+                'volume': float(candle['volume']),
+                'start': candle['start']
+            })
         
-        if close > BREAKOUT_THRESHOLD and volume >= BREAKOUT_VOLUME_MULTIPLIER * avg_volume:
-            logger.info(f"--- FARTCOIN ALERT ---")
-            logger.info(f"Daily close > {BREAKOUT_THRESHOLD} and volume ≥ 20% above 20-day average!")
-            logger.info(f"Timestamp: {ts}, Close: {close}, Volume: {volume:,.0f}, Avg Volume: {avg_volume:,.0f}")
+        df = pd.DataFrame(candle_data)
+        
+        # Calculate RSI using pandas_ta
+        rsi = ta.rsi(df['close'], length=RSI_PERIOD)
+        current_rsi = rsi.iloc[-1]
+        
+        # Check momentum signal: RSI < 30 for at least 2 consecutive periods
+        momentum_signal = False
+        if len(rsi) >= CONSECUTIVE_RSI_PERIODS:
+            recent_rsi_values = rsi.iloc[-CONSECUTIVE_RSI_PERIODS:].dropna()
+            if len(recent_rsi_values) >= CONSECUTIVE_RSI_PERIODS:
+                momentum_signal = all(rsi_val < RSI_THRESHOLD for rsi_val in recent_rsi_values)
+        
+        # Calculate volume confirmation: Current volume >= 20-period average
+        volume_confirmation = False
+        if len(six_hour_candles) >= VOLUME_PERIOD + 1:
+            volume_period_candles = six_hour_candles[1:VOLUME_PERIOD + 1]  # Exclude current candle
+            avg_volume = sum(float(c['volume']) for c in volume_period_candles) / len(volume_period_candles)
+            volume_confirmation = current_volume >= avg_volume
+        
+        logger.info(f"FARTCOIN Check (6H): Close=${close:.5f}, RSI={current_rsi:.2f}, Volume={current_volume:,.0f}")
+        logger.info(f"Momentum Signal (RSI<30 for 2 periods): {momentum_signal}")
+        logger.info(f"Volume Confirmation (≥20-period avg): {volume_confirmation}")
+        
+        # Alert conditions with momentum and volume confirmation
+        alert_triggered = False
+        
+        # Alert 1: $1.00 with momentum and volume confirmation
+        if close >= ALERT_1_00 and momentum_signal and volume_confirmation:
+            logger.info(f"--- FARTCOIN ALERT 1 (6H) ---")
+            logger.info(f"Price >= ${ALERT_1_00} with momentum signal and volume confirmation!")
+            logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
+            alert_triggered = True
+        
+        # Alert 2: Below $0.95 with momentum and volume confirmation
+        elif close < ALERT_0_95 and momentum_signal and volume_confirmation:
+            logger.info(f"--- FARTCOIN ALERT 2 (6H) ---")
+            logger.info(f"Price < ${ALERT_0_95} with momentum signal and volume confirmation!")
+            logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
+            alert_triggered = True
+        
+        # Alert 3: $0.90 (regardless of RSI/volume - emergency alert)
+        elif close <= ALERT_0_90:
+            logger.info(f"--- FARTCOIN ALERT 3 (6H) - EMERGENCY ---")
+            logger.info(f"Price <= ${ALERT_0_90} - Emergency alert triggered!")
+            logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
+            alert_triggered = True
+        
+        if alert_triggered:
             logger.info("")  # Empty line for visual separation
+            
+            # Play alert sound
+            try:
+                play_alert_sound()
+            except Exception as e:
+                logger.error(f"Failed to play alert sound: {e}")
+            
             return ts
 
     except Exception as e:
@@ -235,6 +359,19 @@ def execute_btc_breakout_trade(cb_service, breakout_type: str, entry_price: floa
 def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
+    
+    # Check if alert sound file exists
+    alert_sound_file = "alert_sound.wav"
+    if not os.path.exists(alert_sound_file):
+        logger.error(f"❌ Alert sound file '{alert_sound_file}' not found!")
+        logger.error("Please run 'python synthesize_alert_sound.py' first to create the sound file.")
+        logger.error("Then run this script again.")
+        return
+    else:
+        logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
+    
+    logger.info("")  # Empty line for visual separation
+    
     cb_service = setup_coinbase()
     btc_triangle_breakout_last_alert_ts = None
     fartcoin_last_alert_ts = None
@@ -242,7 +379,7 @@ def main():
     while True:
         try:
             # BTC triangle breakout alert
-            btc_triangle_breakout_last_alert_ts = btc_triangle_breakout_alert(cb_service, btc_triangle_breakout_last_alert_ts)
+            # btc_triangle_breakout_last_alert_ts = btc_triangle_breakout_alert(cb_service, btc_triangle_breakout_last_alert_ts)
 
             # FARTCOIN daily alert (runs hourly but condition only changes daily)
             fartcoin_last_alert_ts = fartcoin_daily_alert(cb_service, fartcoin_last_alert_ts)
