@@ -178,6 +178,42 @@ class TradingAnalyzer:
         
         return max_drawdown, drawdown_periods
     
+    def calculate_max_increase(self) -> Tuple[float, List[dict]]:
+        """Calculate maximum increase and rally periods."""
+        cumulative_returns = (1 + self.df['Outcome %'] / 100).cumprod()
+        rolling_min = cumulative_returns.expanding().min()
+        increases = (cumulative_returns - rolling_min) / rolling_min * 100
+        
+        max_increase = increases.max()
+        
+        # Find rally periods
+        rally_periods = []
+        in_rally = False
+        start_idx = 0
+        
+        for i in range(len(increases)):
+            if not in_rally and increases.iloc[i] > 0:
+                in_rally = True
+                start_idx = i
+            elif in_rally and (increases.iloc[i] <= 0 or i == len(increases) - 1):
+                # End the rally period if we decline or reach the end of data
+                in_rally = False
+                end_idx = i if increases.iloc[i] <= 0 else i + 1
+                period_increase = increases.iloc[start_idx:end_idx].max()
+                
+                # Only add significant rallies (e.g., more than 1%)
+                if period_increase > 1:
+                    rally_periods.append({
+                        'start_date': self.df['Timestamp'].iloc[start_idx],
+                        'end_date': self.df['Timestamp'].iloc[end_idx - 1],
+                        'increase': period_increase
+                    })
+        
+        # Sort rally periods by magnitude (descending)
+        rally_periods.sort(key=lambda x: x['increase'], reverse=True)
+        
+        return max_increase, rally_periods
+    
     def calculate_risk_metrics(self) -> dict:
         """Calculate various risk metrics."""
         returns = self.df['Outcome %'] / 100
@@ -228,6 +264,7 @@ class TradingAnalyzer:
         leveraged_profits = self.calculate_leveraged_dollar_profits()
         sharpe_ratio = self.calculate_sharpe_ratio()
         max_drawdown, drawdown_periods = self.calculate_max_drawdown()
+        max_increase, rally_periods = self.calculate_max_increase()
         risk_metrics = self.calculate_risk_metrics()
         current_drawdown = self.get_current_drawdown()
         duration_stats = self.calculate_trade_duration_stats()
@@ -278,6 +315,7 @@ class TradingAnalyzer:
         print(f"{BOLD}⚠️ Risk Metrics{END}")
         print(f"{'=' * 50}")
         print(f"Maximum Drawdown: {RED}{max_drawdown:.2f}%{END}")
+        print(f"Maximum Increase: {GREEN}{max_increase:.2f}%{END}")
         print(f"Current Drawdown: {RED if current_drawdown < 0 else GREEN}{current_drawdown:.2f}%{END}")
         print(f"Standard Deviation: {YELLOW}{risk_metrics['Standard Deviation']:.2f}%{END}")
         print(f"Average R/R Ratio: {BLUE}{risk_metrics['Average R/R Ratio']:.2f}{END}")
@@ -307,6 +345,14 @@ class TradingAnalyzer:
             print(f"{'=' * 50}")
             for period in drawdown_periods[:3]:  # Show top 3 drawdowns
                 print(f"From {period['start_date'].date()} to {period['end_date'].date()}: {RED}{period['drawdown']:.2f}%{END}")
+            print(f"{'=' * 50}\n")
+        
+        # Rally Analysis
+        if rally_periods:
+            print(f"{BOLD}📈 Largest Rally Periods{END}")
+            print(f"{'=' * 50}")
+            for period in rally_periods[:3]:  # Show top 3 rallies
+                print(f"From {period['start_date'].date()} to {period['end_date'].date()}: {GREEN}{period['increase']:.2f}%{END}")
             print(f"{'=' * 50}\n")
         
         # Trading Style Analysis
