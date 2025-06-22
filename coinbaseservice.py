@@ -352,7 +352,7 @@ class CoinbaseService:
             
             self.logger.info(f"Market order placed: {market_order}")
             
-            # Extract order ID - Updated this section
+            # Extract order ID - Updated this section with better validation
             order_id = None
             if (isinstance(market_order, dict) and 
                 'success_response' in market_order and 
@@ -363,14 +363,24 @@ class CoinbaseService:
                 if isinstance(success_response, dict) and 'order_id' in success_response:
                     order_id = success_response['order_id']
             
-            if not order_id:
-                self.logger.error(f"Could not find order ID in response: {market_order}")
-                return {"error": "Could not find order ID", "market_order": str(market_order)}
+            # Validate order ID format
+            if not order_id or not isinstance(order_id, str) or len(order_id) < 10:
+                self.logger.error(f"Invalid order ID extracted: {order_id}")
+                self.logger.error(f"Full market order response: {market_order}")
+                return {"error": "Invalid order ID extracted", "market_order": str(market_order)}
             
             self.logger.info(f"Extracted order ID: {order_id}")
             
-            # Wait briefly for market order to fill
-            time.sleep(2)
+            # Wait longer for market order to fill and be available
+            time.sleep(5)  # Increased from 2 to 5 seconds
+            
+            # Verify order exists before proceeding
+            try:
+                order_status = self.client.get_order(order_id=order_id)
+                self.logger.info(f"Order status response: {order_status}")
+            except Exception as e:
+                self.logger.error(f"Failed to get order status for {order_id}: {e}")
+                return {"error": f"Order not found on exchange: {e}", "market_order": str(market_order)}
             
             # Get the order status
             order_status = self.client.get_order(order_id=order_id)
@@ -509,7 +519,7 @@ class CoinbaseService:
             
             self.logger.info(f"Limit order placed: {limit_order}")
             
-            # Extract order ID
+            # Extract order ID with better validation
             order_id = None
             if (isinstance(limit_order, dict) and 
                 'success_response' in limit_order and 
@@ -520,11 +530,21 @@ class CoinbaseService:
                 if isinstance(success_response, dict) and 'order_id' in success_response:
                     order_id = success_response['order_id']
             
-            if not order_id:
-                self.logger.error(f"Could not find order ID in response: {limit_order}")
-                return {"error": "Could not find order ID", "limit_order": str(limit_order)}
+            # Validate order ID format
+            if not order_id or not isinstance(order_id, str) or len(order_id) < 10:
+                self.logger.error(f"Invalid order ID extracted: {order_id}")
+                self.logger.error(f"Full limit order response: {limit_order}")
+                return {"error": "Invalid order ID extracted", "limit_order": str(limit_order)}
             
             self.logger.info(f"Extracted order ID: {order_id}")
+            
+            # Verify order exists before returning
+            try:
+                order_status = self.client.get_order(order_id=order_id)
+                self.logger.info(f"Order status response: {order_status}")
+            except Exception as e:
+                self.logger.error(f"Failed to get order status for {order_id}: {e}")
+                return {"error": f"Order not found on exchange: {e}", "limit_order": str(limit_order)}
             
             # Return the limit order details immediately
             return {
