@@ -121,7 +121,14 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
         last_close = float(last_closed_candle_raw['close'])
         last_volume = float(last_closed_candle_raw['volume'])
 
-        logger.info(f"BTC Triangle Breakout Check: Last Close=${last_close:,.2f}, Last Volume={last_volume:,.0f}, Avg Volume({VOLUME_PERIOD})={avg_volume:,.0f}")
+        # Calculate 14-period RSI using pandas_ta
+        closes = [float(c['close']) for c in candles_raw[1:VOLUME_PERIOD+2]]  # last_closed + previous 20
+        closes_series = pd.Series(closes)
+        rsi_series = ta.rsi(closes_series, length=14)
+        last_rsi = rsi_series.iloc[-1] if not rsi_series.isna().all() else None
+        rsi_str = f"{last_rsi:.2f}" if last_rsi is not None and not pd.isna(last_rsi) else "N/A"
+
+        logger.info(f"BTC Triangle Breakout Check: Last Close=${last_close:,.2f}, Last Volume={last_volume:,.0f}, Avg Volume({VOLUME_PERIOD})={avg_volume:,.0f}, RSI(14)={rsi_str}")
 
         # 4. Check alert conditions
         is_breakout_price = last_close > ENTRY_PRICE_THRESHOLD
