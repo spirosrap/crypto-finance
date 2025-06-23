@@ -35,8 +35,8 @@ LEVERAGE = 5  # Conservative leverage
 POSITION_SIZE_USD = 100  # Position size in USD
 
 # Recalculate these values every 50 trades using plot_atr_histogram.py
-mean_atr_percent = 0.284
-std_atr_percent = 0.148
+mean_atr_percent = 0.223
+std_atr_percent = 0.084
 # Recalculate this value every 50 trades using analyze_volume_thresholds.py
 VOLUME_THRESHOLD = 1.4
 # Recalculate this value every 50 trades using volatility_threshold.py
