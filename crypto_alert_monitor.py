@@ -127,6 +127,10 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
         is_breakout_price = last_close > ENTRY_PRICE_THRESHOLD
         is_high_volume = last_volume >= (avg_volume * VOLUME_MULTIPLIER)
         
+        # Log condition status
+        logger.info(f"  - Price > ${ENTRY_PRICE_THRESHOLD:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
+        logger.info(f"  - Volume >= {VOLUME_MULTIPLIER}x Avg ({avg_volume * VOLUME_MULTIPLIER:,.0f}): {'✅ Met' if is_high_volume else '❌ Not Met'}")
+        
         if is_breakout_price and is_high_volume:
             logger.info(f"--- BTC TRIANGLE BREAKOUT ALERT ---")
             logger.info(f"Entry condition met: 1-hour close > ${ENTRY_PRICE_THRESHOLD:,.0f} with volume >= {VOLUME_MULTIPLIER}x 20-period average.")
