@@ -22,8 +22,8 @@ PRODUCT_ID = "BTC-PERP-INTX"
 # Trade parameters for BTC breakout
 BTC_BREAKOUT_MARGIN = 300  # USD
 BTC_BREAKOUT_LEVERAGE = 20  # 20x leverage
-BTC_BREAKOUT_STOP_LOSS = 102000  # Stop-loss at $102,000
-BTC_BREAKOUT_TAKE_PROFIT = 108000  # First profit target at $108,000
+BTC_BREAKOUT_STOP_LOSS = 104300  # Stop-loss at $104,300
+BTC_BREAKOUT_TAKE_PROFIT = 109000  # First profit target at $109,000
 
 def play_alert_sound(filename="alert_sound.wav"):
     """
@@ -85,14 +85,14 @@ def get_recent_hourly_candles(cb_service, num_candles=24):
 def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
     """
     Alerts on an intraday triangle breakout for BTC.
-    Entry trigger: 1-hour close > 104,200 with >=2x 20-period volume.
+    Entry trigger: 1-hour close > 106,000 on spike volume (>20% above avg).
     """
     PRODUCT_ID = "BTC-PERP-INTX"
-    ENTRY_PRICE_THRESHOLD = 104200
+    ENTRY_PRICE_THRESHOLD = 106000
     VOLUME_PERIOD = 20
-    VOLUME_MULTIPLIER = 2.0
-    ENTRY_ZONE_LOW = 104200
-    ENTRY_ZONE_HIGH = 104800
+    VOLUME_MULTIPLIER = 1.2  # >20% above average
+    ENTRY_ZONE_LOW = 106000
+    ENTRY_ZONE_HIGH = 106500
 
     try:
         # 1. Get candles for analysis (volume period + 2 for current and last closed)
@@ -387,10 +387,10 @@ def main():
     while True:
         try:
             # BTC triangle breakout alert
-            # btc_triangle_breakout_last_alert_ts = btc_triangle_breakout_alert(cb_service, btc_triangle_breakout_last_alert_ts)
+            btc_triangle_breakout_last_alert_ts = btc_triangle_breakout_alert(cb_service, btc_triangle_breakout_last_alert_ts)
 
             # FARTCOIN daily alert (runs hourly but condition only changes daily)
-            fartcoin_last_alert_ts = fartcoin_daily_alert(cb_service, fartcoin_last_alert_ts)
+            # fartcoin_last_alert_ts = fartcoin_daily_alert(cb_service, fartcoin_last_alert_ts)
 
             # Wait until next hour + 1 minute
             now = datetime.now(UTC)
