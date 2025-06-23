@@ -82,6 +82,55 @@ def get_recent_hourly_candles(cb_service, num_candles=24):
     return candles
 
 
+def get_current_btc_data(cb_service):
+    """
+    Get current live BTC price, volume, and RSI data
+    """
+    try:
+        current_price = None
+        current_volume = None
+        current_rsi = None
+        
+        # Get recent candles for price, volume and RSI calculation (last 20 minutes for RSI)
+        now = datetime.now(UTC)
+        start = now - timedelta(minutes=20)
+        start_ts = int(start.timestamp())
+        end_ts = int(now.timestamp())
+        
+        response = cb_service.client.get_public_candles(
+            product_id="BTC-PERP-INTX",
+            start=start_ts,
+            end=end_ts,
+            granularity="ONE_MINUTE"
+        )
+        
+        if hasattr(response, 'candles'):
+            recent_candles = response.candles
+        else:
+            recent_candles = response.get('candles', [])
+        
+        if recent_candles:
+            # Get current price from the most recent candle
+            current_price = float(recent_candles[-1]['close'])
+            
+            # Sum volume from last 5 minutes
+            current_volume = sum(float(c['volume']) for c in recent_candles[-5:])
+            
+            # Calculate current RSI using recent closes
+            closes = [float(c['close']) for c in recent_candles]
+            
+            if len(closes) >= 14:  # Need at least 14 periods for RSI
+                closes_series = pd.Series(closes)
+                rsi_series = ta.rsi(closes_series, length=14)
+                current_rsi = rsi_series.iloc[-1] if not rsi_series.isna().all() else None
+        
+        return current_price, current_volume, current_rsi
+        
+    except Exception as e:
+        logger.error(f"Error getting current BTC data: {e}")
+        return None, None, None
+
+
 def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
     """
     Alerts on an intraday triangle breakout for BTC.
@@ -128,7 +177,18 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
         last_rsi = rsi_series.iloc[-1] if not rsi_series.isna().all() else None
         rsi_str = f"{last_rsi:.2f}" if last_rsi is not None and not pd.isna(last_rsi) else "N/A"
 
-        logger.info(f"BTC Triangle Breakout Check: Last Close=${last_close:,.2f}, Last Volume={last_volume:,.0f}, Avg Volume({VOLUME_PERIOD})={avg_volume:,.0f}, RSI(14)={rsi_str}")
+        # Get current live data
+        current_price, current_volume, current_rsi = get_current_btc_data(cb_service)
+        current_price_str = f"${current_price:,.2f}" if current_price is not None else "N/A"
+        current_volume_str = f"{current_volume:,.0f}" if current_volume is not None else "N/A"
+        current_rsi_str = f"{current_rsi:.2f}" if current_rsi is not None and not pd.isna(current_rsi) else "N/A"
+
+        # Report both current (live) and completed candle data
+        logger.info(f"=== BTC MARKET DATA REPORT ===")
+        logger.info(f"📊 COMPLETED CANDLE (1H): Close=${last_close:,.2f}, Volume={last_volume:,.0f}, RSI(14)={rsi_str}")
+        logger.info(f"📈 CURRENT LIVE: Price={current_price_str}, Volume(5min)={current_volume_str}, RSI(14)={current_rsi_str}")
+        logger.info(f"📊 HISTORICAL: Avg Volume({VOLUME_PERIOD})={avg_volume:,.0f}")
+        logger.info(f"=================================")
 
         # 4. Check alert conditions
         is_breakout_price = last_close > ENTRY_PRICE_THRESHOLD
@@ -403,11 +463,9 @@ def main():
             # FARTCOIN daily alert (runs hourly but condition only changes daily)
             # fartcoin_last_alert_ts = fartcoin_daily_alert(cb_service, fartcoin_last_alert_ts)
 
-            # Wait until next hour + 1 minute
-            now = datetime.now(UTC)
-            next_poll = (now + timedelta(hours=1)).replace(minute=1, second=0, microsecond=0)
-            wait_seconds = (next_poll - now).total_seconds()
-            logger.info(f"Waiting {wait_seconds:.0f} seconds until next poll")
+            # Wait 5 minutes until next poll
+            wait_seconds = 300  # 5 minutes
+            logger.info(f"Waiting {wait_seconds} seconds until next poll")
             logger.info("")  # Empty line for visual separation
             time.sleep(wait_seconds)
             
