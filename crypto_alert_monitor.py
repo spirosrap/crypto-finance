@@ -23,7 +23,7 @@ PRODUCT_ID = "BTC-PERP-INTX"
 BTC_BREAKOUT_MARGIN = 300  # USD
 BTC_BREAKOUT_LEVERAGE = 20  # 20x leverage
 BTC_BREAKOUT_STOP_LOSS = 104300  # Stop-loss at $104,300
-BTC_BREAKOUT_TAKE_PROFIT = 109000  # First profit target at $109,000
+BTC_BREAKOUT_TAKE_PROFIT = 108500  # First profit target at $108,500
 
 def play_alert_sound(filename="alert_sound.wav"):
     """
@@ -131,17 +131,17 @@ def get_current_btc_data(cb_service):
         return None, None, None
 
 
-def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
+def btc_continuation_alert(cb_service, last_alert_ts=None):
     """
-    Alerts on an intraday triangle breakout for BTC.
-    Entry trigger: 1-hour close > 106,000 on spike volume (>20% above avg).
+    Alerts on BTC continuation above ~$105k range.
+    Entry trigger: 1-hour close > 105,700 on spike volume (>20% above avg).
     """
     PRODUCT_ID = "BTC-PERP-INTX"
-    ENTRY_PRICE_THRESHOLD = 106000
+    ENTRY_PRICE_THRESHOLD = 105700
     VOLUME_PERIOD = 20
     VOLUME_MULTIPLIER = 1.2  # >20% above average
-    ENTRY_ZONE_LOW = 106000
-    ENTRY_ZONE_HIGH = 106500
+    ENTRY_ZONE_LOW = 105700
+    ENTRY_ZONE_HIGH = 106200
 
     try:
         # 1. Get candles for analysis (volume period + 2 for current and last closed)
@@ -199,7 +199,7 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
         logger.info(f"  - Volume >= {VOLUME_MULTIPLIER}x Avg ({avg_volume * VOLUME_MULTIPLIER:,.0f}): {'✅ Met' if is_high_volume else '❌ Not Met'}")
         
         if is_breakout_price and is_high_volume:
-            logger.info(f"--- BTC TRIANGLE BREAKOUT ALERT ---")
+            logger.info(f"--- BTC CONTINUATION ALERT ---")
             logger.info(f"Entry condition met: 1-hour close > ${ENTRY_PRICE_THRESHOLD:,.0f} with volume >= {VOLUME_MULTIPLIER}x 20-period average.")
             
             if ENTRY_ZONE_LOW <= last_close <= ENTRY_ZONE_HIGH:
@@ -210,22 +210,22 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
             logger.info(f"Details: Timestamp={ts}, Close=${last_close:,.2f}, Volume={last_volume:,.0f}, Avg Volume={avg_volume:,.0f}")
 
             # Execute the trade
-            logger.info("Executing BTC breakout trade...")
-            breakout_type = f"triangle_breakout_{ENTRY_PRICE_THRESHOLD}"
-            trade_success, trade_result = execute_btc_breakout_trade(cb_service, breakout_type, last_close)
+            logger.info("Executing BTC continuation trade...")
+            breakout_type = f"continuation_{ENTRY_PRICE_THRESHOLD}"
+            trade_success, trade_result = execute_btc_continuation_trade(cb_service, breakout_type, last_close)
 
             if trade_success:
-                logger.info("BTC breakout trade executed successfully!")
+                logger.info("BTC continuation trade executed successfully!")
                 logger.info(f"Trade parameters: Margin=${BTC_BREAKOUT_MARGIN}, Leverage={BTC_BREAKOUT_LEVERAGE}x")
                 logger.info(f"Stop Loss: ${BTC_BREAKOUT_STOP_LOSS:,.0f}, Take Profit: ${BTC_BREAKOUT_TAKE_PROFIT:,.0f}")
             else:
-                logger.error(f"BTC breakout trade failed: {trade_result}")
+                logger.error(f"BTC continuation trade failed: {trade_result}")
 
             logger.info("")
             return ts
 
     except Exception as e:
-        logger.error(f"Error in BTC triangle breakout alert logic: {e}")
+        logger.error(f"Error in BTC continuation alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     
@@ -391,12 +391,12 @@ def fartcoin_daily_alert(cb_service, last_alert_ts=None):
     return last_alert_ts
 
 
-def execute_btc_breakout_trade(cb_service, breakout_type: str, entry_price: float):
+def execute_btc_continuation_trade(cb_service, continuation_type: str, entry_price: float):
     """
-    Execute BTC breakout trade using trade_btc_perp.py functionality
+    Execute BTC continuation trade using trade_btc_perp.py functionality
     """
     try:
-        logger.info(f"Executing BTC breakout trade: {breakout_type} at ${entry_price:,.2f}")
+        logger.info(f"Executing BTC continuation trade: {continuation_type} at ${entry_price:,.2f}")
         
         # Calculate position size based on margin and leverage
         position_size_usd = BTC_BREAKOUT_MARGIN * BTC_BREAKOUT_LEVERAGE
@@ -419,11 +419,11 @@ def execute_btc_breakout_trade(cb_service, breakout_type: str, entry_price: floa
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         if result.returncode == 0:
-            logger.info("BTC breakout trade executed successfully!")
+            logger.info("BTC continuation trade executed successfully!")
             logger.info(f"Trade output: {result.stdout}")
             return True, result.stdout
         else:
-            logger.error(f"BTC breakout trade failed!")
+            logger.error(f"BTC continuation trade failed!")
             logger.error(f"Error output: {result.stderr}")
             return False, result.stderr
             
@@ -431,7 +431,7 @@ def execute_btc_breakout_trade(cb_service, breakout_type: str, entry_price: floa
         logger.error("Trade execution timed out")
         return False, "Timeout"
     except Exception as e:
-        logger.error(f"Error executing BTC breakout trade: {e}")
+        logger.error(f"Error executing BTC continuation trade: {e}")
         return False, str(e)
 
 
@@ -452,13 +452,13 @@ def main():
     logger.info("")  # Empty line for visual separation
     
     cb_service = setup_coinbase()
-    btc_triangle_breakout_last_alert_ts = None
+    btc_continuation_last_alert_ts = None
     fartcoin_last_alert_ts = None
     
     while True:
         try:
-            # BTC triangle breakout alert
-            btc_triangle_breakout_last_alert_ts = btc_triangle_breakout_alert(cb_service, btc_triangle_breakout_last_alert_ts)
+            # BTC continuation alert
+            btc_continuation_last_alert_ts = btc_continuation_alert(cb_service, btc_continuation_last_alert_ts)
 
             # FARTCOIN daily alert (runs hourly but condition only changes daily)
             # fartcoin_last_alert_ts = fartcoin_daily_alert(cb_service, fartcoin_last_alert_ts)
