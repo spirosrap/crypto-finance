@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 GRANULARITY = "ONE_HOUR"
 PRODUCT_ID = "BTC-PERP-INTX"
 
-# Trade parameters for BTC breakout
+# Trade parameters for BTC descending triangle breakout
 BTC_BREAKOUT_MARGIN = 300  # USD
 BTC_BREAKOUT_LEVERAGE = 20  # 20x leverage
-BTC_BREAKOUT_STOP_LOSS = 104300  # Stop-loss at $104,300
-BTC_BREAKOUT_TAKE_PROFIT = 108500  # First profit target at $108,500
+BTC_BREAKOUT_STOP_LOSS = 104800  # Stop-loss at $104,800 (triangle support)
+BTC_BREAKOUT_TAKE_PROFIT = 110000  # First profit target at $110,000 (triangle measured move)
 
 # Trade tracking
 btc_continuation_trade_taken = False
@@ -134,24 +134,27 @@ def get_current_btc_data(cb_service):
         return None, None, None
 
 
-def btc_continuation_alert(cb_service, last_alert_ts=None):
+def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
     """
-    Alerts on BTC continuation above ~$105k range.
-    Entry trigger: 1-hour close > 105,700 on spike volume (>20% above avg).
+    Alerts on BTC-USD descending triangle breakout.
+    Entry trigger: Daily/1H close > 106,700 with ≥20% volume spike (break above triangle apex)
+    Entry zone: 106,700–107,200
+    Stop-loss: 104,800
+    First profit target: 110,000
     """
     global btc_continuation_trade_taken
     
     PRODUCT_ID = "BTC-PERP-INTX"
-    ENTRY_PRICE_THRESHOLD = 105700
+    ENTRY_PRICE_THRESHOLD = 106700
     VOLUME_PERIOD = 20
-    VOLUME_MULTIPLIER = 1.2  # >20% above average
-    ENTRY_ZONE_LOW = 105700
-    ENTRY_ZONE_HIGH = 106200
+    VOLUME_MULTIPLIER = 1.2  # ≥20% above average
+    ENTRY_ZONE_LOW = 106700
+    ENTRY_ZONE_HIGH = 107200
 
     try:
         # Check if trade has already been taken
         if btc_continuation_trade_taken:
-            logger.info("BTC continuation trade already taken - skipping execution")
+            logger.info("BTC triangle breakout trade already taken - skipping execution")
             return last_alert_ts
 
         # 1. Get candles for analysis (volume period + 2 for current and last closed)
@@ -180,23 +183,15 @@ def btc_continuation_alert(cb_service, last_alert_ts=None):
         last_close = float(last_closed_candle_raw['close'])
         last_volume = float(last_closed_candle_raw['volume'])
 
-        # Calculate 14-period RSI using pandas_ta
-        closes = [float(c['close']) for c in candles_raw[1:VOLUME_PERIOD+2]]  # last_closed + previous 20
-        closes_series = pd.Series(closes)
-        rsi_series = ta.rsi(closes_series, length=14)
-        last_rsi = rsi_series.iloc[-1] if not rsi_series.isna().all() else None
-        rsi_str = f"{last_rsi:.2f}" if last_rsi is not None and not pd.isna(last_rsi) else "N/A"
-
         # Get current live data
         current_price, current_volume, current_rsi = get_current_btc_data(cb_service)
         current_price_str = f"${current_price:,.2f}" if current_price is not None else "N/A"
         current_volume_str = f"{current_volume:,.0f}" if current_volume is not None else "N/A"
-        current_rsi_str = f"{current_rsi:.2f}" if current_rsi is not None and not pd.isna(current_rsi) else "N/A"
 
         # Report both current (live) and completed candle data
-        logger.info(f"=== BTC MARKET DATA REPORT ===")
-        logger.info(f"📊 COMPLETED CANDLE (1H): Close=${last_close:,.2f}, Volume={last_volume:,.0f}, RSI(14)={rsi_str}")
-        logger.info(f"📈 CURRENT LIVE: Price={current_price_str}, Volume(5min)={current_volume_str}, RSI(14)={current_rsi_str}")
+        logger.info(f"=== BTC TRIANGLE BREAKOUT MARKET DATA REPORT ===")
+        logger.info(f"📊 COMPLETED CANDLE (1H): Close=${last_close:,.2f}, Volume={last_volume:,.0f}")
+        logger.info(f"📈 CURRENT LIVE: Price={current_price_str}, Volume(5min)={current_volume_str}")
         logger.info(f"📊 HISTORICAL: Avg Volume({VOLUME_PERIOD})={avg_volume:,.0f}")
         logger.info(f"=================================")
 
@@ -209,8 +204,8 @@ def btc_continuation_alert(cb_service, last_alert_ts=None):
         logger.info(f"  - Volume >= {VOLUME_MULTIPLIER}x Avg ({avg_volume * VOLUME_MULTIPLIER:,.0f}): {'✅ Met' if is_high_volume else '❌ Not Met'}")
         
         if is_breakout_price and is_high_volume:
-            logger.info(f"--- BTC CONTINUATION ALERT ---")
-            logger.info(f"Entry condition met: 1-hour close > ${ENTRY_PRICE_THRESHOLD:,.0f} with volume >= {VOLUME_MULTIPLIER}x 20-period average.")
+            logger.info(f"--- BTC DESCENDING TRIANGLE BREAKOUT ALERT ---")
+            logger.info(f"Entry condition met: Daily/1H close > ${ENTRY_PRICE_THRESHOLD:,.0f} with volume ≥ {VOLUME_MULTIPLIER}x 20-period average.")
             
             if ENTRY_ZONE_LOW <= last_close <= ENTRY_ZONE_HIGH:
                 logger.info(f"Price ${last_close:,.2f} is within designated entry zone (${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}).")
@@ -220,24 +215,24 @@ def btc_continuation_alert(cb_service, last_alert_ts=None):
             logger.info(f"Details: Timestamp={ts}, Close=${last_close:,.2f}, Volume={last_volume:,.0f}, Avg Volume={avg_volume:,.0f}")
 
             # Execute the trade
-            logger.info("Executing BTC continuation trade...")
-            breakout_type = f"continuation_{ENTRY_PRICE_THRESHOLD}"
+            logger.info("Executing BTC triangle breakout trade...")
+            breakout_type = f"triangle_breakout_{ENTRY_PRICE_THRESHOLD}"
             trade_success, trade_result = execute_btc_continuation_trade(cb_service, breakout_type, last_close)
 
             if trade_success:
-                logger.info("BTC continuation trade executed successfully!")
+                logger.info("BTC triangle breakout trade executed successfully!")
                 logger.info(f"Trade parameters: Margin=${BTC_BREAKOUT_MARGIN}, Leverage={BTC_BREAKOUT_LEVERAGE}x")
                 logger.info(f"Stop Loss: ${BTC_BREAKOUT_STOP_LOSS:,.0f}, Take Profit: ${BTC_BREAKOUT_TAKE_PROFIT:,.0f}")
                 btc_continuation_trade_taken = True
-                logger.info("Trade flag set - no more BTC continuation trades will be taken")
+                logger.info("Trade flag set - no more BTC triangle breakout trades will be taken")
             else:
-                logger.error(f"BTC continuation trade failed: {trade_result}")
+                logger.error(f"BTC triangle breakout trade failed: {trade_result}")
 
             logger.info("")
             return ts
 
     except Exception as e:
-        logger.error(f"Error in BTC continuation alert logic: {e}")
+        logger.error(f"Error in BTC triangle breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     
@@ -464,9 +459,9 @@ def main():
     
     # Show trade status
     if btc_continuation_trade_taken:
-        logger.info("⚠️  BTC continuation trade already taken - no new trades will be executed")
+        logger.info("⚠️  BTC triangle breakout trade already taken - no new trades will be executed")
     else:
-        logger.info("✅ Ready to take BTC continuation trades")
+        logger.info("✅ Ready to take BTC triangle breakout trades")
     
     logger.info("")  # Empty line for visual separation
     
@@ -488,8 +483,8 @@ def main():
     
     while True:
         try:
-            # BTC continuation alert
-            btc_continuation_last_alert_ts = btc_continuation_alert(cb_service, btc_continuation_last_alert_ts)
+            # BTC triangle breakout alert
+            btc_continuation_last_alert_ts = btc_triangle_breakout_alert(cb_service, btc_continuation_last_alert_ts)
 
             # FARTCOIN daily alert (runs hourly but condition only changes daily)
             # fartcoin_last_alert_ts = fartcoin_daily_alert(cb_service, fartcoin_last_alert_ts)
