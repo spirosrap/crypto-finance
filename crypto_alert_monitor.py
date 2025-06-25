@@ -25,6 +25,9 @@ BTC_BREAKOUT_LEVERAGE = 20  # 20x leverage
 BTC_BREAKOUT_STOP_LOSS = 104300  # Stop-loss at $104,300
 BTC_BREAKOUT_TAKE_PROFIT = 108500  # First profit target at $108,500
 
+# Trade tracking
+btc_continuation_trade_taken = False
+
 def play_alert_sound(filename="alert_sound.wav"):
     """
     Play the alert sound using system commands
@@ -136,6 +139,8 @@ def btc_continuation_alert(cb_service, last_alert_ts=None):
     Alerts on BTC continuation above ~$105k range.
     Entry trigger: 1-hour close > 105,700 on spike volume (>20% above avg).
     """
+    global btc_continuation_trade_taken
+    
     PRODUCT_ID = "BTC-PERP-INTX"
     ENTRY_PRICE_THRESHOLD = 105700
     VOLUME_PERIOD = 20
@@ -144,6 +149,11 @@ def btc_continuation_alert(cb_service, last_alert_ts=None):
     ENTRY_ZONE_HIGH = 106200
 
     try:
+        # Check if trade has already been taken
+        if btc_continuation_trade_taken:
+            logger.info("BTC continuation trade already taken - skipping execution")
+            return last_alert_ts
+
         # 1. Get candles for analysis (volume period + 2 for current and last closed)
         candles_raw = get_recent_hourly_candles(cb_service, num_candles=VOLUME_PERIOD + 2)
         if not candles_raw or len(candles_raw) < VOLUME_PERIOD + 2:
@@ -218,6 +228,8 @@ def btc_continuation_alert(cb_service, last_alert_ts=None):
                 logger.info("BTC continuation trade executed successfully!")
                 logger.info(f"Trade parameters: Margin=${BTC_BREAKOUT_MARGIN}, Leverage={BTC_BREAKOUT_LEVERAGE}x")
                 logger.info(f"Stop Loss: ${BTC_BREAKOUT_STOP_LOSS:,.0f}, Take Profit: ${BTC_BREAKOUT_TAKE_PROFIT:,.0f}")
+                btc_continuation_trade_taken = True
+                logger.info("Trade flag set - no more BTC continuation trades will be taken")
             else:
                 logger.error(f"BTC continuation trade failed: {trade_result}")
 
@@ -435,8 +447,27 @@ def execute_btc_continuation_trade(cb_service, continuation_type: str, entry_pri
         return False, str(e)
 
 
+def reset_btc_continuation_trade_flag():
+    """
+    Reset the BTC continuation trade flag to allow taking another trade
+    """
+    global btc_continuation_trade_taken
+    btc_continuation_trade_taken = False
+    logger.info("BTC continuation trade flag reset - ready to take new trades")
+
+
 def main():
+    global btc_continuation_trade_taken
+    
     logger.info("Starting multi-asset alert script")
+    logger.info("")  # Empty line for visual separation
+    
+    # Show trade status
+    if btc_continuation_trade_taken:
+        logger.info("⚠️  BTC continuation trade already taken - no new trades will be executed")
+    else:
+        logger.info("✅ Ready to take BTC continuation trades")
+    
     logger.info("")  # Empty line for visual separation
     
     # Check if alert sound file exists
