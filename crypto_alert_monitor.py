@@ -19,11 +19,12 @@ logger = logging.getLogger(__name__)
 GRANULARITY = "ONE_HOUR"
 PRODUCT_ID = "BTC-PERP-INTX"
 
-# Trade parameters for BTC descending triangle breakout
-BTC_BREAKOUT_MARGIN = 300  # USD
-BTC_BREAKOUT_LEVERAGE = 20  # 20x leverage
-BTC_BREAKOUT_STOP_LOSS = 104800  # Stop-loss at $104,800 (triangle support)
-BTC_BREAKOUT_TAKE_PROFIT = 110000  # First profit target at $110,000 (triangle measured move)
+
+# Trade parameters for BTC mid-range breakout
+BTC_MIDRANGE_MARGIN = 300  # USD
+BTC_MIDRANGE_LEVERAGE = 20  # 15x leverage
+BTC_MIDRANGE_STOP_LOSS = 105500  # Stop-loss at $105,500 (recent swing low structure)
+BTC_MIDRANGE_TAKE_PROFIT = 112000  # First profit target at $112,000 (prior ATH cluster)
 
 # Trade tracking
 btc_continuation_trade_taken = False
@@ -134,133 +135,113 @@ def get_current_btc_data(cb_service):
         return None, None, None
 
 
-def btc_triangle_breakout_alert(cb_service, last_alert_ts=None):
+def execute_btc_trade(cb_service, trade_type: str, entry_price: float, stop_loss: float, take_profit: float, 
+                     margin: float = 300, leverage: int = 20, side: str = "BUY", product: str = "BTC-PERP-INTX"):
     """
-    Alerts on BTC-USD descending triangle breakout.
-    Entry trigger: Daily/1H close > 106,700 with ≥20% volume spike (break above triangle apex)
-    Entry zone: 106,700–107,200
-    Stop-loss: 104,800
-    First profit target: 110,000
-    """
-    global btc_continuation_trade_taken
+    General BTC trade execution function using trade_btc_perp.py
     
-    PRODUCT_ID = "BTC-PERP-INTX"
-    ENTRY_PRICE_THRESHOLD = 106700
-    VOLUME_PERIOD = 20
-    VOLUME_MULTIPLIER = 1.2  # ≥20% above average
-    ENTRY_ZONE_LOW = 106700
-    ENTRY_ZONE_HIGH = 107200
-
+    Args:
+        cb_service: Coinbase service instance
+        trade_type: Description of the trade type for logging
+        entry_price: Entry price for logging
+        stop_loss: Stop-loss price
+        take_profit: Take-profit price
+        margin: USD amount to risk (default: 300)
+        leverage: Leverage multiplier (default: 20)
+        side: Trade side - "BUY" or "SELL" (default: "BUY")
+        product: Trading product (default: "BTC-PERP-INTX")
+    """
     try:
-        # Check if trade has already been taken
-        if btc_continuation_trade_taken:
-            logger.info("BTC triangle breakout trade already taken - skipping execution")
-            return last_alert_ts
-
-        # 1. Get candles for analysis (volume period + 2 for current and last closed)
-        candles_raw = get_recent_hourly_candles(cb_service, num_candles=VOLUME_PERIOD + 2)
-        if not candles_raw or len(candles_raw) < VOLUME_PERIOD + 2:
-            logger.warning(f"Not enough BTC hourly candle data for triangle breakout alert. Need {VOLUME_PERIOD + 2}, got {len(candles_raw)}.")
-            return last_alert_ts
-
-        # 2. Prepare data for analysis
-        last_closed_candle_raw = candles_raw[1]
-        ts = datetime.fromtimestamp(int(last_closed_candle_raw['start']), UTC)
-
-        # Avoid re-alerting for the same candle
-        if ts == last_alert_ts:
-            return last_alert_ts
+        logger.info(f"Executing BTC trade: {trade_type} at ${entry_price:,.2f}")
+        logger.info(f"Trade params: Margin=${margin}, Leverage={leverage}x, Side={side}")
         
-        # Historical candles for volume average (20 periods before the last closed candle)
-        historical_candles = candles_raw[2:VOLUME_PERIOD + 2]
-        if len(historical_candles) < VOLUME_PERIOD:
-            logger.warning(f"Not enough historical BTC hourly candle data for volume average. Need {VOLUME_PERIOD}, got {len(historical_candles)}.")
-            return last_alert_ts
-
-        volumes = [float(c['volume']) for c in historical_candles]
-        avg_volume = sum(volumes) / len(volumes)
-
-        last_close = float(last_closed_candle_raw['close'])
-        last_volume = float(last_closed_candle_raw['volume'])
-
-        # Get current live data
-        current_price, current_volume, current_rsi = get_current_btc_data(cb_service)
-        current_price_str = f"${current_price:,.2f}" if current_price is not None else "N/A"
-        current_volume_str = f"{current_volume:,.0f}" if current_volume is not None else "N/A"
-
-        # Report both current (live) and completed candle data
-        logger.info(f"=== BTC TRIANGLE BREAKOUT MARKET DATA REPORT ===")
-        logger.info(f"📊 COMPLETED CANDLE (1H): Close=${last_close:,.2f}, Volume={last_volume:,.0f}")
-        logger.info(f"📈 CURRENT LIVE: Price={current_price_str}, Volume(5min)={current_volume_str}")
-        logger.info(f"📊 HISTORICAL: Avg Volume({VOLUME_PERIOD})={avg_volume:,.0f}")
-        logger.info(f"=================================")
-
-        # 4. Check alert conditions
-        is_breakout_price = last_close > ENTRY_PRICE_THRESHOLD
-        is_high_volume = last_volume >= (avg_volume * VOLUME_MULTIPLIER)
+        # Calculate position size based on margin and leverage
+        position_size_usd = margin * leverage
         
-        # Log condition status
-        logger.info(f"  - Price > ${ENTRY_PRICE_THRESHOLD:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
-        logger.info(f"  - Volume >= {VOLUME_MULTIPLIER}x Avg ({avg_volume * VOLUME_MULTIPLIER:,.0f}): {'✅ Met' if is_high_volume else '❌ Not Met'}")
+        # Use subprocess to call trade_btc_perp.py
+        cmd = [
+            sys.executable, 'trade_btc_perp.py',
+            '--product', product,
+            '--side', side,
+            '--size', str(position_size_usd),
+            '--leverage', str(leverage),
+            '--tp', str(take_profit),
+            '--sl', str(stop_loss),
+            '--no-confirm'  # Skip confirmation for automated trading
+        ]
         
-        if is_breakout_price and is_high_volume:
-            logger.info(f"--- BTC DESCENDING TRIANGLE BREAKOUT ALERT ---")
-            logger.info(f"Entry condition met: Daily/1H close > ${ENTRY_PRICE_THRESHOLD:,.0f} with volume ≥ {VOLUME_MULTIPLIER}x 20-period average.")
+        logger.info(f"Executing command: {' '.join(cmd)}")
+        
+        # Execute the trade command
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode == 0:
+            logger.info(f"BTC {trade_type} trade executed successfully!")
+            logger.info(f"Trade output: {result.stdout}")
+            return True, result.stdout
+        else:
+            logger.error(f"BTC {trade_type} trade failed!")
+            logger.error(f"Error output: {result.stderr}")
+            return False, result.stderr
             
-            if ENTRY_ZONE_LOW <= last_close <= ENTRY_ZONE_HIGH:
-                logger.info(f"Price ${last_close:,.2f} is within designated entry zone (${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}).")
-            else:
-                logger.warning(f"Price ${last_close:,.2f} is outside designated entry zone (${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}).")
-
-            logger.info(f"Details: Timestamp={ts}, Close=${last_close:,.2f}, Volume={last_volume:,.0f}, Avg Volume={avg_volume:,.0f}")
-
-            # Execute the trade
-            logger.info("Executing BTC triangle breakout trade...")
-            breakout_type = f"triangle_breakout_{ENTRY_PRICE_THRESHOLD}"
-            trade_success, trade_result = execute_btc_continuation_trade(cb_service, breakout_type, last_close)
-
-            if trade_success:
-                logger.info("BTC triangle breakout trade executed successfully!")
-                logger.info(f"Trade parameters: Margin=${BTC_BREAKOUT_MARGIN}, Leverage={BTC_BREAKOUT_LEVERAGE}x")
-                logger.info(f"Stop Loss: ${BTC_BREAKOUT_STOP_LOSS:,.0f}, Take Profit: ${BTC_BREAKOUT_TAKE_PROFIT:,.0f}")
-                btc_continuation_trade_taken = True
-                logger.info("Trade flag set - no more BTC triangle breakout trades will be taken")
-            else:
-                logger.error(f"BTC triangle breakout trade failed: {trade_result}")
-
-            logger.info("")
-            return ts
-
+    except subprocess.TimeoutExpired:
+        logger.error("Trade execution timed out")
+        return False, "Timeout"
     except Exception as e:
-        logger.error(f"Error in BTC triangle breakout alert logic: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-    
-    return last_alert_ts
+        logger.error(f"Error executing BTC {trade_type} trade: {e}")
+        return False, str(e)
 
 
-def fartcoin_daily_alert(cb_service, last_alert_ts=None):
-    PRODUCT_ID = "FARTCOIN-PERP-INTX"
-    GRANULARITY = "ONE_HOUR"  # Get 1-hour candles to aggregate
-    
-    # Alert thresholds
-    RECOVERY_THRESHOLD = 0.90
-    SUPPORT_LOW = 0.78
-    SUPPORT_HIGH = 0.80
-    RSI_THRESHOLD = 30
-    RSI_PERIOD = 14
-    VOLUME_PERIOD = 15  # For volume confirmation
-    CONSECUTIVE_CLOSES_NEEDED = 2  # Need 2 consecutive 6-hour closes for support confirmation
+# Convenience wrapper for mid-range breakout with default parameters
+def execute_btc_midrange_breakout_trade(cb_service, breakout_type: str, entry_price: float, stop_loss: float, take_profit: float):
+    """
+    Execute BTC mid-range breakout trade using default parameters
+    """
+    return execute_btc_trade(
+        cb_service=cb_service,
+        trade_type=f"mid-range breakout ({breakout_type})",
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        margin=BTC_MIDRANGE_MARGIN,
+        leverage=BTC_MIDRANGE_LEVERAGE
+    )
 
+
+def btc_breakout_midrange_alert(cb_service, last_alert_ts=None, timeframe='4h'):
+    """
+    BTC-USD breakout above mid-range resistance alert (4h or daily candle)
+    Entry trigger: 4-hr or daily close above 107,500 with volume ≥20% above 20-period avg
+    Entry zone: 107,500–108,200
+    Stop-loss: 105,500
+    First profit target: 112,000
+    """
+    PRODUCT_ID = "BTC-PERP-INTX"
+    if timeframe == '4h':
+        GRANULARITY = "FOUR_HOUR"
+        periods_needed = 20 + 2
+        hours_needed = periods_needed * 4
+    elif timeframe == '1d':
+        GRANULARITY = "ONE_DAY"
+        periods_needed = 20 + 2
+        hours_needed = periods_needed * 24
+    else:
+        logger.error(f"Unsupported timeframe: {timeframe}")
+        return last_alert_ts
+    ENTRY_TRIGGER = 107500
+    ENTRY_ZONE_LOW = 107500
+    ENTRY_ZONE_HIGH = 108200
+    STOP_LOSS = 105500
+    PROFIT_TARGET = 112000
+    VOLUME_PERIOD = 20
+    VOLUME_MULTIPLIER = 1.2
     try:
         now = datetime.now(UTC)
-        now = now.replace(minute=0, second=0, microsecond=0)  # Round to hour
-        # Get more hourly data to aggregate into 6-hour candles
-        start = now - timedelta(hours=150)  # Increased from 120 to 150 hours (6.25 days)
+        now = now.replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=hours_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
-        
         response = cb_service.client.get_public_candles(
             product_id=PRODUCT_ID,
             start=start_ts,
@@ -271,200 +252,73 @@ def fartcoin_daily_alert(cb_service, last_alert_ts=None):
             candles = response.candles
         else:
             candles = response.get('candles', [])
-        if not candles or len(candles) < max(RSI_PERIOD * 6 + 1, VOLUME_PERIOD * 6 + 1):  # Need enough 1-hour candles
-            logger.warning("Not enough FARTCOIN hourly candle data for 6-hour aggregation and analysis.")
+        if not candles or len(candles) < periods_needed:
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for {timeframe} analysis.")
             return last_alert_ts
-        
-        # Aggregate 1-hour candles into 6-hour candles
-        six_hour_candles = []
-        for i in range(0, len(candles) - 5, 6):  # Step by 6 hours
-            if i + 5 < len(candles):
-                hour_candles = candles[i:i+6]  # Get 6 consecutive 1-hour candles
-                
-                # Aggregate into 6-hour candle
-                opens = [float(c['open']) for c in hour_candles]
-                highs = [float(c['high']) for c in hour_candles]
-                lows = [float(c['low']) for c in hour_candles]
-                closes = [float(c['close']) for c in hour_candles]
-                volumes = [float(c['volume']) for c in hour_candles]
-                
-                six_hour_candle = {
-                    'open': opens[0],  # First hour's open
-                    'high': max(highs),  # Highest high
-                    'low': min(lows),    # Lowest low
-                    'close': closes[-1],  # Last hour's close
-                    'volume': sum(volumes),  # Sum of volumes
-                    'start': hour_candles[0]['start']  # Start time of first hour
-                }
-                six_hour_candles.append(six_hour_candle)
-        
-        if len(six_hour_candles) < max(RSI_PERIOD + 1, VOLUME_PERIOD + 1):
-            logger.warning(f"Not enough 6-hour candles for analysis. Need {max(RSI_PERIOD + 1, VOLUME_PERIOD + 1)}, got {len(six_hour_candles)}.")
-            return last_alert_ts
-        
-        # Use the most recent 6-hour candle
-        last_candle = six_hour_candles[1]  # Second most recent (most recent completed)
+        # Debug: print order and closes
+        logger.info(f"First 3 candles (timestamp, close): {[ (c['start'], c['close']) for c in candles[:3] ]}")
+        logger.info(f"Last 3 candles (timestamp, close): {[ (c['start'], c['close']) for c in candles[-3:] ]}")
+        # Determine order: if first candle is newer than last, it's newest-first
+        first_ts = int(candles[0]['start'])
+        last_ts = int(candles[-1]['start'])
+        if first_ts > last_ts:
+            # Newest first: use candles[1] as most recent completed
+            last_candle = candles[1]
+        else:
+            # Oldest first: use candles[-2]
+            last_candle = candles[-2]
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
-
         if ts == last_alert_ts:
             return last_alert_ts
-
         close = float(last_candle['close'])
         current_volume = float(last_candle['volume'])
-        
-        # Calculate RSI using 6-hour candles
-        candle_data = []
-        for candle in six_hour_candles:
-            candle_data.append({
-                'close': float(candle['close']),
-                'high': float(candle['high']),
-                'low': float(candle['low']),
-                'volume': float(candle['volume']),
-                'start': candle['start']
-            })
-        
-        df = pd.DataFrame(candle_data)
-        
-        # Calculate RSI using pandas_ta
-        rsi = ta.rsi(df['close'], length=RSI_PERIOD)
-        current_rsi = rsi.iloc[-1]
-        
-        logger.info(f"FARTCOIN Check (6H): Close=${close:.5f}, RSI={current_rsi:.2f}, Volume={current_volume:,.0f}")
-        
-        # Alert conditions
-        alert_triggered = False
-        
-        # Alert 1: Recovery above $0.90 with RSI < 30 still intact
-        if close >= RECOVERY_THRESHOLD and current_rsi < RSI_THRESHOLD:
-            logger.info(f"--- FARTCOIN RECOVERY ALERT (6H) ---")
-            logger.info(f"Recovery above ${RECOVERY_THRESHOLD} with RSI < {RSI_THRESHOLD} still intact!")
-            logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
-            alert_triggered = True
-        
-        # Alert 2: Hold at new support $0.78-$0.80 confirmed by two consecutive 6 hr closes and RSI divergence
-        elif SUPPORT_LOW <= close <= SUPPORT_HIGH:
-            # Check for two consecutive closes in support zone
-            if len(six_hour_candles) >= CONSECUTIVE_CLOSES_NEEDED + 1:
-                recent_closes = []
-                recent_rsi_values = []
-                
-                # Get the last 3 candles for analysis (current + 2 previous)
-                for i in range(1, min(4, len(six_hour_candles))):
-                    candle_close = float(six_hour_candles[i]['close'])
-                    recent_closes.append(candle_close)
-                    if i < len(rsi):
-                        recent_rsi_values.append(rsi.iloc[-i])
-                
-                # Check if we have enough data for RSI divergence analysis
-                if len(recent_closes) >= 3 and len(recent_rsi_values) >= 3:
-                    # Check for two consecutive closes in support zone
-                    consecutive_support_closes = 0
-                    for i in range(min(2, len(recent_closes))):
-                        if SUPPORT_LOW <= recent_closes[i] <= SUPPORT_HIGH:
-                            consecutive_support_closes += 1
-                        else:
-                            break
-                    
-                    # Check for RSI divergence (price makes lower low, RSI makes higher low)
-                    price_lower_low = recent_closes[0] < recent_closes[2]  # Current close < 2 periods ago
-                    rsi_higher_low = recent_rsi_values[0] > recent_rsi_values[2]  # Current RSI > 2 periods ago
-                    
-                    if consecutive_support_closes >= CONSECUTIVE_CLOSES_NEEDED and price_lower_low and rsi_higher_low:
-                        logger.info(f"--- FARTCOIN SUPPORT ALERT (6H) ---")
-                        logger.info(f"Hold at new support ${SUPPORT_LOW}-${SUPPORT_HIGH} confirmed!")
-                        logger.info(f"Two consecutive closes in support zone: {consecutive_support_closes}")
-                        logger.info(f"RSI divergence detected: Price lower low, RSI higher low")
-                        logger.info(f"Timestamp: {ts}, Close: ${close:.5f}, RSI: {current_rsi:.2f}")
-                        logger.info(f"Recent closes: {recent_closes[:3]}")
-                        logger.info(f"Recent RSI values: {[f'{r:.2f}' for r in recent_rsi_values[:3]]}")
-                        alert_triggered = True
-        
-        if alert_triggered:
-            logger.info("")  # Empty line for visual separation
-            
-            # Play alert sound
+        # Historical candles for volume average (20 periods before the last closed candle)
+        if first_ts > last_ts:
+            historical_candles = candles[2:VOLUME_PERIOD+2]
+        else:
+            historical_candles = candles[-(VOLUME_PERIOD+2):-2]
+        volumes = [float(c['volume']) for c in historical_candles]
+        avg_volume = sum(volumes) / len(volumes)
+        # Alert logic
+        is_breakout_price = close > ENTRY_TRIGGER
+        is_high_volume = current_volume >= (avg_volume * VOLUME_MULTIPLIER)
+        in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
+        logger.info(f"=== BTC MID-RANGE BREAKOUT ({timeframe.upper()}) ===")
+        logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Avg Vol({VOLUME_PERIOD}): {avg_volume:,.0f}")
+        logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Avg: {'✅ Met' if is_high_volume else '❌ Not Met'}")
+        logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW}-{ENTRY_ZONE_HIGH}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
+        if is_breakout_price and is_high_volume and in_entry_zone:
+            logger.info(f"--- BTC MID-RANGE BREAKOUT ALERT ({timeframe.upper()}) ---")
+            logger.info(f"Entry condition met: {timeframe} close > ${ENTRY_TRIGGER:,.0f} with volume ≥ {VOLUME_MULTIPLIER}x 20-period avg.")
+            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, First profit target: ${PROFIT_TARGET:,.0f}")
             try:
                 play_alert_sound()
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
-            
+            # Execute the trade
+            breakout_type = f"midrange_breakout_{ENTRY_TRIGGER}_{timeframe}"
+            trade_success, trade_result = execute_btc_midrange_breakout_trade(cb_service, breakout_type, close, STOP_LOSS, PROFIT_TARGET)
+            if trade_success:
+                logger.info(f"BTC {timeframe.upper()} mid-range breakout trade executed successfully!")
+                logger.info(f"Trade output: {trade_result}")
+            else:
+                logger.error(f"BTC {timeframe.upper()} mid-range breakout trade failed: {trade_result}")
             return ts
-
     except Exception as e:
-        logger.error(f"Error in FARTCOIN alert logic: {e}")
+        logger.error(f"Error in BTC mid-range breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-
     return last_alert_ts
-
-
-def execute_btc_continuation_trade(cb_service, continuation_type: str, entry_price: float):
-    """
-    Execute BTC continuation trade using trade_btc_perp.py functionality
-    """
-    try:
-        logger.info(f"Executing BTC continuation trade: {continuation_type} at ${entry_price:,.2f}")
-        
-        # Calculate position size based on margin and leverage
-        position_size_usd = BTC_BREAKOUT_MARGIN * BTC_BREAKOUT_LEVERAGE
-        
-        # Use subprocess to call trade_btc_perp.py
-        cmd = [
-            sys.executable, 'trade_btc_perp.py',
-            '--product', 'BTC-PERP-INTX',
-            '--side', 'BUY',
-            '--size', str(position_size_usd),
-            '--leverage', str(BTC_BREAKOUT_LEVERAGE),
-            '--tp', str(BTC_BREAKOUT_TAKE_PROFIT),
-            '--sl', str(BTC_BREAKOUT_STOP_LOSS),
-            '--no-confirm'  # Skip confirmation for automated trading
-        ]
-        
-        logger.info(f"Executing command: {' '.join(cmd)}")
-        
-        # Execute the trade command
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        
-        if result.returncode == 0:
-            logger.info("BTC continuation trade executed successfully!")
-            logger.info(f"Trade output: {result.stdout}")
-            return True, result.stdout
-        else:
-            logger.error(f"BTC continuation trade failed!")
-            logger.error(f"Error output: {result.stderr}")
-            return False, result.stderr
-            
-    except subprocess.TimeoutExpired:
-        logger.error("Trade execution timed out")
-        return False, "Timeout"
-    except Exception as e:
-        logger.error(f"Error executing BTC continuation trade: {e}")
-        return False, str(e)
-
-
-def reset_btc_continuation_trade_flag():
-    """
-    Reset the BTC continuation trade flag to allow taking another trade
-    """
-    global btc_continuation_trade_taken
-    btc_continuation_trade_taken = False
-    logger.info("BTC continuation trade flag reset - ready to take new trades")
 
 
 def main():
     global btc_continuation_trade_taken
-    
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
-    
     # Show trade status
-    if btc_continuation_trade_taken:
-        logger.info("⚠️  BTC triangle breakout trade already taken - no new trades will be executed")
-    else:
-        logger.info("✅ Ready to take BTC triangle breakout trades")
-    
+    logger.info("✅ Ready to take BTC mid-range breakout trades (4H/1D)")
     logger.info("")  # Empty line for visual separation
-    
     # Check if alert sound file exists
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -474,27 +328,21 @@ def main():
         return
     else:
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
-    
     logger.info("")  # Empty line for visual separation
-    
     cb_service = setup_coinbase()
-    btc_continuation_last_alert_ts = None
-    fartcoin_last_alert_ts = None
-    
+    btc_midrange_last_alert_ts_4h = None
+    btc_midrange_last_alert_ts_1d = None
     while True:
         try:
-            # BTC triangle breakout alert
-            btc_continuation_last_alert_ts = btc_triangle_breakout_alert(cb_service, btc_continuation_last_alert_ts)
-
-            # FARTCOIN daily alert (runs hourly but condition only changes daily)
-            # fartcoin_last_alert_ts = fartcoin_daily_alert(cb_service, fartcoin_last_alert_ts)
-
+            # BTC mid-range breakout alert (4h)
+            btc_midrange_last_alert_ts_4h = btc_breakout_midrange_alert(cb_service, btc_midrange_last_alert_ts_4h, timeframe='4h')
+            # BTC mid-range breakout alert (1d)
+            btc_midrange_last_alert_ts_1d = btc_breakout_midrange_alert(cb_service, btc_midrange_last_alert_ts_1d, timeframe='1d')
             # Wait 5 minutes until next poll
             wait_seconds = 300  # 5 minutes
             logger.info(f"Waiting {wait_seconds} seconds until next poll")
             logger.info("")  # Empty line for visual separation
             time.sleep(wait_seconds)
-            
         except KeyboardInterrupt:
             logger.info("Stopped by user.")
             break
