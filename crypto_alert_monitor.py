@@ -255,9 +255,6 @@ def btc_breakout_midrange_alert(cb_service, last_alert_ts=None, timeframe='4h'):
         if not candles or len(candles) < periods_needed:
             logger.warning(f"Not enough BTC {GRANULARITY} candle data for {timeframe} analysis.")
             return last_alert_ts
-        # Debug: print order and closes
-        logger.info(f"First 3 candles (timestamp, close): {[ (c['start'], c['close']) for c in candles[:3] ]}")
-        logger.info(f"Last 3 candles (timestamp, close): {[ (c['start'], c['close']) for c in candles[-3:] ]}")
         # Determine order: if first candle is newer than last, it's newest-first
         first_ts = int(candles[0]['start'])
         last_ts = int(candles[-1]['start'])
