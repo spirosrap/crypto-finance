@@ -110,17 +110,35 @@ def check_for_rsi_signal(cb_service):
         logger.info(f"Skipping check: A trade is already active ({state['active_trade_side']}).")
         # A simple way to reset is to check if positions are zero.
         try:
-            positions = cb_service.get_open_positions()
-            if not positions or all(p.get('size', 0) == 0 for p in positions):
-                 logger.info("No open positions found. Resetting active trade state.")
-                 state["active_trade_side"] = None
-                 save_state(state)
+            # Simple position check using the client directly
+            portfolio_response = cb_service.client.get_portfolios()
+            portfolios = portfolio_response.portfolios if hasattr(portfolio_response, 'portfolios') else portfolio_response.get('portfolios', [])
+            
+            has_open_positions = False
+            for portfolio in portfolios:
+                if portfolio.get('type') == 'INTX':
+                    # Check if there are any open positions in the INTX portfolio
+                    breakdown_response = cb_service.client.get_portfolio_breakdown(portfolio['uuid'])
+                    breakdown = breakdown_response.breakdown if hasattr(breakdown_response, 'breakdown') else breakdown_response.get('breakdown', {})
+                    
+                    positions = breakdown.get('portfolio_balances', {}).get('positions', [])
+                    for position in positions:
+                        if abs(float(position.get('size', 0))) > 0.001:  # Check if position size is significant
+                            has_open_positions = True
+                            break
+                    break
+            
+            if not has_open_positions:
+                logger.info("No open positions found. Resetting active trade state.")
+                state["active_trade_side"] = None
+                save_state(state)
             else:
-                logger.info(f"Positions are still open: {positions}")
+                logger.info("Positions are still open")
                 return # Don't check for new signals if a position is open
         except Exception as e:
             logger.error(f"Could not verify open positions: {e}")
-            return # Don't proceed if we can't verify position status
+            # Continue with the signal check since we can't verify position status
+            pass
 
 
     # Check for cooldown
@@ -146,25 +164,33 @@ def check_for_rsi_signal(cb_service):
             granularity=GRANULARITY
         )
         
-        candles = response.get('candles', [])
+        if hasattr(response, 'candles'):
+            candles = response.candles
+        else:
+            candles = response.get('candles', [])
         if not candles or len(candles) < RSI_PERIOD:
             logger.warning("Not enough candle data for RSI calculation.")
             return
 
-        df = pd.DataFrame(candles)
-        df['start'] = pd.to_datetime(df['start'].astype(float), unit='s', utc=True)
-        df = df.sort_values('start', ascending=True)
+        # Sort candles by timestamp (oldest first for RSI calculation)
+        candles_sorted = sorted(candles, key=lambda x: int(x['start']))
         
-        # Calculate RSI
-        df['rsi'] = ta.rsi(df['close'].astype(float), length=RSI_PERIOD)
+        # Extract close prices for RSI calculation
+        close_prices = [float(candle['close']) for candle in candles_sorted]
         
-        last_candle = df.iloc[-1]
-        rsi_value = last_candle['rsi']
+        # Calculate RSI using pandas_ta
+        close_series = pd.Series(close_prices)
+        rsi_series = ta.rsi(close_series, length=RSI_PERIOD)
+        
+        # Get the most recent candle and RSI value
+        last_candle = candles_sorted[-1]
+        rsi_value = rsi_series.iloc[-1]
         current_price = float(last_candle['close'])
         signal_candle_high = float(last_candle['high'])
         signal_candle_low = float(last_candle['low'])
 
-        logger.info(f"Checking RSI for {PRODUCT_ID} | Time: {last_candle['start']} | Price: ${current_price:,.2f} | RSI({RSI_PERIOD}): {rsi_value:.2f}")
+        candle_time = datetime.fromtimestamp(int(last_candle['start']), UTC)
+        logger.info(f"Checking RSI for {PRODUCT_ID} | Time: {candle_time} | Price: ${current_price:,.2f} | RSI({RSI_PERIOD}): {rsi_value:.2f}")
 
         # --- TRADING LOGIC ---
         side = None
@@ -192,7 +218,7 @@ def check_for_rsi_signal(cb_service):
             logger.info(f"  - Entry Price (approx): ${current_price:,.2f}")
             logger.info(f"  - Stop Loss: ${stop_loss:,.2f}")
             logger.info(f"  - Take Profit: ${take_profit:,.2f}")
-            w
+            
             trade_successful = execute_trade(cb_service, side, current_price, round(stop_loss, 2), round(take_profit, 2))
             
             if trade_successful:
