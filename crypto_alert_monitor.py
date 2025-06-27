@@ -26,6 +26,12 @@ BTC_MIDRANGE_LEVERAGE = 20  # 15x leverage
 BTC_MIDRANGE_STOP_LOSS = 105500  # Stop-loss at $105,500 (recent swing low structure)
 BTC_MIDRANGE_TAKE_PROFIT = 112000  # First profit target at $112,000 (prior ATH cluster)
 
+# Trade parameters for BTC bull flag breakout
+BTC_BULLFLAG_MARGIN = 300  # USD
+BTC_BULLFLAG_LEVERAGE = 20  # 20x leverage
+BTC_BULLFLAG_STOP_LOSS = 107000  # Stop-loss at $107,000 (lower flag trendline/support)
+BTC_BULLFLAG_TAKE_PROFIT = 140000  # First profit target at $140,000 (flag's measured move projection)
+
 # Trade parameters for ETH EMA cluster breakout
 ETH_EMA_MARGIN = 200  # USD
 ETH_EMA_LEVERAGE = 10  # 10x leverage
@@ -144,33 +150,26 @@ def execute_btc_midrange_breakout_trade(cb_service, breakout_type: str, entry_pr
     )
 
 
-def btc_breakout_midrange_alert(cb_service, last_alert_ts=None, timeframe='4h'):
+def btc_bullflag_breakout_alert(cb_service, last_alert_ts=None):
     """
-    BTC-USD breakout above mid-range resistance alert (4h or daily candle)
-    Entry trigger: 4-hr or daily close above 107,500 with volume ≥20% above 20-period avg
-    Entry zone: 107,500–108,200
-    Stop-loss: 105,500
-    First profit target: 112,000
+    BTC-USD bull flag breakout alert (daily candle)
+    Entry trigger: Daily close above $109,000 on ≥20% above-average volume
+    Entry zone: 109,000–109,500
+    Stop-loss: 107,000
+    First profit target: 140,000
     """
     PRODUCT_ID = "BTC-PERP-INTX"
-    if timeframe == '4h':
-        GRANULARITY = "FOUR_HOUR"
-        periods_needed = 20 + 2
-        hours_needed = periods_needed * 4
-    elif timeframe == '1d':
-        GRANULARITY = "ONE_DAY"
-        periods_needed = 20 + 2
-        hours_needed = periods_needed * 24
-    else:
-        logger.error(f"Unsupported timeframe: {timeframe}")
-        return last_alert_ts
-    ENTRY_TRIGGER = 107500
-    ENTRY_ZONE_LOW = 107500
-    ENTRY_ZONE_HIGH = 108200
-    STOP_LOSS = 105500
-    PROFIT_TARGET = 112000
+    GRANULARITY = "ONE_DAY"
+    periods_needed = 20 + 2  # 20 periods for volume average + 2 for analysis
+    hours_needed = periods_needed * 24  # Daily candles
+    ENTRY_TRIGGER = 109000
+    ENTRY_ZONE_LOW = 109000
+    ENTRY_ZONE_HIGH = 109500
+    STOP_LOSS = 107000
+    PROFIT_TARGET = 140000
     VOLUME_PERIOD = 20
-    VOLUME_MULTIPLIER = 1.2
+    VOLUME_MULTIPLIER = 1.2  # ≥20% above average volume
+    
     try:
         now = datetime.now(UTC)
         now = now.replace(minute=0, second=0, microsecond=0)
@@ -178,6 +177,7 @@ def btc_breakout_midrange_alert(cb_service, last_alert_ts=None, timeframe='4h'):
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
+        
         response = cb_service.client.get_public_candles(
             product_id=PRODUCT_ID,
             start=start_ts,
@@ -189,8 +189,9 @@ def btc_breakout_midrange_alert(cb_service, last_alert_ts=None, timeframe='4h'):
         else:
             candles = response.get('candles', [])
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for {timeframe} analysis.")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for analysis.")
             return last_alert_ts
+        
         # Determine order: if first candle is newer than last, it's newest-first
         first_ts = int(candles[0]['start'])
         last_ts = int(candles[-1]['start'])
@@ -200,11 +201,14 @@ def btc_breakout_midrange_alert(cb_service, last_alert_ts=None, timeframe='4h'):
         else:
             # Oldest first: use candles[-2]
             last_candle = candles[-2]
+        
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
         if ts == last_alert_ts:
             return last_alert_ts
+        
         close = float(last_candle['close'])
         current_volume = float(last_candle['volume'])
+        
         # Historical candles for volume average (20 periods before the last closed candle)
         if first_ts > last_ts:
             historical_candles = candles[2:VOLUME_PERIOD+2]
@@ -212,34 +216,47 @@ def btc_breakout_midrange_alert(cb_service, last_alert_ts=None, timeframe='4h'):
             historical_candles = candles[-(VOLUME_PERIOD+2):-2]
         volumes = [float(c['volume']) for c in historical_candles]
         avg_volume = sum(volumes) / len(volumes)
+        
         # Alert logic
         is_breakout_price = close > ENTRY_TRIGGER
         is_high_volume = current_volume >= (avg_volume * VOLUME_MULTIPLIER)
         in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-        logger.info(f"=== BTC MID-RANGE BREAKOUT ({timeframe.upper()}) ===")
+        
+        logger.info(f"=== BTC BULL FLAG BREAKOUT (DAILY) ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Avg Vol({VOLUME_PERIOD}): {avg_volume:,.0f}")
         logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
         logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Avg: {'✅ Met' if is_high_volume else '❌ Not Met'}")
         logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW}-{ENTRY_ZONE_HIGH}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
+        
         if is_breakout_price and is_high_volume and in_entry_zone:
-            logger.info(f"--- BTC MID-RANGE BREAKOUT ALERT ({timeframe.upper()}) ---")
-            logger.info(f"Entry condition met: {timeframe} close > ${ENTRY_TRIGGER:,.0f} with volume ≥ {VOLUME_MULTIPLIER}x 20-period avg.")
+            logger.info(f"--- BTC BULL FLAG BREAKOUT ALERT (DAILY) ---")
+            logger.info(f"Entry condition met: Daily close > ${ENTRY_TRIGGER:,.0f} on ≥ {VOLUME_MULTIPLIER}x above-average volume.")
             logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, First profit target: ${PROFIT_TARGET:,.0f}")
             try:
                 play_alert_sound()
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
+            
             # Execute the trade
-            breakout_type = f"midrange_breakout_{ENTRY_TRIGGER}_{timeframe}"
-            trade_success, trade_result = execute_btc_midrange_breakout_trade(cb_service, breakout_type, close, STOP_LOSS, PROFIT_TARGET)
+            breakout_type = f"bullflag_{ENTRY_TRIGGER}"
+            trade_success, trade_result = execute_crypto_trade(
+                cb_service=cb_service,
+                trade_type=f"bull flag breakout ({breakout_type})",
+                entry_price=close,
+                stop_loss=STOP_LOSS,
+                take_profit=PROFIT_TARGET,
+                margin=BTC_BULLFLAG_MARGIN,
+                leverage=BTC_BULLFLAG_LEVERAGE
+            )
             if trade_success:
-                logger.info(f"BTC {timeframe.upper()} mid-range breakout trade executed successfully!")
+                logger.info(f"BTC bull flag breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC {timeframe.upper()} mid-range breakout trade failed: {trade_result}")
+                logger.error(f"BTC bull flag breakout trade failed: {trade_result}")
             return ts
+            
     except Exception as e:
-        logger.error(f"Error in BTC mid-range breakout alert logic: {e}")
+        logger.error(f"Error in BTC bull flag breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
@@ -371,7 +388,7 @@ def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
     # Show trade status
-    logger.info("✅ Ready to take BTC mid-range breakout trades (4H/1D)")
+    logger.info("✅ Ready to take BTC bull flag breakout trades (1D)")
     logger.info("✅ Ready to take ETH EMA cluster breakout trades (1D)")
     logger.info("")  # Empty line for visual separation
     # Check if alert sound file exists
@@ -385,17 +402,14 @@ def main():
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
     logger.info("")  # Empty line for visual separation
     cb_service = setup_coinbase()
-    btc_midrange_last_alert_ts_4h = None
-    btc_midrange_last_alert_ts_1d = None
+    btc_bullflag_last_alert_ts = None
     eth_ema_last_alert_ts = None
     while True:
         try:
-            # BTC mid-range breakout alert (4h)
-            btc_midrange_last_alert_ts_4h = btc_breakout_midrange_alert(cb_service, btc_midrange_last_alert_ts_4h, timeframe='4h')
-            # BTC mid-range breakout alert (1d)
-            btc_midrange_last_alert_ts_1d = btc_breakout_midrange_alert(cb_service, btc_midrange_last_alert_ts_1d, timeframe='1d')
+            # BTC bull flag breakout alert (1d)
+            btc_bullflag_last_alert_ts = btc_bullflag_breakout_alert(cb_service, btc_bullflag_last_alert_ts)
             # ETH EMA cluster breakout alert (1d)
-            eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
+            # eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
             # Wait 5 minutes until next poll
             wait_seconds = 300  # 5 minutes
             logger.info(f"Waiting {wait_seconds} seconds until next poll")
