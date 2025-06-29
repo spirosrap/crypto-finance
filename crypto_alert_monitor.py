@@ -26,17 +26,14 @@ BTC_MIDRANGE_LEVERAGE = 20  # 15x leverage
 BTC_MIDRANGE_STOP_LOSS = 105500  # Stop-loss at $105,500 (recent swing low structure)
 BTC_MIDRANGE_TAKE_PROFIT = 112000  # First profit target at $112,000 (prior ATH cluster)
 
-# Trade parameters for BTC bull flag breakout
-BTC_BULLFLAG_MARGIN = 300  # USD
-BTC_BULLFLAG_LEVERAGE = 20  # 20x leverage
-BTC_BULLFLAG_STOP_LOSS = 107000  # Stop-loss at $107,000 (lower flag trendline/support)
-BTC_BULLFLAG_TAKE_PROFIT = 140000  # First profit target at $140,000 (flag's measured move projection)
 
-# Trade parameters for BTC ascending channel breakout
-BTC_CHANNEL_MARGIN = 300  # USD
-BTC_CHANNEL_LEVERAGE = 20  # 20x leverage
-BTC_CHANNEL_STOP_LOSS = 106500  # Stop-loss at $106,500 (channel median/support zone)
-BTC_CHANNEL_TAKE_PROFIT = 111000  # First profit target at $111,000 (prior supply and ATH cluster)
+
+# Trade parameters for BTC upper descending channel breakout
+BTC_DESCENDING_MARGIN = 300  # USD
+BTC_DESCENDING_LEVERAGE = 20  # 20x leverage
+BTC_DESCENDING_STOP_LOSS = 106500  # Stop-loss at $106,500 (channel mid/support)
+BTC_DESCENDING_TAKE_PROFIT = 112000  # First profit target at $112,000 (ATH cluster)
+BTC_DESCENDING_EXTENDED_TARGET = 140000  # Extended projection if volume confirms
 
 # Trade parameters for ETH EMA cluster breakout
 ETH_EMA_MARGIN = 200  # USD
@@ -156,13 +153,13 @@ def execute_btc_midrange_breakout_trade(cb_service, breakout_type: str, entry_pr
     )
 
 
-def btc_channel_breakout_alert(cb_service, last_alert_ts=None, timeframe='1d'):
+def btc_descending_channel_breakout_alert(cb_service, last_alert_ts=None, timeframe='1d'):
     """
-    BTC-USD ascending channel breakout alert (daily or 4-hr candle)
-    Entry trigger: Daily or 4-hr close above $108,000 with ≥20% volume increase over baseline
-    Entry zone: 108,000–108,500
+    BTC-USD breakout above upper descending channel alert (daily or 4-hr candle)
+    Entry trigger: Daily or 4-hr close > $108,000 with ≥20% volume spike
+    Entry zone: 108,000–108,600
     Stop-loss: 106,500
-    First profit target: 110,500–111,000
+    First profit target: 112,000 (ATH cluster), extended projection to 140,000 if volume confirms
     """
     PRODUCT_ID = "BTC-PERP-INTX"
     if timeframe == '4h':
@@ -179,11 +176,13 @@ def btc_channel_breakout_alert(cb_service, last_alert_ts=None, timeframe='1d'):
     
     ENTRY_TRIGGER = 108000
     ENTRY_ZONE_LOW = 108000
-    ENTRY_ZONE_HIGH = 108500
+    ENTRY_ZONE_HIGH = 108600
     STOP_LOSS = 106500
-    PROFIT_TARGET = 111000
+    PROFIT_TARGET = 112000
+    EXTENDED_TARGET = 140000
     VOLUME_PERIOD = 20
-    VOLUME_MULTIPLIER = 1.2  # ≥20% volume increase over baseline
+    VOLUME_MULTIPLIER = 1.2  # ≥20% volume spike
+    HIGH_VOLUME_MULTIPLIER = 1.5  # For extended target consideration
     
     try:
         now = datetime.now(UTC)
@@ -234,44 +233,50 @@ def btc_channel_breakout_alert(cb_service, last_alert_ts=None, timeframe='1d'):
         
         # Alert logic
         is_breakout_price = close > ENTRY_TRIGGER
-        is_high_volume = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
+        is_volume_spike = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
+        is_high_volume = current_volume >= (baseline_volume * HIGH_VOLUME_MULTIPLIER)
         in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
         
-        logger.info(f"=== BTC ASCENDING CHANNEL BREAKOUT ({timeframe.upper()}) ===")
+        # Determine profit target based on volume
+        target_price = EXTENDED_TARGET if is_high_volume else PROFIT_TARGET
+        target_description = "extended projection" if is_high_volume else "ATH cluster"
+        
+        logger.info(f"=== BTC UPPER DESCENDING CHANNEL BREAKOUT ({timeframe.upper()}) ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Baseline Vol({VOLUME_PERIOD}): {baseline_volume:,.0f}")
         logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Baseline: {'✅ Met' if is_high_volume else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Baseline: {'✅ Met' if is_volume_spike else '❌ Not Met'}")
         logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW}-{ENTRY_ZONE_HIGH}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
+        logger.info(f"  - Target: ${target_price:,.0f} ({target_description}) - Volume confirms: {'✅' if is_high_volume else '❌'}")
         
-        if is_breakout_price and is_high_volume and in_entry_zone:
-            logger.info(f"--- BTC ASCENDING CHANNEL BREAKOUT ALERT ({timeframe.upper()}) ---")
-            logger.info(f"Entry condition met: {timeframe.upper()} close > ${ENTRY_TRIGGER:,.0f} with ≥ {VOLUME_MULTIPLIER}x volume increase over baseline.")
-            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, First profit target: ${PROFIT_TARGET:,.0f}")
+        if is_breakout_price and is_volume_spike and in_entry_zone:
+            logger.info(f"--- BTC UPPER DESCENDING CHANNEL BREAKOUT ALERT ({timeframe.upper()}) ---")
+            logger.info(f"Entry condition met: {timeframe.upper()} close > ${ENTRY_TRIGGER:,.0f} with ≥ {VOLUME_MULTIPLIER}x volume spike.")
+            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${target_price:,.0f} ({target_description})")
             try:
                 play_alert_sound()
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
             
             # Execute the trade
-            breakout_type = f"channel_{ENTRY_TRIGGER}_{timeframe}"
+            breakout_type = f"descending_{ENTRY_TRIGGER}_{timeframe}"
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type=f"ascending channel breakout ({breakout_type})",
+                trade_type=f"upper descending channel breakout ({breakout_type})",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
-                take_profit=PROFIT_TARGET,
-                margin=BTC_CHANNEL_MARGIN,
-                leverage=BTC_CHANNEL_LEVERAGE
+                take_profit=target_price,
+                margin=BTC_DESCENDING_MARGIN,
+                leverage=BTC_DESCENDING_LEVERAGE
             )
             if trade_success:
-                logger.info(f"BTC {timeframe.upper()} ascending channel breakout trade executed successfully!")
+                logger.info(f"BTC {timeframe.upper()} upper descending channel breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC {timeframe.upper()} ascending channel breakout trade failed: {trade_result}")
+                logger.error(f"BTC {timeframe.upper()} upper descending channel breakout trade failed: {trade_result}")
             return ts
             
     except Exception as e:
-        logger.error(f"Error in BTC ascending channel breakout alert logic: {e}")
+        logger.error(f"Error in BTC upper descending channel breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
@@ -403,7 +408,7 @@ def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
     # Show trade status
-    logger.info("✅ Ready to take BTC ascending channel breakout trades (4H/1D)")
+    logger.info("✅ Ready to take BTC upper descending channel breakout trades (4H/1D)")
     logger.info("✅ Ready to take ETH EMA cluster breakout trades (1D)")
     logger.info("")  # Empty line for visual separation
     # Check if alert sound file exists
@@ -417,15 +422,15 @@ def main():
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
     logger.info("")  # Empty line for visual separation
     cb_service = setup_coinbase()
-    btc_channel_last_alert_ts_4h = None
-    btc_channel_last_alert_ts_1d = None
+    btc_descending_last_alert_ts_4h = None
+    btc_descending_last_alert_ts_1d = None
     eth_ema_last_alert_ts = None
     while True:
         try:
-            # BTC ascending channel breakout alert (4h)
-            btc_channel_last_alert_ts_4h = btc_channel_breakout_alert(cb_service, btc_channel_last_alert_ts_4h, timeframe='4h')
-            # BTC ascending channel breakout alert (1d)
-            btc_channel_last_alert_ts_1d = btc_channel_breakout_alert(cb_service, btc_channel_last_alert_ts_1d, timeframe='1d')
+            # BTC upper descending channel breakout alert (4h)
+            btc_descending_last_alert_ts_4h = btc_descending_channel_breakout_alert(cb_service, btc_descending_last_alert_ts_4h, timeframe='4h')
+            # BTC upper descending channel breakout alert (1d)
+            btc_descending_last_alert_ts_1d = btc_descending_channel_breakout_alert(cb_service, btc_descending_last_alert_ts_1d, timeframe='1d')
             # ETH EMA cluster breakout alert (1d)
             # eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
             # Wait 5 minutes until next poll
