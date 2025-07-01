@@ -204,6 +204,29 @@ def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, tim
         volumes = [float(c['volume']) for c in historical_candles]
         baseline_volume = sum(volumes) / len(volumes)
         
+        # Calculate RSI using all available candles (need at least 14 periods for RSI)
+        if len(candles) >= 16:  # 14 for RSI + 2 for analysis
+            # Create DataFrame for RSI calculation
+            df_data = []
+            if first_ts > last_ts:
+                # Newest first - reverse for chronological order
+                rsi_candles = candles[::-1]
+            else:
+                # Already in chronological order
+                rsi_candles = candles
+            
+            for candle in rsi_candles:
+                df_data.append({
+                    'close': float(candle['close']),
+                    'timestamp': int(candle['start'])
+                })
+            
+            df = pd.DataFrame(df_data)
+            df['rsi'] = ta.rsi(df['close'], length=14)
+            current_rsi = df['rsi'].iloc[-2] if len(df) >= 2 else None  # Most recent completed candle
+        else:
+            current_rsi = None
+        
         # Alert logic
         is_breakout_price = close > ENTRY_TRIGGER
         is_volume_increase = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
@@ -211,6 +234,8 @@ def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, tim
         
         logger.info(f"=== BTC HORIZONTAL RESISTANCE BREAKOUT ({timeframe.upper()}) ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Baseline Vol({VOLUME_PERIOD}): {baseline_volume:,.0f}")
+        rsi_text = f"RSI: {current_rsi:.1f}" if current_rsi is not None else "RSI: N/A"
+        logger.info(f"  - {rsi_text}")
         logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
         logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Baseline: {'✅ Met' if is_volume_increase else '❌ Not Met'}")
         logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW:,.0f}-{ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
@@ -219,7 +244,8 @@ def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, tim
         if is_breakout_price and is_volume_increase and in_entry_zone:
             logger.info(f"--- BTC HORIZONTAL RESISTANCE BREAKOUT ALERT ({timeframe.upper()}) ---")
             logger.info(f"Entry condition met: {timeframe.upper()} close > ${ENTRY_TRIGGER:,.0f} with ≥ {VOLUME_MULTIPLIER}x volume increase.")
-            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET:,.0f} (next supply cluster)")
+            rsi_alert_text = f" (RSI: {current_rsi:.1f})" if current_rsi is not None else " (RSI: N/A)"
+            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET:,.0f} (next supply cluster){rsi_alert_text}")
             try:
                 play_alert_sound()
             except Exception as e:
