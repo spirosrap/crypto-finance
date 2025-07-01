@@ -19,21 +19,12 @@ logger = logging.getLogger(__name__)
 GRANULARITY = "ONE_HOUR"
 PRODUCT_ID = "BTC-PERP-INTX"
 
-
-# Trade parameters for BTC mid-range breakout
-BTC_MIDRANGE_MARGIN = 300  # USD
-BTC_MIDRANGE_LEVERAGE = 20  # 15x leverage
-BTC_MIDRANGE_STOP_LOSS = 105500  # Stop-loss at $105,500 (recent swing low structure)
-BTC_MIDRANGE_TAKE_PROFIT = 112000  # First profit target at $112,000 (prior ATH cluster)
-
-
-
-# Trade parameters for BTC upper descending channel breakout
-BTC_DESCENDING_MARGIN = 300  # USD
-BTC_DESCENDING_LEVERAGE = 20  # 20x leverage
-BTC_DESCENDING_STOP_LOSS = 106500  # Stop-loss at $106,500 (channel mid/support)
-BTC_DESCENDING_TAKE_PROFIT = 112000  # First profit target at $112,000 (ATH cluster)
-BTC_DESCENDING_EXTENDED_TARGET = 140000  # Extended projection if volume confirms
+# Trade parameters for BTC horizontal resistance breakout
+BTC_HORIZONTAL_MARGIN = 300  # USD
+BTC_HORIZONTAL_LEVERAGE = 20  # 20x leverage
+BTC_HORIZONTAL_STOP_LOSS = 106500  # Stop-loss at $106,500 (channel mid/support)
+BTC_HORIZONTAL_TAKE_PROFIT = 112000  # First profit target at $112,000 (ATH cluster)
+BTC_HORIZONTAL_EXTENDED_TARGET = 140000  # Extended projection if volume confirms
 
 # Trade parameters for ETH EMA cluster breakout
 ETH_EMA_MARGIN = 200  # USD
@@ -135,22 +126,6 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
     except Exception as e:
         logger.error(f"Error executing crypto {trade_type} trade: {e}")
         return False, str(e)
-
-
-# Convenience wrapper for mid-range breakout with default parameters
-def execute_btc_midrange_breakout_trade(cb_service, breakout_type: str, entry_price: float, stop_loss: float, take_profit: float):
-    """
-    Execute BTC mid-range breakout trade using default parameters
-    """
-    return execute_crypto_trade(
-        cb_service=cb_service,
-        trade_type=f"mid-range breakout ({breakout_type})",
-        entry_price=entry_price,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
-        margin=BTC_MIDRANGE_MARGIN,
-        leverage=BTC_MIDRANGE_LEVERAGE
-    )
 
 
 def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, timeframe='1d'):
@@ -258,8 +233,8 @@ def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, tim
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
-                margin=BTC_DESCENDING_MARGIN,
-                leverage=BTC_DESCENDING_LEVERAGE
+                margin=BTC_HORIZONTAL_MARGIN,
+                leverage=BTC_HORIZONTAL_LEVERAGE
             )
             if trade_success:
                 logger.info(f"BTC {timeframe.upper()} horizontal resistance breakout trade executed successfully!")
