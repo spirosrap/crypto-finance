@@ -153,13 +153,13 @@ def execute_btc_midrange_breakout_trade(cb_service, breakout_type: str, entry_pr
     )
 
 
-def btc_descending_channel_breakout_alert(cb_service, last_alert_ts=None, timeframe='1d'):
+def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, timeframe='1d'):
     """
-    BTC-USD breakout above upper descending channel alert (daily or 4-hr candle)
-    Entry trigger: Daily or 4-hr close > $108,000 with ≥20% volume spike
-    Entry zone: 108,000–108,600
-    Stop-loss: 106,500
-    First profit target: 112,000 (ATH cluster), extended projection to 140,000 if volume confirms
+    BTC-USD breakout above $108,300 horizontal resistance alert (daily or 4-hr candle)
+    Entry trigger: Daily or 4-hr close > $108,300 with ≥20% volume increase
+    Entry zone: 108,300–109,000
+    Stop-loss: 106,500 (range mid-support)
+    First profit target: 112,000 (next supply cluster)
     """
     PRODUCT_ID = "BTC-PERP-INTX"
     if timeframe == '4h':
@@ -174,15 +174,13 @@ def btc_descending_channel_breakout_alert(cb_service, last_alert_ts=None, timefr
         logger.error(f"Unsupported timeframe: {timeframe}")
         return last_alert_ts
     
-    ENTRY_TRIGGER = 108000
-    ENTRY_ZONE_LOW = 108000
-    ENTRY_ZONE_HIGH = 108600
+    ENTRY_TRIGGER = 108300
+    ENTRY_ZONE_LOW = 108300
+    ENTRY_ZONE_HIGH = 109000
     STOP_LOSS = 106500
     PROFIT_TARGET = 112000
-    EXTENDED_TARGET = 140000
     VOLUME_PERIOD = 20
-    VOLUME_MULTIPLIER = 1.2  # ≥20% volume spike
-    HIGH_VOLUME_MULTIPLIER = 1.5  # For extended target consideration
+    VOLUME_MULTIPLIER = 1.2  # ≥20% volume increase
     
     try:
         now = datetime.now(UTC)
@@ -233,50 +231,45 @@ def btc_descending_channel_breakout_alert(cb_service, last_alert_ts=None, timefr
         
         # Alert logic
         is_breakout_price = close > ENTRY_TRIGGER
-        is_volume_spike = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
-        is_high_volume = current_volume >= (baseline_volume * HIGH_VOLUME_MULTIPLIER)
+        is_volume_increase = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
         in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
         
-        # Determine profit target based on volume
-        target_price = EXTENDED_TARGET if is_high_volume else PROFIT_TARGET
-        target_description = "extended projection" if is_high_volume else "ATH cluster"
-        
-        logger.info(f"=== BTC UPPER DESCENDING CHANNEL BREAKOUT ({timeframe.upper()}) ===")
+        logger.info(f"=== BTC HORIZONTAL RESISTANCE BREAKOUT ({timeframe.upper()}) ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Baseline Vol({VOLUME_PERIOD}): {baseline_volume:,.0f}")
         logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Baseline: {'✅ Met' if is_volume_spike else '❌ Not Met'}")
-        logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW}-{ENTRY_ZONE_HIGH}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-        logger.info(f"  - Target: ${target_price:,.0f} ({target_description}) - Volume confirms: {'✅' if is_high_volume else '❌'}")
+        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Baseline: {'✅ Met' if is_volume_increase else '❌ Not Met'}")
+        logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW:,.0f}-{ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
+        logger.info(f"  - Target: ${PROFIT_TARGET:,.0f} (next supply cluster)")
         
-        if is_breakout_price and is_volume_spike and in_entry_zone:
-            logger.info(f"--- BTC UPPER DESCENDING CHANNEL BREAKOUT ALERT ({timeframe.upper()}) ---")
-            logger.info(f"Entry condition met: {timeframe.upper()} close > ${ENTRY_TRIGGER:,.0f} with ≥ {VOLUME_MULTIPLIER}x volume spike.")
-            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${target_price:,.0f} ({target_description})")
+        if is_breakout_price and is_volume_increase and in_entry_zone:
+            logger.info(f"--- BTC HORIZONTAL RESISTANCE BREAKOUT ALERT ({timeframe.upper()}) ---")
+            logger.info(f"Entry condition met: {timeframe.upper()} close > ${ENTRY_TRIGGER:,.0f} with ≥ {VOLUME_MULTIPLIER}x volume increase.")
+            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET:,.0f} (next supply cluster)")
             try:
                 play_alert_sound()
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
             
             # Execute the trade
-            breakout_type = f"descending_{ENTRY_TRIGGER}_{timeframe}"
+            breakout_type = f"horizontal_resistance_{ENTRY_TRIGGER}_{timeframe}"
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type=f"upper descending channel breakout ({breakout_type})",
+                trade_type=f"horizontal resistance breakout ({breakout_type})",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
-                take_profit=target_price,
+                take_profit=PROFIT_TARGET,
                 margin=BTC_DESCENDING_MARGIN,
                 leverage=BTC_DESCENDING_LEVERAGE
             )
             if trade_success:
-                logger.info(f"BTC {timeframe.upper()} upper descending channel breakout trade executed successfully!")
+                logger.info(f"BTC {timeframe.upper()} horizontal resistance breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC {timeframe.upper()} upper descending channel breakout trade failed: {trade_result}")
+                logger.error(f"BTC {timeframe.upper()} horizontal resistance breakout trade failed: {trade_result}")
             return ts
             
     except Exception as e:
-        logger.error(f"Error in BTC upper descending channel breakout alert logic: {e}")
+        logger.error(f"Error in BTC horizontal resistance breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
@@ -408,7 +401,7 @@ def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
     # Show trade status
-    logger.info("✅ Ready to take BTC upper descending channel breakout trades (4H/1D)")
+    logger.info("✅ Ready to take BTC horizontal resistance breakout trades (4H/1D)")
     logger.info("✅ Ready to take ETH EMA cluster breakout trades (1D)")
     logger.info("")  # Empty line for visual separation
     # Check if alert sound file exists
@@ -422,15 +415,15 @@ def main():
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
     logger.info("")  # Empty line for visual separation
     cb_service = setup_coinbase()
-    btc_descending_last_alert_ts_4h = None
-    btc_descending_last_alert_ts_1d = None
+    btc_horizontal_last_alert_ts_4h = None
+    btc_horizontal_last_alert_ts_1d = None
     eth_ema_last_alert_ts = None
     while True:
         try:
-            # BTC upper descending channel breakout alert (4h)
-            btc_descending_last_alert_ts_4h = btc_descending_channel_breakout_alert(cb_service, btc_descending_last_alert_ts_4h, timeframe='4h')
-            # BTC upper descending channel breakout alert (1d)
-            btc_descending_last_alert_ts_1d = btc_descending_channel_breakout_alert(cb_service, btc_descending_last_alert_ts_1d, timeframe='1d')
+            # BTC horizontal resistance breakout alert (4h)
+            btc_horizontal_last_alert_ts_4h = btc_horizontal_resistance_breakout_alert(cb_service, btc_horizontal_last_alert_ts_4h, timeframe='4h')
+            # BTC horizontal resistance breakout alert (1d)
+            btc_horizontal_last_alert_ts_1d = btc_horizontal_resistance_breakout_alert(cb_service, btc_horizontal_last_alert_ts_1d, timeframe='1d')
             # ETH EMA cluster breakout alert (1d)
             # eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
             # Wait 5 minutes until next poll
