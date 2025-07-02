@@ -22,9 +22,6 @@ PRODUCT_ID = "BTC-PERP-INTX"
 # Trade parameters for BTC horizontal resistance breakout
 BTC_HORIZONTAL_MARGIN = 300  # USD
 BTC_HORIZONTAL_LEVERAGE = 20  # 20x leverage
-BTC_HORIZONTAL_STOP_LOSS = 106500  # Stop-loss at $106,500 (channel mid/support)
-BTC_HORIZONTAL_TAKE_PROFIT = 112000  # First profit target at $112,000 (ATH cluster)
-BTC_HORIZONTAL_EXTENDED_TARGET = 140000  # Extended projection if volume confirms
 
 # Trade parameters for ETH EMA cluster breakout
 ETH_EMA_MARGIN = 200  # USD
@@ -128,34 +125,47 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         return False, str(e)
 
 
-def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, timeframe='1d'):
+
+
+# Convenience wrapper for ETH EMA cluster breakout with default parameters
+def execute_eth_ema_breakout_trade(cb_service, breakout_type: str, entry_price: float, stop_loss: float, take_profit: float):
     """
-    BTC-USD breakout above $108,300 horizontal resistance alert (daily or 4-hr candle)
-    Entry trigger: Daily or 4-hr close > $108,300 with ≥20% volume increase
-    Entry zone: 108,300–109,000
-    Stop-loss: 106,500 (range mid-support)
-    First profit target: 112,000 (next supply cluster)
+    Execute ETH EMA cluster breakout trade using default parameters
+    """
+    return execute_crypto_trade(
+        cb_service=cb_service,
+        trade_type=f"EMA cluster breakout ({breakout_type})",
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        margin=ETH_EMA_MARGIN,
+        leverage=ETH_EMA_LEVERAGE,
+        product="ETH-PERP-INTX"
+    )
+
+
+def btc_descending_triangle_breakout_alert(cb_service, last_alert_ts=None):
+    """
+    BTC-USD descending triangle breakout alert
+    Entry trigger: Close above 108,000-108,500 on ≥20% volume surge
+    Entry zone: 108,000-108,500
+    Stop-loss: 106,000 (below triangle support base)
+    First profit target: 112,000-114,000 (triangle measured move / supply zone)
     """
     PRODUCT_ID = "BTC-PERP-INTX"
-    if timeframe == '4h':
-        GRANULARITY = "FOUR_HOUR"
-        periods_needed = 20 + 2
-        hours_needed = periods_needed * 4
-    elif timeframe == '1d':
-        GRANULARITY = "ONE_DAY"
-        periods_needed = 20 + 2
-        hours_needed = periods_needed * 24
-    else:
-        logger.error(f"Unsupported timeframe: {timeframe}")
-        return last_alert_ts
+    GRANULARITY = "ONE_HOUR"  # Using hourly candles for more responsive detection
+    periods_needed = 24 + 2  # 24 periods for volume baseline + 2 for analysis
+    hours_needed = periods_needed  # Hourly candles
     
-    ENTRY_TRIGGER = 108300
-    ENTRY_ZONE_LOW = 108300
-    ENTRY_ZONE_HIGH = 109000
-    STOP_LOSS = 106500
-    PROFIT_TARGET = 112000
-    VOLUME_PERIOD = 20
-    VOLUME_MULTIPLIER = 1.2  # ≥20% volume increase
+    ENTRY_TRIGGER_LOW = 108000
+    ENTRY_TRIGGER_HIGH = 108500
+    ENTRY_ZONE_LOW = 108000
+    ENTRY_ZONE_HIGH = 108500
+    STOP_LOSS = 106000  # Below triangle support base
+    PROFIT_TARGET_LOW = 112000  # Conservative target
+    PROFIT_TARGET_HIGH = 114000  # Measured move target
+    VOLUME_PERIOD = 24  # 24-hour volume baseline
+    VOLUME_MULTIPLIER = 1.2  # ≥20% volume surge
     
     try:
         now = datetime.now(UTC)
@@ -176,7 +186,7 @@ def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, tim
         else:
             candles = response.get('candles', [])
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for {timeframe} analysis.")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for descending triangle analysis.")
             return last_alert_ts
         
         # Determine order: if first candle is newer than last, it's newest-first
@@ -196,7 +206,7 @@ def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, tim
         close = float(last_candle['close'])
         current_volume = float(last_candle['volume'])
         
-        # Historical candles for volume baseline (20 periods before the last closed candle)
+        # Historical candles for volume baseline (24 periods before the last closed candle)
         if first_ts > last_ts:
             historical_candles = candles[2:VOLUME_PERIOD+2]
         else:
@@ -204,7 +214,7 @@ def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, tim
         volumes = [float(c['volume']) for c in historical_candles]
         baseline_volume = sum(volumes) / len(volumes)
         
-        # Calculate RSI using all available candles (need at least 14 periods for RSI)
+        # Calculate RSI using all available candles
         if len(candles) >= 16:  # 14 for RSI + 2 for analysis
             # Create DataFrame for RSI calculation
             df_data = []
@@ -228,69 +238,53 @@ def btc_horizontal_resistance_breakout_alert(cb_service, last_alert_ts=None, tim
             current_rsi = None
         
         # Alert logic
-        is_breakout_price = close > ENTRY_TRIGGER
-        is_volume_increase = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
+        is_breakout_price = close >= ENTRY_TRIGGER_LOW and close <= ENTRY_TRIGGER_HIGH
+        is_volume_surge = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
         in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
         
-        logger.info(f"=== BTC HORIZONTAL RESISTANCE BREAKOUT ({timeframe.upper()}) ===")
-        logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Baseline Vol({VOLUME_PERIOD}): {baseline_volume:,.0f}")
+        logger.info(f"=== BTC DESCENDING TRIANGLE BREAKOUT (HOURLY) ===")
+        logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Baseline Vol({VOLUME_PERIOD}h): {baseline_volume:,.0f}")
         rsi_text = f"RSI: {current_rsi:.1f}" if current_rsi is not None else "RSI: N/A"
         logger.info(f"  - {rsi_text}")
-        logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Baseline: {'✅ Met' if is_volume_increase else '❌ Not Met'}")
+        logger.info(f"  - Close in breakout range ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Baseline: {'✅ Met' if is_volume_surge else '❌ Not Met'}")
         logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW:,.0f}-{ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-        logger.info(f"  - Target: ${PROFIT_TARGET:,.0f} (next supply cluster)")
+        logger.info(f"  - Target range: ${PROFIT_TARGET_LOW:,.0f}-${PROFIT_TARGET_HIGH:,.0f} (triangle measured move)")
         
-        if is_breakout_price and is_volume_increase and in_entry_zone:
-            logger.info(f"--- BTC HORIZONTAL RESISTANCE BREAKOUT ALERT ({timeframe.upper()}) ---")
-            logger.info(f"Entry condition met: {timeframe.upper()} close > ${ENTRY_TRIGGER:,.0f} with ≥ {VOLUME_MULTIPLIER}x volume increase.")
+        if is_breakout_price and is_volume_surge and in_entry_zone:
+            logger.info(f"--- BTC DESCENDING TRIANGLE BREAKOUT ALERT ---")
+            logger.info(f"Entry condition met: Close above ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f} with ≥ {VOLUME_MULTIPLIER}x volume surge.")
             rsi_alert_text = f" (RSI: {current_rsi:.1f})" if current_rsi is not None else " (RSI: N/A)"
-            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET:,.0f} (next supply cluster){rsi_alert_text}")
+            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET_LOW:,.0f}-${PROFIT_TARGET_HIGH:,.0f}{rsi_alert_text}")
             try:
                 play_alert_sound()
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
             
-            # Execute the trade
-            breakout_type = f"horizontal_resistance_{ENTRY_TRIGGER}_{timeframe}"
+            # Execute the trade using the mid-point of the target range
+            profit_target = (PROFIT_TARGET_LOW + PROFIT_TARGET_HIGH) / 2  # Use mid-point: $113,000
+            breakout_type = f"descending_triangle_{ENTRY_TRIGGER_LOW}_{ENTRY_TRIGGER_HIGH}"
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type=f"horizontal resistance breakout ({breakout_type})",
+                trade_type=f"descending triangle breakout ({breakout_type})",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
-                take_profit=PROFIT_TARGET,
+                take_profit=profit_target,
                 margin=BTC_HORIZONTAL_MARGIN,
                 leverage=BTC_HORIZONTAL_LEVERAGE
             )
             if trade_success:
-                logger.info(f"BTC {timeframe.upper()} horizontal resistance breakout trade executed successfully!")
+                logger.info(f"BTC descending triangle breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC {timeframe.upper()} horizontal resistance breakout trade failed: {trade_result}")
+                logger.error(f"BTC descending triangle breakout trade failed: {trade_result}")
             return ts
             
     except Exception as e:
-        logger.error(f"Error in BTC horizontal resistance breakout alert logic: {e}")
+        logger.error(f"Error in BTC descending triangle breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
-
-
-# Convenience wrapper for ETH EMA cluster breakout with default parameters
-def execute_eth_ema_breakout_trade(cb_service, breakout_type: str, entry_price: float, stop_loss: float, take_profit: float):
-    """
-    Execute ETH EMA cluster breakout trade using default parameters
-    """
-    return execute_crypto_trade(
-        cb_service=cb_service,
-        trade_type=f"EMA cluster breakout ({breakout_type})",
-        entry_price=entry_price,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
-        margin=ETH_EMA_MARGIN,
-        leverage=ETH_EMA_LEVERAGE,
-        product="ETH-PERP-INTX"
-    )
 
 
 def eth_ema_cluster_breakout_alert(cb_service, last_alert_ts=None):
@@ -402,7 +396,7 @@ def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
     # Show trade status
-    logger.info("✅ Ready to take BTC horizontal resistance breakout trades (4H/1D)")
+    logger.info("✅ Ready to take BTC descending triangle breakout trades (1H)")
     logger.info("✅ Ready to take ETH EMA cluster breakout trades (1D)")
     logger.info("")  # Empty line for visual separation
     # Check if alert sound file exists
@@ -418,13 +412,12 @@ def main():
     cb_service = setup_coinbase()
     btc_horizontal_last_alert_ts_4h = None
     btc_horizontal_last_alert_ts_1d = None
+    btc_triangle_last_alert_ts = None
     eth_ema_last_alert_ts = None
     while True:
         try:
-            # BTC horizontal resistance breakout alert (4h)
-            btc_horizontal_last_alert_ts_4h = btc_horizontal_resistance_breakout_alert(cb_service, btc_horizontal_last_alert_ts_4h, timeframe='4h')
-            # BTC horizontal resistance breakout alert (1d)
-            btc_horizontal_last_alert_ts_1d = btc_horizontal_resistance_breakout_alert(cb_service, btc_horizontal_last_alert_ts_1d, timeframe='1d')
+            # BTC descending triangle breakout alert (1h)
+            btc_triangle_last_alert_ts = btc_descending_triangle_breakout_alert(cb_service, btc_triangle_last_alert_ts)
             # ETH EMA cluster breakout alert (1d)
             # eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
             # Wait 5 minutes until next poll
