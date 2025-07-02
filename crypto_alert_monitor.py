@@ -254,28 +254,25 @@ def execute_eth_ema_breakout_trade(cb_service, breakout_type: str, entry_price: 
     )
 
 
-def btc_descending_triangle_breakout_alert(cb_service, last_alert_ts=None):
+
+def btc_momentum_breakout_alert(cb_service, last_alert_ts=None):
     """
-    BTC-USD descending triangle breakout alert
-    Entry trigger: Close above 108,000-108,500 on ≥20% volume surge
-    Entry zone: 108,000-108,500
-    Stop-loss: 106,000 (below triangle support base)
-    First profit target: 112,000-114,000 (triangle measured move / supply zone)
+    BTC-USD momentum breakout alert
+    Entry trigger: 1h close ≥ $109,600 with volume ≥ breakout-bar × 0.8
+    Entry zone: Above $109,600
+    Stop-loss: $107,000 (conservative below recent support)
+    First profit target: $115,000 (momentum projection)
     """
     PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "ONE_HOUR"  # Using hourly candles for more responsive detection
-    periods_needed = 24 + 2  # 24 periods for volume baseline + 2 for analysis
+    GRANULARITY = "ONE_HOUR"  # Using hourly candles
+    periods_needed = 24 + 2  # 24 periods for volume analysis + 2 for breakout detection
     hours_needed = periods_needed  # Hourly candles
     
-    ENTRY_TRIGGER_LOW = 108000
-    ENTRY_TRIGGER_HIGH = 108500
-    ENTRY_ZONE_LOW = 108000
-    ENTRY_ZONE_HIGH = 108500
-    STOP_LOSS = 106000  # Below triangle support base
-    PROFIT_TARGET_LOW = 112000  # Conservative target
-    PROFIT_TARGET_HIGH = 114000  # Measured move target
-    VOLUME_PERIOD = 24  # 24-hour volume baseline
-    VOLUME_MULTIPLIER = 1.2  # ≥20% volume surge
+    ENTRY_TRIGGER = 109600  # $109,600 breakout level
+    STOP_LOSS = 107000  # Conservative stop below support
+    PROFIT_TARGET = 115000  # Momentum target
+    VOLUME_PERIOD = 24  # 24-hour lookback for breakout bar detection
+    VOLUME_MULTIPLIER = 0.8  # Volume ≥ breakout-bar × 0.8
     
     try:
         now = datetime.now(UTC)
@@ -287,10 +284,10 @@ def btc_descending_triangle_breakout_alert(cb_service, last_alert_ts=None):
         
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         if not candles:
-            logger.warning(f"Failed to fetch BTC {GRANULARITY} candle data for descending triangle analysis.")
+            logger.warning(f"Failed to fetch BTC {GRANULARITY} candle data for momentum breakout analysis.")
             return last_alert_ts
         if len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for descending triangle analysis.")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for momentum breakout analysis.")
             return last_alert_ts
         
         # Determine order: if first candle is newer than last, it's newest-first
@@ -310,13 +307,15 @@ def btc_descending_triangle_breakout_alert(cb_service, last_alert_ts=None):
         close = float(last_candle['close'])
         current_volume = float(last_candle['volume'])
         
-        # Historical candles for volume baseline (24 periods before the last closed candle)
+        # Find the highest volume "breakout bar" in the last 24 hours for volume comparison
         if first_ts > last_ts:
-            historical_candles = candles[2:VOLUME_PERIOD+2]
+            historical_candles = candles[1:VOLUME_PERIOD+1]  # Exclude current candle
         else:
-            historical_candles = candles[-(VOLUME_PERIOD+2):-2]
+            historical_candles = candles[-(VOLUME_PERIOD+1):-1]  # Exclude current candle
+        
         volumes = [float(c['volume']) for c in historical_candles]
-        baseline_volume = sum(volumes) / len(volumes)
+        breakout_bar_volume = max(volumes) if volumes else current_volume
+        volume_threshold = breakout_bar_volume * VOLUME_MULTIPLIER
         
         # Calculate RSI using all available candles
         if len(candles) >= 16:  # 14 for RSI + 2 for analysis
@@ -342,50 +341,48 @@ def btc_descending_triangle_breakout_alert(cb_service, last_alert_ts=None):
             current_rsi = None
         
         # Alert logic
-        is_breakout_price = close >= ENTRY_TRIGGER_LOW and close <= ENTRY_TRIGGER_HIGH
-        is_volume_surge = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
-        in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
+        is_breakout_price = close >= ENTRY_TRIGGER
+        is_volume_confirmed = current_volume >= volume_threshold
         
-        logger.info(f"=== BTC DESCENDING TRIANGLE BREAKOUT (HOURLY) ===")
-        logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Baseline Vol({VOLUME_PERIOD}h): {baseline_volume:,.0f}")
+        logger.info(f"=== BTC MOMENTUM BREAKOUT (HOURLY) ===")
+        logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}")
+        logger.info(f"Breakout bar volume(24h): {breakout_bar_volume:,.0f}, Threshold(×{VOLUME_MULTIPLIER}): {volume_threshold:,.0f}")
         rsi_text = f"RSI: {current_rsi:.1f}" if current_rsi is not None else "RSI: N/A"
         logger.info(f"  - {rsi_text}")
-        logger.info(f"  - Close in breakout range ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Baseline: {'✅ Met' if is_volume_surge else '❌ Not Met'}")
-        logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW:,.0f}-{ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-        logger.info(f"  - Target range: ${PROFIT_TARGET_LOW:,.0f}-${PROFIT_TARGET_HIGH:,.0f} (triangle measured move)")
+        logger.info(f"  - Close ≥ ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ breakout-bar×{VOLUME_MULTIPLIER}: {'✅ Met' if is_volume_confirmed else '❌ Not Met'}")
+        logger.info(f"  - Target: ${PROFIT_TARGET:,.0f} (momentum projection)")
         
-        if is_breakout_price and is_volume_surge and in_entry_zone:
-            logger.info(f"--- BTC DESCENDING TRIANGLE BREAKOUT ALERT ---")
-            logger.info(f"Entry condition met: Close above ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f} with ≥ {VOLUME_MULTIPLIER}x volume surge.")
+        if is_breakout_price and is_volume_confirmed:
+            logger.info(f"--- BTC MOMENTUM BREAKOUT ALERT ---")
+            logger.info(f"Entry condition met: 1h close ≥ ${ENTRY_TRIGGER:,.0f} with volume ≥ breakout-bar×{VOLUME_MULTIPLIER}.")
             rsi_alert_text = f" (RSI: {current_rsi:.1f})" if current_rsi is not None else " (RSI: N/A)"
-            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET_LOW:,.0f}-${PROFIT_TARGET_HIGH:,.0f}{rsi_alert_text}")
+            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET:,.0f}{rsi_alert_text}")
             try:
                 play_alert_sound()
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
             
-            # Execute the trade using the mid-point of the target range
-            profit_target = (PROFIT_TARGET_LOW + PROFIT_TARGET_HIGH) / 2  # Use mid-point: $113,000
-            breakout_type = f"descending_triangle_{ENTRY_TRIGGER_LOW}_{ENTRY_TRIGGER_HIGH}"
+            # Execute the trade
+            breakout_type = f"momentum_{ENTRY_TRIGGER}"
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type=f"descending triangle breakout ({breakout_type})",
+                trade_type=f"momentum breakout ({breakout_type})",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
-                take_profit=profit_target,
+                take_profit=PROFIT_TARGET,
                 margin=BTC_HORIZONTAL_MARGIN,
                 leverage=BTC_HORIZONTAL_LEVERAGE
             )
             if trade_success:
-                logger.info(f"BTC descending triangle breakout trade executed successfully!")
+                logger.info(f"BTC momentum breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC descending triangle breakout trade failed: {trade_result}")
+                logger.error(f"BTC momentum breakout trade failed: {trade_result}")
             return ts
             
     except Exception as e:
-        logger.error(f"Error in BTC descending triangle breakout alert logic: {e}")
+        logger.error(f"Error in BTC momentum breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
@@ -494,7 +491,7 @@ def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
     # Show trade status
-    logger.info("✅ Ready to take BTC descending triangle breakout trades (1H)")
+    logger.info("✅ Ready to take BTC momentum breakout trades (1H)")
     logger.info("✅ Ready to take ETH EMA cluster breakout trades (1D)")
     logger.info("")  # Empty line for visual separation
     # Check if alert sound file exists
@@ -510,7 +507,7 @@ def main():
     cb_service = setup_coinbase()
     btc_horizontal_last_alert_ts_4h = None
     btc_horizontal_last_alert_ts_1d = None
-    btc_triangle_last_alert_ts = None
+    btc_momentum_last_alert_ts = None
     eth_ema_last_alert_ts = None
     consecutive_failures = 0
     max_consecutive_failures = 5
@@ -520,8 +517,8 @@ def main():
             # Reset failure counter on successful iteration start
             iteration_start_time = time.time()
             
-            # BTC descending triangle breakout alert (1h)
-            btc_triangle_last_alert_ts = btc_descending_triangle_breakout_alert(cb_service, btc_triangle_last_alert_ts)
+            # BTC momentum breakout alert (1h)
+            btc_momentum_last_alert_ts = btc_momentum_breakout_alert(cb_service, btc_momentum_last_alert_ts)
             # ETH EMA cluster breakout alert (1d)
             # eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
             
