@@ -237,155 +237,164 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
 
 
 
-# Convenience wrapper for ETH EMA cluster breakout with default parameters
-def execute_eth_ema_breakout_trade(cb_service, breakout_type: str, entry_price: float, stop_loss: float, take_profit: float):
+def btc_consolidation_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts_1d=None):
     """
-    Execute ETH EMA cluster breakout trade using default parameters
+    BTC-USD consolidation breakout to $110K+
+    Entry trigger: Daily or 4-hr close above $108,600-$109,000 on ≥20% volume surge (volume jump ~10-38%)
+    Entry zone: $109,000-$109,500
+    Stop-loss: $107,000 (support at 50-day SMA ~$106K and recent range lows)
+    First profit target: $113,000 (next resistance) with extended target at $117,000 per short-term holder cost basis
     """
-    return execute_crypto_trade(
-        cb_service=cb_service,
-        trade_type=f"EMA cluster breakout ({breakout_type})",
-        entry_price=entry_price,
-        stop_loss=stop_loss,
-        take_profit=take_profit,
-        margin=ETH_EMA_MARGIN,
-        leverage=ETH_EMA_LEVERAGE,
-        product="ETH-PERP-INTX"
-    )
-
-
-
-def btc_momentum_breakout_alert(cb_service, last_alert_ts=None):
-    """
-    BTC-USD momentum breakout alert
-    Entry trigger: 1h close ≥ $109,600 with volume ≥ breakout-bar × 0.8
-    Entry zone: Above $109,600
-    Stop-loss: $107,000 (conservative below recent support)
-    First profit target: $115,000 (momentum projection)
-    """
-    PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "ONE_HOUR"  # Using hourly candles
-    periods_needed = 24 + 2  # 24 periods for volume analysis + 2 for breakout detection
-    hours_needed = periods_needed  # Hourly candles
     
-    ENTRY_TRIGGER = 109600  # $109,600 breakout level
-    STOP_LOSS = 107000  # Conservative stop below support
-    PROFIT_TARGET = 115000  # Momentum target
-    VOLUME_PERIOD = 24  # 24-hour lookback for breakout bar detection
-    VOLUME_MULTIPLIER = 0.8  # Volume ≥ breakout-bar × 0.8
+    # Check both 4-hour and daily timeframes
+    results = {}
     
-    try:
-        now = datetime.now(UTC)
-        now = now.replace(minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=hours_needed)
-        end = now
-        start_ts = int(start.timestamp())
-        end_ts = int(end.timestamp())
+    for timeframe in ['4h', '1d']:
+        PRODUCT_ID = "BTC-PERP-INTX"
+        if timeframe == '4h':
+            GRANULARITY = "FOUR_HOUR"
+            periods_needed = 20 + 2
+            hours_needed = periods_needed * 4
+            last_alert_ts = last_alert_ts_4h
+        else:  # 1d
+            GRANULARITY = "ONE_DAY"
+            periods_needed = 20 + 2
+            hours_needed = periods_needed * 24
+            last_alert_ts = last_alert_ts_1d
         
-        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-        if not candles:
-            logger.warning(f"Failed to fetch BTC {GRANULARITY} candle data for momentum breakout analysis.")
-            return last_alert_ts
-        if len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for momentum breakout analysis.")
-            return last_alert_ts
+        ENTRY_TRIGGER_LOW = 108600
+        ENTRY_TRIGGER_HIGH = 109000
+        ENTRY_ZONE_LOW = 109000
+        ENTRY_ZONE_HIGH = 109500
+        STOP_LOSS = 107000  # Support at 50-day SMA ~$106K and recent range lows
+        PROFIT_TARGET = 113000  # Next resistance
+        EXTENDED_TARGET = 117000  # Short-term holder cost basis
+        VOLUME_PERIOD = 20
+        VOLUME_MULTIPLIER = 1.2  # ≥20% volume surge (minimum of stated range)
         
-        # Determine order: if first candle is newer than last, it's newest-first
-        first_ts = int(candles[0]['start'])
-        last_ts = int(candles[-1]['start'])
-        if first_ts > last_ts:
-            # Newest first: use candles[1] as most recent completed
-            last_candle = candles[1]
-        else:
-            # Oldest first: use candles[-2]
-            last_candle = candles[-2]
-        
-        ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
-        if ts == last_alert_ts:
-            return last_alert_ts
-        
-        close = float(last_candle['close'])
-        current_volume = float(last_candle['volume'])
-        
-        # Find the highest volume "breakout bar" in the last 24 hours for volume comparison
-        if first_ts > last_ts:
-            historical_candles = candles[1:VOLUME_PERIOD+1]  # Exclude current candle
-        else:
-            historical_candles = candles[-(VOLUME_PERIOD+1):-1]  # Exclude current candle
-        
-        volumes = [float(c['volume']) for c in historical_candles]
-        breakout_bar_volume = max(volumes) if volumes else current_volume
-        volume_threshold = breakout_bar_volume * VOLUME_MULTIPLIER
-        
-        # Calculate RSI using all available candles
-        if len(candles) >= 16:  # 14 for RSI + 2 for analysis
-            # Create DataFrame for RSI calculation
-            df_data = []
+        try:
+            now = datetime.now(UTC)
+            now = now.replace(minute=0, second=0, microsecond=0)
+            start = now - timedelta(hours=hours_needed)
+            end = now
+            start_ts = int(start.timestamp())
+            end_ts = int(end.timestamp())
+            
+            candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+            if not candles:
+                logger.warning(f"Failed to fetch BTC {GRANULARITY} candle data for consolidation breakout analysis.")
+                results[timeframe] = last_alert_ts
+                continue
+            if len(candles) < periods_needed:
+                logger.warning(f"Not enough BTC {GRANULARITY} candle data for consolidation breakout analysis.")
+                results[timeframe] = last_alert_ts
+                continue
+            
+            # Determine order: if first candle is newer than last, it's newest-first
+            first_ts = int(candles[0]['start'])
+            last_ts = int(candles[-1]['start'])
             if first_ts > last_ts:
-                # Newest first - reverse for chronological order
-                rsi_candles = candles[::-1]
+                # Newest first: use candles[1] as most recent completed
+                last_candle = candles[1]
             else:
-                # Already in chronological order
-                rsi_candles = candles
+                # Oldest first: use candles[-2]
+                last_candle = candles[-2]
             
-            for candle in rsi_candles:
-                df_data.append({
-                    'close': float(candle['close']),
-                    'timestamp': int(candle['start'])
-                })
+            ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
+            if ts == last_alert_ts:
+                results[timeframe] = last_alert_ts
+                continue
             
-            df = pd.DataFrame(df_data)
-            df['rsi'] = ta.rsi(df['close'], length=14)
-            current_rsi = df['rsi'].iloc[-2] if len(df) >= 2 else None  # Most recent completed candle
-        else:
-            current_rsi = None
-        
-        # Alert logic
-        is_breakout_price = close >= ENTRY_TRIGGER
-        is_volume_confirmed = current_volume >= volume_threshold
-        
-        logger.info(f"=== BTC MOMENTUM BREAKOUT (HOURLY) ===")
-        logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}")
-        logger.info(f"Breakout bar volume(24h): {breakout_bar_volume:,.0f}, Threshold(×{VOLUME_MULTIPLIER}): {volume_threshold:,.0f}")
-        rsi_text = f"RSI: {current_rsi:.1f}" if current_rsi is not None else "RSI: N/A"
-        logger.info(f"  - {rsi_text}")
-        logger.info(f"  - Close ≥ ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ breakout-bar×{VOLUME_MULTIPLIER}: {'✅ Met' if is_volume_confirmed else '❌ Not Met'}")
-        logger.info(f"  - Target: ${PROFIT_TARGET:,.0f} (momentum projection)")
-        
-        if is_breakout_price and is_volume_confirmed:
-            logger.info(f"--- BTC MOMENTUM BREAKOUT ALERT ---")
-            logger.info(f"Entry condition met: 1h close ≥ ${ENTRY_TRIGGER:,.0f} with volume ≥ breakout-bar×{VOLUME_MULTIPLIER}.")
-            rsi_alert_text = f" (RSI: {current_rsi:.1f})" if current_rsi is not None else " (RSI: N/A)"
-            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET:,.0f}{rsi_alert_text}")
-            try:
-                play_alert_sound()
-            except Exception as e:
-                logger.error(f"Failed to play alert sound: {e}")
+            close = float(last_candle['close'])
+            current_volume = float(last_candle['volume'])
             
-            # Execute the trade
-            breakout_type = f"momentum_{ENTRY_TRIGGER}"
-            trade_success, trade_result = execute_crypto_trade(
-                cb_service=cb_service,
-                trade_type=f"momentum breakout ({breakout_type})",
-                entry_price=close,
-                stop_loss=STOP_LOSS,
-                take_profit=PROFIT_TARGET,
-                margin=BTC_HORIZONTAL_MARGIN,
-                leverage=BTC_HORIZONTAL_LEVERAGE
-            )
-            if trade_success:
-                logger.info(f"BTC momentum breakout trade executed successfully!")
-                logger.info(f"Trade output: {trade_result}")
+            # Historical candles for volume baseline (20 periods before the last closed candle)
+            if first_ts > last_ts:
+                historical_candles = candles[2:VOLUME_PERIOD+2]
             else:
-                logger.error(f"BTC momentum breakout trade failed: {trade_result}")
-            return ts
+                historical_candles = candles[-(VOLUME_PERIOD+2):-2]
+            volumes = [float(c['volume']) for c in historical_candles]
+            baseline_volume = sum(volumes) / len(volumes)
             
-    except Exception as e:
-        logger.error(f"Error in BTC momentum breakout alert logic: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-    return last_alert_ts
+            # Calculate volume surge percentage for logging
+            volume_surge_pct = ((current_volume / baseline_volume) - 1) * 100 if baseline_volume > 0 else 0
+            
+            # Calculate RSI using all available candles
+            if len(candles) >= 16:  # 14 for RSI + 2 for analysis
+                # Create DataFrame for RSI calculation
+                df_data = []
+                if first_ts > last_ts:
+                    # Newest first - reverse for chronological order
+                    rsi_candles = candles[::-1]
+                else:
+                    # Already in chronological order
+                    rsi_candles = candles
+                
+                for candle in rsi_candles:
+                    df_data.append({
+                        'close': float(candle['close']),
+                        'timestamp': int(candle['start'])
+                    })
+                
+                df = pd.DataFrame(df_data)
+                df['rsi'] = ta.rsi(df['close'], length=14)
+                current_rsi = df['rsi'].iloc[-2] if len(df) >= 2 else None  # Most recent completed candle
+            else:
+                current_rsi = None
+            
+            # Alert logic
+            is_breakout_price = close >= ENTRY_TRIGGER_LOW and close <= ENTRY_TRIGGER_HIGH
+            is_volume_surge = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
+            in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
+            
+            logger.info(f"=== BTC CONSOLIDATION BREAKOUT ({timeframe.upper()}) ===")
+            logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f} (+{volume_surge_pct:.1f}%)")
+            logger.info(f"Baseline Vol({VOLUME_PERIOD}): {baseline_volume:,.0f}")
+            rsi_text = f"RSI: {current_rsi:.1f}" if current_rsi is not None else "RSI: N/A"
+            logger.info(f"  - {rsi_text}")
+            logger.info(f"  - Close in range ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
+            logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x baseline: {'✅ Met' if is_volume_surge else '❌ Not Met'}")
+            logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
+            logger.info(f"  - Targets: ${PROFIT_TARGET:,.0f} | Extended: ${EXTENDED_TARGET:,.0f}")
+            
+            if is_breakout_price and is_volume_surge and in_entry_zone:
+                logger.info(f"--- BTC CONSOLIDATION BREAKOUT ALERT ({timeframe.upper()}) ---")
+                logger.info(f"Entry condition met: {timeframe.upper()} close ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f} with {volume_surge_pct:.1f}% volume surge.")
+                rsi_alert_text = f" (RSI: {current_rsi:.1f})" if current_rsi is not None else " (RSI: N/A)"
+                logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET:,.0f}, Extended: ${EXTENDED_TARGET:,.0f}{rsi_alert_text}")
+                try:
+                    play_alert_sound()
+                except Exception as e:
+                    logger.error(f"Failed to play alert sound: {e}")
+                
+                # Execute the trade using the primary target
+                breakout_type = f"consolidation_{ENTRY_TRIGGER_LOW}_{ENTRY_TRIGGER_HIGH}_{timeframe}"
+                trade_success, trade_result = execute_crypto_trade(
+                    cb_service=cb_service,
+                    trade_type=f"consolidation breakout ({breakout_type})",
+                    entry_price=close,
+                    stop_loss=STOP_LOSS,
+                    take_profit=PROFIT_TARGET,
+                    margin=BTC_HORIZONTAL_MARGIN,
+                    leverage=BTC_HORIZONTAL_LEVERAGE
+                )
+                if trade_success:
+                    logger.info(f"BTC {timeframe.upper()} consolidation breakout trade executed successfully!")
+                    logger.info(f"Trade output: {trade_result}")
+                    logger.info(f"💡 Note: Extended target at ${EXTENDED_TARGET:,.0f} available for position management")
+                else:
+                    logger.error(f"BTC {timeframe.upper()} consolidation breakout trade failed: {trade_result}")
+                results[timeframe] = ts
+            else:
+                results[timeframe] = last_alert_ts
+                
+        except Exception as e:
+            logger.error(f"Error in BTC consolidation breakout alert logic ({timeframe}): {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            results[timeframe] = last_alert_ts
+    
+    return results.get('4h', last_alert_ts_4h), results.get('1d', last_alert_ts_1d)
 
 
 def eth_ema_cluster_breakout_alert(cb_service, last_alert_ts=None):
@@ -491,7 +500,7 @@ def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
     # Show trade status
-    logger.info("✅ Ready to take BTC momentum breakout trades (1H)")
+    logger.info("✅ Ready to take BTC consolidation breakout trades (4H/1D)")
     logger.info("✅ Ready to take ETH EMA cluster breakout trades (1D)")
     logger.info("")  # Empty line for visual separation
     # Check if alert sound file exists
@@ -517,8 +526,8 @@ def main():
             # Reset failure counter on successful iteration start
             iteration_start_time = time.time()
             
-            # BTC momentum breakout alert (1h)
-            btc_momentum_last_alert_ts = btc_momentum_breakout_alert(cb_service, btc_momentum_last_alert_ts)
+            # BTC consolidation breakout alert (4h and 1d)
+            btc_horizontal_last_alert_ts_4h, btc_horizontal_last_alert_ts_1d = btc_consolidation_breakout_alert(cb_service, btc_horizontal_last_alert_ts_4h, btc_horizontal_last_alert_ts_1d)
             # ETH EMA cluster breakout alert (1d)
             # eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
             
