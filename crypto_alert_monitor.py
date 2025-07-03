@@ -237,186 +237,22 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
 
 
 
-def btc_consolidation_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts_1d=None):
+def btc_4h_breakout_vol_spike_alert(cb_service, last_alert_ts=None):
     """
-    BTC-USD consolidation breakout to $110K+
-    Entry trigger: Daily or 4-hr close above $108,600-$109,000 on ≥20% volume surge (volume jump ~10-38%)
-    Entry zone: $109,000-$109,500
-    Stop-loss: $107,000 (support at 50-day SMA ~$106K and recent range lows)
-    First profit target: $113,000 (next resistance) with extended target at $117,000 per short-term holder cost basis
+    BTC 4h breakout alert:
+    - Entry: 4h close >= 110,100 (hard threshold)
+    - Volume: >= 1.2x 20-period average
+    - Trade is taken when both conditions are met
     """
-    
-    # Check both 4-hour and daily timeframes
-    results = {}
-    
-    for timeframe in ['4h', '1d']:
-        PRODUCT_ID = "BTC-PERP-INTX"
-        if timeframe == '4h':
-            GRANULARITY = "FOUR_HOUR"
-            periods_needed = 20 + 2
-            hours_needed = periods_needed * 4
-            last_alert_ts = last_alert_ts_4h
-        else:  # 1d
-            GRANULARITY = "ONE_DAY"
-            periods_needed = 20 + 2
-            hours_needed = periods_needed * 24
-            last_alert_ts = last_alert_ts_1d
-        
-        ENTRY_TRIGGER_LOW = 108600
-        ENTRY_TRIGGER_HIGH = 109000
-        ENTRY_ZONE_LOW = 109000
-        ENTRY_ZONE_HIGH = 109500
-        STOP_LOSS = 107000  # Support at 50-day SMA ~$106K and recent range lows
-        PROFIT_TARGET = 113000  # Next resistance
-        EXTENDED_TARGET = 117000  # Short-term holder cost basis
-        VOLUME_PERIOD = 20
-        VOLUME_MULTIPLIER = 1.2  # ≥20% volume surge (minimum of stated range)
-        
-        try:
-            now = datetime.now(UTC)
-            now = now.replace(minute=0, second=0, microsecond=0)
-            start = now - timedelta(hours=hours_needed)
-            end = now
-            start_ts = int(start.timestamp())
-            end_ts = int(end.timestamp())
-            
-            candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-            if not candles:
-                logger.warning(f"Failed to fetch BTC {GRANULARITY} candle data for consolidation breakout analysis.")
-                results[timeframe] = last_alert_ts
-                continue
-            if len(candles) < periods_needed:
-                logger.warning(f"Not enough BTC {GRANULARITY} candle data for consolidation breakout analysis.")
-                results[timeframe] = last_alert_ts
-                continue
-            
-            # Determine order: if first candle is newer than last, it's newest-first
-            first_ts = int(candles[0]['start'])
-            last_ts = int(candles[-1]['start'])
-            if first_ts > last_ts:
-                # Newest first: use candles[1] as most recent completed
-                last_candle = candles[1]
-            else:
-                # Oldest first: use candles[-2]
-                last_candle = candles[-2]
-            
-            ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
-            if ts == last_alert_ts:
-                results[timeframe] = last_alert_ts
-                continue
-            
-            close = float(last_candle['close'])
-            current_volume = float(last_candle['volume'])
-            
-            # Historical candles for volume baseline (20 periods before the last closed candle)
-            if first_ts > last_ts:
-                historical_candles = candles[2:VOLUME_PERIOD+2]
-            else:
-                historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-            volumes = [float(c['volume']) for c in historical_candles]
-            baseline_volume = sum(volumes) / len(volumes)
-            
-            # Calculate volume surge percentage for logging
-            volume_surge_pct = ((current_volume / baseline_volume) - 1) * 100 if baseline_volume > 0 else 0
-            
-            # Calculate RSI using all available candles
-            if len(candles) >= 16:  # 14 for RSI + 2 for analysis
-                # Create DataFrame for RSI calculation
-                df_data = []
-                if first_ts > last_ts:
-                    # Newest first - reverse for chronological order
-                    rsi_candles = candles[::-1]
-                else:
-                    # Already in chronological order
-                    rsi_candles = candles
-                
-                for candle in rsi_candles:
-                    df_data.append({
-                        'close': float(candle['close']),
-                        'timestamp': int(candle['start'])
-                    })
-                
-                df = pd.DataFrame(df_data)
-                df['rsi'] = ta.rsi(df['close'], length=14)
-                current_rsi = df['rsi'].iloc[-2] if len(df) >= 2 else None  # Most recent completed candle
-            else:
-                current_rsi = None
-            
-            # Alert logic
-            is_breakout_price = close >= ENTRY_TRIGGER_LOW
-            is_volume_surge = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
-            in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-            
-            logger.info(f"=== BTC CONSOLIDATION BREAKOUT ({timeframe.upper()}) ===")
-            logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f} (+{volume_surge_pct:.1f}%)")
-            logger.info(f"Baseline Vol({VOLUME_PERIOD}): {baseline_volume:,.0f}")
-            rsi_text = f"RSI: {current_rsi:.1f}" if current_rsi is not None else "RSI: N/A"
-            logger.info(f"  - {rsi_text}")
-            logger.info(f"  - Close ≥ ${ENTRY_TRIGGER_LOW:,.0f} (breakout trigger): {'✅ Met' if is_breakout_price else '❌ Not Met'}")
-            logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x baseline: {'✅ Met' if is_volume_surge else '❌ Not Met'}")
-            logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-            logger.info(f"  - Targets: ${PROFIT_TARGET:,.0f} | Extended: ${EXTENDED_TARGET:,.0f}")
-            
-            if is_breakout_price and is_volume_surge and in_entry_zone:
-                logger.info(f"--- BTC CONSOLIDATION BREAKOUT ALERT ({timeframe.upper()}) ---")
-                logger.info(f"Entry condition met: {timeframe.upper()} close ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f} with {volume_surge_pct:.1f}% volume surge.")
-                rsi_alert_text = f" (RSI: {current_rsi:.1f})" if current_rsi is not None else " (RSI: N/A)"
-                logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, Target: ${PROFIT_TARGET:,.0f}, Extended: ${EXTENDED_TARGET:,.0f}{rsi_alert_text}")
-                try:
-                    play_alert_sound()
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-                
-                # Execute the trade using the primary target
-                breakout_type = f"consolidation_{ENTRY_TRIGGER_LOW}_{ENTRY_TRIGGER_HIGH}_{timeframe}"
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type=f"consolidation breakout ({breakout_type})",
-                    entry_price=close,
-                    stop_loss=STOP_LOSS,
-                    take_profit=PROFIT_TARGET,
-                    margin=BTC_HORIZONTAL_MARGIN,
-                    leverage=BTC_HORIZONTAL_LEVERAGE
-                )
-                if trade_success:
-                    logger.info(f"BTC {timeframe.upper()} consolidation breakout trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                    logger.info(f"💡 Note: Extended target at ${EXTENDED_TARGET:,.0f} available for position management")
-                else:
-                    logger.error(f"BTC {timeframe.upper()} consolidation breakout trade failed: {trade_result}")
-                results[timeframe] = ts
-            else:
-                results[timeframe] = last_alert_ts
-                
-        except Exception as e:
-            logger.error(f"Error in BTC consolidation breakout alert logic ({timeframe}): {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            results[timeframe] = last_alert_ts
-    
-    return results.get('4h', last_alert_ts_4h), results.get('1d', last_alert_ts_1d)
+    PRODUCT_ID = "BTC-PERP-INTX"
+    GRANULARITY = "FOUR_HOUR"
+    VOL_LOOKBACK = 20
+    PRICE_LVL = 110000
+    PRICE_BUFFER = 100
+    VOL_FACTOR = 1.20
+    periods_needed = VOL_LOOKBACK + 2  # 20 for avg, 1 for current, 1 for safety
+    hours_needed = periods_needed * 4
 
-
-def eth_ema_cluster_breakout_alert(cb_service, last_alert_ts=None):
-    """
-    ETH-USD EMA cluster breakout alert (daily candle)
-    Entry trigger: Close > 2600 daily with confirmed volume spike
-    Entry zone: 2600–2650
-    Stop-loss: 2500
-    First profit target: 3000
-    """
-    PRODUCT_ID = "ETH-PERP-INTX"
-    GRANULARITY = "ONE_DAY"
-    periods_needed = 20 + 2  # 20 periods for volume average + 2 for analysis
-    hours_needed = periods_needed * 24  # Daily candles
-    ENTRY_TRIGGER = 2600
-    ENTRY_ZONE_LOW = 2600
-    ENTRY_ZONE_HIGH = 2650
-    STOP_LOSS = 2500
-    PROFIT_TARGET = 3000
-    VOLUME_PERIOD = 20
-    VOLUME_MULTIPLIER = 1.2  # Confirmed volume spike (≥20% above average)
-    
     try:
         now = datetime.now(UTC)
         now = now.replace(minute=0, second=0, microsecond=0)
@@ -424,75 +260,72 @@ def eth_ema_cluster_breakout_alert(cb_service, last_alert_ts=None):
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
-        
+
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-        if not candles:
-            logger.warning(f"Failed to fetch ETH {GRANULARITY} candle data for analysis.")
+        if not candles or len(candles) < periods_needed:
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for 4h breakout alert.")
             return last_alert_ts
-        if len(candles) < periods_needed:
-            logger.warning(f"Not enough ETH {GRANULARITY} candle data for analysis.")
-            return last_alert_ts
-        
+
         # Determine order: if first candle is newer than last, it's newest-first
         first_ts = int(candles[0]['start'])
         last_ts = int(candles[-1]['start'])
         if first_ts > last_ts:
             # Newest first: use candles[1] as most recent completed
             last_candle = candles[1]
+            historical_candles = candles[2:VOL_LOOKBACK+2]
         else:
-            # Oldest first: use candles[-2]
+            # Oldest first: use candles[-2] as most recent completed
             last_candle = candles[-2]
-        
+            historical_candles = candles[-(VOL_LOOKBACK+2):-2]
+
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
         if ts == last_alert_ts:
             return last_alert_ts
-        
+
         close = float(last_candle['close'])
-        current_volume = float(last_candle['volume'])
+        v0 = float(last_candle['volume'])
+        avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
+        close_ok = close >= PRICE_LVL + PRICE_BUFFER
+        vol_ok = v0 >= VOL_FACTOR * avg20
         
-        # Historical candles for volume average (20 periods before the last closed candle)
-        if first_ts > last_ts:
-            historical_candles = candles[2:VOLUME_PERIOD+2]
-        else:
-            historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-        volumes = [float(c['volume']) for c in historical_candles]
-        avg_volume = sum(volumes) / len(volumes)
-        
-        # Alert logic
-        is_breakout_price = close > ENTRY_TRIGGER
-        is_high_volume = current_volume >= (avg_volume * VOLUME_MULTIPLIER)
-        in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-        
-        logger.info(f"=== ETH EMA CLUSTER BREAKOUT (DAILY) ===")
-        logger.info(f"Candle close: ${close:,.2f}, Volume: {current_volume:,.0f}, Avg Vol({VOLUME_PERIOD}): {avg_volume:,.0f}")
-        logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x Avg: {'✅ Met' if is_high_volume else '❌ Not Met'}")
-        logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW}-{ENTRY_ZONE_HIGH}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-        
-        if is_breakout_price and is_high_volume and in_entry_zone:
-            logger.info(f"--- ETH EMA CLUSTER BREAKOUT ALERT (DAILY) ---")
-            logger.info(f"Entry condition met: Daily close > ${ENTRY_TRIGGER:,.0f} with confirmed volume spike ≥ {VOLUME_MULTIPLIER}x 20-period avg.")
-            logger.info(f"Stop-loss: ${STOP_LOSS:,.0f}, First profit target: ${PROFIT_TARGET:,.0f}")
+        logger.info(f"=== BTC 4H BREAKOUT VOL SPIKE ===")
+        logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
+        logger.info(f"  - Close >= ${PRICE_LVL + PRICE_BUFFER:,.0f}: {'✅ Met' if close_ok else '❌ Not Met'}")
+        logger.info(f"  - Volume >= {VOL_FACTOR}x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
+
+        if close_ok and vol_ok:
+            logger.info(f"--- BTC 4H BREAKOUT VOL SPIKE ALERT ---")
+            logger.info(f"Entry condition met: 4h close >= ${PRICE_LVL + PRICE_BUFFER:,.0f} with volume spike.")
             try:
                 play_alert_sound()
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
-            
-            # Execute the trade
-            breakout_type = f"ema_cluster_{ENTRY_TRIGGER}"
-            trade_success, trade_result = execute_eth_ema_breakout_trade(cb_service, breakout_type, close, STOP_LOSS, PROFIT_TARGET)
+            # Take the trade
+            STOP_LOSS = 107000
+            PROFIT_TARGET = 113000
+            breakout_type = f"4h_breakout_vol_spike_{PRICE_LVL + PRICE_BUFFER}"
+            trade_success, trade_result = execute_crypto_trade(
+                cb_service=cb_service,
+                trade_type=f"4h breakout vol spike ({breakout_type})",
+                entry_price=close,
+                stop_loss=STOP_LOSS,
+                take_profit=PROFIT_TARGET,
+                margin=BTC_HORIZONTAL_MARGIN,
+                leverage=BTC_HORIZONTAL_LEVERAGE
+            )
             if trade_success:
-                logger.info(f"ETH EMA cluster breakout trade executed successfully!")
+                logger.info(f"BTC 4h breakout vol spike trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"ETH EMA cluster breakout trade failed: {trade_result}")
+                logger.error(f"BTC 4h breakout vol spike trade failed: {trade_result}")
             return ts
-            
     except Exception as e:
-        logger.error(f"Error in ETH EMA cluster breakout alert logic: {e}")
+        logger.error(f"Error in BTC 4h breakout vol spike alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
+
+
 
 
 def main():
@@ -500,7 +333,7 @@ def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
     # Show trade status
-    logger.info("✅ Ready to take BTC consolidation breakout trades (4H/1D)")
+    logger.info("✅ Ready to take BTC 4h breakout vol spike trades (4H)")
     logger.info("✅ Ready to take ETH EMA cluster breakout trades (1D)")
     logger.info("")  # Empty line for visual separation
     # Check if alert sound file exists
@@ -514,9 +347,7 @@ def main():
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
     logger.info("")  # Empty line for visual separation
     cb_service = setup_coinbase()
-    btc_horizontal_last_alert_ts_4h = None
-    btc_horizontal_last_alert_ts_1d = None
-    btc_momentum_last_alert_ts = None
+    btc_4h_breakout_last_alert_ts = None
     eth_ema_last_alert_ts = None
     consecutive_failures = 0
     max_consecutive_failures = 5
@@ -526,8 +357,8 @@ def main():
             # Reset failure counter on successful iteration start
             iteration_start_time = time.time()
             
-            # BTC consolidation breakout alert (4h and 1d)
-            btc_horizontal_last_alert_ts_4h, btc_horizontal_last_alert_ts_1d = btc_consolidation_breakout_alert(cb_service, btc_horizontal_last_alert_ts_4h, btc_horizontal_last_alert_ts_1d)
+            # BTC 4h breakout vol spike alert
+            btc_4h_breakout_last_alert_ts = btc_4h_breakout_vol_spike_alert(cb_service, btc_4h_breakout_last_alert_ts)
             # ETH EMA cluster breakout alert (1d)
             # eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
             
