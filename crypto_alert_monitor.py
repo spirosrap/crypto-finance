@@ -343,7 +343,7 @@ def btc_consolidation_breakout_alert(cb_service, last_alert_ts_4h=None, last_ale
                 current_rsi = None
             
             # Alert logic
-            is_breakout_price = close >= ENTRY_TRIGGER_LOW and close <= ENTRY_TRIGGER_HIGH
+            is_breakout_price = close >= ENTRY_TRIGGER_LOW
             is_volume_surge = current_volume >= (baseline_volume * VOLUME_MULTIPLIER)
             in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
             
@@ -352,7 +352,7 @@ def btc_consolidation_breakout_alert(cb_service, last_alert_ts_4h=None, last_ale
             logger.info(f"Baseline Vol({VOLUME_PERIOD}): {baseline_volume:,.0f}")
             rsi_text = f"RSI: {current_rsi:.1f}" if current_rsi is not None else "RSI: N/A"
             logger.info(f"  - {rsi_text}")
-            logger.info(f"  - Close in range ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f}: {'✅ Met' if is_breakout_price else '❌ Not Met'}")
+            logger.info(f"  - Close ≥ ${ENTRY_TRIGGER_LOW:,.0f} (breakout trigger): {'✅ Met' if is_breakout_price else '❌ Not Met'}")
             logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x baseline: {'✅ Met' if is_volume_surge else '❌ Not Met'}")
             logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
             logger.info(f"  - Targets: ${PROFIT_TARGET:,.0f} | Extended: ${EXTENDED_TARGET:,.0f}")
