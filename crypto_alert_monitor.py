@@ -9,6 +9,7 @@ import subprocess
 import sys
 import platform
 import os
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -235,14 +236,25 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         return False, str(e)
 
 
+class BreakoutState:
+    def __init__(self):
+        self.state = "WATCH"  # WATCH, TRIGGERED, ENTER
+        self.entry_price = None
+
+    def to_dict(self):
+        return {"state": self.state, "entry_price": self.entry_price}
+
+    def from_dict(self, d):
+        self.state = d.get("state", "WATCH")
+        self.entry_price = d.get("entry_price")
 
 
-def btc_4h_breakout_vol_spike_alert(cb_service, last_alert_ts=None):
+def btc_4h_breakout_vol_spike_alert_stateful(cb_service, breakout_state, last_alert_ts=None):
     """
-    BTC 4h breakout alert:
-    - Entry: 4h close >= 110,100 (hard threshold)
-    - Volume: >= 1.2x 20-period average
-    - Trade is taken when both conditions are met
+    BTC 4h breakout alert with 1-bar confirmation and state machine:
+    - WATCH: If close >= 110,100 and vol spike, set TRIGGERED
+    - TRIGGERED: On next bar, if close >= 110,000, enter trade; else reset to WATCH
+    - ENTER: If close < 110,000, exit trade; if high >= 111,500, move stop to breakeven
     """
     PRODUCT_ID = "BTC-PERP-INTX"
     GRANULARITY = "FOUR_HOUR"
@@ -250,7 +262,10 @@ def btc_4h_breakout_vol_spike_alert(cb_service, last_alert_ts=None):
     PRICE_LVL = 110000
     PRICE_BUFFER = 100
     VOL_FACTOR = 1.20
-    periods_needed = VOL_LOOKBACK + 2  # 20 for avg, 1 for current, 1 for safety
+    BREAKEVEN_HIGH = 111500
+    STOP_LOSS = 108600
+    PROFIT_TARGET = 113000
+    periods_needed = VOL_LOOKBACK + 3  # 20 for avg, 2 for current/prev, 1 for safety
     hours_needed = periods_needed * 4
 
     try:
@@ -270,57 +285,103 @@ def btc_4h_breakout_vol_spike_alert(cb_service, last_alert_ts=None):
         first_ts = int(candles[0]['start'])
         last_ts = int(candles[-1]['start'])
         if first_ts > last_ts:
-            # Newest first: use candles[1] as most recent completed
-            last_candle = candles[1]
-            historical_candles = candles[2:VOL_LOOKBACK+2]
+            # Newest first: use candles[1] as just-closed, [2] as prev, [3:23] as history
+            just_closed = candles[1]
+            prev_candle = candles[2]
+            historical_candles = candles[3:VOL_LOOKBACK+3]
         else:
-            # Oldest first: use candles[-2] as most recent completed
-            last_candle = candles[-2]
-            historical_candles = candles[-(VOL_LOOKBACK+2):-2]
+            # Oldest first: use candles[-2] as just-closed, [-3] as prev, [-(VOL_LOOKBACK+3):-3] as history
+            just_closed = candles[-2]
+            prev_candle = candles[-3]
+            historical_candles = candles[-(VOL_LOOKBACK+3):-3]
 
-        ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
+        ts = datetime.fromtimestamp(int(just_closed['start']), UTC)
         if ts == last_alert_ts:
             return last_alert_ts
 
-        close = float(last_candle['close'])
-        v0 = float(last_candle['volume'])
+        close = float(just_closed['close'])
+        high = float(just_closed['high'])
+        v0 = float(just_closed['volume'])
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
         close_ok = close >= PRICE_LVL + PRICE_BUFFER
         vol_ok = v0 >= VOL_FACTOR * avg20
-        
-        logger.info(f"=== BTC 4H BREAKOUT VOL SPIKE ===")
-        logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
+
+        logger.info(f"=== BTC 4H BREAKOUT STATE: {breakout_state.state} ===")
+        logger.info(f"Candle close: ${close:,.2f}, High: ${high:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
         logger.info(f"  - Close >= ${PRICE_LVL + PRICE_BUFFER:,.0f}: {'✅ Met' if close_ok else '❌ Not Met'}")
         logger.info(f"  - Volume >= {VOL_FACTOR}x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
 
-        if close_ok and vol_ok:
-            logger.info(f"--- BTC 4H BREAKOUT VOL SPIKE ALERT ---")
-            logger.info(f"Entry condition met: 4h close >= ${PRICE_LVL + PRICE_BUFFER:,.0f} with volume spike.")
-            try:
-                play_alert_sound()
-            except Exception as e:
-                logger.error(f"Failed to play alert sound: {e}")
-            # Take the trade
-            STOP_LOSS = 107000
-            PROFIT_TARGET = 113000
-            breakout_type = f"4h_breakout_vol_spike_{PRICE_LVL + PRICE_BUFFER}"
-            trade_success, trade_result = execute_crypto_trade(
-                cb_service=cb_service,
-                trade_type=f"4h breakout vol spike ({breakout_type})",
-                entry_price=close,
-                stop_loss=STOP_LOSS,
-                take_profit=PROFIT_TARGET,
-                margin=BTC_HORIZONTAL_MARGIN,
-                leverage=BTC_HORIZONTAL_LEVERAGE
-            )
-            if trade_success:
-                logger.info(f"BTC 4h breakout vol spike trade executed successfully!")
-                logger.info(f"Trade output: {trade_result}")
+        # State machine
+        if breakout_state.state == "WATCH":
+            if close_ok and vol_ok:
+                breakout_state.state = "TRIGGERED"
+                logger.info("State change: WATCH → TRIGGERED (waiting for confirmation)")
+            # else: remain in WATCH
+        elif breakout_state.state == "TRIGGERED":
+            # On confirmation bar (just-closed):
+            prev_close = float(prev_candle['close'])
+            if prev_close >= PRICE_LVL:
+                breakout_state.state = "ENTER"
+                breakout_state.entry_price = prev_close
+                logger.info(f"State change: TRIGGERED → ENTER (trade entry at ${prev_close:,.2f})")
+                try:
+                    play_alert_sound()
+                except Exception as e:
+                    logger.error(f"Failed to play alert sound: {e}")
+                trade_success, trade_result = execute_crypto_trade(
+                    cb_service=cb_service,
+                    trade_type="4h breakout 1-bar confirm",
+                    entry_price=prev_close,
+                    stop_loss=STOP_LOSS,
+                    take_profit=PROFIT_TARGET,
+                    margin=BTC_HORIZONTAL_MARGIN,
+                    leverage=BTC_HORIZONTAL_LEVERAGE
+                )
+                if trade_success:
+                    logger.info(f"BTC 4h breakout 1-bar confirm trade executed successfully!")
+                    logger.info(f"Trade output: {trade_result}")
+                else:
+                    logger.error(f"BTC 4h breakout 1-bar confirm trade failed: {trade_result}")
             else:
-                logger.error(f"BTC 4h breakout vol spike trade failed: {trade_result}")
-            return ts
+                breakout_state.state = "WATCH"
+                breakout_state.entry_price = None
+                logger.info("State change: TRIGGERED → WATCH (breakout failed)")
+        elif breakout_state.state == "ENTER":
+            # Exit if failed follow-through
+            if close < PRICE_LVL:
+                logger.info(f"Exit: close < ${PRICE_LVL:,.0f} (breakout nullified)")
+                try:
+                    subprocess.run([sys.executable, 'close_positions.py'], check=True, timeout=60)
+                    logger.info("Position closed via close_positions.py")
+                except Exception as e:
+                    logger.error(f"Failed to close position: {e}")
+                breakout_state.state = "WATCH"
+                breakout_state.entry_price = None
+                logger.info("State change: ENTER → WATCH (position closed)")
+            elif high >= BREAKEVEN_HIGH and breakout_state.entry_price:
+                # Move stop to breakeven (entry price)
+                logger.info(f"High >= ${BREAKEVEN_HIGH:,.0f}: Move stop to breakeven (${breakout_state.entry_price:,.2f})")
+                try:
+                    # Cancel all open orders for BTC-PERP-INTX
+                    cb_service.cancel_all_orders(product_id=PRODUCT_ID)
+                    logger.info("Cancelled all open orders for BTC-PERP-INTX before updating stop loss.")
+                    # Get position size (assume full margin * leverage for now)
+                    position_size_usd = BTC_HORIZONTAL_MARGIN * BTC_HORIZONTAL_LEVERAGE
+                    # Place new bracket order with stop at entry price
+                    bracket_result = cb_service.place_bracket_order(
+                        product_id=PRODUCT_ID,
+                        side="SELL",
+                        size=position_size_usd,
+                        entry_price=breakout_state.entry_price,
+                        take_profit_price=PROFIT_TARGET,
+                        stop_loss_price=breakout_state.entry_price
+                    )
+                    logger.info(f"Placed new bracket order with stop at breakeven: {bracket_result}")
+                except Exception as e:
+                    logger.error(f"Failed to update stop to breakeven: {e}")
+        return ts
     except Exception as e:
-        logger.error(f"Error in BTC 4h breakout vol spike alert logic: {e}")
+        logger.error(f"Error in BTC 4h breakout vol spike alert stateful logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
@@ -333,8 +394,7 @@ def main():
     logger.info("Starting multi-asset alert script")
     logger.info("")  # Empty line for visual separation
     # Show trade status
-    logger.info("✅ Ready to take BTC 4h breakout vol spike trades (4H)")
-    logger.info("✅ Ready to take ETH EMA cluster breakout trades (1D)")
+    logger.info("✅ Ready to take BTC 4h breakout vol spike trades (4H, 1-bar confirm)")
     logger.info("")  # Empty line for visual separation
     # Check if alert sound file exists
     alert_sound_file = "alert_sound.wav"
@@ -348,7 +408,7 @@ def main():
     logger.info("")  # Empty line for visual separation
     cb_service = setup_coinbase()
     btc_4h_breakout_last_alert_ts = None
-    eth_ema_last_alert_ts = None
+    breakout_state = BreakoutState()
     consecutive_failures = 0
     max_consecutive_failures = 5
     
@@ -357,10 +417,8 @@ def main():
             # Reset failure counter on successful iteration start
             iteration_start_time = time.time()
             
-            # BTC 4h breakout vol spike alert
-            btc_4h_breakout_last_alert_ts = btc_4h_breakout_vol_spike_alert(cb_service, btc_4h_breakout_last_alert_ts)
-            # ETH EMA cluster breakout alert (1d)
-            # eth_ema_last_alert_ts = eth_ema_cluster_breakout_alert(cb_service, eth_ema_last_alert_ts)
+            # BTC 4h breakout vol spike alert (stateful)
+            btc_4h_breakout_last_alert_ts = btc_4h_breakout_vol_spike_alert_stateful(cb_service, breakout_state, btc_4h_breakout_last_alert_ts)
             
             # Reset consecutive failures on successful completion
             consecutive_failures = 0
