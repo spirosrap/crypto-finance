@@ -249,6 +249,55 @@ class BreakoutState:
         self.entry_price = d.get("entry_price")
 
 
+def get_btc_perp_position_size(cb_service):
+    """
+    Returns the open position size for BTC-PERP-INTX (absolute value, in base currency units).
+    Returns 0.0 if no open position.
+    Handles both dict and SDK object responses.
+    """
+    try:
+        # Get the INTX portfolio UUID and breakdown
+        ports = cb_service.client.get_portfolios()
+        portfolio_uuid = None
+        for p in ports['portfolios']:
+            if p['type'] == "INTX":
+                portfolio_uuid = p['uuid']
+                break
+        if not portfolio_uuid:
+            logger.error("Could not find INTX portfolio")
+            return 0.0
+        portfolio = cb_service.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+        # Convert to dict if needed
+        if not isinstance(portfolio, dict):
+            if hasattr(portfolio, '__dict__'):
+                portfolio = vars(portfolio)
+            else:
+                logger.error("Portfolio breakdown is not a dict and has no __dict__")
+                return 0.0
+        breakdown = portfolio.get('breakdown', {})
+        # Convert breakdown to dict if needed
+        if not isinstance(breakdown, dict):
+            if hasattr(breakdown, '__dict__'):
+                breakdown = vars(breakdown)
+            else:
+                logger.error("Breakdown is not a dict and has no __dict__")
+                return 0.0
+        positions = breakdown.get('perp_positions', [])
+        for pos in positions:
+            # Convert pos to dict if needed
+            if not isinstance(pos, dict):
+                if hasattr(pos, '__dict__'):
+                    pos = vars(pos)
+                else:
+                    continue
+            if pos.get('symbol') == "BTC-PERP-INTX":
+                return abs(float(pos.get('net_size', 0)))
+        return 0.0
+    except Exception as e:
+        logger.error(f"Error getting BTC-PERP-INTX position size: {e}")
+        return 0.0
+
+
 def btc_4h_breakout_vol_spike_alert_stateful(cb_service, breakout_state, last_alert_ts=None):
     """
     BTC 4h breakout alert with 1-bar confirmation and state machine:
@@ -365,18 +414,21 @@ def btc_4h_breakout_vol_spike_alert_stateful(cb_service, breakout_state, last_al
                     # Cancel all open orders for BTC-PERP-INTX
                     cb_service.cancel_all_orders(product_id=PRODUCT_ID)
                     logger.info("Cancelled all open orders for BTC-PERP-INTX before updating stop loss.")
-                    # Get position size (assume full margin * leverage for now)
-                    position_size_usd = BTC_HORIZONTAL_MARGIN * BTC_HORIZONTAL_LEVERAGE
-                    # Place new bracket order with stop at entry price
-                    bracket_result = cb_service.place_bracket_order(
-                        product_id=PRODUCT_ID,
-                        side="SELL",
-                        size=position_size_usd,
-                        entry_price=breakout_state.entry_price,
-                        take_profit_price=PROFIT_TARGET,
-                        stop_loss_price=breakout_state.entry_price
-                    )
-                    logger.info(f"Placed new bracket order with stop at breakeven: {bracket_result}")
+                    # Get actual open position size
+                    position_size = get_btc_perp_position_size(cb_service)
+                    if position_size <= 0:
+                        logger.warning("No open BTC-PERP-INTX position found; cannot update stop.")
+                    else:
+                        # Place new bracket order with stop at entry price
+                        bracket_result = cb_service.place_bracket_order(
+                            product_id=PRODUCT_ID,
+                            side="SELL",
+                            size=position_size,
+                            entry_price=breakout_state.entry_price,
+                            take_profit_price=PROFIT_TARGET,
+                            stop_loss_price=breakout_state.entry_price
+                        )
+                        logger.info(f"Placed new bracket order with stop at breakeven: {bracket_result}")
                 except Exception as e:
                     logger.error(f"Failed to update stop to breakeven: {e}")
         return ts
