@@ -298,13 +298,13 @@ def get_btc_perp_position_size(cb_service):
         return 0.0
 
 
-def btc_triangle_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts_1d=None):
+def btc_longterm_res_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts_1d=None):
     """
-    BTC-USD confirmed triangle/ascending breakout alert:
-    - Entry trigger: 4-hr or daily close above $109,000 on ≥20% above-average volume
-    - Entry zone: $109,000–$109,500
-    - Stop-loss: $106,500
-    - First profit target: $115,000
+    BTC-USD breakout above long-term resistance (~$114k):
+    - Entry trigger: Daily/4-hr close > $114,000 on ≥20% volume surge
+    - Entry zone: 114,000–115,000
+    - Stop-loss: 110,500
+    - First profit target: 143,000
     """
     results = {}
     for timeframe in ['4h', '1d']:
@@ -319,10 +319,10 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts
             periods_needed = 20 + 2
             hours_needed = periods_needed * 24
             last_alert_ts = last_alert_ts_1d
-        ENTRY_ZONE_LOW = 109000
-        ENTRY_ZONE_HIGH = 109500
-        STOP_LOSS = 106500
-        PROFIT_TARGET = 115000
+        ENTRY_ZONE_LOW = 114000
+        ENTRY_ZONE_HIGH = 115000
+        STOP_LOSS = 110500
+        PROFIT_TARGET = 143000
         VOLUME_PERIOD = 20
         VOLUME_MULTIPLIER = 1.2
         try:
@@ -334,7 +334,7 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts
             end_ts = int(end.timestamp())
             candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
             if not candles or len(candles) < periods_needed:
-                logger.warning(f"Not enough BTC {GRANULARITY} candle data for triangle breakout alert.")
+                logger.warning(f"Not enough BTC {GRANULARITY} candle data for long-term resistance breakout alert.")
                 results[timeframe] = last_alert_ts
                 continue
             first_ts = int(candles[0]['start'])
@@ -354,12 +354,12 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts
             avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
             in_entry_zone = ENTRY_ZONE_LOW < close <= ENTRY_ZONE_HIGH
             vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-            logger.info(f"=== BTC TRIANGLE BREAKOUT ({timeframe.upper()}) ===")
+            logger.info(f"=== BTC LONG-TERM RESISTANCE BREAKOUT ({timeframe.upper()}) ===")
             logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
             logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
             logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
             if in_entry_zone and vol_ok:
-                logger.info(f"--- BTC TRIANGLE BREAKOUT ALERT ({timeframe.upper()}) ---")
+                logger.info(f"--- BTC LONG-TERM RESISTANCE BREAKOUT ALERT ({timeframe.upper()}) ---")
                 logger.info(f"Entry condition met: {timeframe.upper()} close in ${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f} with volume spike.")
                 try:
                     play_alert_sound()
@@ -367,7 +367,7 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts
                     logger.error(f"Failed to play alert sound: {e}")
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type=f"triangle breakout ({timeframe})",
+                    trade_type=f"longterm resistance breakout ({timeframe})",
                     entry_price=close,
                     stop_loss=STOP_LOSS,
                     take_profit=PROFIT_TARGET,
@@ -375,15 +375,15 @@ def btc_triangle_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts
                     leverage=BTC_HORIZONTAL_LEVERAGE
                 )
                 if trade_success:
-                    logger.info(f"BTC {timeframe.upper()} triangle breakout trade executed successfully!")
+                    logger.info(f"BTC {timeframe.upper()} long-term resistance breakout trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
                 else:
-                    logger.error(f"BTC {timeframe.upper()} triangle breakout trade failed: {trade_result}")
+                    logger.error(f"BTC {timeframe.upper()} long-term resistance breakout trade failed: {trade_result}")
                 results[timeframe] = ts
             else:
                 results[timeframe] = last_alert_ts
         except Exception as e:
-            logger.error(f"Error in BTC triangle breakout alert logic ({timeframe}): {e}")
+            logger.error(f"Error in BTC long-term resistance breakout alert logic ({timeframe}): {e}")
             import traceback
             logger.error(traceback.format_exc())
             results[timeframe] = last_alert_ts
@@ -419,7 +419,7 @@ def main():
             iteration_start_time = time.time()
             
             # BTC 4h breakout vol spike alert (stateful)
-            btc_4h_breakout_last_alert_ts = btc_triangle_breakout_alert(cb_service, btc_4h_breakout_last_alert_ts, None)
+            btc_4h_breakout_last_alert_ts = btc_longterm_res_breakout_alert(cb_service, btc_4h_breakout_last_alert_ts, None)
             
             # Reset consecutive failures on successful completion
             consecutive_failures = 0
