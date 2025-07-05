@@ -298,96 +298,80 @@ def get_btc_perp_position_size(cb_service):
         return 0.0
 
 
-def btc_longterm_res_breakout_alert(cb_service, last_alert_ts_4h=None, last_alert_ts_1d=None):
+def btc_1h_rejection_wick_short_alert(cb_service, last_alert_ts=None):
     """
-    BTC-USD breakout above long-term resistance (~$114k):
-    - Entry trigger: Daily/4-hr close > $114,000 on ≥20% volume surge
-    - Entry zone: 114,000–115,000
-    - Stop-loss: 110,500
-    - First profit target: 143,000
+    Bearish 1h rejection wick short setup:
+    - 1h high >= $108,800 and close < $108,000
+    - Enter short at close
+    - Stop-loss: $110,600
+    - Take profit: $104,000
     """
-    results = {}
-    for timeframe in ['4h', '1d']:
-        PRODUCT_ID = "BTC-PERP-INTX"
-        if timeframe == '4h':
-            GRANULARITY = "FOUR_HOUR"
-            periods_needed = 20 + 2
-            hours_needed = periods_needed * 4
-            last_alert_ts = last_alert_ts_4h
+    PRODUCT_ID = "BTC-PERP-INTX"
+    GRANULARITY = "ONE_HOUR"
+    periods_needed = 2  # 1 for just-closed, 1 for safety
+    hours_needed = periods_needed
+    WICK_ZONE = 108800
+    CLOSE_TRIGGER = 108000
+    STOP_LOSS = 110600
+    PROFIT_TARGET = 104000
+    try:
+        now = datetime.now(UTC)
+        now = now.replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=hours_needed)
+        end = now
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+        if not candles or len(candles) < periods_needed:
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for 1h rejection wick short alert.")
+            return last_alert_ts
+        first_ts = int(candles[0]['start'])
+        last_ts = int(candles[-1]['start'])
+        if first_ts > last_ts:
+            last_candle = candles[1]
         else:
-            GRANULARITY = "ONE_DAY"
-            periods_needed = 20 + 2
-            hours_needed = periods_needed * 24
-            last_alert_ts = last_alert_ts_1d
-        ENTRY_ZONE_LOW = 114000
-        ENTRY_ZONE_HIGH = 115000
-        STOP_LOSS = 110500
-        PROFIT_TARGET = 143000
-        VOLUME_PERIOD = 20
-        VOLUME_MULTIPLIER = 1.2
-        try:
-            now = datetime.now(UTC)
-            now = now.replace(minute=0, second=0, microsecond=0)
-            start = now - timedelta(hours=hours_needed)
-            end = now
-            start_ts = int(start.timestamp())
-            end_ts = int(end.timestamp())
-            candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-            if not candles or len(candles) < periods_needed:
-                logger.warning(f"Not enough BTC {GRANULARITY} candle data for long-term resistance breakout alert.")
-                results[timeframe] = last_alert_ts
-                continue
-            first_ts = int(candles[0]['start'])
-            last_ts = int(candles[-1]['start'])
-            if first_ts > last_ts:
-                last_candle = candles[1]
-                historical_candles = candles[2:VOLUME_PERIOD+2]
+            last_candle = candles[-2]
+        ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
+        if ts == last_alert_ts:
+            return last_alert_ts
+        high = float(last_candle['high'])
+        close = float(last_candle['close'])
+        wick_ok = high >= WICK_ZONE
+        close_ok = close < CLOSE_TRIGGER
+        logger.info(f"=== BTC 1H REJECTION WICK SHORT ===")
+        logger.info(f"Candle high: ${high:,.2f}, close: ${close:,.2f}")
+        logger.info(f"  - High >= ${WICK_ZONE:,.0f}: {'✅ Met' if wick_ok else '❌ Not Met'}")
+        logger.info(f"  - Close < ${CLOSE_TRIGGER:,.0f}: {'✅ Met' if close_ok else '❌ Not Met'}")
+        if wick_ok and close_ok:
+            logger.info(f"--- BTC 1H REJECTION WICK SHORT ALERT ---")
+            logger.info(f"Entry condition met: 1h high >= ${WICK_ZONE:,.0f} and close < ${CLOSE_TRIGGER:,.0f}.")
+            try:
+                play_alert_sound()
+            except Exception as e:
+                logger.error(f"Failed to play alert sound: {e}")
+            trade_success, trade_result = execute_crypto_trade(
+                cb_service=cb_service,
+                trade_type="1h rejection wick short",
+                entry_price=close,
+                stop_loss=STOP_LOSS,
+                take_profit=PROFIT_TARGET,
+                margin=BTC_HORIZONTAL_MARGIN,
+                leverage=BTC_HORIZONTAL_LEVERAGE,
+                side="SELL",
+                product=PRODUCT_ID
+            )
+            if trade_success:
+                logger.info(f"BTC 1h rejection wick short trade executed successfully!")
+                logger.info(f"Trade output: {trade_result}")
             else:
-                last_candle = candles[-2]
-                historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-            ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
-            if ts == last_alert_ts:
-                results[timeframe] = last_alert_ts
-                continue
-            close = float(last_candle['close'])
-            v0 = float(last_candle['volume'])
-            avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-            in_entry_zone = ENTRY_ZONE_LOW < close <= ENTRY_ZONE_HIGH
-            vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-            logger.info(f"=== BTC LONG-TERM RESISTANCE BREAKOUT ({timeframe.upper()}) ===")
-            logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-            logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-            logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
-            if in_entry_zone and vol_ok:
-                logger.info(f"--- BTC LONG-TERM RESISTANCE BREAKOUT ALERT ({timeframe.upper()}) ---")
-                logger.info(f"Entry condition met: {timeframe.upper()} close in ${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f} with volume spike.")
-                try:
-                    play_alert_sound()
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type=f"longterm resistance breakout ({timeframe})",
-                    entry_price=close,
-                    stop_loss=STOP_LOSS,
-                    take_profit=PROFIT_TARGET,
-                    margin=BTC_HORIZONTAL_MARGIN,
-                    leverage=BTC_HORIZONTAL_LEVERAGE
-                )
-                if trade_success:
-                    logger.info(f"BTC {timeframe.upper()} long-term resistance breakout trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                else:
-                    logger.error(f"BTC {timeframe.upper()} long-term resistance breakout trade failed: {trade_result}")
-                results[timeframe] = ts
-            else:
-                results[timeframe] = last_alert_ts
-        except Exception as e:
-            logger.error(f"Error in BTC long-term resistance breakout alert logic ({timeframe}): {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            results[timeframe] = last_alert_ts
-    return results.get('4h', last_alert_ts_4h), results.get('1d', last_alert_ts_1d)
+                logger.error(f"BTC 1h rejection wick short trade failed: {trade_result}")
+            return ts
+        return last_alert_ts
+    except Exception as e:
+        logger.error(f"Error in BTC 1h rejection wick short alert logic: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    return last_alert_ts
 
 
 def main():
@@ -419,7 +403,7 @@ def main():
             iteration_start_time = time.time()
             
             # BTC 4h breakout vol spike alert (stateful)
-            btc_4h_breakout_last_alert_ts = btc_longterm_res_breakout_alert(cb_service, btc_4h_breakout_last_alert_ts, None)
+            btc_4h_breakout_last_alert_ts = btc_1h_rejection_wick_short_alert(cb_service, btc_4h_breakout_last_alert_ts)
             
             # Reset consecutive failures on successful completion
             consecutive_failures = 0
@@ -467,4 +451,4 @@ def main():
             time.sleep(delay)
 
 if __name__ == "__main__":
-    main() 
+    main()
