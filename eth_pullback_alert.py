@@ -212,6 +212,8 @@ def eth_pullback_alert(cb_service, last_alert_ts=None):
             if trade_success:
                 logger.info(f"ETH pull-back long trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
+                logger.info("🎯 Trade taken successfully - exiting program")
+                sys.exit(0)  # Exit with success code
             else:
                 logger.error(f"ETH pull-back long trade failed: {trade_result}")
             return ts
