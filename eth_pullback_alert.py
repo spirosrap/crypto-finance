@@ -182,7 +182,7 @@ def eth_pullback_alert(cb_service, last_alert_ts=None):
                 vwap = ta.vwap(df['high'], df['low'], df['close'], df['volume'])
                 vwap_30d = vwap.iloc[-2] if vwap is not None and len(vwap) >= 2 else None
                 if vwap_30d is not None:
-                    vwap_stop = float(vwap_30d)
+                    vwap_stop = round(float(vwap_30d), 2)
             else:
                 logger.warning(f"VWAP calculation skipped: DataFrame empty or missing columns. Columns: {df.columns.tolist()}")
         except Exception as e:
