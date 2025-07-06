@@ -104,31 +104,26 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         logger.error(f"Error executing crypto {trade_type} trade: {e}")
         return False, str(e)
 
-def xrp_trendline_bounce_alert(cb_service, last_alert_ts_1h=None, last_alert_ts_2h=None):
+def xrp_trend_retest_and_breakout_alert(cb_service, last_alert_ts_1h=None, last_alert_ts_4h=None):
     results = {}
-    for timeframe in ['1h', '2h']:
-        if timeframe == '1h':
-            GRANULARITY = "ONE_HOUR"
-            periods_needed = VOLUME_PERIOD + 2
-            hours_needed = periods_needed
-            last_alert_ts = last_alert_ts_1h
+    # --- Trend-retest (1h) ---
+    timeframe = '1h'
+    GRANULARITY = "ONE_HOUR"
+    periods_needed = VOLUME_PERIOD + 2
+    hours_needed = periods_needed
+    last_alert_ts = last_alert_ts_1h
+    try:
+        now = datetime.now(UTC)
+        now = now.replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=hours_needed)
+        end = now
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+        if not candles or len(candles) < periods_needed:
+            logger.warning(f"Not enough XRP {GRANULARITY} candle data for trend-retest alert.")
+            results[timeframe] = last_alert_ts
         else:
-            GRANULARITY = "TWO_HOUR"
-            periods_needed = VOLUME_PERIOD + 2
-            hours_needed = periods_needed * 2
-            last_alert_ts = last_alert_ts_2h
-        try:
-            now = datetime.now(UTC)
-            now = now.replace(minute=0, second=0, microsecond=0)
-            start = now - timedelta(hours=hours_needed)
-            end = now
-            start_ts = int(start.timestamp())
-            end_ts = int(end.timestamp())
-            candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-            if not candles or len(candles) < periods_needed:
-                logger.warning(f"Not enough XRP {GRANULARITY} candle data for trendline bounce alert.")
-                results[timeframe] = last_alert_ts
-                continue
             first_ts = int(candles[0]['start'])
             last_ts = int(candles[-1]['start'])
             if first_ts > last_ts:
@@ -140,50 +135,142 @@ def xrp_trendline_bounce_alert(cb_service, last_alert_ts_1h=None, last_alert_ts_
             ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
             if ts == last_alert_ts:
                 results[timeframe] = last_alert_ts
-                continue
-            close = float(last_candle['close'])
-            v0 = float(last_candle['volume'])
-            avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-            reclaim = close >= ENTRY_TRIGGER
-            in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-            vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-            logger.info(f"=== XRP TRENDLINE BOUNCE ({timeframe.upper()}) ===")
-            logger.info(f"Candle close: ${close:,.4f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-            logger.info(f"  - Reclaim >= ${ENTRY_TRIGGER:,.2f}: {'✅ Met' if reclaim else '❌ Not Met'}")
-            logger.info(f"  - Entry zone ${ENTRY_ZONE_LOW:,.2f}-${ENTRY_ZONE_HIGH:,.2f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-            logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
-            if reclaim and in_entry_zone and vol_ok:
-                logger.info(f"--- XRP TRENDLINE BOUNCE ALERT ({timeframe.upper()}) ---")
-                logger.info(f"Entry condition met: {timeframe.upper()} close >= ${ENTRY_TRIGGER:,.2f} in zone ${ENTRY_ZONE_LOW:,.2f}-${ENTRY_ZONE_HIGH:,.2f} with volume spike.")
-                try:
-                    play_alert_sound()
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type=f"XRP trendline bounce ({timeframe})",
-                    entry_price=close,
-                    stop_loss=STOP_LOSS,
-                    take_profit=TP1,
-                    margin=XRP_MARGIN,
-                    leverage=XRP_LEVERAGE,
-                    side="BUY",
-                    product=PRODUCT_ID
-                )
-                if trade_success:
-                    logger.info(f"XRP {timeframe.upper()} trendline bounce trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                else:
-                    logger.error(f"XRP {timeframe.upper()} trendline bounce trade failed: {trade_result}")
-                results[timeframe] = ts
             else:
-                results[timeframe] = last_alert_ts
-        except Exception as e:
-            logger.error(f"Error in XRP trendline bounce alert logic ({timeframe}): {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+                close = float(last_candle['close'])
+                v0 = float(last_candle['volume'])
+                avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
+                in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
+                vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
+                # Calculate RSI
+                closes = [float(c['close']) for c in candles[-(VOLUME_PERIOD+15):]]
+                rsi = ta.rsi(pd.Series(closes), length=14).iloc[-2] if len(closes) >= 16 else None
+                rsi_ok = rsi is not None and rsi > 50
+                # Format RSI for logging
+                rsi_str = f"{rsi:.2f}" if rsi is not None else "N/A"
+                logger.info(f"=== XRP TREND-RETEST (1H) ===")
+                logger.info(f"Candle close: ${close:,.4f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}, RSI: {rsi_str}")
+                logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,.2f}-${ENTRY_ZONE_HIGH:,.2f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
+                logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
+                logger.info(f"  - RSI > 50: {'✅ Met' if rsi_ok else '❌ Not Met'}")
+                if in_entry_zone and vol_ok and rsi_ok:
+                    logger.info(f"--- XRP TREND-RETEST ALERT (1H) ---")
+                    logger.info(f"Entry condition met: 1h close in ${ENTRY_ZONE_LOW:,.2f}-${ENTRY_ZONE_HIGH:,.2f}, vol spike, RSI > 50.")
+                    try:
+                        play_alert_sound()
+                    except Exception as e:
+                        logger.error(f"Failed to play alert sound: {e}")
+                    trade_success, trade_result = execute_crypto_trade(
+                        cb_service=cb_service,
+                        trade_type="XRP trend-retest (1h)",
+                        entry_price=close,
+                        stop_loss=STOP_LOSS,
+                        take_profit=TP1,
+                        margin=XRP_MARGIN,
+                        leverage=XRP_LEVERAGE,
+                        side="BUY",
+                        product=PRODUCT_ID
+                    )
+                    if trade_success:
+                        logger.info(f"XRP 1H trend-retest trade executed successfully!")
+                        logger.info(f"Trade output: {trade_result}")
+                    else:
+                        logger.error(f"XRP 1H trend-retest trade failed: {trade_result}")
+                    results[timeframe] = ts
+                else:
+                    results[timeframe] = last_alert_ts
+    except Exception as e:
+        logger.error(f"Error in XRP trend-retest alert logic (1h): {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        results[timeframe] = last_alert_ts
+
+    # --- Breakout-continuation (4h) ---
+    timeframe = '4h'
+    GRANULARITY = "FOUR_HOUR"
+    periods_needed = VOLUME_PERIOD + 2
+    hours_needed = periods_needed * 4
+    last_alert_ts = last_alert_ts_4h
+    try:
+        now = datetime.now(UTC)
+        now = now.replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=hours_needed)
+        end = now
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+        if not candles or len(candles) < periods_needed:
+            logger.warning(f"Not enough XRP {GRANULARITY} candle data for breakout-continuation alert.")
             results[timeframe] = last_alert_ts
-    return results.get('1h', last_alert_ts_1h), results.get('2h', last_alert_ts_2h)
+        else:
+            first_ts = int(candles[0]['start'])
+            last_ts = int(candles[-1]['start'])
+            if first_ts > last_ts:
+                last_candle = candles[1]
+                prev_candle = candles[2]
+                historical_candles = candles[3:VOLUME_PERIOD+3]
+            else:
+                last_candle = candles[-2]
+                prev_candle = candles[-3]
+                historical_candles = candles[-(VOLUME_PERIOD+3):-3]
+            ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
+            if ts == last_alert_ts:
+                results[timeframe] = last_alert_ts
+            else:
+                close = float(last_candle['close'])
+                v0 = float(last_candle['volume'])
+                avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
+                breakout = close >= 2.30
+                vol_ok = v0 >= 1.20 * avg20
+                logger.info(f"=== XRP BREAKOUT-CONTINUATION (4H) ===")
+                logger.info(f"Candle close: ${close:,.4f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
+                logger.info(f"  - Close ≥ $2.30: {'✅ Met' if breakout else '❌ Not Met'}")
+                logger.info(f"  - Volume surge ≥ 1.20x baseline: {'✅ Met' if vol_ok else '❌ Not Met'}")
+                # Pull-back logic: wait for next close with price at least 0.3% below breakout close
+                if breakout and vol_ok:
+                    # Save breakout close for pull-back check
+                    results['4h_breakout_close'] = close
+                    results[timeframe] = ts
+                elif '4h_breakout_close' in results:
+                    # Check for pull-back
+                    pullback_close = close
+                    breakout_close = results['4h_breakout_close']
+                    if pullback_close <= breakout_close * 0.997:  # 0.3% pull-back
+                        logger.info(f"--- XRP BREAKOUT-CONTINUATION PULLBACK ENTRY (4H) ---")
+                        logger.info(f"Entry condition met: 4h close pull-back ≥ 0.3% after breakout close.")
+                        try:
+                            play_alert_sound()
+                        except Exception as e:
+                            logger.error(f"Failed to play alert sound: {e}")
+                        trade_success, trade_result = execute_crypto_trade(
+                            cb_service=cb_service,
+                            trade_type="XRP breakout-continuation (4h)",
+                            entry_price=pullback_close,
+                            stop_loss=2.21,
+                            take_profit=2.45,
+                            margin=XRP_MARGIN,
+                            leverage=XRP_LEVERAGE,
+                            side="BUY",
+                            product=PRODUCT_ID
+                        )
+                        if trade_success:
+                            logger.info(f"XRP 4H breakout-continuation trade executed successfully!")
+                            logger.info(f"Trade output: {trade_result}")
+                        else:
+                            logger.error(f"XRP 4H breakout-continuation trade failed: {trade_result}")
+                        # Remove breakout_close after entry
+                        del results['4h_breakout_close']
+                        results[timeframe] = ts
+                    else:
+                        logger.info(f"Waiting for pull-back entry: current close ${pullback_close:.4f}, breakout close ${breakout_close:.4f}")
+                        results[timeframe] = last_alert_ts
+                else:
+                    results[timeframe] = last_alert_ts
+    except Exception as e:
+        logger.error(f"Error in XRP breakout-continuation alert logic (4h): {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        results[timeframe] = last_alert_ts
+    return results.get('1h', last_alert_ts_1h), results.get('4h', last_alert_ts_4h)
 
 def main():
     logger.info("Starting XRP trendline bounce alert script")
@@ -201,11 +288,11 @@ def main():
     logger.info("")
     cb_service = setup_coinbase()
     xrp_last_alert_ts_1h = None
-    xrp_last_alert_ts_2h = None
+    xrp_last_alert_ts_4h = None
     while True:
         try:
             iteration_start_time = time.time()
-            xrp_last_alert_ts_1h, xrp_last_alert_ts_2h = xrp_trendline_bounce_alert(cb_service, xrp_last_alert_ts_1h, xrp_last_alert_ts_2h)
+            xrp_last_alert_ts_1h, xrp_last_alert_ts_4h = xrp_trend_retest_and_breakout_alert(cb_service, xrp_last_alert_ts_1h, xrp_last_alert_ts_4h)
             wait_seconds = 300
             logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
             logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll")
