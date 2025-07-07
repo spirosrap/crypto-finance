@@ -79,8 +79,8 @@ STOP_LOSS = 2480
 PROFIT_TARGET = 2800
 POTENTIAL_TARGET = 3000
 VOLUME_MULTIPLIER = 1.20  # 20% above average
-ETH_MARGIN = 200  # USD
-ETH_LEVERAGE = 10
+ETH_MARGIN = 300  # USD
+ETH_LEVERAGE = 20
 
 
 def play_alert_sound(filename="alert_sound.wav"):
