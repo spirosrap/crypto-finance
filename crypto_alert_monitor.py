@@ -374,6 +374,91 @@ def btc_1h_rejection_wick_short_alert(cb_service, last_alert_ts=None):
     return last_alert_ts
 
 
+def btc_4h_breakout_momentum_alert(cb_service, last_alert_ts=None):
+    """
+    BTC-USD breakout above $109K with momentum confirmation:
+    - Entry trigger: 4-hr/daily close >109,600–110,000 on ≥20% above-average volume
+    - Entry zone: 109,600–110,200
+    - Stop-loss: 107,000
+    - First profit target: 115,000
+    """
+    PRODUCT_ID = "BTC-PERP-INTX"
+    GRANULARITY = "FOUR_HOUR"
+    VOLUME_PERIOD = 20
+    periods_needed = VOLUME_PERIOD + 2
+    hours_needed = periods_needed * 4
+    ENTRY_TRIGGER_LOW = 109600
+    ENTRY_TRIGGER_HIGH = 110000
+    ENTRY_ZONE_LOW = 109600
+    ENTRY_ZONE_HIGH = 110200
+    STOP_LOSS = 107000
+    PROFIT_TARGET = 115000
+    VOLUME_MULTIPLIER = 1.20  # 20% above average
+    try:
+        now = datetime.now(UTC)
+        now = now.replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=hours_needed)
+        end = now
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+        if not candles or len(candles) < periods_needed:
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for 4h breakout alert.")
+            return last_alert_ts
+        first_ts = int(candles[0]['start'])
+        last_ts = int(candles[-1]['start'])
+        if first_ts > last_ts:
+            last_candle = candles[1]
+            historical_candles = candles[2:VOLUME_PERIOD+2]
+        else:
+            last_candle = candles[-2]
+            historical_candles = candles[-(VOLUME_PERIOD+2):-2]
+        ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
+        if ts == last_alert_ts:
+            return last_alert_ts
+        close = float(last_candle['close'])
+        v0 = float(last_candle['volume'])
+        avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
+        trigger_ok = ENTRY_TRIGGER_LOW < close <= ENTRY_TRIGGER_HIGH
+        vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
+        in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
+        logger.info(f"=== BTC 4H BREAKOUT MOMENTUM ALERT ===")
+        logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
+        logger.info(f"  - Close in trigger zone ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ 1.20x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
+        logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,.0f}-${ENTRY_ZONE_HIGH:,.0f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
+        if trigger_ok and vol_ok and in_entry_zone:
+            logger.info(f"--- BTC 4H BREAKOUT MOMENTUM TRADE ALERT ---")
+            logger.info(f"Entry condition met: 4h close in ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f}, vol spike, entry zone.")
+            try:
+                play_alert_sound()
+            except Exception as e:
+                logger.error(f"Failed to play alert sound: {e}")
+            trade_success, trade_result = execute_crypto_trade(
+                cb_service=cb_service,
+                trade_type="4h breakout momentum long",
+                entry_price=close,
+                stop_loss=STOP_LOSS,
+                take_profit=PROFIT_TARGET,
+                margin=BTC_HORIZONTAL_MARGIN,
+                leverage=BTC_HORIZONTAL_LEVERAGE,
+                side="BUY",
+                product=PRODUCT_ID
+            )
+            if trade_success:
+                logger.info(f"BTC 4h breakout momentum trade executed successfully!")
+                logger.info(f"Trade output: {trade_result}")
+            else:
+                logger.error(f"BTC 4h breakout momentum trade failed: {trade_result}")
+            return ts
+        return last_alert_ts
+    except Exception as e:
+        logger.error(f"Error in BTC 4h breakout momentum alert logic: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    return last_alert_ts
+
+
 def main():
     global btc_continuation_trade_taken
     logger.info("Starting multi-asset alert script")
@@ -399,33 +484,26 @@ def main():
     
     while True:
         try:
-            # Reset failure counter on successful iteration start
             iteration_start_time = time.time()
-            
-            # BTC 4h breakout vol spike alert (stateful)
+            # BTC 4h breakout momentum alert
+            btc_4h_breakout_last_alert_ts = btc_4h_breakout_momentum_alert(cb_service, btc_4h_breakout_last_alert_ts)
+            # BTC 1h rejection wick short alert
             btc_4h_breakout_last_alert_ts = btc_1h_rejection_wick_short_alert(cb_service, btc_4h_breakout_last_alert_ts)
-            
-            # Reset consecutive failures on successful completion
             consecutive_failures = 0
-            
-            # Wait 5 minutes until next poll
-            wait_seconds = 300  # 5 minutes
+            wait_seconds = 300
             logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
             logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll")
-            logger.info("")  # Empty line for visual separation
+            logger.info("")
             time.sleep(wait_seconds)
-            
         except KeyboardInterrupt:
             logger.info("👋 Stopped by user.")
             break
         except CONNECTION_ERRORS as e:
             consecutive_failures += 1
             logger.error(f"🔗 Connection error (failure {consecutive_failures}/{max_consecutive_failures}): {e}")
-            
             if consecutive_failures >= max_consecutive_failures:
                 logger.error(f"❌ Too many consecutive connection failures. Attempting to reconnect...")
                 try:
-                    # Try to reconnect
                     cb_service = setup_coinbase()
                     consecutive_failures = 0
                     logger.info("✅ Reconnection successful, resuming monitoring...")
@@ -434,19 +512,15 @@ def main():
                     logger.info("😴 Sleeping for 5 minutes before retry...")
                     time.sleep(300)
             else:
-                # Exponential backoff for connection errors
                 delay = exponential_backoff_delay(consecutive_failures - 1)
                 logger.info(f"🔄 Retrying in {delay:.1f} seconds...")
                 time.sleep(delay)
-                
         except Exception as e:
             consecutive_failures += 1
             logger.error(f"❌ Unexpected error in alert loop (failure {consecutive_failures}): {e}")
             import traceback
             logger.error(traceback.format_exc())
-            
-            # For non-connection errors, use a shorter delay
-            delay = min(60 * consecutive_failures, 300)  # Max 5 minutes
+            delay = min(60 * consecutive_failures, 300)
             logger.info(f"😴 Sleeping for {delay} seconds before retry...")
             time.sleep(delay)
 
