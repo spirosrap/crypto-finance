@@ -84,7 +84,7 @@ def preview_order(cb_service, product_id: str, side: str, size: float, leverage:
 
 def validate_params(product_id: str, side: str, size_usd: float, leverage: float, tp_price: float, sl_price: float, limit_price: float, cb_service):
     """Validate input parameters."""
-    valid_products = ['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX"]
+    valid_products = ['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX",'NEAR-PERP-INTX']
     if product_id not in valid_products:
         raise ValueError(f"Invalid product. Must be one of: {', '.join(valid_products)}")
 
@@ -180,7 +180,7 @@ def calculate_base_size(product_id: str, size_usd: float, current_price: float) 
 def main():
     parser = argparse.ArgumentParser(description='Place a leveraged market or limit order for perpetual futures')
     parser.add_argument('--product', type=str, default='BTC-PERP-INTX',
-                      choices=['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX"],
+                      choices=['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX", "NEAR-PERP-INTX"],
                       help='Trading product (default: BTC-PERP-INTX)')
     parser.add_argument('--side', type=str, choices=['BUY', 'SELL'],
                       help='Trade direction (BUY/SELL)')
