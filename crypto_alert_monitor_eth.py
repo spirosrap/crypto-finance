@@ -82,6 +82,10 @@ VOLUME_MULTIPLIER = 1.20  # 20% above average
 ETH_MARGIN = 300  # USD
 ETH_LEVERAGE = 20
 TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
+# Add new constants for extended target and volume surge
+EXTENDED_TARGET_LOW = 3000
+EXTENDED_TARGET_HIGH = 3150
+VOLUME_SURGE_MULTIPLIER = 1.5  # 50% above average for extended target
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -212,11 +216,12 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
         close = float(last_candle['close'])
         v0 = float(last_candle['volume'])
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-        trigger_ok = ENTRY_TRIGGER_LOW < close <= ENTRY_TRIGGER_HIGH
+        # --- MODIFIED ENTRY TRIGGER LOGIC ---
+        trigger_ok = (close > ENTRY_TRIGGER_LOW) and (close <= ENTRY_TRIGGER_HIGH)
         vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-        logger.info(f"=== ETH DAILY SYMMETRICAL TRIANGLE BREAKOUT ALERT ===")
+        logger.info(f"=== ETH DAILY ASCENDING TRIANGLE BREAKOUT ALERT ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close in trigger zone ${ENTRY_TRIGGER_LOW:,.0f}-${ENTRY_TRIGGER_HIGH:,.0f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
+        logger.info(f"  - Close in trigger zone >${ENTRY_TRIGGER_LOW:,.0f} and <=${ENTRY_TRIGGER_HIGH:,.0f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
         logger.info(f"  - Volume ≥ 1.20x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
         # Step 1: Set trigger if in trigger zone and volume is high
         if trigger_ok and vol_ok and not trigger_state.get("triggered", False):
@@ -233,8 +238,20 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
                     continue
                 high = float(c['high'])
                 low = float(c['low'])
+                c_close = float(c['close'])
+                c_vol = float(c['volume'])
+                # Check if price touched entry zone
                 if (ENTRY_ZONE_LOW <= high <= ENTRY_ZONE_HIGH) or (ENTRY_ZONE_LOW <= low <= ENTRY_ZONE_HIGH) or (low < ENTRY_ZONE_LOW and high > ENTRY_ZONE_HIGH):
-                    logger.info(f"--- ETH DAILY SYMMETRICAL TRIANGLE BREAKOUT TRADE ALERT ---")
+                    # --- EXTENDED TARGET LOGIC ---
+                    extended_target = False
+                    if c_close > ENTRY_ZONE_HIGH and c_vol >= VOLUME_SURGE_MULTIPLIER * avg20:
+                        take_profit = EXTENDED_TARGET_HIGH
+                        extended_target = True
+                        logger.info(f"🚀 Breakout above ${ENTRY_ZONE_HIGH} with volume surge! Using extended profit target: ${EXTENDED_TARGET_LOW}-${EXTENDED_TARGET_HIGH}")
+                    else:
+                        take_profit = PROFIT_TARGET
+                        logger.info(f"🎯 Using standard profit target: ${PROFIT_TARGET}")
+                    logger.info(f"--- ETH DAILY ASCENDING TRIANGLE BREAKOUT TRADE ALERT ---")
                     logger.info(f"Entry condition met: price touched entry zone (${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH}) after trigger. Taking trade.")
                     try:
                         play_alert_sound()
@@ -245,7 +262,7 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
                         trade_type="ETH daily triangle breakout long",
                         entry_price=high if high >= ENTRY_ZONE_LOW else low,
                         stop_loss=STOP_LOSS,
-                        take_profit=PROFIT_TARGET,
+                        take_profit=take_profit,
                         margin=ETH_MARGIN,
                         leverage=ETH_LEVERAGE,
                         side="BUY",
