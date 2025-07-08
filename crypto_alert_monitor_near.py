@@ -78,7 +78,7 @@ STOP_LOSS = 2.10
 PROFIT_TARGET = 2.30
 VOLUME_MULTIPLIER = 1.50  # 50% above average
 NEAR_MARGIN = 200  # USD
-NEAR_LEVERAGE = 15
+NEAR_LEVERAGE = 20
 
 TRIGGER_STATE_FILE = "near_breakout_trigger_state.json"
 
