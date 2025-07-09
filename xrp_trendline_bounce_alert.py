@@ -151,19 +151,27 @@ def xrp_breakout_pullback_alert(cb_service, last_alert_ts=None):
         latest_low = float(latest_candle['low'])
         latest_high = float(latest_candle['high'])
         latest_vol = float(latest_candle['volume'])
-        logger.info(f"Latest Completed Candle: {latest_time.strftime('%m-%d')} Close=${latest_close:.4f}, Low=${latest_low:.4f}, High=${latest_high:.4f}, Volume={latest_vol:.0f}")
-        # Log last 5 candle times and closes for verification
-        candle_info = []
-        for c in candles[-5:]:
-            t = datetime.fromtimestamp(int(c['start']), UTC)
-            candle_info.append(f"{t.strftime('%m-%d')}:${c['close']}")
-        logger.info(f"Last 5 candles: {' | '.join(candle_info)}")
-        # --- Summary of what we're waiting for ---
+        
+        # Calculate average volume
+        recent_volumes = [float(c['volume']) for c in candles[-VOLUME_PERIOD-1:-1]]  # Exclude current incomplete candle
+        avg_volume = sum(recent_volumes) / len(recent_volumes) if recent_volumes else 0
+        
+        logger.info(f"=== XRP DAILY BREAKOUT PULLBACK ALERT ===")
+        logger.info(f"Candle close: ${latest_close:.2f}, Volume: {latest_vol:,.0f}, Avg({VOLUME_PERIOD}): {avg_volume:,.0f}")
+        
+        # Check conditions
+        close_above_240 = latest_close > 2.40
+        volume_above_threshold = latest_vol >= avg_volume * VOLUME_MULTIPLIER if avg_volume > 0 else False
+        
+        logger.info(f"  - Close > $2.40: {'✅ Met' if close_above_240 else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x avg: {'✅ Met' if volume_above_threshold else '❌ Not Met'}")
+        
+        # Show trigger status
         trigger_state_str = trigger_state.get("triggered", False)
         if not trigger_state_str:
-            logger.info("Waiting for: Daily close > $2.40 to set breakout trigger. If price slips < $2.24 before that, setup is invalidated.")
+            logger.info("  - Breakout trigger: ❌ Waiting for close > $2.40")
         else:
-            logger.info("Breakout triggered! Waiting for: First daily close in $2.38–2.40 (pullback entry), with no price slip < $2.24 since trigger. Stop: $2.24, Take-profit: $2.60–2.65.")
+            logger.info("  - Breakout trigger: ✅ Active - waiting for pullback to $2.38-2.40")
         # Step 1: If not triggered, look for daily close > 2.40
         if not trigger_state.get("triggered", False):
             for i in range(len(candles)-2, -1, -1):  # Only check completed candles
@@ -172,17 +180,16 @@ def xrp_breakout_pullback_alert(cb_service, last_alert_ts=None):
                 low = float(c['low'])
                 ts = int(c['start'])
                 if close > 2.40:
-                    logger.info(f"Trigger set: Daily close ${close:.2f} > $2.40 at {datetime.fromtimestamp(ts, UTC).strftime('%m-%d')}")
+                    logger.info(f"✅ Breakout trigger set: Daily close ${close:.2f} > $2.40 at {datetime.fromtimestamp(ts, UTC).strftime('%m-%d')}")
                     trigger_state = {"triggered": True, "trigger_ts": ts, "min_price_since_trigger": close}
                     save_trigger_state(trigger_state)
                     return last_alert_ts
                 if low < 2.24:
-                    logger.info(f"Slip candle time: {datetime.fromtimestamp(ts, UTC).strftime('%m-%d')}")
-                    logger.info(f"Price slipped below $2.24 (${low:.2f}) before trigger. Waiting for new base.")
+                    logger.info(f"❌ Price slipped below $2.24 (${low:.2f}) before trigger. Setup invalidated.")
                     trigger_state = {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
                     save_trigger_state(trigger_state)
                     return last_alert_ts
-            logger.info("No daily close > $2.40 found yet. Waiting...")
+            logger.info("⏳ No daily close > $2.40 found yet. Waiting...")
             return last_alert_ts
         # Step 2: If triggered, look for first pullback into 2.38–2.40, and check for slip < 2.24
         triggered_ts = trigger_state.get("trigger_ts")
@@ -200,13 +207,14 @@ def xrp_breakout_pullback_alert(cb_service, last_alert_ts=None):
                 trigger_state["min_price_since_trigger"] = min_price
                 save_trigger_state(trigger_state)
             if low < 2.24:
-                logger.info(f"Price slipped below $2.24 (${low:.2f}) after trigger. Setup invalidated. Waiting for new base.")
+                logger.info(f"❌ Price slipped below $2.24 (${low:.2f}) after trigger. Setup invalidated.")
                 trigger_state = {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
                 save_trigger_state(trigger_state)
                 return last_alert_ts
             if 2.38 <= close <= 2.40:
-                logger.info(f"--- XRP BREAKOUT PULLBACK TRADE ALERT ---")
+                logger.info(f"=== XRP BREAKOUT PULLBACK TRADE EXECUTED ===")
                 logger.info(f"Entry condition met: pullback close ${close:.2f} in $2.38–2.40 after breakout trigger.")
+                logger.info(f"Trade params: Stop Loss: $2.24, Take Profit: $2.60, Margin: ${XRP_MARGIN}, Leverage: {XRP_LEVERAGE}x")
                 try:
                     play_alert_sound()
                 except Exception as e:
@@ -223,15 +231,15 @@ def xrp_breakout_pullback_alert(cb_service, last_alert_ts=None):
                     product=PRODUCT_ID
                 )
                 if trade_success:
-                    logger.info(f"XRP breakout pullback trade executed successfully!")
+                    logger.info(f"✅ XRP breakout pullback trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
                 else:
-                    logger.error(f"XRP breakout pullback trade failed: {trade_result}")
+                    logger.error(f"❌ XRP breakout pullback trade failed: {trade_result}")
                 # Reset trigger after trade
                 trigger_state = {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
                 save_trigger_state(trigger_state)
                 return datetime.fromtimestamp(ts, UTC)
-        logger.info("Breakout triggered, but no valid pullback entry found yet.")
+        logger.info("⏳ Breakout triggered, but no valid pullback entry found yet.")
         return last_alert_ts
     except Exception as e:
         logger.error(f"Error in XRP breakout pullback alert logic: {e}")

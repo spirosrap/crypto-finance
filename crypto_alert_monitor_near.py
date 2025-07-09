@@ -217,14 +217,31 @@ def near_bounce_support_alert(cb_service, last_alert_ts=None):
         latest_vol = float(latest_candle['volume'])
         latest_rsi = rsi_series.iloc[-2] if not pd.isna(rsi_series.iloc[-2]) else None
         rsi_str = f"{latest_rsi:.2f}" if latest_rsi is not None else "N/A"
-        logger.info(f"Latest Candle: Close=${latest_close:.4f}, Low=${latest_low:.4f}, High=${latest_high:.4f}, Volume={latest_vol:.0f}, RSI={rsi_str}")
-        logger.info(f"20-period avg volume: {avg20:.0f}")
-        # Debug: Print the times and closes of the last 5 fetched candles
-        candle_info = []
-        for c in candles[-5:]:
-            t = datetime.fromtimestamp(int(c['start']), UTC)
-            candle_info.append(f"{t.strftime('%m-%d %H:%M')}:${c['close']}")
-        logger.info(f"Last 5 candles: {' | '.join(candle_info)}")
+        
+        logger.info(f"=== NEAR SUPPORT BOUNCE ALERT ===")
+        logger.info(f"Candle close: ${latest_close:.2f}, Volume: {latest_vol:,.0f}, Avg({VOLUME_PERIOD}): {avg20:,.0f}, RSI: {rsi_str}")
+        
+        # Check conditions
+        close_in_entry_zone = ENTRY_ZONE_LOW <= latest_close <= ENTRY_ZONE_HIGH
+        volume_above_threshold = latest_vol >= VOLUME_MULTIPLIER * avg20 if avg20 > 0 else False
+        rsi_below_threshold = latest_rsi < RSI_THRESHOLD if latest_rsi is not None else False
+        
+        logger.info(f"  - Close in entry zone (${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH}): {'✅ Met' if close_in_entry_zone else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x avg: {'✅ Met' if volume_above_threshold else '❌ Not Met'}")
+        logger.info(f"  - RSI < {RSI_THRESHOLD}: {'✅ Met' if rsi_below_threshold else '❌ Not Met'}")
+        
+        # Check if support was recently touched
+        support_touched = False
+        for i in range(len(candles)-2, max(len(candles)-5, 0), -1):
+            if i < 0:
+                break
+            c = candles[i]
+            low = float(c['low'])
+            if SUPPORT_LOW <= low <= SUPPORT_HIGH:
+                support_touched = True
+                break
+        
+        logger.info(f"  - Support touch (${SUPPORT_LOW}-${SUPPORT_HIGH}): {'✅ Recent' if support_touched else '❌ None'}")
         # Only check the last 3 completed candles for support touch
         for i in range(len(candles)-2, len(candles)-5, -1):
             if i < 0:
@@ -232,7 +249,7 @@ def near_bounce_support_alert(cb_service, last_alert_ts=None):
             c = candles[i]
             low = float(c['low'])
             if SUPPORT_LOW <= low <= SUPPORT_HIGH:
-                logger.info(f"Candle at {datetime.fromtimestamp(int(c['start']), UTC).strftime('%m-%d %H:%M')} touched support zone (${SUPPORT_LOW}-${SUPPORT_HIGH})")
+                logger.info(f"✅ Support touch detected at {datetime.fromtimestamp(int(c['start']), UTC).strftime('%m-%d %H:%M')} (${low:.2f})")
                 # Check next candle for bounce
                 if i+1 >= len(candles):
                     continue
@@ -240,12 +257,13 @@ def near_bounce_support_alert(cb_service, last_alert_ts=None):
                 bounce_close = float(bounce['close'])
                 bounce_vol = float(bounce['volume'])
                 bounce_rsi = rsi_series.iloc[i+1] if not pd.isna(rsi_series.iloc[i+1]) else 100
-                logger.info(f"Bounce candle close: ${bounce_close:.2f}, volume: {bounce_vol:.0f}, RSI: {bounce_rsi:.2f}")
+                logger.info(f"Bounce candle: Close=${bounce_close:.2f}, Volume={bounce_vol:,.0f}, RSI={bounce_rsi:.2f}")
                 if (ENTRY_ZONE_LOW <= bounce_close <= ENTRY_ZONE_HIGH and
                     bounce_vol >= VOLUME_MULTIPLIER * avg20 and
                     bounce_rsi < RSI_THRESHOLD):
-                    logger.info(f"--- NEAR SUPPORT BOUNCE TRADE ALERT ---")
-                    logger.info(f"Entry condition met: bounce close ${bounce_close:.2f} in entry zone, volume spike, RSI < 30. Taking trade.")
+                    logger.info(f"=== NEAR SUPPORT BOUNCE TRADE EXECUTED ===")
+                    logger.info(f"Entry condition met: bounce close ${bounce_close:.2f} in entry zone, volume spike, RSI < 30.")
+                    logger.info(f"Trade params: Stop Loss: ${STOP_LOSS}, Take Profit: ${PROFIT_TARGET}, Margin: ${NEAR_MARGIN}, Leverage: {NEAR_LEVERAGE}x")
                     try:
                         play_alert_sound()
                     except Exception as e:
@@ -262,13 +280,13 @@ def near_bounce_support_alert(cb_service, last_alert_ts=None):
                         product=PRODUCT_ID
                     )
                     if trade_success:
-                        logger.info(f"NEAR support bounce trade executed successfully!")
+                        logger.info(f"✅ NEAR support bounce trade executed successfully!")
                         logger.info(f"Trade output: {trade_result}")
                     else:
-                        logger.error(f"NEAR support bounce trade failed: {trade_result}")
+                        logger.error(f"❌ NEAR support bounce trade failed: {trade_result}")
                     return datetime.fromtimestamp(int(bounce['start']), UTC)
                 else:
-                    logger.info(f"Bounce/volume/RSI confirmation absent. Skipping trade.")
+                    logger.info(f"⏳ Bounce/volume/RSI confirmation absent. Skipping trade.")
         return last_alert_ts
     except Exception as e:
         logger.error(f"Error in NEAR support bounce alert logic: {e}")
