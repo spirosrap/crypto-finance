@@ -9,6 +9,7 @@ import subprocess
 import sys
 import platform
 import os
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -26,6 +27,8 @@ ENTRY_ZONE_LOW = 2.23
 ENTRY_ZONE_HIGH = 2.26
 VOLUME_PERIOD = 20
 VOLUME_MULTIPLIER = 1.15  # 15% uptick
+
+TRIGGER_STATE_FILE = "xrp_breakout_trigger_state.json"
 
 
 def play_alert_sound(filename="alert_sound.wav"):
@@ -104,178 +107,139 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         logger.error(f"Error executing crypto {trade_type} trade: {e}")
         return False, str(e)
 
-def xrp_trend_retest_and_breakout_alert(cb_service, last_alert_ts_1h=None, last_alert_ts_4h=None):
-    results = {}
-    # --- Trend-retest (1h) ---
-    timeframe = '1h'
-    GRANULARITY = "ONE_HOUR"
-    periods_needed = VOLUME_PERIOD + 2
-    hours_needed = periods_needed
-    last_alert_ts = last_alert_ts_1h
-    try:
-        now = datetime.now(UTC)
-        now = now.replace(minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=hours_needed)
-        end = now
-        start_ts = int(start.timestamp())
-        end_ts = int(end.timestamp())
-        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-        if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough XRP {GRANULARITY} candle data for trend-retest alert.")
-            results[timeframe] = last_alert_ts
-        else:
-            first_ts = int(candles[0]['start'])
-            last_ts = int(candles[-1]['start'])
-            if first_ts > last_ts:
-                last_candle = candles[1]
-                historical_candles = candles[2:VOLUME_PERIOD+2]
-            else:
-                last_candle = candles[-2]
-                historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-            ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
-            if ts == last_alert_ts:
-                results[timeframe] = last_alert_ts
-            else:
-                close = float(last_candle['close'])
-                v0 = float(last_candle['volume'])
-                avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-                in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-                vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-                # Calculate RSI
-                closes = [float(c['close']) for c in candles[-(VOLUME_PERIOD+15):]]
-                rsi = ta.rsi(pd.Series(closes), length=14).iloc[-2] if len(closes) >= 16 else None
-                rsi_ok = rsi is not None and rsi > 50
-                # Format RSI for logging
-                rsi_str = f"{rsi:.2f}" if rsi is not None else "N/A"
-                logger.info(f"=== XRP TREND-RETEST (1H) ===")
-                logger.info(f"Candle close: ${close:,.4f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}, RSI: {rsi_str}")
-                logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,.2f}-${ENTRY_ZONE_HIGH:,.2f}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-                logger.info(f"  - Volume ≥ {VOLUME_MULTIPLIER}x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
-                logger.info(f"  - RSI > 50: {'✅ Met' if rsi_ok else '❌ Not Met'}")
-                if in_entry_zone and vol_ok and rsi_ok:
-                    logger.info(f"--- XRP TREND-RETEST ALERT (1H) ---")
-                    logger.info(f"Entry condition met: 1h close in ${ENTRY_ZONE_LOW:,.2f}-${ENTRY_ZONE_HIGH:,.2f}, vol spike, RSI > 50.")
-                    try:
-                        play_alert_sound()
-                    except Exception as e:
-                        logger.error(f"Failed to play alert sound: {e}")
-                    trade_success, trade_result = execute_crypto_trade(
-                        cb_service=cb_service,
-                        trade_type="XRP trend-retest (1h)",
-                        entry_price=close,
-                        stop_loss=STOP_LOSS,
-                        take_profit=TP1,
-                        margin=XRP_MARGIN,
-                        leverage=XRP_LEVERAGE,
-                        side="BUY",
-                        product=PRODUCT_ID
-                    )
-                    if trade_success:
-                        logger.info(f"XRP 1H trend-retest trade executed successfully!")
-                        logger.info(f"Trade output: {trade_result}")
-                    else:
-                        logger.error(f"XRP 1H trend-retest trade failed: {trade_result}")
-                    results[timeframe] = ts
-                else:
-                    results[timeframe] = last_alert_ts
-    except Exception as e:
-        logger.error(f"Error in XRP trend-retest alert logic (1h): {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        results[timeframe] = last_alert_ts
+def load_trigger_state():
+    if os.path.exists(TRIGGER_STATE_FILE):
+        try:
+            with open(TRIGGER_STATE_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
+    return {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
 
-    # --- Breakout-continuation (4h) ---
-    timeframe = '4h'
-    GRANULARITY = "FOUR_HOUR"
-    periods_needed = VOLUME_PERIOD + 2
-    hours_needed = periods_needed * 4
-    last_alert_ts = last_alert_ts_4h
+def save_trigger_state(state):
+    try:
+        with open(TRIGGER_STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except Exception as e:
+        logger.error(f"Failed to save trigger state: {e}")
+
+
+def xrp_breakout_pullback_alert(cb_service, last_alert_ts=None):
+    GRANULARITY = "ONE_DAY"
+    periods_needed = 30
+    days_needed = periods_needed
+    trigger_state = load_trigger_state()
     try:
         now = datetime.now(UTC)
-        now = now.replace(minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=hours_needed)
+        now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = now - timedelta(days=days_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-        if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough XRP {GRANULARITY} candle data for breakout-continuation alert.")
-            results[timeframe] = last_alert_ts
+        if not candles or len(candles) < 5:
+            logger.warning(f"Not enough XRP {GRANULARITY} candle data for breakout alert.")
+            return last_alert_ts
+        # Ensure candles are in correct order (oldest to newest)
+        if int(candles[0]['start']) > int(candles[-1]['start']):
+            candles = list(reversed(candles))
+        logger.info(f"Fetched {len(candles)} daily candles from {datetime.fromtimestamp(int(candles[0]['start']), UTC)} to {datetime.fromtimestamp(int(candles[-1]['start']), UTC)}")
+        # Log the latest completed candle's info
+        latest_candle = candles[-2]
+        latest_time = datetime.fromtimestamp(int(latest_candle['start']), UTC)
+        latest_close = float(latest_candle['close'])
+        latest_low = float(latest_candle['low'])
+        latest_high = float(latest_candle['high'])
+        latest_vol = float(latest_candle['volume'])
+        logger.info(f"Latest Completed Candle: Time={latest_time}, Close=${latest_close:.4f}, Low=${latest_low:.4f}, High=${latest_high:.4f}, Volume={latest_vol:.0f}")
+        # Log last 5 candle times and closes for verification
+        logger.info("Last 5 fetched candles (UTC):")
+        for c in candles[-5:]:
+            t = datetime.fromtimestamp(int(c['start']), UTC)
+            logger.info(f"Candle: Time={t}, Close={c['close']}")
+        # --- Summary of what we're waiting for ---
+        trigger_state_str = trigger_state.get("triggered", False)
+        if not trigger_state_str:
+            logger.info("Waiting for: Daily close > $2.40 to set breakout trigger. If price slips < $2.24 before that, setup is invalidated.")
         else:
-            first_ts = int(candles[0]['start'])
-            last_ts = int(candles[-1]['start'])
-            if first_ts > last_ts:
-                last_candle = candles[1]
-                prev_candle = candles[2]
-                historical_candles = candles[3:VOLUME_PERIOD+3]
-            else:
-                last_candle = candles[-2]
-                prev_candle = candles[-3]
-                historical_candles = candles[-(VOLUME_PERIOD+3):-3]
-            ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
-            if ts == last_alert_ts:
-                results[timeframe] = last_alert_ts
-            else:
-                close = float(last_candle['close'])
-                v0 = float(last_candle['volume'])
-                avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-                breakout = close >= 2.30
-                vol_ok = v0 >= 1.20 * avg20
-                logger.info(f"=== XRP BREAKOUT-CONTINUATION (4H) ===")
-                logger.info(f"Candle close: ${close:,.4f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-                logger.info(f"  - Close ≥ $2.30: {'✅ Met' if breakout else '❌ Not Met'}")
-                logger.info(f"  - Volume surge ≥ 1.20x baseline: {'✅ Met' if vol_ok else '❌ Not Met'}")
-                # Pull-back logic: wait for next close with price at least 0.3% below breakout close
-                if breakout and vol_ok:
-                    # Save breakout close for pull-back check
-                    results['4h_breakout_close'] = close
-                    results[timeframe] = ts
-                elif '4h_breakout_close' in results:
-                    # Check for pull-back
-                    pullback_close = close
-                    breakout_close = results['4h_breakout_close']
-                    if pullback_close <= breakout_close * 0.997:  # 0.3% pull-back
-                        logger.info(f"--- XRP BREAKOUT-CONTINUATION PULLBACK ENTRY (4H) ---")
-                        logger.info(f"Entry condition met: 4h close pull-back ≥ 0.3% after breakout close.")
-                        try:
-                            play_alert_sound()
-                        except Exception as e:
-                            logger.error(f"Failed to play alert sound: {e}")
-                        trade_success, trade_result = execute_crypto_trade(
-                            cb_service=cb_service,
-                            trade_type="XRP breakout-continuation (4h)",
-                            entry_price=pullback_close,
-                            stop_loss=2.21,
-                            take_profit=2.45,
-                            margin=XRP_MARGIN,
-                            leverage=XRP_LEVERAGE,
-                            side="BUY",
-                            product=PRODUCT_ID
-                        )
-                        if trade_success:
-                            logger.info(f"XRP 4H breakout-continuation trade executed successfully!")
-                            logger.info(f"Trade output: {trade_result}")
-                        else:
-                            logger.error(f"XRP 4H breakout-continuation trade failed: {trade_result}")
-                        # Remove breakout_close after entry
-                        del results['4h_breakout_close']
-                        results[timeframe] = ts
-                    else:
-                        logger.info(f"Waiting for pull-back entry: current close ${pullback_close:.4f}, breakout close ${breakout_close:.4f}")
-                        results[timeframe] = last_alert_ts
+            logger.info("Breakout triggered! Waiting for: First daily close in $2.38–2.40 (pullback entry), with no price slip < $2.24 since trigger. Stop: $2.24, Take-profit: $2.60–2.65.")
+        # Step 1: If not triggered, look for daily close > 2.40
+        if not trigger_state.get("triggered", False):
+            for i in range(len(candles)-2, -1, -1):  # Only check completed candles
+                c = candles[i]
+                close = float(c['close'])
+                low = float(c['low'])
+                ts = int(c['start'])
+                if close > 2.40:
+                    logger.info(f"Trigger set: Daily close ${close:.2f} > $2.40 at {datetime.fromtimestamp(ts, UTC)}")
+                    trigger_state = {"triggered": True, "trigger_ts": ts, "min_price_since_trigger": close}
+                    save_trigger_state(trigger_state)
+                    return last_alert_ts
+                if low < 2.24:
+                    logger.info(f"Slip candle time: {datetime.fromtimestamp(ts, UTC)}")
+                    logger.info(f"Price slipped below $2.24 (${low:.2f}) before trigger. Waiting for new base.")
+                    trigger_state = {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
+                    save_trigger_state(trigger_state)
+                    return last_alert_ts
+            logger.info("No daily close > $2.40 found yet. Waiting...")
+            return last_alert_ts
+        # Step 2: If triggered, look for first pullback into 2.38–2.40, and check for slip < 2.24
+        triggered_ts = trigger_state.get("trigger_ts")
+        min_price = trigger_state.get("min_price_since_trigger", 9999)
+        for i in range(len(candles)-2, -1, -1):
+            c = candles[i]
+            ts = int(c['start'])
+            if ts <= triggered_ts:
+                continue
+            close = float(c['close'])
+            low = float(c['low'])
+            # Track min price since trigger
+            if low < min_price:
+                min_price = low
+                trigger_state["min_price_since_trigger"] = min_price
+                save_trigger_state(trigger_state)
+            if low < 2.24:
+                logger.info(f"Price slipped below $2.24 (${low:.2f}) after trigger. Setup invalidated. Waiting for new base.")
+                trigger_state = {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
+                save_trigger_state(trigger_state)
+                return last_alert_ts
+            if 2.38 <= close <= 2.40:
+                logger.info(f"--- XRP BREAKOUT PULLBACK TRADE ALERT ---")
+                logger.info(f"Entry condition met: pullback close ${close:.2f} in $2.38–2.40 after breakout trigger.")
+                try:
+                    play_alert_sound()
+                except Exception as e:
+                    logger.error(f"Failed to play alert sound: {e}")
+                trade_success, trade_result = execute_crypto_trade(
+                    cb_service=cb_service,
+                    trade_type="XRP breakout pullback long",
+                    entry_price=close,
+                    stop_loss=2.24,
+                    take_profit=2.60,
+                    margin=XRP_MARGIN,
+                    leverage=XRP_LEVERAGE,
+                    side="BUY",
+                    product=PRODUCT_ID
+                )
+                if trade_success:
+                    logger.info(f"XRP breakout pullback trade executed successfully!")
+                    logger.info(f"Trade output: {trade_result}")
                 else:
-                    results[timeframe] = last_alert_ts
+                    logger.error(f"XRP breakout pullback trade failed: {trade_result}")
+                # Reset trigger after trade
+                trigger_state = {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
+                save_trigger_state(trigger_state)
+                return datetime.fromtimestamp(ts, UTC)
+        logger.info("Breakout triggered, but no valid pullback entry found yet.")
+        return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in XRP breakout-continuation alert logic (4h): {e}")
+        logger.error(f"Error in XRP breakout pullback alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        results[timeframe] = last_alert_ts
-    return results.get('1h', last_alert_ts_1h), results.get('4h', last_alert_ts_4h)
+    return last_alert_ts
 
 def main():
-    logger.info("Starting XRP trendline bounce alert script")
-    logger.info("")
-    logger.info("✅ Ready to take XRP trendline bounce trades (1H/2H)")
+    logger.info("Starting XRP breakout pullback alert script")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -287,12 +251,11 @@ def main():
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
     logger.info("")
     cb_service = setup_coinbase()
-    xrp_last_alert_ts_1h = None
-    xrp_last_alert_ts_4h = None
+    xrp_last_alert_ts = None
     while True:
         try:
             iteration_start_time = time.time()
-            xrp_last_alert_ts_1h, xrp_last_alert_ts_4h = xrp_trend_retest_and_breakout_alert(cb_service, xrp_last_alert_ts_1h, xrp_last_alert_ts_4h)
+            xrp_last_alert_ts = xrp_breakout_pullback_alert(cb_service, xrp_last_alert_ts)
             wait_seconds = 300
             logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
             logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll")
