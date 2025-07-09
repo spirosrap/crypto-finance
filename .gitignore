@@ -88,3 +88,4 @@ logs/backfill_exit_trade.log
 logs/add_regime_tags.log
 logs
 xrp_breakout_trigger_state.json
+btc_breakout_trigger_state.json
