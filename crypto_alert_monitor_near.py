@@ -197,13 +197,13 @@ def near_bounce_support_alert(cb_service, last_alert_ts=None):
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
-        logger.info(f"Requesting candles from {start} (ts={start_ts}) to {end} (ts={end_ts})")
+        logger.info(f"Requesting candles from {start.strftime('%m-%d %H:%M')} (ts={start_ts}) to {end.strftime('%m-%d %H:%M')} (ts={end_ts})")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         if not candles or len(candles) < 5:
             logger.warning(f"Not enough NEAR {GRANULARITY} candle data for support bounce alert.")
             return last_alert_ts
         candles = list(reversed(candles))
-        logger.info(f"Fetched {len(candles)} candles from {datetime.fromtimestamp(int(candles[0]['start']), UTC)} to {datetime.fromtimestamp(int(candles[-1]['start']), UTC)}")
+        logger.info(f"Fetched {len(candles)} candles from {datetime.fromtimestamp(int(candles[0]['start']), UTC).strftime('%m-%d %H:%M')} to {datetime.fromtimestamp(int(candles[-1]['start']), UTC).strftime('%m-%d %H:%M')}")
         historical_candles = candles[-(VOLUME_PERIOD+2):-2]
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
         # Calculate RSI for each candle
@@ -220,10 +220,11 @@ def near_bounce_support_alert(cb_service, last_alert_ts=None):
         logger.info(f"Latest Candle: Close=${latest_close:.4f}, Low=${latest_low:.4f}, High=${latest_high:.4f}, Volume={latest_vol:.0f}, RSI={rsi_str}")
         logger.info(f"20-period avg volume: {avg20:.0f}")
         # Debug: Print the times and closes of the last 5 fetched candles
-        logger.info("Last 5 fetched candles (UTC):")
+        candle_info = []
         for c in candles[-5:]:
             t = datetime.fromtimestamp(int(c['start']), UTC)
-            logger.info(f"Candle: Time={t}, Close={c['close']}")
+            candle_info.append(f"{t.strftime('%m-%d %H:%M')}:${c['close']}")
+        logger.info(f"Last 5 candles: {' | '.join(candle_info)}")
         # Only check the last 3 completed candles for support touch
         for i in range(len(candles)-2, len(candles)-5, -1):
             if i < 0:
@@ -231,7 +232,7 @@ def near_bounce_support_alert(cb_service, last_alert_ts=None):
             c = candles[i]
             low = float(c['low'])
             if SUPPORT_LOW <= low <= SUPPORT_HIGH:
-                logger.info(f"Candle at {datetime.fromtimestamp(int(c['start']), UTC)} touched support zone (${SUPPORT_LOW}-${SUPPORT_HIGH})")
+                logger.info(f"Candle at {datetime.fromtimestamp(int(c['start']), UTC).strftime('%m-%d %H:%M')} touched support zone (${SUPPORT_LOW}-${SUPPORT_HIGH})")
                 # Check next candle for bounce
                 if i+1 >= len(candles):
                     continue

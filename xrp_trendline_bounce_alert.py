@@ -143,7 +143,7 @@ def xrp_breakout_pullback_alert(cb_service, last_alert_ts=None):
         # Ensure candles are in correct order (oldest to newest)
         if int(candles[0]['start']) > int(candles[-1]['start']):
             candles = list(reversed(candles))
-        logger.info(f"Fetched {len(candles)} daily candles from {datetime.fromtimestamp(int(candles[0]['start']), UTC)} to {datetime.fromtimestamp(int(candles[-1]['start']), UTC)}")
+        logger.info(f"Fetched {len(candles)} daily candles from {datetime.fromtimestamp(int(candles[0]['start']), UTC).strftime('%m-%d')} to {datetime.fromtimestamp(int(candles[-1]['start']), UTC).strftime('%m-%d')}")
         # Log the latest completed candle's info
         latest_candle = candles[-2]
         latest_time = datetime.fromtimestamp(int(latest_candle['start']), UTC)
@@ -151,12 +151,13 @@ def xrp_breakout_pullback_alert(cb_service, last_alert_ts=None):
         latest_low = float(latest_candle['low'])
         latest_high = float(latest_candle['high'])
         latest_vol = float(latest_candle['volume'])
-        logger.info(f"Latest Completed Candle: Time={latest_time}, Close=${latest_close:.4f}, Low=${latest_low:.4f}, High=${latest_high:.4f}, Volume={latest_vol:.0f}")
+        logger.info(f"Latest Completed Candle: {latest_time.strftime('%m-%d')} Close=${latest_close:.4f}, Low=${latest_low:.4f}, High=${latest_high:.4f}, Volume={latest_vol:.0f}")
         # Log last 5 candle times and closes for verification
-        logger.info("Last 5 fetched candles (UTC):")
+        candle_info = []
         for c in candles[-5:]:
             t = datetime.fromtimestamp(int(c['start']), UTC)
-            logger.info(f"Candle: Time={t}, Close={c['close']}")
+            candle_info.append(f"{t.strftime('%m-%d')}:${c['close']}")
+        logger.info(f"Last 5 candles: {' | '.join(candle_info)}")
         # --- Summary of what we're waiting for ---
         trigger_state_str = trigger_state.get("triggered", False)
         if not trigger_state_str:
@@ -171,12 +172,12 @@ def xrp_breakout_pullback_alert(cb_service, last_alert_ts=None):
                 low = float(c['low'])
                 ts = int(c['start'])
                 if close > 2.40:
-                    logger.info(f"Trigger set: Daily close ${close:.2f} > $2.40 at {datetime.fromtimestamp(ts, UTC)}")
+                    logger.info(f"Trigger set: Daily close ${close:.2f} > $2.40 at {datetime.fromtimestamp(ts, UTC).strftime('%m-%d')}")
                     trigger_state = {"triggered": True, "trigger_ts": ts, "min_price_since_trigger": close}
                     save_trigger_state(trigger_state)
                     return last_alert_ts
                 if low < 2.24:
-                    logger.info(f"Slip candle time: {datetime.fromtimestamp(ts, UTC)}")
+                    logger.info(f"Slip candle time: {datetime.fromtimestamp(ts, UTC).strftime('%m-%d')}")
                     logger.info(f"Price slipped below $2.24 (${low:.2f}) before trigger. Waiting for new base.")
                     trigger_state = {"triggered": False, "trigger_ts": None, "min_price_since_trigger": None}
                     save_trigger_state(trigger_state)
