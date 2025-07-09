@@ -87,3 +87,4 @@ data/trade_state_tracker.json
 logs/backfill_exit_trade.log
 logs/add_regime_tags.log
 logs
+xrp_breakout_trigger_state.json
