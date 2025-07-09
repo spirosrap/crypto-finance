@@ -72,11 +72,14 @@ PRODUCT_ID = "NEAR-PERP-INTX"
 GRANULARITY = "ONE_HOUR"
 VOLUME_PERIOD = 20
 ENTRY_TRIGGER_LOW = 2.20  # Above this level
-ENTRY_ZONE_LOW = 2.20
-ENTRY_ZONE_HIGH = 2.25
-STOP_LOSS = 2.10
+ENTRY_ZONE_LOW = 2.15
+ENTRY_ZONE_HIGH = 2.18
+SUPPORT_LOW = 2.13
+SUPPORT_HIGH = 2.15
+STOP_LOSS = 2.05
 PROFIT_TARGET = 2.30
-VOLUME_MULTIPLIER = 1.50  # 50% above average
+VOLUME_MULTIPLIER = 1.20  # 20% above average for confirmation
+RSI_THRESHOLD = 30
 NEAR_MARGIN = 200  # USD
 NEAR_LEVERAGE = 20
 
@@ -183,8 +186,8 @@ def save_trigger_state(state):
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-def near_cup_handle_breakout_alert(cb_service, last_alert_ts=None):
-    periods_needed = VOLUME_PERIOD + 2
+def near_bounce_support_alert(cb_service, last_alert_ts=None):
+    periods_needed = 30  # Fetch last 30 candles for more recent data
     hours_needed = periods_needed
     trigger_state = load_trigger_state()
     try:
@@ -194,56 +197,62 @@ def near_cup_handle_breakout_alert(cb_service, last_alert_ts=None):
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
+        logger.info(f"Requesting candles from {start} (ts={start_ts}) to {end} (ts={end_ts})")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-        if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough NEAR {GRANULARITY} candle data for 1h breakout alert.")
+        if not candles or len(candles) < 5:
+            logger.warning(f"Not enough NEAR {GRANULARITY} candle data for support bounce alert.")
             return last_alert_ts
-        first_ts = int(candles[0]['start'])
-        last_ts_candle = int(candles[-1]['start'])
-        if first_ts > last_ts_candle:
-            last_candle = candles[1]
-            historical_candles = candles[2:VOLUME_PERIOD+2]
-            candidate_candles = candles[2:]
-        else:
-            last_candle = candles[-2]
-            historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-            candidate_candles = candles[-(VOLUME_PERIOD+2):-1]
-        ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
-        close = float(last_candle['close'])
-        v0 = float(last_candle['volume'])
+        candles = list(reversed(candles))
+        logger.info(f"Fetched {len(candles)} candles from {datetime.fromtimestamp(int(candles[0]['start']), UTC)} to {datetime.fromtimestamp(int(candles[-1]['start']), UTC)}")
+        historical_candles = candles[-(VOLUME_PERIOD+2):-2]
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-        trigger_ok = close > ENTRY_TRIGGER_LOW  # Above $2.20
-        vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-        logger.info(f"=== NEAR 1H CUP & HANDLE BREAKOUT ALERT ===")
-        logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close above trigger ${ENTRY_TRIGGER_LOW:,.2f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ 1.50x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
-        # Step 1: Set trigger if above trigger level and volume is high
-        if trigger_ok and vol_ok and not trigger_state.get("triggered", False):
-            logger.info(f"--- NEAR breakout TRIGGERED: waiting for entry zone on next candles ---")
-            trigger_state = {"triggered": True, "trigger_ts": int(last_candle['start'])}
-            save_trigger_state(trigger_state)
-            return last_alert_ts
-        # Step 2: If previously triggered, check for entry zone (high/low touch)
-        if trigger_state.get("triggered", False):
-            logger.info(f"NEAR breakout previously triggered at candle {trigger_state.get('trigger_ts')}, checking for entry zone (high/low)...")
-            triggered_ts = trigger_state.get('trigger_ts')
-            for c in candles:
-                if int(c['start']) <= triggered_ts:
+        # Calculate RSI for each candle
+        closes = [float(c['close']) for c in candles]
+        rsi_series = ta.rsi(pd.Series(closes), length=14)
+        # Log the latest candle's info for reporting
+        latest_candle = candles[-2]  # -2 is the last completed candle
+        latest_close = float(latest_candle['close'])
+        latest_low = float(latest_candle['low'])
+        latest_high = float(latest_candle['high'])
+        latest_vol = float(latest_candle['volume'])
+        latest_rsi = rsi_series.iloc[-2] if not pd.isna(rsi_series.iloc[-2]) else None
+        rsi_str = f"{latest_rsi:.2f}" if latest_rsi is not None else "N/A"
+        logger.info(f"Latest Candle: Close=${latest_close:.4f}, Low=${latest_low:.4f}, High=${latest_high:.4f}, Volume={latest_vol:.0f}, RSI={rsi_str}")
+        logger.info(f"20-period avg volume: {avg20:.0f}")
+        # Debug: Print the times and closes of the last 5 fetched candles
+        logger.info("Last 5 fetched candles (UTC):")
+        for c in candles[-5:]:
+            t = datetime.fromtimestamp(int(c['start']), UTC)
+            logger.info(f"Candle: Time={t}, Close={c['close']}")
+        # Only check the last 3 completed candles for support touch
+        for i in range(len(candles)-2, len(candles)-5, -1):
+            if i < 0:
+                break
+            c = candles[i]
+            low = float(c['low'])
+            if SUPPORT_LOW <= low <= SUPPORT_HIGH:
+                logger.info(f"Candle at {datetime.fromtimestamp(int(c['start']), UTC)} touched support zone (${SUPPORT_LOW}-${SUPPORT_HIGH})")
+                # Check next candle for bounce
+                if i+1 >= len(candles):
                     continue
-                high = float(c['high'])
-                low = float(c['low'])
-                if (ENTRY_ZONE_LOW <= high <= ENTRY_ZONE_HIGH) or (ENTRY_ZONE_LOW <= low <= ENTRY_ZONE_HIGH) or (low < ENTRY_ZONE_LOW and high > ENTRY_ZONE_HIGH):
-                    logger.info(f"--- NEAR 1H CUP & HANDLE BREAKOUT TRADE ALERT ---")
-                    logger.info(f"Entry condition met: price touched entry zone (${ENTRY_ZONE_LOW:,.2f}-${ENTRY_ZONE_HIGH:,.2f}) after trigger. Taking trade.")
+                bounce = candles[i+1]
+                bounce_close = float(bounce['close'])
+                bounce_vol = float(bounce['volume'])
+                bounce_rsi = rsi_series.iloc[i+1] if not pd.isna(rsi_series.iloc[i+1]) else 100
+                logger.info(f"Bounce candle close: ${bounce_close:.2f}, volume: {bounce_vol:.0f}, RSI: {bounce_rsi:.2f}")
+                if (ENTRY_ZONE_LOW <= bounce_close <= ENTRY_ZONE_HIGH and
+                    bounce_vol >= VOLUME_MULTIPLIER * avg20 and
+                    bounce_rsi < RSI_THRESHOLD):
+                    logger.info(f"--- NEAR SUPPORT BOUNCE TRADE ALERT ---")
+                    logger.info(f"Entry condition met: bounce close ${bounce_close:.2f} in entry zone, volume spike, RSI < 30. Taking trade.")
                     try:
                         play_alert_sound()
                     except Exception as e:
                         logger.error(f"Failed to play alert sound: {e}")
                     trade_success, trade_result = execute_crypto_trade(
                         cb_service=cb_service,
-                        trade_type="NEAR 1h cup & handle breakout long",
-                        entry_price=high if high >= ENTRY_ZONE_LOW else low,
+                        trade_type="NEAR support bounce long",
+                        entry_price=bounce_close,
                         stop_loss=STOP_LOSS,
                         take_profit=PROFIT_TARGET,
                         margin=NEAR_MARGIN,
@@ -252,18 +261,16 @@ def near_cup_handle_breakout_alert(cb_service, last_alert_ts=None):
                         product=PRODUCT_ID
                     )
                     if trade_success:
-                        logger.info(f"NEAR 1h cup & handle breakout trade executed successfully!")
+                        logger.info(f"NEAR support bounce trade executed successfully!")
                         logger.info(f"Trade output: {trade_result}")
                     else:
-                        logger.error(f"NEAR 1h cup & handle breakout trade failed: {trade_result}")
-                    # Reset trigger after trade
-                    trigger_state = {"triggered": False, "trigger_ts": None}
-                    save_trigger_state(trigger_state)
-                    return ts
-            logger.info(f"NEAR breakout triggered, but price has not touched entry zone yet.")
+                        logger.error(f"NEAR support bounce trade failed: {trade_result}")
+                    return datetime.fromtimestamp(int(bounce['start']), UTC)
+                else:
+                    logger.info(f"Bounce/volume/RSI confirmation absent. Skipping trade.")
         return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in NEAR 1h cup & handle breakout alert logic: {e}")
+        logger.error(f"Error in NEAR support bounce alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
@@ -287,7 +294,7 @@ def main():
     while True:
         try:
             iteration_start_time = time.time()
-            near_breakout_last_alert_ts = near_cup_handle_breakout_alert(cb_service, near_breakout_last_alert_ts)
+            near_breakout_last_alert_ts = near_bounce_support_alert(cb_service, near_breakout_last_alert_ts)
             consecutive_failures = 0
             wait_seconds = 300
             logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
