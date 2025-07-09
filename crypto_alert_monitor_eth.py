@@ -71,14 +71,13 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
 PRODUCT_ID = "ETH-PERP-INTX"
 GRANULARITY = "ONE_DAY"
 VOLUME_PERIOD = 20
-ENTRY_TRIGGER_LOW = 2560
-ENTRY_TRIGGER_HIGH = 2600
+ENTRY_TRIGGER = 2600
 ENTRY_ZONE_LOW = 2600
 ENTRY_ZONE_HIGH = 2650
 STOP_LOSS = 2480
 PROFIT_TARGET = 2800
-POTENTIAL_TARGET = 3000
-VOLUME_MULTIPLIER = 1.20  # 20% above average
+EXTENDED_TARGET = 3000
+VOLUME_MULTIPLIER = 1.20  # 20% above average for trigger
 ETH_MARGIN = 300  # USD
 ETH_LEVERAGE = 20
 TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
@@ -217,13 +216,13 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
         v0 = float(last_candle['volume'])
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
         # --- MODIFIED ENTRY TRIGGER LOGIC ---
-        trigger_ok = (close > ENTRY_TRIGGER_LOW) and (close <= ENTRY_TRIGGER_HIGH)
+        trigger_ok = close > ENTRY_TRIGGER
         vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
         logger.info(f"=== ETH DAILY ASCENDING TRIANGLE BREAKOUT ALERT ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close in trigger zone >${ENTRY_TRIGGER_LOW:,.0f} and <=${ENTRY_TRIGGER_HIGH:,.0f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
+        logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
         logger.info(f"  - Volume ≥ 1.20x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
-        # Step 1: Set trigger if in trigger zone and volume is high
+        # Step 1: Set trigger if close > 2,600 and volume is high
         if trigger_ok and vol_ok and not trigger_state.get("triggered", False):
             logger.info(f"--- ETH breakout TRIGGERED: waiting for entry zone on next candles ---")
             trigger_state = {"triggered": True, "trigger_ts": int(last_candle['start'])}
@@ -233,7 +232,7 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
         if trigger_state.get("triggered", False):
             logger.info(f"ETH breakout previously triggered at candle {trigger_state.get('trigger_ts')}, checking for entry zone (high/low)...")
             triggered_ts = trigger_state.get('trigger_ts')
-            for c in candles:
+            for i, c in enumerate(candles):
                 if int(c['start']) <= triggered_ts:
                     continue
                 high = float(c['high'])
@@ -243,13 +242,18 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
                 # Check if price touched entry zone
                 if (ENTRY_ZONE_LOW <= high <= ENTRY_ZONE_HIGH) or (ENTRY_ZONE_LOW <= low <= ENTRY_ZONE_HIGH) or (low < ENTRY_ZONE_LOW and high > ENTRY_ZONE_HIGH):
                     # --- EXTENDED TARGET LOGIC ---
-                    extended_target = False
-                    if c_close > ENTRY_ZONE_HIGH and c_vol >= VOLUME_SURGE_MULTIPLIER * avg20:
-                        take_profit = EXTENDED_TARGET_HIGH
-                        extended_target = True
-                        logger.info(f"🚀 Breakout above ${ENTRY_ZONE_HIGH} with volume surge! Using extended profit target: ${EXTENDED_TARGET_LOW}-${EXTENDED_TARGET_HIGH}")
+                    take_profit = PROFIT_TARGET
+                    # Check for sustained breakout: next candle closes above 2,650 with high volume
+                    if i+1 < len(candles):
+                        next_candle = candles[i+1]
+                        next_close = float(next_candle['close'])
+                        next_vol = float(next_candle['volume'])
+                        if next_close > ENTRY_ZONE_HIGH and next_vol >= VOLUME_MULTIPLIER * avg20:
+                            take_profit = EXTENDED_TARGET
+                            logger.info(f"🚀 Sustained breakout! Using extended profit target: ${EXTENDED_TARGET}")
+                        else:
+                            logger.info(f"🎯 Using standard profit target: ${PROFIT_TARGET}")
                     else:
-                        take_profit = PROFIT_TARGET
                         logger.info(f"🎯 Using standard profit target: ${PROFIT_TARGET}")
                     logger.info(f"--- ETH DAILY ASCENDING TRIANGLE BREAKOUT TRADE ALERT ---")
                     logger.info(f"Entry condition met: price touched entry zone (${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH}) after trigger. Taking trade.")
