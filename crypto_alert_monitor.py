@@ -317,14 +317,12 @@ def btc_4h_breakout_momentum_alert(cb_service, last_alert_ts=None):
     VOLUME_PERIOD = 20
     periods_needed = VOLUME_PERIOD + 2
     hours_needed = periods_needed * 4
-    ENTRY_TRIGGER = 110500
-    ENTRY_ZONE_LOW = 110500
-    ENTRY_ZONE_HIGH = 111200
-    STOP_LOSS = 107000
-    PROFIT_TARGET = 115000
-    EXTENDED_TARGET = 150000
+    BREAKOUT_LEVEL = 118423
+    ENTRY_ZONE_LOW = 118400
+    ENTRY_ZONE_HIGH = 119000
+    STOP_LOSS = 115000
+    PROFIT_TARGET = 134500
     VOLUME_MULTIPLIER = 1.20  # 20% above average for trigger
-    VOLUME_SURGE_MULTIPLIER = 1.5  # 50% above average for extended target
     trigger_state = load_trigger_state()
     try:
         now = datetime.now(UTC)
@@ -335,30 +333,28 @@ def btc_4h_breakout_momentum_alert(cb_service, last_alert_ts=None):
         end_ts = int(end.timestamp())
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for 4h breakout alert.")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for breakout alert.")
             return last_alert_ts
         first_ts = int(candles[0]['start'])
         last_ts = int(candles[-1]['start'])
         if first_ts > last_ts:
             last_candle = candles[1]
             historical_candles = candles[2:VOLUME_PERIOD+2]
-            candidate_candles = candles[2:]
         else:
             last_candle = candles[-2]
             historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-            candidate_candles = candles[-(VOLUME_PERIOD+2):-1]
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
         close = float(last_candle['close'])
         v0 = float(last_candle['volume'])
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-        # --- MODIFIED ENTRY TRIGGER LOGIC ---
-        trigger_ok = close > ENTRY_TRIGGER
+        # --- NEW BREAKOUT ENTRY TRIGGER LOGIC ---
+        trigger_ok = close > BREAKOUT_LEVEL
         vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-        logger.info(f"=== BTC 4H SYMMETRICAL TRIANGLE BREAKOUT ALERT ===")
+        logger.info(f"=== BTC-USD BREAKOUT ABOVE ${BREAKOUT_LEVEL:,} ALERT ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
+        logger.info(f"  - Close > ${BREAKOUT_LEVEL:,}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
         logger.info(f"  - Volume ≥ 1.20x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
-        # Step 1: Set trigger if close > 110,500 and volume is high
+        # Step 1: Set trigger if close > breakout level and volume is high
         if trigger_ok and vol_ok and not trigger_state.get("triggered", False):
             logger.info(f"--- BTC breakout TRIGGERED: waiting for entry zone on next candles ---")
             trigger_state = {"triggered": True, "trigger_ts": int(last_candle['start'])}
@@ -373,18 +369,9 @@ def btc_4h_breakout_momentum_alert(cb_service, last_alert_ts=None):
                     continue
                 high = float(c['high'])
                 low = float(c['low'])
-                c_close = float(c['close'])
-                c_vol = float(c['volume'])
                 # Check if price touched entry zone
                 if (ENTRY_ZONE_LOW <= high <= ENTRY_ZONE_HIGH) or (ENTRY_ZONE_LOW <= low <= ENTRY_ZONE_HIGH) or (low < ENTRY_ZONE_LOW and high > ENTRY_ZONE_HIGH):
-                    # --- EXTENDED TARGET LOGIC ---
-                    if c_vol >= VOLUME_SURGE_MULTIPLIER * avg20:
-                        take_profit = EXTENDED_TARGET
-                        logger.info(f"🚀 Post-breakout volume surge! Using extended profit target: ${EXTENDED_TARGET}")
-                    else:
-                        take_profit = PROFIT_TARGET
-                        logger.info(f"🎯 Using standard profit target: ${PROFIT_TARGET}")
-                    logger.info(f"--- BTC 4H SYMMETRICAL TRIANGLE BREAKOUT TRADE ALERT ---")
+                    logger.info(f"--- BTC-USD BREAKOUT TRADE ALERT ---")
                     logger.info(f"Entry condition met: price touched entry zone (${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH}) after trigger. Taking trade.")
                     try:
                         play_alert_sound()
@@ -392,20 +379,20 @@ def btc_4h_breakout_momentum_alert(cb_service, last_alert_ts=None):
                         logger.error(f"Failed to play alert sound: {e}")
                     trade_success, trade_result = execute_crypto_trade(
                         cb_service=cb_service,
-                        trade_type="4h symmetrical triangle breakout long",
+                        trade_type="BTC-USD breakout above ATH",
                         entry_price=high if high >= ENTRY_ZONE_LOW else low,
                         stop_loss=STOP_LOSS,
-                        take_profit=take_profit,
+                        take_profit=PROFIT_TARGET,
                         margin=BTC_HORIZONTAL_MARGIN,
                         leverage=BTC_HORIZONTAL_LEVERAGE,
                         side="BUY",
                         product=PRODUCT_ID
                     )
                     if trade_success:
-                        logger.info(f"BTC 4h symmetrical triangle breakout trade executed successfully!")
+                        logger.info(f"BTC-USD breakout trade executed successfully!")
                         logger.info(f"Trade output: {trade_result}")
                     else:
-                        logger.error(f"BTC 4h symmetrical triangle breakout trade failed: {trade_result}")
+                        logger.error(f"BTC-USD breakout trade failed: {trade_result}")
                     # Reset trigger after trade
                     trigger_state = {"triggered": False, "trigger_ts": None}
                     save_trigger_state(trigger_state)
@@ -413,7 +400,7 @@ def btc_4h_breakout_momentum_alert(cb_service, last_alert_ts=None):
             logger.info(f"BTC breakout triggered, but price has not touched entry zone yet.")
         return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in BTC 4h breakout momentum alert logic: {e}")
+        logger.error(f"Error in BTC breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts

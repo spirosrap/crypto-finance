@@ -67,24 +67,19 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH symmetrical triangle breakout parameters
+# ETH breakout parameters (updated)
 PRODUCT_ID = "ETH-PERP-INTX"
 GRANULARITY = "ONE_DAY"
 VOLUME_PERIOD = 20
-ENTRY_TRIGGER = 2600
-ENTRY_ZONE_LOW = 2600
-ENTRY_ZONE_HIGH = 2650
-STOP_LOSS = 2480
-PROFIT_TARGET = 2800
-EXTENDED_TARGET = 3000
-VOLUME_MULTIPLIER = 1.20  # 20% above average for trigger
+BREAKOUT_LEVEL = 2820
+ENTRY_ZONE_LOW = 2820
+ENTRY_ZONE_HIGH = 2900
+STOP_LOSS = 2715
+PROFIT_TARGET = 3000
+EXTENDED_TARGET = 3525
 ETH_MARGIN = 300  # USD
 ETH_LEVERAGE = 20
 TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
-# Add new constants for extended target and volume surge
-EXTENDED_TARGET_LOW = 3000
-EXTENDED_TARGET_HIGH = 3150
-VOLUME_SURGE_MULTIPLIER = 1.5  # 50% above average for extended target
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -186,7 +181,7 @@ def save_trigger_state(state):
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
+def eth_breakout_alert(cb_service, last_alert_ts=None):
     periods_needed = VOLUME_PERIOD + 2
     days_needed = periods_needed
     trigger_state = load_trigger_state()
@@ -206,23 +201,21 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
         if first_ts > last_ts_candle:
             last_candle = candles[1]
             historical_candles = candles[2:VOLUME_PERIOD+2]
-            candidate_candles = candles[2:]
         else:
             last_candle = candles[-2]
             historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-            candidate_candles = candles[-(VOLUME_PERIOD+2):-1]
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
         close = float(last_candle['close'])
         v0 = float(last_candle['volume'])
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-        # --- MODIFIED ENTRY TRIGGER LOGIC ---
-        trigger_ok = close > ENTRY_TRIGGER
-        vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-        logger.info(f"=== ETH DAILY ASCENDING TRIANGLE BREAKOUT ALERT ===")
+        # --- NEW BREAKOUT ENTRY TRIGGER LOGIC ---
+        trigger_ok = close > BREAKOUT_LEVEL
+        vol_ok = v0 > avg20  # Above-average volume
+        logger.info(f"=== ETH-USD BREAKOUT ABOVE ~${BREAKOUT_LEVEL:,} ALERT ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close > ${ENTRY_TRIGGER:,.0f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ 1.20x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
-        # Step 1: Set trigger if close > 2,600 and volume is high
+        logger.info(f"  - Close > ${BREAKOUT_LEVEL:,}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
+        logger.info(f"  - Volume > avg(20): {'✅ Met' if vol_ok else '❌ Not Met'}")
+        # Step 1: Set trigger if close > breakout level and volume is above average
         if trigger_ok and vol_ok and not trigger_state.get("triggered", False):
             logger.info(f"--- ETH breakout TRIGGERED: waiting for entry zone on next candles ---")
             trigger_state = {"triggered": True, "trigger_ts": int(last_candle['start'])}
@@ -237,25 +230,22 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
                     continue
                 high = float(c['high'])
                 low = float(c['low'])
-                c_close = float(c['close'])
-                c_vol = float(c['volume'])
                 # Check if price touched entry zone
                 if (ENTRY_ZONE_LOW <= high <= ENTRY_ZONE_HIGH) or (ENTRY_ZONE_LOW <= low <= ENTRY_ZONE_HIGH) or (low < ENTRY_ZONE_LOW and high > ENTRY_ZONE_HIGH):
-                    # --- EXTENDED TARGET LOGIC ---
                     take_profit = PROFIT_TARGET
-                    # Check for sustained breakout: next candle closes above 2,650 with high volume
+                    # Check for strong follow-through: next candle closes above 2,900 with above-average volume
                     if i+1 < len(candles):
                         next_candle = candles[i+1]
                         next_close = float(next_candle['close'])
                         next_vol = float(next_candle['volume'])
-                        if next_close > ENTRY_ZONE_HIGH and next_vol >= VOLUME_MULTIPLIER * avg20:
+                        if next_close > ENTRY_ZONE_HIGH and next_vol > avg20:
                             take_profit = EXTENDED_TARGET
-                            logger.info(f"🚀 Sustained breakout! Using extended profit target: ${EXTENDED_TARGET}")
+                            logger.info(f"🚀 Strong follow-through! Using extended profit target: ${EXTENDED_TARGET}")
                         else:
                             logger.info(f"🎯 Using standard profit target: ${PROFIT_TARGET}")
                     else:
                         logger.info(f"🎯 Using standard profit target: ${PROFIT_TARGET}")
-                    logger.info(f"--- ETH DAILY ASCENDING TRIANGLE BREAKOUT TRADE ALERT ---")
+                    logger.info(f"--- ETH-USD BREAKOUT TRADE ALERT ---")
                     logger.info(f"Entry condition met: price touched entry zone (${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH}) after trigger. Taking trade.")
                     try:
                         play_alert_sound()
@@ -263,7 +253,7 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
                         logger.error(f"Failed to play alert sound: {e}")
                     trade_success, trade_result = execute_crypto_trade(
                         cb_service=cb_service,
-                        trade_type="ETH daily triangle breakout long",
+                        trade_type="ETH-USD breakout above resistance",
                         entry_price=high if high >= ENTRY_ZONE_LOW else low,
                         stop_loss=STOP_LOSS,
                         take_profit=take_profit,
@@ -273,10 +263,10 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
                         product=PRODUCT_ID
                     )
                     if trade_success:
-                        logger.info(f"ETH daily triangle breakout trade executed successfully!")
+                        logger.info(f"ETH-USD breakout trade executed successfully!")
                         logger.info(f"Trade output: {trade_result}")
                     else:
-                        logger.error(f"ETH daily triangle breakout trade failed: {trade_result}")
+                        logger.error(f"ETH-USD breakout trade failed: {trade_result}")
                     # Reset trigger after trade
                     trigger_state = {"triggered": False, "trigger_ts": None}
                     save_trigger_state(trigger_state)
@@ -284,7 +274,7 @@ def eth_sym_triangle_breakout_alert(cb_service, last_alert_ts=None):
             logger.info(f"ETH breakout triggered, but price has not touched entry zone yet.")
         return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in ETH daily triangle breakout alert logic: {e}")
+        logger.error(f"Error in ETH breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
@@ -308,7 +298,7 @@ def main():
     while True:
         try:
             iteration_start_time = time.time()
-            eth_breakout_last_alert_ts = eth_sym_triangle_breakout_alert(cb_service, eth_breakout_last_alert_ts)
+            eth_breakout_last_alert_ts = eth_breakout_alert(cb_service, eth_breakout_last_alert_ts)
             consecutive_failures = 0
             wait_seconds = 300
             logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
