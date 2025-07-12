@@ -135,8 +135,8 @@ XRP_ENTRY_ZONE_LOW = 2.73
 XRP_ENTRY_ZONE_HIGH = 2.78
 XRP_VOLUME_MULTIPLIER = 1.15
 XRP_VOLUME_PERIOD = 20
-XRP_MARGIN = 200
-XRP_LEVERAGE = 10
+XRP_MARGIN = 300  # Updated to 300
+XRP_LEVERAGE = 20  # Updated to 20
 XRP_RISK_UNIT_PCT = 0.01  # 1% of equity
 
 # --- Helper: Format with emojis ---
@@ -256,9 +256,8 @@ def xrp_breakout_alert(cb_service, last_alert_ts=None):
     # --- Trade logic ---
     log_emoji(f"Breakout + 1h pullback detected! Preparing trade...", "🚀")
     play_alert_sound()
-    equity = get_equity(cb_service)
-    risk_unit = equity * XRP_RISK_UNIT_PCT
-    position_size_usd = risk_unit
+    # Use fixed position size: margin × leverage
+    position_size_usd = XRP_MARGIN * XRP_LEVERAGE
     # Get current price for base size calculation
     trades = cb_service.client.get_market_trades(product_id=PRODUCT_ID, limit=1)
     current_price = float(trades['trades'][0]['price'])
