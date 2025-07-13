@@ -17,8 +17,8 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 PRODUCT_ID = "XRP-PERP-INTX"
-XRP_MARGIN = 200
-XRP_LEVERAGE = 10
+XRP_MARGIN = 300
+XRP_LEVERAGE = 20
 STOP_LOSS = 2.17
 TP1 = 2.38
 TP2 = 2.60
@@ -124,20 +124,139 @@ def save_trigger_state(state):
         logger.error(f"Failed to save trigger state: {e}")
 
 
-# === NEW XRP BREAKOUT STRATEGY ALERT & TRADE LOGIC ===
+# === NEW XRP BREAKOUT STRATEGY ALERT & TRADE LOGIC (BLOCKS) ===
 
-# --- STRATEGY PARAMETERS (from user screenshots) ---
 XRP_STOP_LOSS = 2.58
 XRP_TP1 = 3.00
 XRP_TP2 = 3.325  # Midpoint of 3.25–3.40
 XRP_ENTRY_TRIGGER = 2.73
 XRP_ENTRY_ZONE_LOW = 2.73
-XRP_ENTRY_ZONE_HIGH = 2.78
+XRP_ENTRY_ZONE_HIGH = 2.75
 XRP_VOLUME_MULTIPLIER = 1.15
 XRP_VOLUME_PERIOD = 20
-XRP_MARGIN = 300  # Updated to 300
-XRP_LEVERAGE = 20  # Updated to 20
-XRP_RISK_UNIT_PCT = 0.01  # 1% of equity
+XRP_MARGIN = 300
+XRP_LEVERAGE = 20
+XRP_HARD_EXIT = 2.70
+
+TRIGGER_STATE_FILE = "xrp_breakout_blocks_state.json"
+
+def load_blocks_state():
+    if os.path.exists(TRIGGER_STATE_FILE):
+        try:
+            with open(TRIGGER_STATE_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {"breakout_seen": False, "retest_fired": False, "breakout_ts": None}
+    return {"breakout_seen": False, "retest_fired": False, "breakout_ts": None}
+
+def save_blocks_state(state):
+    try:
+        with open(TRIGGER_STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except Exception as e:
+        logger.error(f"Failed to save trigger state: {e}")
+
+def xrp_breakout_blocks_alert(cb_service, last_alert_ts=None):
+    PRODUCT_ID = "XRP-PERP-INTX"
+    GRANULARITY = "ONE_DAY"
+    periods_needed = XRP_VOLUME_PERIOD + 2
+    state = load_blocks_state()
+    try:
+        now = datetime.now(UTC)
+        now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = now - timedelta(days=periods_needed)
+        end = now
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+        if not candles or len(candles) < periods_needed:
+            log_emoji("Not enough daily candle data.", "⚠️")
+            return last_alert_ts
+        # Ensure candles are in correct order (oldest to newest)
+        if int(candles[0]['start']) > int(candles[-1]['start']):
+            candles = list(reversed(candles))
+        latest_candle = candles[-2]  # Last completed daily candle
+        prev_candle = candles[-3] if len(candles) >= 3 else None
+        historical_candles = candles[-(XRP_VOLUME_PERIOD+2):-2]
+        close = float(latest_candle['close'])
+        prev_close = float(prev_candle['close']) if prev_candle else None
+        low = float(latest_candle['low'])
+        v0 = float(latest_candle['volume'])
+        avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
+        ts = datetime.fromtimestamp(int(latest_candle['start']), UTC)
+        # --- Reporting ---
+        log_status(f"XRP Breakout Blocks Monitor\nClose: ${close:.2f} | Low: ${low:.2f} | Vol: {v0:,.0f} | AvgVol({XRP_VOLUME_PERIOD}): {avg20:,.0f}")
+        # --- Block 1: Breakout continuation ---
+        first_cross = close > XRP_ENTRY_TRIGGER and prev_close is not None and prev_close <= XRP_ENTRY_TRIGGER
+        volume_ok = v0 >= XRP_VOLUME_MULTIPLIER * avg20
+        clean_candle = low >= XRP_ENTRY_TRIGGER  # Optional: omit for less strict
+        trigger = first_cross and volume_ok and clean_candle
+        log_emoji(f"Breakout trigger: close > {XRP_ENTRY_TRIGGER} and prev_close <= {XRP_ENTRY_TRIGGER}: {'✅' if first_cross else '❌'}", "📈")
+        log_emoji(f"Volume filter ≥ {XRP_VOLUME_MULTIPLIER}x: {'✅' if volume_ok else '❌'}", "🔊")
+        log_emoji(f"Clean candle (low >= {XRP_ENTRY_TRIGGER}): {'✅' if clean_candle else '❌'}", "🕯️")
+        # Reset breakout_seen if hard exit condition
+        if close < XRP_HARD_EXIT:
+            state = {"breakout_seen": False, "retest_fired": False, "breakout_ts": None}
+            save_blocks_state(state)
+            log_emoji(f"Breakout reset: close < {XRP_HARD_EXIT}", "🔄")
+        # Block 1: Fire trigger
+        if trigger and not state.get("breakout_seen", False):
+            log_emoji(f"Breakout continuation detected! Buying at close ${close:.2f}", "🚀")
+            play_alert_sound()
+            trade_success, trade_result = execute_crypto_trade(
+                cb_service=cb_service,
+                trade_type="XRP Breakout Continuation",
+                entry_price=close,
+                stop_loss=XRP_STOP_LOSS,
+                take_profit=XRP_TP1,
+                margin=XRP_MARGIN,
+                leverage=XRP_LEVERAGE,
+                side="BUY",
+                product=PRODUCT_ID
+            )
+            if trade_success:
+                log_emoji(f"Trade executed! TP1=${XRP_TP1}, SL=${XRP_STOP_LOSS}", "🎉")
+            else:
+                log_emoji(f"Trade failed: {trade_result}", "❌")
+            state = {"breakout_seen": True, "retest_fired": False, "breakout_ts": int(latest_candle['start'])}
+            save_blocks_state(state)
+            return ts
+        # --- Block 2: Pull-back retest ---
+        if state.get("breakout_seen", False) and not state.get("retest_fired", False):
+            # Look for first daily candle after breakout where low tags 2.73–2.75 and close > 2.73
+            breakout_ts = state.get("breakout_ts")
+            for c in candles:
+                if int(c['start']) <= breakout_ts:
+                    continue
+                c_low = float(c['low'])
+                c_close = float(c['close'])
+                if XRP_ENTRY_ZONE_LOW <= c_low <= XRP_ENTRY_ZONE_HIGH and c_close > XRP_ENTRY_TRIGGER:
+                    log_emoji(f"Pull-back retest detected! Limit buy in zone {XRP_ENTRY_ZONE_LOW}-{XRP_ENTRY_ZONE_HIGH} at close ${c_close:.2f}", "🟢")
+                    play_alert_sound()
+                    trade_success, trade_result = execute_crypto_trade(
+                        cb_service=cb_service,
+                        trade_type="XRP Pull-back Retest",
+                        entry_price=c_close,
+                        stop_loss=XRP_STOP_LOSS,
+                        take_profit=XRP_TP1,
+                        margin=XRP_MARGIN,
+                        leverage=XRP_LEVERAGE,
+                        side="BUY",
+                        product=PRODUCT_ID
+                    )
+                    if trade_success:
+                        log_emoji(f"Retest trade executed! TP1=${XRP_TP1}, SL=${XRP_STOP_LOSS}", "🎉")
+                    else:
+                        log_emoji(f"Retest trade failed: {trade_result}", "❌")
+                    state["retest_fired"] = True
+                    save_blocks_state(state)
+                    return datetime.fromtimestamp(int(c['start']), UTC)
+        return last_alert_ts
+    except Exception as e:
+        logger.error(f"Error in XRP breakout blocks alert logic: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    return last_alert_ts
 
 # --- Helper: Format with emojis ---
 def log_status(msg):
@@ -192,90 +311,9 @@ def monitor_tp1_and_rebracket(cb_service, product, original_size, tp1, tp2, sl, 
     else:
         log_emoji("TP1 not filled within monitoring window.", "⌛")
 
-# --- Main alert logic ---
-def xrp_breakout_alert(cb_service, last_alert_ts=None):
-    GRANULARITY = "ONE_DAY"
-    periods_needed = 30
-    now = datetime.now(UTC)
-    now = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    start = now - timedelta(days=periods_needed)
-    end = now
-    start_ts = int(start.timestamp())
-    end_ts = int(end.timestamp())
-    candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
-    if not candles or len(candles) < XRP_VOLUME_PERIOD + 2:
-        log_emoji("Not enough daily candle data.", "⚠️")
-        return last_alert_ts
-    # Ensure candles are in correct order (oldest to newest)
-    if int(candles[0]['start']) > int(candles[-1]['start']):
-        candles = list(reversed(candles))
-    latest_candle = candles[-2]
-    latest_close = float(latest_candle['close'])
-    latest_vol = float(latest_candle['volume'])
-    recent_volumes = [float(c['volume']) for c in candles[-XRP_VOLUME_PERIOD-1:-1]]
-    avg_volume = sum(recent_volumes) / len(recent_volumes) if recent_volumes else 0
-    # --- Reporting ---
-    log_status(f"XRP Breakout Alert\nClose: ${latest_close:.2f} | Vol: {latest_vol:,.0f} | AvgVol({XRP_VOLUME_PERIOD}): {avg_volume:,.0f}")
-    # --- Trigger conditions (DAILY) ---
-    cond_close = latest_close > XRP_ENTRY_TRIGGER
-    cond_vol = latest_vol >= avg_volume * XRP_VOLUME_MULTIPLIER if avg_volume > 0 else False
-    log_emoji(f"Daily close > {XRP_ENTRY_TRIGGER}: {'✅' if cond_close else '❌'}", "📈")
-    log_emoji(f"Volume filter ≥ {XRP_VOLUME_MULTIPLIER}x: {'✅' if cond_vol else '❌'}", "🔊")
-    if not (cond_close and cond_vol):
-        log_emoji("No breakout setup. Waiting...", "⏳")
-        return last_alert_ts
-    # --- If daily trigger is met, stalk 1h chart for entry ---
-    log_emoji("Daily trigger met! Stalking 1h chart for entry...", "🕰️")
-    # Get 1h candles for the current day
-    one_hour_gran = "ONE_HOUR"
-    day_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = day_start + timedelta(days=1)
-    h_start_ts = int(day_start.timestamp())
-    h_end_ts = int(day_end.timestamp())
-    h_candles = safe_get_candles(cb_service, PRODUCT_ID, h_start_ts, h_end_ts, one_hour_gran)
-    if not h_candles or len(h_candles) < 1:
-        log_emoji("No 1h candles for today yet.", "⚠️")
-        return last_alert_ts
-    # Ensure 1h candles are in correct order
-    if int(h_candles[0]['start']) > int(h_candles[-1]['start']):
-        h_candles = list(reversed(h_candles))
-    # Look for a 1h close in the entry zone
-    entry_found = False
-    entry_price = None
-    for hc in h_candles[:-1]:  # Exclude current incomplete candle
-        h_close = float(hc['close'])
-        h_time = datetime.fromtimestamp(int(hc['start']), UTC)
-        if XRP_ENTRY_ZONE_LOW <= h_close <= XRP_ENTRY_ZONE_HIGH:
-            entry_found = True
-            entry_price = h_close
-            log_emoji(f"1h close in entry zone at {h_time.strftime('%H:%M')}: ${h_close:.2f}", "✅")
-            break
-    if not entry_found:
-        log_emoji(f"No 1h close in entry zone ({XRP_ENTRY_ZONE_LOW}-{XRP_ENTRY_ZONE_HIGH}) yet. Waiting...", "⏳")
-        return last_alert_ts
-    # --- Trade logic ---
-    log_emoji(f"Breakout + 1h pullback detected! Preparing trade...", "🚀")
-    play_alert_sound()
-    # Use fixed position size: margin × leverage
-    position_size_usd = XRP_MARGIN * XRP_LEVERAGE
-    # Get current price for base size calculation
-    trades = cb_service.client.get_market_trades(product_id=PRODUCT_ID, limit=1)
-    current_price = float(trades['trades'][0]['price'])
-    base_size = position_size_usd / current_price
-    # Place initial bracket order (full size, TP1, SL)
-    log_emoji(f"Placing initial bracket: size=${position_size_usd:.2f} ({base_size:.1f} XRP), TP1=${XRP_TP1}, SL=${XRP_STOP_LOSS}", "🛒")
-    result = place_bracket(cb_service, base_size, XRP_TP1, XRP_STOP_LOSS, XRP_LEVERAGE, PRODUCT_ID)
-    if result.get("error"):
-        log_emoji(f"Trade failed: {result['error']}", "❌")
-        return last_alert_ts
-    log_emoji(f"Trade placed! Monitoring for TP1 fill...", "🎉")
-    # Monitor for TP1 fill and re-bracket for TP2
-    monitor_tp1_and_rebracket(cb_service, PRODUCT_ID, base_size, XRP_TP1, XRP_TP2, XRP_STOP_LOSS, XRP_LEVERAGE)
-    return datetime.now(UTC)
-
 # --- Main loop ---
 def main():
-    logger.info("Starting XRP breakout alert script (new strategy)")
+    logger.info("Starting XRP breakout blocks alert script (daily)")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
         logger.error(f"❌ Alert sound file '{alert_sound_file}' not found!")
@@ -287,7 +325,7 @@ def main():
     while True:
         try:
             iteration_start_time = time.time()
-            xrp_last_alert_ts = xrp_breakout_alert(cb_service, xrp_last_alert_ts)
+            xrp_last_alert_ts = xrp_breakout_blocks_alert(cb_service, xrp_last_alert_ts)
             wait_seconds = 60  # 1 minute
             logger.info(f"✅ Alert cycle completed in {time.time() - iteration_start_time:.1f} seconds")
             logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll\n")
