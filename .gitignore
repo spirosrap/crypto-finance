@@ -90,3 +90,4 @@ logs
 xrp_breakout_trigger_state.json
 btc_breakout_trigger_state.json
 eth_breakout_trigger_state.json
+btc_desc_channel_breakout_state.json
