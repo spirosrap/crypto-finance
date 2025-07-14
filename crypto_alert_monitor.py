@@ -12,9 +12,15 @@ import os
 import json
 import concurrent.futures
 
-# Set up logging
-logging.basicConfig(level=logging.INFO,
-                   format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up file logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('btc_alert_debug.log'),
+        logging.StreamHandler()  # Keep console output too
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Connection retry configuration
@@ -313,6 +319,7 @@ def get_btc_perp_position_size(cb_service):
 
 
 def btc_custom_breakout_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting btc_custom_breakout_alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
     GRANULARITY = "ONE_HOUR"
     ENTRY_ZONE_LOW = 120000
@@ -326,43 +333,75 @@ def btc_custom_breakout_alert(cb_service, last_alert_ts=None):
     
     trigger_state = load_trigger_state()
     try:
+        logger.info("Setting up time parameters...")
         now = datetime.now(UTC)
         now = now.replace(minute=0, second=0, microsecond=0)
         start = now - timedelta(hours=periods_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
+        logger.info(f"Time range: {start} to {end}")
+        
+        logger.info("Fetching candles from API...")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+        logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
+        
         if not candles or len(candles) < periods_needed:
             logger.warning(f"Not enough BTC {GRANULARITY} candle data for custom breakout alert.")
+            logger.info("=== btc_custom_breakout_alert completed (insufficient data) ===")
             return last_alert_ts
-        # Use the most recent closed candle
-        last_candle = candles[-2]
-        ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
-        close = float(last_candle['close'])
-        high = float(last_candle['high'])
-        low = float(last_candle['low'])
-        v0 = float(last_candle['volume'])
-        historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-        avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
+            
+        logger.info("Processing candle data...")
+        
+        # Use the most recent closed candle (first in the list since candles are in reverse chronological order)
+        last_candle = candles[0]
+        
+        # Handle both dict and object formats for candle data
+        def get_candle_value(candle, key):
+            if isinstance(candle, dict):
+                value = candle.get(key)
+            else:
+                value = getattr(candle, key, None)
+            return value
+        
+        ts = datetime.fromtimestamp(int(get_candle_value(last_candle, 'start')), UTC)
+        close = float(get_candle_value(last_candle, 'close'))
+        high = float(get_candle_value(last_candle, 'high'))
+        low = float(get_candle_value(last_candle, 'low'))
+        v0 = float(get_candle_value(last_candle, 'volume'))
+        historical_candles = candles[1:VOLUME_PERIOD+1]  # Skip the first candle (most recent) and take the next VOLUME_PERIOD candles
+        avg20 = sum(float(get_candle_value(c, 'volume')) for c in historical_candles) / len(historical_candles)
+        
+        logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}")
         
         # --- Reporting ---
+        logger.info("Generating report...")
         logger.info("")
         logger.info(f"Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,} (pull-back to prior ceiling)")
-        logger.info(f"Stop-loss: ${STOP_LOSS:,} (below today’s intraday low)")
+        logger.info(f"Stop-loss: ${STOP_LOSS:,} (below today's intraday low)")
         logger.info(f"1st target: ${PROFIT_TARGET:,} (psychological + flag projection)")
         logger.info(f"Facts: fresh all-time high above $120K on heavy flows from ETFs/corporate treasuries. [markets.businessinsider.com] [investing.com]")
         logger.info(f"Opinion: momentum intact; buy dips only—chase breakouts as last resort.")
         logger.info("")
         logger.info(f"Candle close: ${close:,.2f}, High: ${high:,.2f}, Low: ${low:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
+        
         # --- Entry logic ---
+        logger.info("Checking entry conditions...")
         in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
+        logger.info(f"Entry conditions: in_zone={in_entry_zone}")
+        
         if in_entry_zone and not trigger_state.get("triggered", False):
+            logger.info("Entry conditions met - preparing to execute trade...")
             logger.info(f"Entry condition met: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}). Taking trade.")
+            
+            logger.info("Playing alert sound...")
             try:
                 play_alert_sound()
+                logger.info("Alert sound played successfully")
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
+            
+            logger.info("Executing crypto trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
                 trade_type="BTC-USD custom breakout entry",
@@ -374,25 +413,39 @@ def btc_custom_breakout_alert(cb_service, last_alert_ts=None):
                 side="BUY",
                 product=PRODUCT_ID
             )
+            logger.info(f"Trade execution completed: success={trade_success}")
+            
             if trade_success:
                 logger.info(f"BTC-USD custom breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
                 logger.error(f"BTC-USD custom breakout trade failed: {trade_result}")
+            
+            logger.info("Saving trigger state...")
             # Set trigger to avoid duplicate trades
-            trigger_state = {"triggered": True, "trigger_ts": int(last_candle['start'])}
+            trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
+            logger.info("Trigger state saved")
+            
+            logger.info("=== btc_custom_breakout_alert completed (trade executed) ===")
             return ts
+            
         # Reset trigger if price leaves entry zone
+        logger.info("Checking if trigger should be reset...")
         if trigger_state.get("triggered", False):
             if not in_entry_zone:
+                logger.info("Resetting trigger state...")
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
+                logger.info("Trigger state reset")
+        
+        logger.info("=== btc_custom_breakout_alert completed (no trade) ===")
         return last_alert_ts
     except Exception as e:
         logger.error(f"Error in BTC custom breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        logger.info("=== btc_custom_breakout_alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions

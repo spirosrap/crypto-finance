@@ -12,9 +12,15 @@ import os
 import json
 import concurrent.futures
 
-# Set up logging
-logging.basicConfig(level=logging.INFO,
-                   format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up file logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('eth_alert_debug.log'),
+        logging.StreamHandler()  # Keep console output too
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Connection retry configuration
@@ -183,6 +189,7 @@ def save_trigger_state(state):
         logger.error(f"Failed to save trigger state: {e}")
 
 def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting eth_custom_breakout_alert ===")
     PRODUCT_ID = "ETH-PERP-INTX"
     GRANULARITY = "ONE_HOUR"
     ENTRY_ZONE_LOW = 3000
@@ -195,16 +202,25 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
     periods_needed = VOLUME_PERIOD + 2
     trigger_state = load_trigger_state()
     try:
+        logger.info("Setting up time parameters...")
         now = datetime.now(UTC)
         now = now.replace(minute=0, second=0, microsecond=0)
         start = now - timedelta(hours=periods_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
+        logger.info(f"Time range: {start} to {end}")
+        
+        logger.info("Fetching candles from API...")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+        logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
+        
         if not candles or len(candles) < periods_needed:
             logger.warning(f"Not enough ETH {GRANULARITY} candle data for custom breakout alert.")
+            logger.info("=== eth_custom_breakout_alert completed (insufficient data) ===")
             return last_alert_ts
+            
+        logger.info("Processing candle data...")
         last_candle = candles[-2]
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
         close = float(last_candle['close'])
@@ -213,7 +229,10 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
         v0 = float(last_candle['volume'])
         historical_candles = candles[-(VOLUME_PERIOD+2):-2]
         avg2 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles) if historical_candles else 0
+        logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}")
+        
         # --- Reporting ---
+        logger.info("Generating report...")
         logger.info("")
         logger.info(f"Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,}")
         logger.info(f"Stop-loss: ${STOP_LOSS:,}")
@@ -222,14 +241,24 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
         logger.info(f"Opinion: risk-to-reward ≈ 4 : 1—size accordingly.")
         logger.info("")
         logger.info(f"Candle close: ${close:,.2f}, High: ${high:,.2f}, Low: ${low:,.2f}, Volume: {v0:,.0f}, Avg(2): {avg2:,.0f}")
+        
         # --- Entry logic ---
+        logger.info("Checking entry conditions...")
         in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
+        logger.info(f"Entry conditions: in_zone={in_entry_zone}")
+        
         if in_entry_zone and not trigger_state.get("triggered", False):
+            logger.info("Entry conditions met - preparing to execute trade...")
             logger.info(f"Entry condition met: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}). Taking trade.")
+            
+            logger.info("Playing alert sound...")
             try:
                 play_alert_sound()
+                logger.info("Alert sound played successfully")
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
+            
+            logger.info("Executing crypto trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
                 trade_type="ETH-USD custom breakout entry",
@@ -241,25 +270,39 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
                 side="BUY",
                 product=PRODUCT_ID
             )
+            logger.info(f"Trade execution completed: success={trade_success}")
+            
             if trade_success:
                 logger.info(f"ETH-USD custom breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
                 logger.error(f"ETH-USD custom breakout trade failed: {trade_result}")
+            
+            logger.info("Saving trigger state...")
             # Set trigger to avoid duplicate trades
             trigger_state = {"triggered": True, "trigger_ts": int(last_candle['start'])}
             save_trigger_state(trigger_state)
+            logger.info("Trigger state saved")
+            
+            logger.info("=== eth_custom_breakout_alert completed (trade executed) ===")
             return ts
+            
         # Reset trigger if price leaves entry zone
+        logger.info("Checking if trigger should be reset...")
         if trigger_state.get("triggered", False):
             if not in_entry_zone:
+                logger.info("Resetting trigger state...")
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
+                logger.info("Trigger state reset")
+        
+        logger.info("=== eth_custom_breakout_alert completed (no trade) ===")
         return last_alert_ts
     except Exception as e:
         logger.error(f"Error in ETH custom breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
+        logger.info("=== eth_custom_breakout_alert completed (with error) ===")
     return last_alert_ts
 
 def main():
