@@ -10,6 +10,7 @@ import sys
 import platform
 import os
 import json
+import concurrent.futures
 
 # Set up logging
 logging.basicConfig(level=logging.INFO,
@@ -301,14 +302,22 @@ def main():
         return
     cb_service = setup_coinbase()
     last_alert_ts = None
+    def poll_iteration():
+        nonlocal last_alert_ts
+        iteration_start_time = time.time()
+        last_alert_ts = xrp_custom_breakout_alert(cb_service, last_alert_ts)
+        wait_seconds = 60  # 1 minute
+        logger.info(f"✅ Alert cycle completed in {time.time() - iteration_start_time:.1f} seconds")
+        logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll\n")
+        time.sleep(wait_seconds)
     while True:
         try:
-            iteration_start_time = time.time()
-            last_alert_ts = xrp_custom_breakout_alert(cb_service, last_alert_ts)
-            wait_seconds = 60  # 1 minute
-            logger.info(f"✅ Alert cycle completed in {time.time() - iteration_start_time:.1f} seconds")
-            logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll\n")
-            time.sleep(wait_seconds)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(poll_iteration)
+                try:
+                    future.result(timeout=120)  # 2 minute max per poll
+                except concurrent.futures.TimeoutError:
+                    logger.error('Polling iteration timed out! Skipping to next.')
         except KeyboardInterrupt:
             logger.info("👋 Stopped by user.")
             break
