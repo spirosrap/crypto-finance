@@ -306,16 +306,16 @@ def main():
         nonlocal last_alert_ts
         iteration_start_time = time.time()
         last_alert_ts = xrp_custom_breakout_alert(cb_service, last_alert_ts)
-        wait_seconds = 60  # 1 minute
         logger.info(f"✅ Alert cycle completed in {time.time() - iteration_start_time:.1f} seconds")
-        logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll\n")
-        time.sleep(wait_seconds)
     while True:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(poll_iteration)
                 try:
                     future.result(timeout=120)  # 2 minute max per poll
+                    wait_seconds = 60  # 1 minute
+                    logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll\n")
+                    time.sleep(wait_seconds)
                 except concurrent.futures.TimeoutError:
                     logger.error('Polling iteration timed out! Skipping to next.')
         except KeyboardInterrupt:
