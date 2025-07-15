@@ -109,7 +109,7 @@ GRANULARITY = "ONE_HOUR"
 PRODUCT_ID = "BTC-PERP-INTX"
 
 # Trade parameters for BTC horizontal resistance breakout
-BTC_HORIZONTAL_MARGIN = 300  # USD
+BTC_HORIZONTAL_MARGIN = 250  # USD
 BTC_HORIZONTAL_LEVERAGE = 20  # 20x leverage
 
 
@@ -193,7 +193,7 @@ def setup_coinbase():
 
 
 def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_loss: float, take_profit: float, 
-                     margin: float = 300, leverage: int = 20, side: str = "BUY", product: str = "BTC-PERP-INTX"):
+                     margin: float = 250, leverage: int = 20, side: str = "BUY", product: str = "BTC-PERP-INTX"):
     """
     General crypto trade execution function using trade_btc_perp.py with retry logic
     
@@ -203,7 +203,7 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         entry_price: Entry price for logging
         stop_loss: Stop-loss price
         take_profit: Take-profit price
-        margin: USD amount to risk (default: 300)
+        margin: USD amount to risk (default: 250)
         leverage: Leverage multiplier (default: 20)
         side: Trade side - "BUY" or "SELL" (default: "BUY")
         product: Trading product (default: "BTC-PERP-INTX")
@@ -318,14 +318,14 @@ def get_btc_perp_position_size(cb_service):
         return 0.0
 
 
-def btc_custom_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting btc_custom_breakout_alert ===")
+def btc_long_continuation_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting btc_long_continuation_alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
     GRANULARITY = "ONE_HOUR"
-    ENTRY_ZONE_LOW = 120000
-    ENTRY_ZONE_HIGH = 121500
-    STOP_LOSS = 117500
-    PROFIT_TARGET = 125000
+    ENTRY_ZONE_LOW = 121000
+    ENTRY_ZONE_HIGH = 123000
+    STOP_LOSS = 116000
+    PROFIT_TARGET = 130000
     MARGIN = 300
     LEVERAGE = 20
     VOLUME_PERIOD = 20
@@ -347,16 +347,12 @@ def btc_custom_breakout_alert(cb_service, last_alert_ts=None):
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
         
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for custom breakout alert.")
-            logger.info("=== btc_custom_breakout_alert completed (insufficient data) ===")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for long continuation alert.")
+            logger.info("=== btc_long_continuation_alert completed (insufficient data) ===")
             return last_alert_ts
-            
+        
         logger.info("Processing candle data...")
         
-        # Use the most recent closed candle (first in the list since candles are in reverse chronological order)
-        last_candle = candles[0]
-        
-        # Handle both dict and object formats for candle data
         def get_candle_value(candle, key):
             if isinstance(candle, dict):
                 value = candle.get(key)
@@ -364,35 +360,40 @@ def btc_custom_breakout_alert(cb_service, last_alert_ts=None):
                 value = getattr(candle, key, None)
             return value
         
+        last_candle = candles[0]
         ts = datetime.fromtimestamp(int(get_candle_value(last_candle, 'start')), UTC)
         close = float(get_candle_value(last_candle, 'close'))
         high = float(get_candle_value(last_candle, 'high'))
         low = float(get_candle_value(last_candle, 'low'))
         v0 = float(get_candle_value(last_candle, 'volume'))
-        historical_candles = candles[1:VOLUME_PERIOD+1]  # Skip the first candle (most recent) and take the next VOLUME_PERIOD candles
+        historical_candles = candles[1:VOLUME_PERIOD+1]
         avg20 = sum(float(get_candle_value(c, 'volume')) for c in historical_candles) / len(historical_candles)
         
-        logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}")
+        # Calculate relative volume
+        rv = v0 / avg20 if avg20 > 0 else 0
+        
+        logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, rv={rv:.2f}")
         
         # --- Reporting ---
         logger.info("Generating report...")
         logger.info("")
-        logger.info(f"Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,} (pull-back to prior ceiling)")
-        logger.info(f"Stop-loss: ${STOP_LOSS:,} (below today's intraday low)")
-        logger.info(f"1st target: ${PROFIT_TARGET:,} (psychological + flag projection)")
-        logger.info(f"Facts: fresh all-time high above $120K on heavy flows from ETFs/corporate treasuries. [markets.businessinsider.com] [investing.com]")
-        logger.info(f"Opinion: momentum intact; buy dips only—chase breakouts as last resort.")
+        logger.info(f"Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,} (post-ATH retest zone; spot trades ${int((ENTRY_ZONE_LOW+ENTRY_ZONE_HIGH)/2):,}) [CoinDesk] [Cointelegraph]")
+        logger.info(f"Stop-loss: ${STOP_LOSS:,} (below last consolidation shelf and funding reset)")
+        logger.info(f"First profit target: ${PROFIT_TARGET:,} (round-number magnet + Fib extension)")
+        logger.info("Why: fresh highs, ETF inflows, banks (e.g., Standard Chartered) now offering spot trading to institutions, keeping demand bid [CoinDesk]. Volatility compression before breakout supports a trend leg rather than exhaustion.")
+        logger.info("Opinion: Momentum remains institutional-led; watch funding rates—if they spike, scale down.")
         logger.info("")
-        logger.info(f"Candle close: ${close:,.2f}, High: ${high:,.2f}, Low: ${low:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
+        logger.info(f"Candle close: ${close:,.2f}, High: ${high:,.2f}, Low: ${low:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}, Relative Volume: {rv:.2f}")
         
         # --- Entry logic ---
         logger.info("Checking entry conditions...")
-        in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-        logger.info(f"Entry conditions: in_zone={in_entry_zone}")
+        cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
+        cond_vol = rv >= 1.4
+        logger.info(f"Entry conditions: in_zone={cond_price}, rel_vol={cond_vol} (rv={rv:.2f} >= 1.4)")
         
-        if in_entry_zone and not trigger_state.get("triggered", False):
+        if cond_price and cond_vol and not trigger_state.get("triggered", False):
             logger.info("Entry conditions met - preparing to execute trade...")
-            logger.info(f"Entry condition met: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}). Taking trade.")
+            logger.info(f"Entry condition met: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}) and rv={rv:.2f} >= 1.4. Taking trade.")
             
             logger.info("Playing alert sound...")
             try:
@@ -404,7 +405,7 @@ def btc_custom_breakout_alert(cb_service, last_alert_ts=None):
             logger.info("Executing crypto trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC-USD custom breakout entry",
+                trade_type="BTC-USD long continuation entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -416,36 +417,35 @@ def btc_custom_breakout_alert(cb_service, last_alert_ts=None):
             logger.info(f"Trade execution completed: success={trade_success}")
             
             if trade_success:
-                logger.info(f"BTC-USD custom breakout trade executed successfully!")
+                logger.info(f"BTC-USD long continuation trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC-USD custom breakout trade failed: {trade_result}")
+                logger.error(f"BTC-USD long continuation trade failed: {trade_result}")
             
             logger.info("Saving trigger state...")
-            # Set trigger to avoid duplicate trades
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
             
-            logger.info("=== btc_custom_breakout_alert completed (trade executed) ===")
+            logger.info("=== btc_long_continuation_alert completed (trade executed) ===")
             return ts
-            
+        
         # Reset trigger if price leaves entry zone
         logger.info("Checking if trigger should be reset...")
         if trigger_state.get("triggered", False):
-            if not in_entry_zone:
+            if not cond_price:
                 logger.info("Resetting trigger state...")
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
         
-        logger.info("=== btc_custom_breakout_alert completed (no trade) ===")
+        logger.info("=== btc_long_continuation_alert completed (no trade) ===")
         return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in BTC custom breakout alert logic: {e}")
+        logger.error(f"Error in BTC long continuation alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== btc_custom_breakout_alert completed (with error) ===")
+        logger.info("=== btc_long_continuation_alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
@@ -468,7 +468,7 @@ def main():
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = btc_custom_breakout_alert(cb_service, last_alert_ts)
+        last_alert_ts = btc_long_continuation_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
         logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:
