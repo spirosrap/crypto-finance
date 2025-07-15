@@ -84,9 +84,11 @@ ENTRY_ZONE_HIGH = 2900
 STOP_LOSS = 2715
 PROFIT_TARGET = 3000
 EXTENDED_TARGET = 3525
-ETH_MARGIN = 300  # USD
-ETH_LEVERAGE = 20
+ETH_MARGIN = 250  # USD
+ETH_LEVERAGE = 20  # 20x leverage
 TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
+MARGIN = 250
+LEVERAGE = 20
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -135,7 +137,7 @@ def setup_coinbase():
     return service
 
 def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_loss: float, take_profit: float, 
-                     margin: float = ETH_MARGIN, leverage: int = ETH_LEVERAGE, side: str = "BUY", product: str = PRODUCT_ID):
+                     margin: float = 250, leverage: int = 20, side: str = "BUY", product: str = PRODUCT_ID):
     def _execute_trade():
         logger.info(f"Executing crypto trade: {trade_type} at ${entry_price:,.2f}")
         logger.info(f"Trade params: Margin=${margin}, Leverage={leverage}x, Side={side}, Product={product}")
@@ -196,8 +198,6 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
     ENTRY_ZONE_HIGH = 3050
     STOP_LOSS = 2940
     PROFIT_TARGET = 3380
-    MARGIN = 300
-    LEVERAGE = 20
     VOLUME_PERIOD = 2  # For facts reporting
     periods_needed = VOLUME_PERIOD + 2
     trigger_state = load_trigger_state()

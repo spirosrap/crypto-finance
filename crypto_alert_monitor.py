@@ -321,12 +321,12 @@ def get_btc_perp_position_size(cb_service):
 def btc_long_continuation_alert(cb_service, last_alert_ts=None):
     logger.info("=== Starting btc_long_continuation_alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "ONE_HOUR"
+    GRANULARITY = "FOUR_HOUR"  # Use 4-hour candles
     ENTRY_ZONE_LOW = 121000
-    ENTRY_ZONE_HIGH = 123000
+    ENTRY_ZONE_HIGH = 121500
     STOP_LOSS = 116000
-    PROFIT_TARGET = 130000
-    MARGIN = 300
+    PROFIT_TARGET = 135000
+    MARGIN = 250
     LEVERAGE = 20
     VOLUME_PERIOD = 20
     periods_needed = VOLUME_PERIOD + 2
@@ -335,14 +335,16 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
     try:
         logger.info("Setting up time parameters...")
         now = datetime.now(UTC)
-        now = now.replace(minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=periods_needed)
+        # Align to the last closed 4-hour candle
+        hour = (now.hour // 4) * 4
+        now = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=4 * periods_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         logger.info(f"Time range: {start} to {end}")
         
-        logger.info("Fetching candles from API...")
+        logger.info("Fetching 4-hour candles from API...")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
         
@@ -352,56 +354,53 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
             return last_alert_ts
         
         logger.info("Processing candle data...")
-        
         def get_candle_value(candle, key):
             if isinstance(candle, dict):
                 value = candle.get(key)
             else:
                 value = getattr(candle, key, None)
             return value
-        
-        last_candle = candles[0]
+        # Log the timestamps and closes of the first few candles for debugging
+        for i, c in enumerate(candles[:3]):
+            ts_dbg = datetime.fromtimestamp(int(get_candle_value(c, 'start')), UTC)
+            close_dbg = float(get_candle_value(c, 'close'))
+            logger.info(f"Candle[{i}] start: {ts_dbg}, close: {close_dbg}")
+        # Use candles[1] as the last fully closed candle (skip in-progress)
+        last_candle = candles[1]
         ts = datetime.fromtimestamp(int(get_candle_value(last_candle, 'start')), UTC)
         close = float(get_candle_value(last_candle, 'close'))
         high = float(get_candle_value(last_candle, 'high'))
         low = float(get_candle_value(last_candle, 'low'))
         v0 = float(get_candle_value(last_candle, 'volume'))
-        historical_candles = candles[1:VOLUME_PERIOD+1]
+        historical_candles = candles[2:VOLUME_PERIOD+2]
         avg20 = sum(float(get_candle_value(c, 'volume')) for c in historical_candles) / len(historical_candles)
-        
         # Calculate relative volume
         rv = v0 / avg20 if avg20 > 0 else 0
-        
         logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, rv={rv:.2f}")
-        
         # --- Reporting ---
         logger.info("Generating report...")
         logger.info("")
-        logger.info(f"Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,} (post-ATH retest zone; spot trades ${int((ENTRY_ZONE_LOW+ENTRY_ZONE_HIGH)/2):,}) [CoinDesk] [Cointelegraph]")
-        logger.info(f"Stop-loss: ${STOP_LOSS:,} (below last consolidation shelf and funding reset)")
-        logger.info(f"First profit target: ${PROFIT_TARGET:,} (round-number magnet + Fib extension)")
-        logger.info("Why: fresh highs, ETF inflows, banks (e.g., Standard Chartered) now offering spot trading to institutions, keeping demand bid [CoinDesk]. Volatility compression before breakout supports a trend leg rather than exhaustion.")
+        logger.info(f"Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,} (4-hour close reclaim & hold)")
+        logger.info(f"Stop-loss: ${STOP_LOSS:,} (recent swing support)")
+        logger.info(f"First profit target: ${PROFIT_TARGET:,}")
+        logger.info("Why: fresh highs, ETF inflows, banks (e.g., Standard Chartered) now offering spot trading to institutions, keeping demand bid. Volatility compression before breakout supports a trend leg rather than exhaustion.")
         logger.info("Opinion: Momentum remains institutional-led; watch funding rates—if they spike, scale down.")
         logger.info("")
         logger.info(f"Candle close: ${close:,.2f}, High: ${high:,.2f}, Low: ${low:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}, Relative Volume: {rv:.2f}")
-        
         # --- Entry logic ---
         logger.info("Checking entry conditions...")
         cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
         cond_vol = rv >= 1.4
         logger.info(f"Entry conditions: in_zone={cond_price}, rel_vol={cond_vol} (rv={rv:.2f} >= 1.4)")
-        
         if cond_price and cond_vol and not trigger_state.get("triggered", False):
             logger.info("Entry conditions met - preparing to execute trade...")
             logger.info(f"Entry condition met: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}) and rv={rv:.2f} >= 1.4. Taking trade.")
-            
             logger.info("Playing alert sound...")
             try:
                 play_alert_sound()
                 logger.info("Alert sound played successfully")
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
-            
             logger.info("Executing crypto trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
@@ -415,21 +414,17 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
                 product=PRODUCT_ID
             )
             logger.info(f"Trade execution completed: success={trade_success}")
-            
             if trade_success:
                 logger.info(f"BTC-USD long continuation trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
                 logger.error(f"BTC-USD long continuation trade failed: {trade_result}")
-            
             logger.info("Saving trigger state...")
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            
             logger.info("=== btc_long_continuation_alert completed (trade executed) ===")
             return ts
-        
         # Reset trigger if price leaves entry zone
         logger.info("Checking if trigger should be reset...")
         if trigger_state.get("triggered", False):
@@ -438,7 +433,6 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
-        
         logger.info("=== btc_long_continuation_alert completed (no trade) ===")
         return last_alert_ts
     except Exception as e:

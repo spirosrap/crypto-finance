@@ -24,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 PRODUCT_ID = "XRP-PERP-INTX"
-XRP_MARGIN = 300
+XRP_MARGIN = 250
 XRP_LEVERAGE = 20
 STOP_LOSS = 2.17
 TP1 = 2.38
@@ -85,7 +85,7 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
     return []
 
 def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_loss: float, take_profit: float, 
-                     margin: float = XRP_MARGIN, leverage: int = XRP_LEVERAGE, side: str = "BUY", product: str = PRODUCT_ID):
+                     margin: float = 250, leverage: int = 20, side: str = "BUY", product: str = PRODUCT_ID):
     try:
         logger.info(f"Executing crypto trade: {trade_type} at ${entry_price:,.4f}")
         logger.info(f"Trade params: Margin=${margin}, Leverage={leverage}x, Side={side}, Product={product}")
@@ -141,7 +141,7 @@ XRP_ENTRY_ZONE_LOW = 2.73
 XRP_ENTRY_ZONE_HIGH = 2.75
 XRP_VOLUME_MULTIPLIER = 1.15
 XRP_VOLUME_PERIOD = 20
-XRP_MARGIN = 300
+XRP_MARGIN = 250
 XRP_LEVERAGE = 20
 XRP_HARD_EXIT = 2.70
 
@@ -171,7 +171,7 @@ def xrp_custom_breakout_alert(cb_service, last_alert_ts=None):
     ENTRY_ZONE_HIGH = 2.94
     STOP_LOSS = 2.73
     PROFIT_TARGET = 3.40
-    MARGIN = 300
+    MARGIN = 250
     LEVERAGE = 20
     VOLUME_PERIOD = 2  # For facts reporting
     periods_needed = VOLUME_PERIOD + 2
@@ -256,7 +256,7 @@ def xrp_custom_breakout_alert(cb_service, last_alert_ts=None):
             logger.info("Executing crypto trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="XRP-USD custom breakout entry",
+                trade_type="XRP-USD alert entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
