@@ -318,14 +318,14 @@ def get_btc_perp_position_size(cb_service):
         return 0.0
 
 
-def btc_long_continuation_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting btc_long_continuation_alert ===")
+def btc_bull_flag_breakout_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting btc_bull_flag_breakout_alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
     GRANULARITY = "FOUR_HOUR"  # Use 4-hour candles
-    ENTRY_ZONE_LOW = 121000
-    ENTRY_ZONE_HIGH = 121500
-    STOP_LOSS = 116000
-    PROFIT_TARGET = 135000
+    ENTRY_ZONE_LOW = 119000
+    ENTRY_ZONE_HIGH = 120000
+    STOP_LOSS = 116800
+    PROFIT_TARGET = 125000
     MARGIN = 250
     LEVERAGE = 20
     VOLUME_PERIOD = 20
@@ -349,8 +349,8 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
         
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for long continuation alert.")
-            logger.info("=== btc_long_continuation_alert completed (insufficient data) ===")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for bull-flag breakout alert.")
+            logger.info("=== btc_bull_flag_breakout_alert completed (insufficient data) ===")
             return last_alert_ts
         
         logger.info("Processing candle data...")
@@ -380,21 +380,21 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
         # --- Reporting ---
         logger.info("Generating report...")
         logger.info("")
-        logger.info(f"Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,} (4-hour close reclaim & hold)")
-        logger.info(f"Stop-loss: ${STOP_LOSS:,} (recent swing support)")
-        logger.info(f"First profit target: ${PROFIT_TARGET:,}")
-        logger.info("Why: fresh highs, ETF inflows, banks (e.g., Standard Chartered) now offering spot trading to institutions, keeping demand bid. Volatility compression before breakout supports a trend leg rather than exhaustion.")
-        logger.info("Opinion: Momentum remains institutional-led; watch funding rates—if they spike, scale down.")
+        logger.info(f"Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,} (retest after rising wedge break)")
+        logger.info(f"Stop-loss: ${STOP_LOSS:,} (below recent support pivot)")
+        logger.info(f"Profit target 1: ${PROFIT_TARGET:,} (target from bull-flag projection)")
+        logger.info("Facts: Broke out of a falling wedge into bull-flag, volume surged +150% on breakout, RSI strong but not overbought.")
+        logger.info("Opinion: Enter on pullback inside zone; high reward potential (~3:1), condition met.")
         logger.info("")
         logger.info(f"Candle close: ${close:,.2f}, High: ${high:,.2f}, Low: ${low:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}, Relative Volume: {rv:.2f}")
         # --- Entry logic ---
         logger.info("Checking entry conditions...")
         cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-        cond_vol = rv >= 1.4
-        logger.info(f"Entry conditions: in_zone={cond_price}, rel_vol={cond_vol} (rv={rv:.2f} >= 1.4)")
+        cond_vol = rv >= 1.5
+        logger.info(f"Entry conditions: in_zone={cond_price}, rel_vol={cond_vol} (rv={rv:.2f} >= 1.5)")
         if cond_price and cond_vol and not trigger_state.get("triggered", False):
             logger.info("Entry conditions met - preparing to execute trade...")
-            logger.info(f"Entry condition met: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}) and rv={rv:.2f} >= 1.4. Taking trade.")
+            logger.info(f"Entry condition met: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}) and rv={rv:.2f} >= 1.5. Taking trade.")
             logger.info("Playing alert sound...")
             try:
                 play_alert_sound()
@@ -404,7 +404,7 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
             logger.info("Executing crypto trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC-USD long continuation entry",
+                trade_type="BTC-USD bull-flag breakout entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -415,15 +415,15 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
             )
             logger.info(f"Trade execution completed: success={trade_success}")
             if trade_success:
-                logger.info(f"BTC-USD long continuation trade executed successfully!")
+                logger.info(f"BTC-USD bull-flag breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC-USD long continuation trade failed: {trade_result}")
+                logger.error(f"BTC-USD bull-flag breakout trade failed: {trade_result}")
             logger.info("Saving trigger state...")
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== btc_long_continuation_alert completed (trade executed) ===")
+            logger.info("=== btc_bull_flag_breakout_alert completed (trade executed) ===")
             return ts
         # Reset trigger if price leaves entry zone
         logger.info("Checking if trigger should be reset...")
@@ -433,13 +433,13 @@ def btc_long_continuation_alert(cb_service, last_alert_ts=None):
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
-        logger.info("=== btc_long_continuation_alert completed (no trade) ===")
+        logger.info("=== btc_bull_flag_breakout_alert completed (no trade) ===")
         return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in BTC long continuation alert logic: {e}")
+        logger.error(f"Error in BTC bull-flag breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== btc_long_continuation_alert completed (with error) ===")
+        logger.info("=== btc_bull_flag_breakout_alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
@@ -462,7 +462,7 @@ def main():
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = btc_long_continuation_alert(cb_service, last_alert_ts)
+        last_alert_ts = btc_bull_flag_breakout_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
         logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:
