@@ -67,19 +67,16 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# SOL ascending triangle breakout parameters
+# SOL breakout parameters (NEW SETUP)
 PRODUCT_ID = "SOL-PERP-INTX"
-GRANULARITY = "FOUR_HOUR"
+GRANULARITY = "ONE_DAY"  # Changed to daily
 VOLUME_PERIOD = 20
-ENTRY_TRIGGER_LOW = 154.5
-ENTRY_TRIGGER_HIGH = 155.5
-ENTRY_ZONE_LOW = 155
-ENTRY_ZONE_HIGH = 158
-STOP_LOSS = 148
-PROFIT_TARGET = 170
-EXTENSION_TARGET = 180
-VOLUME_MULTIPLIER = 1.20  # 20% above average
-SOL_MARGIN = 300  # USD (adjust as needed)
+ENTRY_TRIGGER = 180  # Break above $180
+ENTRY_ZONE = 180     # Entry above $180
+STOP_LOSS = 175      # Below $175
+PROFIT_TARGET = 200  # $200
+VOLUME_MULTIPLIER = 1.25  # 25% above average
+SOL_MARGIN = 150  # USD (adjust as needed)
 SOL_LEVERAGE = 20
 TRIGGER_STATE_FILE = "sol_breakout_trigger_state.json"
 
@@ -183,93 +180,72 @@ def save_trigger_state(state):
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-def sol_asc_triangle_breakout_alert(cb_service, last_alert_ts=None):
+def sol_breakout_alert_new(cb_service, last_alert_ts=None):
     periods_needed = VOLUME_PERIOD + 2
-    hours_needed = periods_needed * 4
+    days_needed = periods_needed
     trigger_state = load_trigger_state()
     try:
         now = datetime.now(UTC)
-        now = now.replace(minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=hours_needed)
+        now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = now - timedelta(days=days_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough SOL {GRANULARITY} candle data for 4h breakout alert.")
+            logger.warning(f"Not enough SOL {GRANULARITY} candle data for daily breakout alert.")
             return last_alert_ts
-        first_ts = int(candles[0]['start'])
-        last_ts_candle = int(candles[-1]['start'])
-        if first_ts > last_ts_candle:
-            last_candle = candles[1]
-            historical_candles = candles[2:VOLUME_PERIOD+2]
-            candidate_candles = candles[2:]
-        else:
-            last_candle = candles[-2]
-            historical_candles = candles[-(VOLUME_PERIOD+2):-2]
-            candidate_candles = candles[-(VOLUME_PERIOD+2):-1]
+        last_candle = candles[-2]  # Last closed daily candle
+        historical_candles = candles[-(VOLUME_PERIOD+2):-2]
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
         close = float(last_candle['close'])
         v0 = float(last_candle['volume'])
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
-        trigger_ok = ENTRY_TRIGGER_LOW < close <= ENTRY_TRIGGER_HIGH
+        trigger_ok = close > ENTRY_TRIGGER
         vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
-        logger.info(f"=== SOL 4H ASCENDING TRIANGLE BREAKOUT ALERT ===")
+        logger.info(f"=== SOL DAILY BREAKOUT ALERT (NEW SETUP) ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close in trigger zone ${ENTRY_TRIGGER_LOW:,.1f}-${ENTRY_TRIGGER_HIGH:,.1f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ 1.20x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
-        # Step 1: Set trigger if in trigger zone and volume is high
+        logger.info(f"  - Close above trigger ${ENTRY_TRIGGER:,.1f}: {'✅ Met' if trigger_ok else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ 1.25x avg: {'✅ Met' if vol_ok else '❌ Not Met'}")
+        # Step 1: Set trigger if breakout and volume are high
         if trigger_ok and vol_ok and not trigger_state.get("triggered", False):
-            logger.info(f"--- SOL breakout TRIGGERED: waiting for entry zone on next candles ---")
-            trigger_state = {"triggered": True, "trigger_ts": int(last_candle['start'])}
+            logger.info(f"--- SOL breakout TRIGGERED: taking trade ---")
+            try:
+                play_alert_sound()
+            except Exception as e:
+                logger.error(f"Failed to play alert sound: {e}")
+            trade_success, trade_result = execute_crypto_trade(
+                cb_service=cb_service,
+                trade_type="SOL daily breakout long (new setup)",
+                entry_price=close,
+                stop_loss=STOP_LOSS,
+                take_profit=PROFIT_TARGET,
+                margin=SOL_MARGIN,
+                leverage=SOL_LEVERAGE,
+                side="BUY",
+                product=PRODUCT_ID
+            )
+            if trade_success:
+                logger.info(f"SOL daily breakout trade executed successfully!")
+                logger.info(f"Trade output: {trade_result}")
+            else:
+                logger.error(f"SOL daily breakout trade failed: {trade_result}")
+            # Reset trigger after trade
+            trigger_state = {"triggered": False, "trigger_ts": None}
             save_trigger_state(trigger_state)
-            return last_alert_ts
-        # Step 2: If previously triggered, check for entry zone (high/low touch)
+            return ts
+        # Step 2: If previously triggered, do nothing (one-shot trade)
         if trigger_state.get("triggered", False):
-            logger.info(f"SOL breakout previously triggered at candle {trigger_state.get('trigger_ts')}, checking for entry zone (high/low)...")
-            triggered_ts = trigger_state.get('trigger_ts')
-            for c in candles:
-                if int(c['start']) <= triggered_ts:
-                    continue
-                high = float(c['high'])
-                low = float(c['low'])
-                if (ENTRY_ZONE_LOW <= high <= ENTRY_ZONE_HIGH) or (ENTRY_ZONE_LOW <= low <= ENTRY_ZONE_HIGH) or (low < ENTRY_ZONE_LOW and high > ENTRY_ZONE_HIGH):
-                    logger.info(f"--- SOL 4H ASCENDING TRIANGLE BREAKOUT TRADE ALERT ---")
-                    logger.info(f"Entry condition met: price touched entry zone (${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH}) after trigger. Taking trade.")
-                    try:
-                        play_alert_sound()
-                    except Exception as e:
-                        logger.error(f"Failed to play alert sound: {e}")
-                    trade_success, trade_result = execute_crypto_trade(
-                        cb_service=cb_service,
-                        trade_type="SOL 4h ascending triangle breakout long",
-                        entry_price=high if high >= ENTRY_ZONE_LOW else low,
-                        stop_loss=STOP_LOSS,
-                        take_profit=PROFIT_TARGET,
-                        margin=SOL_MARGIN,
-                        leverage=SOL_LEVERAGE,
-                        side="BUY",
-                        product=PRODUCT_ID
-                    )
-                    if trade_success:
-                        logger.info(f"SOL 4h ascending triangle breakout trade executed successfully!")
-                        logger.info(f"Trade output: {trade_result}")
-                    else:
-                        logger.error(f"SOL 4h ascending triangle breakout trade failed: {trade_result}")
-                    # Reset trigger after trade
-                    trigger_state = {"triggered": False, "trigger_ts": None}
-                    save_trigger_state(trigger_state)
-                    return ts
-            logger.info(f"SOL breakout triggered, but price has not touched entry zone yet.")
+            logger.info(f"SOL breakout previously triggered at candle {trigger_state.get('trigger_ts')}, waiting for reset...")
         return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in SOL 4h ascending triangle breakout alert logic: {e}")
+        logger.error(f"Error in SOL daily breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
     return last_alert_ts
 
 def main():
-    logger.info("Starting SOL ascending triangle breakout alert script")
+    logger.info("Starting SOL daily breakout alert script (NEW SETUP)")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -287,9 +263,9 @@ def main():
     while True:
         try:
             iteration_start_time = time.time()
-            sol_breakout_last_alert_ts = sol_asc_triangle_breakout_alert(cb_service, sol_breakout_last_alert_ts)
+            sol_breakout_last_alert_ts = sol_breakout_alert_new(cb_service, sol_breakout_last_alert_ts)
             consecutive_failures = 0
-            wait_seconds = 300
+            wait_seconds = 86400  # 1 day
             logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
             logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll")
             logger.info("")
