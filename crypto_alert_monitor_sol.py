@@ -191,16 +191,28 @@ def sol_breakout_alert_new(cb_service, last_alert_ts=None):
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
+        
+        logger.info(f"Fetching SOL candles from {start} to {end}")
+        logger.info(f"Product ID: {PRODUCT_ID}, Granularity: {GRANULARITY}")
+        
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         if not candles or len(candles) < periods_needed:
             logger.warning(f"Not enough SOL {GRANULARITY} candle data for daily breakout alert.")
             return last_alert_ts
-        last_candle = candles[-2]  # Last closed daily candle
-        historical_candles = candles[-(VOLUME_PERIOD+2):-2]
+        
+         
+        # Fix: Candles are returned in reverse chronological order (newest first)
+        # So candles[0] is the current incomplete candle, candles[1] is the last closed candle
+        last_candle = candles[1]  # Last closed daily candle (second in array)
+        historical_candles = candles[2:VOLUME_PERIOD+2]  # Use candles 2 onwards for historical data
+        
+        
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
         close = float(last_candle['close'])
         v0 = float(last_candle['volume'])
         avg20 = sum(float(c['volume']) for c in historical_candles) / len(historical_candles)
+        
+        
         trigger_ok = close > ENTRY_TRIGGER
         vol_ok = v0 >= VOLUME_MULTIPLIER * avg20
         logger.info(f"=== SOL DAILY BREAKOUT ALERT (NEW SETUP) ===")
@@ -244,6 +256,37 @@ def sol_breakout_alert_new(cb_service, last_alert_ts=None):
         logger.error(traceback.format_exc())
     return last_alert_ts
 
+def get_current_sol_price(cb_service):
+    """Get current SOL price to verify API is working correctly"""
+    try:
+        now = datetime.now(UTC)
+        start = now - timedelta(hours=1)
+        end = now
+        
+        response = cb_service.client.get_public_candles(
+            product_id=PRODUCT_ID,
+            start=int(start.timestamp()),
+            end=int(end.timestamp()),
+            granularity="ONE_HOUR"
+        )
+        
+        if hasattr(response, 'candles'):
+            candles = response.candles
+        else:
+            candles = response.get('candles', [])
+            
+        if candles:
+            latest_candle = candles[-1]
+            current_price = float(latest_candle['close'])
+            logger.info(f"Current SOL price: ${current_price:,.2f}")
+            return current_price
+        else:
+            logger.error("No candles returned for current price check")
+            return None
+    except Exception as e:
+        logger.error(f"Error getting current SOL price: {e}")
+        return None
+
 def main():
     logger.info("Starting SOL daily breakout alert script (NEW SETUP)")
     logger.info("")
@@ -257,6 +300,19 @@ def main():
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
     logger.info("")
     cb_service = setup_coinbase()
+    
+    # Test current SOL price to verify API is working
+    logger.info("Testing SOL price API...")
+    current_price = get_current_sol_price(cb_service)
+    if current_price is None:
+        logger.error("❌ Failed to get current SOL price. Check API connection.")
+        return
+    elif current_price < 100:  # SOL should be well above $100
+        logger.error(f"❌ Current SOL price seems wrong: ${current_price:,.2f}. Check product ID.")
+        return
+    else:
+        logger.info(f"✅ Current SOL price verified: ${current_price:,.2f}")
+    
     sol_breakout_last_alert_ts = None
     consecutive_failures = 0
     max_consecutive_failures = 5
