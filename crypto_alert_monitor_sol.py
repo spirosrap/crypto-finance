@@ -321,7 +321,7 @@ def main():
             iteration_start_time = time.time()
             sol_breakout_last_alert_ts = sol_breakout_alert_new(cb_service, sol_breakout_last_alert_ts)
             consecutive_failures = 0
-            wait_seconds = 86400  # 1 day
+            wait_seconds = 300  # 5 minutes
             logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
             logger.info(f"⏰ Waiting {wait_seconds} seconds until next poll")
             logger.info("")
