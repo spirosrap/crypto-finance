@@ -254,7 +254,7 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
         logger.info(f"💰 First profit target: ${PROFIT_TARGET:,} (psychological level, measured move)")
         logger.info(f"🚀 Extended target: ${EXTENDED_TARGET:,}+ per derivatives flow analysis")
         logger.info("")
-        logger.info(f"📊 Current: Close=${close:,.2f}, Volume={volume:,.0f}, Avg Volume={avg_volume:,.0f}")
+        logger.info(f"Candle close: ${close:,.2f}, Volume: {volume:,.0f}, Avg({VOLUME_PERIOD}): {avg_volume:,.0f}")
         
         # --- Entry logic ---
         logger.info("Checking breakout conditions...")
@@ -268,10 +268,17 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
         # Check if price is in entry zone
         in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
         
-        logger.info(f"Breakout conditions: breakout_triggered={breakout_triggered}, volume_condition={volume_condition}, in_entry_zone={in_entry_zone}")
+        # Check if all conditions are met
+        all_conditions_met = breakout_triggered and volume_condition and in_entry_zone
+        
+        # Report individual conditions
+        logger.info(f"  - Daily close above ${BREAKOUT_LEVEL:,}: {'✅ Met' if breakout_triggered else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ 1.1x avg ({volume:,.0f} vs {avg_volume:,.0f}): {'✅ Met' if volume_condition else '❌ Not Met'}")
+        logger.info(f"  - Price in entry zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
+        logger.info(f"  - Breakout conditions met: {'✅ Yes' if all_conditions_met else '❌ No'}")
         
         # Execute trade if all conditions are met and not already triggered
-        if breakout_triggered and volume_condition and in_entry_zone and not trigger_state.get("triggered", False):
+        if all_conditions_met and not trigger_state.get("triggered", False):
             logger.info("🎯 ALL BREAKOUT CONDITIONS MET - EXECUTING TRADE!")
             logger.info(f"✅ Daily close (${close:,.2f}) above ${BREAKOUT_LEVEL:,}")
             logger.info(f"✅ Volume ({volume:,.0f}) above average ({avg_volume:,.0f})")
