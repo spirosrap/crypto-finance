@@ -17,7 +17,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('btc_alert_debug.log'),
+        logging.FileHandler('btc_breakout_alert_debug.log'),
         logging.StreamHandler()  # Keep console output too
     ]
 )
@@ -116,7 +116,7 @@ BTC_HORIZONTAL_LEVERAGE = 20  # 20x leverage
 # Trade tracking
 btc_continuation_trade_taken = False
 
-TRIGGER_STATE_FILE = "btc_pullback_trigger_state.json"
+TRIGGER_STATE_FILE = "btc_breakout_trigger_state.json"
 
 def load_trigger_state():
     if os.path.exists(TRIGGER_STATE_FILE):
@@ -269,6 +269,38 @@ class BreakoutState:
         self.entry_price = d.get("entry_price")
 
 
+def calculate_rsi(prices, period=14):
+    """
+    Calculate RSI (Relative Strength Index) for a list of prices
+    
+    Args:
+        prices: List of price values
+        period: RSI period (default: 14)
+    
+    Returns:
+        RSI value (0-100)
+    """
+    if len(prices) < period + 1:
+        return 50  # Default to neutral if not enough data
+    
+    deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+    gains = [delta if delta > 0 else 0 for delta in deltas]
+    losses = [-delta if delta < 0 else 0 for delta in deltas]
+    
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    
+    if avg_loss == 0:
+        return 100
+    
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
 def get_btc_perp_position_size(cb_service):
     """
     Returns the open position size for BTC-PERP-INTX (absolute value, in base currency units).
@@ -318,39 +350,39 @@ def get_btc_perp_position_size(cb_service):
         return 0.0
 
 
-def btc_pullback_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting btc_pullback_alert ===")
+def btc_breakout_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting btc_breakout_alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "FOUR_HOUR"  # Use 4-hour candles for pullback analysis
-    ENTRY_ZONE_LOW = 118000
-    ENTRY_ZONE_HIGH = 119000
-    STOP_LOSS = 116500
-    PROFIT_TARGET = 125000
+    GRANULARITY = "ONE_HOUR"  # Use 1-hour candles for breakout analysis
+    ENTRY_ZONE_LOW = 122800
+    ENTRY_ZONE_HIGH = 123200
+    STOP_LOSS = 121600
+    PROFIT_TARGET = 126200
     MARGIN = 250
     LEVERAGE = 20
     VOLUME_PERIOD = 20
+    VOLUME_THRESHOLD = 1.25  # 25% above average volume
     periods_needed = VOLUME_PERIOD + 2
     
     trigger_state = load_trigger_state()
     try:
         logger.info("Setting up time parameters...")
         now = datetime.now(UTC)
-        # Align to the last closed 4-hour candle
-        hour = (now.hour // 4) * 4
-        now = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=4 * periods_needed)
+        # Align to the last closed 1-hour candle
+        now = now.replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=periods_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         logger.info(f"Time range: {start} to {end}")
         
-        logger.info("Fetching 4-hour candles from API...")
+        logger.info("Fetching 1-hour candles from API...")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
         
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for pullback alert.")
-            logger.info("=== btc_pullback_alert completed (insufficient data) ===")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for breakout alert.")
+            logger.info("=== btc_breakout_alert completed (insufficient data) ===")
             return last_alert_ts
         
         logger.info("Processing candle data...")
@@ -376,19 +408,26 @@ def btc_pullback_alert(cb_service, last_alert_ts=None):
         avg20 = sum(float(get_candle_value(c, 'volume')) for c in historical_candles) / len(historical_candles)
         # Calculate relative volume
         rv = v0 / avg20 if avg20 > 0 else 0
-        logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, rv={rv:.2f}")
+        
+        # Calculate RSI to ensure not overbought
+        closes = [float(get_candle_value(c, 'close')) for c in candles[1:VOLUME_PERIOD+2]]
+        rsi = calculate_rsi(closes, 14) if len(closes) >= 14 else 50  # Default to neutral if not enough data
+        
+        logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, rv={rv:.2f}, RSI={rsi:.1f}")
         # --- Reporting ---
-        logger.info("=== BTC PULLBACK ALERT (NEW SETUP) ===")
+        logger.info("=== BTC BREAKOUT ALERT (RISING CHANNEL) ===")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close in zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ 1.0x avg: {'✅ Met' if rv >= 1.0 else '❌ Not Met'}")
-        logger.info(f"  - Price inside entry conditions: {'✅ Yes' if (ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH) and (rv >= 1.0) else '❌ No'}")
+        logger.info(f"  - Close in breakout zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌ Not Met'}")
+        logger.info(f"  - Volume ≥ {VOLUME_THRESHOLD:.2f}x avg: {'✅ Met' if rv >= VOLUME_THRESHOLD else '❌ Not Met'}")
+        logger.info(f"  - RSI not overbought (≤70): {'✅ Met' if rsi <= 70 else '❌ Not Met'}")
+        logger.info(f"  - Breakout conditions met: {'✅ Yes' if (ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH) and (rv >= VOLUME_THRESHOLD) and (rsi <= 70) else '❌ No'}")
         # --- Entry logic ---
         cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-        cond_vol = rv >= 1.0  # Increased volume on pullback (above 20-period average)
-        if cond_price and cond_vol and not trigger_state.get("triggered", False):
-            logger.info("Entry conditions met - preparing to execute trade...")
-            logger.info(f"Entry condition met: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}) and rv={rv:.2f} >= 1.0. Taking trade.")
+        cond_vol = rv >= VOLUME_THRESHOLD  # 25% above average volume for breakout confirmation
+        cond_rsi = rsi <= 70  # RSI not overbought
+        if cond_price and cond_vol and cond_rsi and not trigger_state.get("triggered", False):
+            logger.info("Breakout conditions met - preparing to execute trade...")
+            logger.info(f"Breakout condition met: close (${close:,.2f}) is within breakout zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}), rv={rv:.2f} >= {VOLUME_THRESHOLD:.2f}, RSI={rsi:.1f} ≤ 70. Taking trade.")
             logger.info("Playing alert sound...")
             try:
                 play_alert_sound()
@@ -398,7 +437,7 @@ def btc_pullback_alert(cb_service, last_alert_ts=None):
             logger.info("Executing crypto trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC-USD pullback entry",
+                trade_type="BTC-USD breakout entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -409,36 +448,36 @@ def btc_pullback_alert(cb_service, last_alert_ts=None):
             )
             logger.info(f"Trade execution completed: success={trade_success}")
             if trade_success:
-                logger.info(f"BTC-USD pullback trade executed successfully!")
+                logger.info(f"BTC-USD breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC-USD pullback trade failed: {trade_result}")
+                logger.error(f"BTC-USD breakout trade failed: {trade_result}")
             logger.info("Saving trigger state...")
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== btc_pullback_alert completed (trade executed) ===")
+            logger.info("=== btc_breakout_alert completed (trade executed) ===")
             return ts
-        # Reset trigger if price leaves entry zone
+        # Reset trigger if any condition is no longer met
         logger.info("Checking if trigger should be reset...")
         if trigger_state.get("triggered", False):
-            if not cond_price:
-                logger.info("Resetting trigger state...")
+            if not (cond_price and cond_vol and cond_rsi):
+                logger.info("Resetting trigger state (conditions no longer met)...")
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
-        logger.info("=== btc_pullback_alert completed (no trade) ===")
+        logger.info("=== btc_breakout_alert completed (no trade) ===")
         return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in BTC pullback alert logic: {e}")
+        logger.error(f"Error in BTC breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== btc_pullback_alert completed (with error) ===")
+        logger.info("=== btc_breakout_alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
 def main():
-    logger.info("Starting custom BTC pullback alert script")
+    logger.info("Starting custom BTC breakout alert script")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -456,7 +495,7 @@ def main():
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = btc_pullback_alert(cb_service, last_alert_ts)
+        last_alert_ts = btc_breakout_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
         logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:
