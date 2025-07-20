@@ -74,19 +74,19 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH breakout parameters (updated based on image)
+# ETH bull-flag continuation parameters (based on image)
 PRODUCT_ID = "ETH-PERP-INTX"
-GRANULARITY = "ONE_DAY"
+GRANULARITY = "ONE_HOUR"  # Using 1-hour candles for more precise entry
 VOLUME_PERIOD = 20
-BREAKOUT_LEVEL = 3675  # Daily close above $3,675
-ENTRY_ZONE_LOW = 3675
-ENTRY_ZONE_HIGH = 3700
-STOP_LOSS = 3525  # 0.786 Fib / recent supply-reclaimed support
-PROFIT_TARGET = 4000  # Psychological level, measured move
-EXTENDED_TARGET = 4100  # Upside potential per derivatives flow analysis
+BREAKOUT_LEVEL = 3600  # Breakout above $3,600 from bull-flag
+ENTRY_ZONE_LOW = 3640  # Shallow retest post breakout
+ENTRY_ZONE_HIGH = 3670
+STOP_LOSS = 3500  # Below flag lower boundary & 20-EMA
+PROFIT_TARGET = 4000  # Projection from flag height & psychological level
+EXTENDED_TARGET = 4100  # Additional upside potential
 ETH_MARGIN = 250  # USD
 ETH_LEVERAGE = 20  # 20x leverage
-TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
+TRIGGER_STATE_FILE = "eth_bullflag_trigger_state.json"
 MARGIN = 250
 LEVERAGE = 20
 
@@ -190,37 +190,28 @@ def save_trigger_state(state):
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting ETH-USD Breakout Alert ===")
+def eth_bullflag_continuation_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting ETH-USD Bull-Flag Continuation Alert ===")
     periods_needed = VOLUME_PERIOD + 2
     trigger_state = load_trigger_state()
     try:
         logger.info("Setting up time parameters...")
         now = datetime.now(UTC)
-        # For daily candles, we want to get recent data including today
+        # For hourly candles, we want to get recent data including current hour
         end = now
-        start = now - timedelta(days=periods_needed + 5)  # Get extra days to ensure we have enough data
+        start = now - timedelta(hours=periods_needed + 24)  # Get extra hours to ensure we have enough data
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         logger.info(f"Time range: {start} to {end}")
-        logger.info(f"Requesting {periods_needed + 5} days of data")
+        logger.info(f"Requesting {periods_needed + 24} hours of data")
         
-        logger.info("Fetching daily candles from API...")
+        logger.info("Fetching hourly candles from API...")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
         
-        # # Debug: Show all candles to understand the data structure
-        # if candles:
-        #     logger.info(f"Debug - All {len(candles)} candles:")
-        #     for i, candle in enumerate(candles):
-        #         candle_ts = datetime.fromtimestamp(int(candle['start']), UTC)
-        #         logger.info(f"  Candle {i+1}: {candle_ts.strftime('%Y-%m-%d %H:%M')} - Close: ${float(candle['close']):,.2f}")
-        #     logger.info("")
-        #     logger.info(f"Using candle at index {len(candles)-1} (last candle)")
-        
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough ETH {GRANULARITY} candle data for breakout alert.")
-            logger.info("=== ETH-USD Breakout Alert completed (insufficient data) ===")
+            logger.warning(f"Not enough ETH {GRANULARITY} candle data for bull-flag alert.")
+            logger.info("=== ETH-USD Bull-Flag Alert completed (insufficient data) ===")
             return last_alert_ts
             
         logger.info("Processing candle data...")
@@ -244,45 +235,49 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
         logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, volume={volume:,.0f}")
         
         # --- Reporting ---
-        logger.info("Generating ETH-USD Breakout Report...")
+        logger.info("Generating ETH-USD Bull-Flag Continuation Report...")
         logger.info("")
-        logger.info("🎯 ETH-USD — Breakout beyond long-term triangle to $3,675 high")
+        logger.info("🎯 ETH-USD — Bull-flag continuation")
         logger.info("")
-        logger.info(f"📈 Entry trigger: Daily close above ${BREAKOUT_LEVEL:,} on above-average volume (ETF inflows >$383M)")
-        logger.info(f"🎯 Entry zone: ${ENTRY_ZONE_LOW:,} – ${ENTRY_ZONE_HIGH:,}")
-        logger.info(f"🛑 Stop-loss: ${STOP_LOSS:,} (0.786 Fib / recent supply-reclaimed support)")
-        logger.info(f"💰 First profit target: ${PROFIT_TARGET:,} (psychological level, measured move)")
-        logger.info(f"🚀 Extended target: ${EXTENDED_TARGET:,}+ per derivatives flow analysis")
+        logger.info(f"📈 Entry zone: ${ENTRY_ZONE_LOW:,} - ${ENTRY_ZONE_HIGH:,} (shallow retest post breakout above ${BREAKOUT_LEVEL:,})")
+        logger.info(f"🛑 Stop-loss: ${STOP_LOSS:,} (below flag lower boundary & 20-EMA)")
+        logger.info(f"💰 First profit target: ${PROFIT_TARGET:,} (projection from flag height & psychological level)")
+        logger.info(f"🚀 Extended target: ${EXTENDED_TARGET:,}+ (additional upside potential)")
+        logger.info("")
+        logger.info("📊 Facts:")
+        logger.info(f"  • ETH broke out from a long-term bull-flag with 1-hour volume ≥1.5x")
+        logger.info(f"  • Weekly candles confirm strength, price near ${close:,.0f}")
+        logger.info(f"  • On-chain whale accumulation rising; ETF inflows remain elevated")
         logger.info("")
         logger.info(f"Candle close: ${close:,.2f}, Volume: {volume:,.0f}, Avg({VOLUME_PERIOD}): {avg_volume:,.0f}")
         
         # --- Entry logic ---
-        logger.info("Checking breakout conditions...")
+        logger.info("Checking bull-flag continuation conditions...")
         
-        # Check if daily close is above breakout level
-        breakout_triggered = close > BREAKOUT_LEVEL
-        
-        # Check if volume is above average (ETF inflows >$383M proxy)
-        volume_condition = volume > avg_volume * 1.1  # 10% above average as proxy for ETF inflows
-        
-        # Check if price is in entry zone
+        # Check if price is in entry zone (shallow retest post breakout)
         in_entry_zone = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
         
+        # Check if volume is above average (1.5x as mentioned in facts)
+        volume_condition = volume > avg_volume * 1.5
+        
+        # Check if we've already broken out above the flag (price should be above breakout level)
+        breakout_confirmed = close > BREAKOUT_LEVEL
+        
         # Check if all conditions are met
-        all_conditions_met = breakout_triggered and volume_condition and in_entry_zone
+        all_conditions_met = in_entry_zone and volume_condition and breakout_confirmed
         
         # Report individual conditions
-        logger.info(f"  - Daily close above ${BREAKOUT_LEVEL:,}: {'✅ Met' if breakout_triggered else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ 1.1x avg ({volume:,.0f} vs {avg_volume:,.0f}): {'✅ Met' if volume_condition else '❌ Not Met'}")
         logger.info(f"  - Price in entry zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if in_entry_zone else '❌ Not Met'}")
-        logger.info(f"  - Breakout conditions met: {'✅ Yes' if all_conditions_met else '❌ No'}")
+        logger.info(f"  - Volume ≥ 1.5x avg ({volume:,.0f} vs {avg_volume:,.0f}): {'✅ Met' if volume_condition else '❌ Not Met'}")
+        logger.info(f"  - Breakout above ${BREAKOUT_LEVEL:,} confirmed: {'✅ Met' if breakout_confirmed else '❌ Not Met'}")
+        logger.info(f"  - Bull-flag continuation conditions met: {'✅ Yes' if all_conditions_met else '❌ No'}")
         
         # Execute trade if all conditions are met and not already triggered
         if all_conditions_met and not trigger_state.get("triggered", False):
-            logger.info("🎯 ALL BREAKOUT CONDITIONS MET - EXECUTING TRADE!")
-            logger.info(f"✅ Daily close (${close:,.2f}) above ${BREAKOUT_LEVEL:,}")
-            logger.info(f"✅ Volume ({volume:,.0f}) above average ({avg_volume:,.0f})")
-            logger.info(f"✅ Price in entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,})")
+            logger.info("🎯 ALL BULL-FLAG CONTINUATION CONDITIONS MET - EXECUTING TRADE!")
+            logger.info(f"✅ Price (${close:,.2f}) in entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,})")
+            logger.info(f"✅ Volume ({volume:,.0f}) above 1.5x average ({avg_volume:,.0f})")
+            logger.info(f"✅ Breakout above ${BREAKOUT_LEVEL:,} confirmed")
             
             logger.info("🔊 Playing alert sound...")
             try:
@@ -291,10 +286,10 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
             
-            logger.info("🚀 Executing ETH-USD breakout trade...")
+            logger.info("🚀 Executing ETH-USD bull-flag continuation trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="ETH-USD Breakout Trade",
+                trade_type="ETH-USD Bull-Flag Continuation Trade",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -306,10 +301,10 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
             logger.info(f"Trade execution completed: success={trade_success}")
             
             if trade_success:
-                logger.info("🎉 ETH-USD Breakout trade executed successfully!")
+                logger.info("🎉 ETH-USD Bull-Flag Continuation trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"❌ ETH-USD Breakout trade failed: {trade_result}")
+                logger.error(f"❌ ETH-USD Bull-Flag Continuation trade failed: {trade_result}")
             
             logger.info("💾 Saving trigger state...")
             # Set trigger to avoid duplicate trades
@@ -317,30 +312,30 @@ def eth_custom_breakout_alert(cb_service, last_alert_ts=None):
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
             
-            logger.info("=== ETH-USD Breakout Alert completed (trade executed) ===")
+            logger.info("=== ETH-USD Bull-Flag Continuation Alert completed (trade executed) ===")
             return ts
             
-        # Reset trigger if price falls below breakout level
+        # Reset trigger if price falls below stop loss level
         logger.info("Checking if trigger should be reset...")
         if trigger_state.get("triggered", False):
-            if close < BREAKOUT_LEVEL:
-                logger.info("🔄 Resetting trigger state - price fell below breakout level")
+            if close < STOP_LOSS:
+                logger.info("🔄 Resetting trigger state - price fell below stop loss level")
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
         
-        logger.info("=== ETH-USD Breakout Alert completed (no trade) ===")
+        logger.info("=== ETH-USD Bull-Flag Continuation Alert completed (no trade) ===")
         return last_alert_ts
     except Exception as e:
-        logger.error(f"Error in ETH-USD Breakout Alert logic: {e}")
+        logger.error(f"Error in ETH-USD Bull-Flag Continuation Alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH-USD Breakout Alert completed (with error) ===")
+        logger.info("=== ETH-USD Bull-Flag Continuation Alert completed (with error) ===")
     return last_alert_ts
 
 def main():
-    logger.info("Starting ETH-USD Breakout Alert Monitor")
-    logger.info("🎯 Monitoring for daily close above $3,675 with above-average volume")
+    logger.info("Starting ETH-USD Bull-Flag Continuation Alert Monitor")
+    logger.info("🎯 Monitoring for bull-flag continuation entry at $3,640-$3,670 with 1.5x volume")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -358,7 +353,7 @@ def main():
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = eth_custom_breakout_alert(cb_service, last_alert_ts)
+        last_alert_ts = eth_bullflag_continuation_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
         logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:

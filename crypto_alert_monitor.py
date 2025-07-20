@@ -351,17 +351,21 @@ def get_btc_perp_position_size(cb_service):
 
 
 def btc_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting btc_breakout_alert ===")
+    logger.info("=== Starting BTC-USD Triangle Breakout Alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "ONE_HOUR"  # Use 1-hour candles for breakout analysis
-    ENTRY_ZONE_LOW = 122800
-    ENTRY_ZONE_HIGH = 123200
-    STOP_LOSS = 121600
-    PROFIT_TARGET = 126200
-    MARGIN = 250
-    LEVERAGE = 20
+    GRANULARITY = "ONE_HOUR"  # Use 1-hour candles for triangle analysis
+    
+    # Triangle breakout parameters from the image
+    ENTRY_ZONE_LOW = 121800   # $121,800 - retest of triangle top after breakout
+    ENTRY_ZONE_HIGH = 122200  # $122,200 - retest of triangle top after breakout
+    STOP_LOSS = 118200        # $118,200 - below daily 20-EMA/triangle base
+    PROFIT_TARGET = 126000    # $126,000 - projected by triangle height
+    MARGIN = 250              # USD margin
+    LEVERAGE = 20             # 20x leverage
+    
+    # Volume confirmation parameters
     VOLUME_PERIOD = 20
-    VOLUME_THRESHOLD = 1.25  # 25% above average volume
+    VOLUME_THRESHOLD = 1.2    # 20% above average volume for breakout confirmation
     periods_needed = VOLUME_PERIOD + 2
     
     trigger_state = load_trigger_state()
@@ -381,8 +385,8 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
         
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for breakout alert.")
-            logger.info("=== btc_breakout_alert completed (insufficient data) ===")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for triangle breakout alert.")
+            logger.info("=== BTC-USD Triangle Breakout Alert completed (insufficient data) ===")
             return last_alert_ts
         
         logger.info("Processing candle data...")
@@ -392,11 +396,13 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
             else:
                 value = getattr(candle, key, None)
             return value
+        
         # Log the timestamps and closes of the first few candles for debugging
         for i, c in enumerate(candles[:3]):
             ts_dbg = datetime.fromtimestamp(int(get_candle_value(c, 'start')), UTC)
             close_dbg = float(get_candle_value(c, 'close'))
             logger.info(f"Candle[{i}] start: {ts_dbg}, close: {close_dbg}")
+        
         # Use candles[1] as the last fully closed candle (skip in-progress)
         last_candle = candles[1]
         ts = datetime.fromtimestamp(int(get_candle_value(last_candle, 'start')), UTC)
@@ -404,40 +410,50 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         high = float(get_candle_value(last_candle, 'high'))
         low = float(get_candle_value(last_candle, 'low'))
         v0 = float(get_candle_value(last_candle, 'volume'))
+        
+        # Calculate volume confirmation
         historical_candles = candles[2:VOLUME_PERIOD+2]
         avg20 = sum(float(get_candle_value(c, 'volume')) for c in historical_candles) / len(historical_candles)
-        # Calculate relative volume
         rv = v0 / avg20 if avg20 > 0 else 0
         
         # Calculate RSI to ensure not overbought
         closes = [float(get_candle_value(c, 'close')) for c in candles[1:VOLUME_PERIOD+2]]
-        rsi = calculate_rsi(closes, 14) if len(closes) >= 14 else 50  # Default to neutral if not enough data
+        rsi = calculate_rsi(closes, 14) if len(closes) >= 14 else 50
         
         logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, rv={rv:.2f}, RSI={rsi:.1f}")
+        
         # --- Reporting ---
-        logger.info("=== BTC BREAKOUT ALERT (RISING CHANNEL) ===")
-        logger.info(f"Candle close: ${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close in breakout zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌ Not Met'}")
+        logger.info("=== BTC-USD TRIANGLE BREAKOUT ALERT ===")
+        logger.info(f"Triangle Setup: Entry Zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,} (retest of triangle top)")
+        logger.info(f"Stop Loss: ${STOP_LOSS:,} (below daily 20-EMA/triangle base)")
+        logger.info(f"Profit Target: ${PROFIT_TARGET:,} (projected by triangle height)")
+        logger.info(f"Current Candle: close=${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
+        logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌ Not Met'}")
         logger.info(f"  - Volume ≥ {VOLUME_THRESHOLD:.2f}x avg: {'✅ Met' if rv >= VOLUME_THRESHOLD else '❌ Not Met'}")
         logger.info(f"  - RSI not overbought (≤70): {'✅ Met' if rsi <= 70 else '❌ Not Met'}")
-        logger.info(f"  - Breakout conditions met: {'✅ Yes' if (ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH) and (rv >= VOLUME_THRESHOLD) and (rsi <= 70) else '❌ No'}")
+        logger.info(f"  - Triangle breakout conditions met: {'✅ Yes' if (ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH) and (rv >= VOLUME_THRESHOLD) and (rsi <= 70) else '❌ No'}")
+        
         # --- Entry logic ---
         cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-        cond_vol = rv >= VOLUME_THRESHOLD  # 25% above average volume for breakout confirmation
+        cond_vol = rv >= VOLUME_THRESHOLD  # 20% above average volume for breakout confirmation
         cond_rsi = rsi <= 70  # RSI not overbought
+        
         if cond_price and cond_vol and cond_rsi and not trigger_state.get("triggered", False):
-            logger.info("Breakout conditions met - preparing to execute trade...")
-            logger.info(f"Breakout condition met: close (${close:,.2f}) is within breakout zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}), rv={rv:.2f} >= {VOLUME_THRESHOLD:.2f}, RSI={rsi:.1f} ≤ 70. Taking trade.")
+            logger.info("🎯 Triangle breakout conditions met - preparing to execute trade...")
+            logger.info(f"Triangle breakout confirmed: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}), rv={rv:.2f} >= {VOLUME_THRESHOLD:.2f}, RSI={rsi:.1f} ≤ 70")
+            logger.info(f"Trade Setup: Entry=${close:,.2f}, SL=${STOP_LOSS:,}, TP=${PROFIT_TARGET:,}, Risk=${MARGIN}, Leverage={LEVERAGE}x")
+            
             logger.info("Playing alert sound...")
             try:
                 play_alert_sound()
                 logger.info("Alert sound played successfully")
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
-            logger.info("Executing crypto trade...")
+            
+            logger.info("Executing triangle breakout trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC-USD breakout entry",
+                trade_type="BTC-USD triangle breakout entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -446,18 +462,21 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
                 side="BUY",
                 product=PRODUCT_ID
             )
+            
             logger.info(f"Trade execution completed: success={trade_success}")
             if trade_success:
-                logger.info(f"BTC-USD breakout trade executed successfully!")
+                logger.info(f"🎉 BTC-USD triangle breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"BTC-USD breakout trade failed: {trade_result}")
+                logger.error(f"❌ BTC-USD triangle breakout trade failed: {trade_result}")
+            
             logger.info("Saving trigger state...")
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== btc_breakout_alert completed (trade executed) ===")
+            logger.info("=== BTC-USD Triangle Breakout Alert completed (trade executed) ===")
             return ts
+        
         # Reset trigger if any condition is no longer met
         logger.info("Checking if trigger should be reset...")
         if trigger_state.get("triggered", False):
@@ -466,18 +485,20 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
-        logger.info("=== btc_breakout_alert completed (no trade) ===")
+        
+        logger.info("=== BTC-USD Triangle Breakout Alert completed (no trade) ===")
         return last_alert_ts
+        
     except Exception as e:
-        logger.error(f"Error in BTC breakout alert logic: {e}")
+        logger.error(f"Error in BTC triangle breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== btc_breakout_alert completed (with error) ===")
+        logger.info("=== BTC-USD Triangle Breakout Alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
 def main():
-    logger.info("Starting custom BTC breakout alert script")
+    logger.info("Starting BTC-USD Triangle Breakout Alert Monitor")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -497,7 +518,7 @@ def main():
         iteration_start_time = time.time()
         last_alert_ts = btc_breakout_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
-        logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
+        logger.info(f"✅ Triangle breakout alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
