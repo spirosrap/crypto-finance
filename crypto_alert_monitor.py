@@ -358,7 +358,7 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
     # Triangle breakout parameters from the image
     ENTRY_ZONE_LOW = 121800   # $121,800 - retest of triangle top after breakout
     ENTRY_ZONE_HIGH = 122200  # $122,200 - retest of triangle top after breakout
-    STOP_LOSS = 118200        # $118,200 - below daily 20-EMA/triangle base
+    STOP_LOSS = 116300        # $116,300 - just below 21 Jul low + cushion
     PROFIT_TARGET = 126000    # $126,000 - projected by triangle height
     MARGIN = 250              # USD margin
     LEVERAGE = 20             # 20x leverage
@@ -425,7 +425,7 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         # --- Reporting ---
         logger.info("=== BTC-USD TRIANGLE BREAKOUT ALERT ===")
         logger.info(f"Triangle Setup: Entry Zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,} (retest of triangle top)")
-        logger.info(f"Stop Loss: ${STOP_LOSS:,} (below daily 20-EMA/triangle base)")
+        logger.info(f"Stop Loss: ${STOP_LOSS:,} (just below 21 Jul low + cushion)")
         logger.info(f"Profit Target: ${PROFIT_TARGET:,} (projected by triangle height)")
         logger.info(f"Current Candle: close=${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
         logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌ Not Met'}")
