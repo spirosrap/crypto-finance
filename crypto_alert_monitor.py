@@ -351,15 +351,15 @@ def get_btc_perp_position_size(cb_service):
 
 
 def btc_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting BTC-USD Triangle Breakout Alert ===")
+    logger.info("=== Starting BTC-USD 4H Breakout Alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "ONE_HOUR"  # Use 1-hour candles for triangle analysis
+    GRANULARITY = "FOUR_HOUR"  # Use 4-hour candles for breakout analysis
     
-    # Triangle breakout parameters from the image
-    ENTRY_ZONE_LOW = 121800   # $121,800 - retest of triangle top after breakout
-    ENTRY_ZONE_HIGH = 122200  # $122,200 - retest of triangle top after breakout
-    STOP_LOSS = 116300        # $116,300 - just below 21 Jul low + cushion
-    PROFIT_TARGET = 126000    # $126,000 - projected by triangle height
+    # Breakout parameters from the screenshot
+    ENTRY_ZONE_LOW = 122000   # $122,000
+    ENTRY_ZONE_HIGH = 122600  # $122,600
+    STOP_LOSS = 118600        # $118,600
+    PROFIT_TARGET = 125000    # $125,000
     MARGIN = 250              # USD margin
     LEVERAGE = 20             # 20x leverage
     
@@ -372,21 +372,22 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
     try:
         logger.info("Setting up time parameters...")
         now = datetime.now(UTC)
-        # Align to the last closed 1-hour candle
-        now = now.replace(minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=periods_needed)
+        # Align to the last closed 4-hour candle
+        hour = (now.hour // 4) * 4
+        now = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=4 * periods_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         logger.info(f"Time range: {start} to {end}")
         
-        logger.info("Fetching 1-hour candles from API...")
+        logger.info("Fetching 4-hour candles from API...")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
         
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for triangle breakout alert.")
-            logger.info("=== BTC-USD Triangle Breakout Alert completed (insufficient data) ===")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for breakout alert.")
+            logger.info("=== BTC-USD 4H Breakout Alert completed (insufficient data) ===")
             return last_alert_ts
         
         logger.info("Processing candle data...")
@@ -423,15 +424,15 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, rv={rv:.2f}, RSI={rsi:.1f}")
         
         # --- Reporting ---
-        logger.info("=== BTC-USD TRIANGLE BREAKOUT ALERT ===")
-        logger.info(f"Triangle Setup: Entry Zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,} (retest of triangle top)")
-        logger.info(f"Stop Loss: ${STOP_LOSS:,} (just below 21 Jul low + cushion)")
-        logger.info(f"Profit Target: ${PROFIT_TARGET:,} (projected by triangle height)")
+        logger.info("=== BTC-USD 4H BREAKOUT ALERT ===")
+        logger.info(f"Breakout Setup: Entry Zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}")
+        logger.info(f"Stop Loss: ${STOP_LOSS:,}")
+        logger.info(f"Profit Target: ${PROFIT_TARGET:,}")
         logger.info(f"Current Candle: close=${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
         logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌ Not Met'}")
         logger.info(f"  - Volume ≥ {VOLUME_THRESHOLD:.2f}x avg: {'✅ Met' if rv >= VOLUME_THRESHOLD else '❌ Not Met'}")
         logger.info(f"  - RSI not overbought (≤70): {'✅ Met' if rsi <= 70 else '❌ Not Met'}")
-        logger.info(f"  - Triangle breakout conditions met: {'✅ Yes' if (ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH) and (rv >= VOLUME_THRESHOLD) and (rsi <= 70) else '❌ No'}")
+        logger.info(f"  - Breakout conditions met: {'✅ Yes' if (ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH) and (rv >= VOLUME_THRESHOLD) and (rsi <= 70) else '❌ No'}")
         
         # --- Entry logic ---
         cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
@@ -439,8 +440,8 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         cond_rsi = rsi <= 70  # RSI not overbought
         
         if cond_price and cond_vol and cond_rsi and not trigger_state.get("triggered", False):
-            logger.info("🎯 Triangle breakout conditions met - preparing to execute trade...")
-            logger.info(f"Triangle breakout confirmed: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}), rv={rv:.2f} >= {VOLUME_THRESHOLD:.2f}, RSI={rsi:.1f} ≤ 70")
+            logger.info("🎯 Breakout conditions met - preparing to execute trade...")
+            logger.info(f"Breakout confirmed: close (${close:,.2f}) is within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}), rv={rv:.2f} >= {VOLUME_THRESHOLD:.2f}, RSI={rsi:.1f} ≤ 70")
             logger.info(f"Trade Setup: Entry=${close:,.2f}, SL=${STOP_LOSS:,}, TP=${PROFIT_TARGET:,}, Risk=${MARGIN}, Leverage={LEVERAGE}x")
             
             logger.info("Playing alert sound...")
@@ -450,10 +451,10 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
             
-            logger.info("Executing triangle breakout trade...")
+            logger.info("Executing breakout trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC-USD triangle breakout entry",
+                trade_type="BTC-USD 4H breakout entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -465,16 +466,16 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
             
             logger.info(f"Trade execution completed: success={trade_success}")
             if trade_success:
-                logger.info(f"🎉 BTC-USD triangle breakout trade executed successfully!")
+                logger.info(f"🎉 BTC-USD 4H breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"❌ BTC-USD triangle breakout trade failed: {trade_result}")
+                logger.error(f"❌ BTC-USD 4H breakout trade failed: {trade_result}")
             
             logger.info("Saving trigger state...")
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== BTC-USD Triangle Breakout Alert completed (trade executed) ===")
+            logger.info("=== BTC-USD 4H Breakout Alert completed (trade executed) ===")
             return ts
         
         # Reset trigger if any condition is no longer met
@@ -486,14 +487,14 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
         
-        logger.info("=== BTC-USD Triangle Breakout Alert completed (no trade) ===")
+        logger.info("=== BTC-USD 4H Breakout Alert completed (no trade) ===")
         return last_alert_ts
         
     except Exception as e:
-        logger.error(f"Error in BTC triangle breakout alert logic: {e}")
+        logger.error(f"Error in BTC 4H breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== BTC-USD Triangle Breakout Alert completed (with error) ===")
+        logger.info("=== BTC-USD 4H Breakout Alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
