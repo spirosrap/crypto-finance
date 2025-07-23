@@ -95,13 +95,13 @@ BREAKOUT_TRIGGER_LEVEL = 3830  # Daily close above this
 ENTRY_ZONE_LOW = 3830
 ENTRY_ZONE_HIGH = 3900
 STOP_LOSS = 3720
-PROFIT_TARGET_LOW = 3980
-PROFIT_TARGET_HIGH = 4000
+PROFIT_TARGET_LOW = 4000
 EXTENDED_TARGET_LOW = 4200
 EXTENDED_TARGET_HIGH = 4250
 VOLUME_LOOKBACK = 20  # For above-average volume
 EMA_PERIOD = 20  # Key EMA trend
 TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
+VOLUME_SURGE_FACTOR = 1.2  # 20% above average
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -235,10 +235,10 @@ def eth_breakout_alert(cb_service, last_alert_ts=None):
         ema = pd.Series(closes).ewm(span=EMA_PERIOD, adjust=False).mean().iloc[-1]
         # --- Entry trigger logic ---
         daily_close_trigger = close > BREAKOUT_TRIGGER_LEVEL
-        volume_trigger = volume > avg_volume
+        volume_trigger = volume >= VOLUME_SURGE_FACTOR * avg_volume
         ema_trend_trigger = close > ema
         logger.info(f"Daily close: ${close:,.2f} (trigger: >${BREAKOUT_TRIGGER_LEVEL}) -> {'✅' if daily_close_trigger else '❌'}")
-        logger.info(f"Volume: {volume:,.0f} (avg: {avg_volume:,.0f}) -> {'✅' if volume_trigger else '❌'}")
+        logger.info(f"Volume: {volume:,.0f} (avg: {avg_volume:,.0f}, surge: {VOLUME_SURGE_FACTOR}x) -> {'✅' if volume_trigger else '❌'}")
         logger.info(f"EMA({EMA_PERIOD}): {ema:,.2f} (close above EMA) -> {'✅' if ema_trend_trigger else '❌'}")
         entry_triggered = daily_close_trigger and volume_trigger and ema_trend_trigger
         # --- If entry trigger is met, check for entry zone on hourly candles ---
@@ -267,7 +267,7 @@ def eth_breakout_alert(cb_service, last_alert_ts=None):
                     trade_type="ETH-USD Breakout Trade",
                     entry_price=h_close,
                     stop_loss=STOP_LOSS,
-                    take_profit=PROFIT_TARGET_HIGH,
+                    take_profit=PROFIT_TARGET_LOW,
                     margin=MARGIN,
                     leverage=LEVERAGE,
                     side="BUY",
