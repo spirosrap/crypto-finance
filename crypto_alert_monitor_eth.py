@@ -91,7 +91,8 @@ MARGIN = 250
 LEVERAGE = 20
 
 # === STRATEGY PARAMETERS (from image) ===
-BREAKOUT_TRIGGER_LEVEL = 3830  # Daily close above this
+BREAKOUT_TRIGGER_LOW = 3830  # Daily close lower bound
+BREAKOUT_TRIGGER_HIGH = 3900  # Daily close upper bound
 ENTRY_ZONE_LOW = 3830
 ENTRY_ZONE_HIGH = 3900
 STOP_LOSS = 3720
@@ -205,7 +206,7 @@ def save_trigger_state(state):
 
 # --- New alert logic for breakout past $3,830 resistance ---
 def eth_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting ETH-USD Breakout Alert ($3,830 resistance) ===")
+    logger.info("=== Starting ETH-USD Breakout Alert ($3,830–3,900 resistance) ===")
     trigger_state = load_trigger_state()
     try:
         now = datetime.now(UTC)
@@ -234,10 +235,10 @@ def eth_breakout_alert(cb_service, last_alert_ts=None):
         closes = [float(c['close']) for c in candles]
         ema = pd.Series(closes).ewm(span=EMA_PERIOD, adjust=False).mean().iloc[-1]
         # --- Entry trigger logic ---
-        daily_close_trigger = close > BREAKOUT_TRIGGER_LEVEL
+        daily_close_trigger = BREAKOUT_TRIGGER_LOW <= close <= BREAKOUT_TRIGGER_HIGH
         volume_trigger = volume >= VOLUME_SURGE_FACTOR * avg_volume
         ema_trend_trigger = close > ema
-        logger.info(f"Daily close: ${close:,.2f} (trigger: >${BREAKOUT_TRIGGER_LEVEL}) -> {'✅' if daily_close_trigger else '❌'}")
+        logger.info(f"Daily close: ${close:,.2f} (trigger: ${BREAKOUT_TRIGGER_LOW}-${BREAKOUT_TRIGGER_HIGH}) -> {'✅' if daily_close_trigger else '❌'}")
         logger.info(f"Volume: {volume:,.0f} (avg: {avg_volume:,.0f}, surge: {VOLUME_SURGE_FACTOR}x) -> {'✅' if volume_trigger else '❌'}")
         logger.info(f"EMA({EMA_PERIOD}): {ema:,.2f} (close above EMA) -> {'✅' if ema_trend_trigger else '❌'}")
         entry_triggered = daily_close_trigger and volume_trigger and ema_trend_trigger
@@ -255,9 +256,15 @@ def eth_breakout_alert(cb_service, last_alert_ts=None):
             # Use most recent hourly close
             h_last = max(h_candles, key=lambda x: int(x['start']))
             h_close = float(h_last['close'])
+            # Optionally, get hourly EMA for stop-loss logic
+            h_closes = [float(c['close']) for c in h_candles]
+            h_ema = pd.Series(h_closes).ewm(span=EMA_PERIOD, adjust=False).mean().iloc[-1]
             logger.info(f"Most recent hourly close: ${h_close:,.2f}")
             in_entry_zone = ENTRY_ZONE_LOW <= h_close <= ENTRY_ZONE_HIGH
             logger.info(f"Entry zone: ${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH} -> {'✅' if in_entry_zone else '❌'}")
+            # Use fixed stop-loss or hourly EMA, whichever is lower
+            stop_loss = min(STOP_LOSS, h_ema)
+            logger.info(f"Stop-loss set at: ${stop_loss:,.2f} (fixed: ${STOP_LOSS}, hourly EMA: ${h_ema:,.2f})")
             all_conditions_met = in_entry_zone
             if all_conditions_met and not trigger_state.get("triggered", False):
                 logger.info("🎯 ALL BREAKOUT CONDITIONS MET - EXECUTING TRADE!")
@@ -266,7 +273,7 @@ def eth_breakout_alert(cb_service, last_alert_ts=None):
                     cb_service=cb_service,
                     trade_type="ETH-USD Breakout Trade",
                     entry_price=h_close,
-                    stop_loss=STOP_LOSS,
+                    stop_loss=stop_loss,
                     take_profit=PROFIT_TARGET_LOW,
                     margin=MARGIN,
                     leverage=LEVERAGE,

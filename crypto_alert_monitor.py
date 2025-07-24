@@ -351,11 +351,11 @@ def get_btc_perp_position_size(cb_service):
 
 
 def btc_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting BTC-USD 4H Breakout Alert ===")
+    logger.info("=== BTC-USD Bull-Pennant Breakout Alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "FOUR_HOUR"  # Use 4-hour candles for breakout analysis
+    GRANULARITY = "FOUR_HOUR"  # 4-hour candles for breakout analysis
 
-    # Breakout parameters from the screenshot
+    # Parameters from the screenshot
     ENTRY_TRIGGER = 120615      # $120,615 (trigger for breakout)
     ENTRY_ZONE_LOW = 120615     # $120,615 (entry zone lower bound)
     ENTRY_ZONE_HIGH = 121200    # $121,200 (entry zone upper bound)
@@ -373,9 +373,8 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
     trigger_state = load_trigger_state()
     try:
-        logger.info("Setting up time parameters...")
+        logger.info("Setting up time parameters for 4H candles...")
         now = datetime.now(UTC)
-        # Align to the last closed 4-hour candle
         hour = (now.hour // 4) * 4
         now = now.replace(hour=hour, minute=0, second=0, microsecond=0)
         start = now - timedelta(hours=4 * periods_needed)
@@ -390,22 +389,15 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
         if not candles or len(candles) < periods_needed:
             logger.warning(f"Not enough BTC {GRANULARITY} candle data for breakout alert.")
-            logger.info("=== BTC-USD 4H Breakout Alert completed (insufficient data) ===")
+            logger.info("=== BTC-USD Bull-Pennant Breakout Alert completed (insufficient data) ===")
             return last_alert_ts
 
-        logger.info("Processing candle data...")
         def get_candle_value(candle, key):
             if isinstance(candle, dict):
                 value = candle.get(key)
             else:
                 value = getattr(candle, key, None)
             return value
-
-        # Log the timestamps and closes of the first few candles for debugging
-        for i, c in enumerate(candles[:3]):
-            ts_dbg = datetime.fromtimestamp(int(get_candle_value(c, 'start')), UTC)
-            close_dbg = float(get_candle_value(c, 'close'))
-            logger.info(f"Candle[{i}] start: {ts_dbg}, close: {close_dbg}")
 
         # Use candles[1] as the last fully closed candle (skip in-progress)
         last_candle = candles[1]
@@ -424,30 +416,30 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         closes = [float(get_candle_value(c, 'close')) for c in candles[1:VOLUME_PERIOD+2]]
         rsi = calculate_rsi(closes, 14) if len(closes) >= 14 else 50
 
-        logger.info(f"Candle data processed: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, rv={rv:.2f}, RSI={rsi:.1f}")
-
-        # --- Reporting ---
-        logger.info("=== BTC-USD 4H BREAKOUT ALERT (Pennant Breakout Strategy) ===")
-        logger.info(f"Breakout Setup: Entry Trigger $120,615+ (close), Entry Zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}")
-        logger.info(f"Stop Loss: ${STOP_LOSS:,}")
-        logger.info(f"First Profit Target: ${PROFIT_TARGET:,}")
-        logger.info(f"Extended Target: ${EXTENDED_TARGET_LOW:,}-${EXTENDED_TARGET_HIGH:,} if momentum holds")
-        logger.info(f"Current Candle: close=${close:,.2f}, Volume: {v0:,.0f}, Avg(20): {avg20:,.0f}")
-        logger.info(f"  - Close above trigger ($120,615): {'✅ Met' if close > ENTRY_TRIGGER else '❌ Not Met'}")
-        logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}: {'✅ Met' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌ Not Met'}")
-        logger.info(f"  - Volume ≥ {VOLUME_THRESHOLD:.2f}x avg: {'✅ Met' if rv >= VOLUME_THRESHOLD else '❌ Not Met'}")
-        logger.info(f"  - RSI not overbought (≤70): {'✅ Met' if rsi <= 70 else '❌ Not Met'}")
-        logger.info(f"  - Breakout conditions met: {'✅ Yes' if (close > ENTRY_TRIGGER and ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH and rv >= VOLUME_THRESHOLD and rsi <= 70) else '❌ No'}")
+        # --- Reporting (match screenshot style) ---
+        logger.info("")
+        logger.info("1. BTC-USD — bull-pennant breakout to $125K+")
+        logger.info(f"• Entry trigger: Daily or 4-hr close > $120,615 with ≥20% volume surge")
+        logger.info(f"• Entry zone: {ENTRY_ZONE_LOW:,}–{ENTRY_ZONE_HIGH:,}")
+        logger.info(f"• Stop-loss: {STOP_LOSS:,} (20EMA and pattern support)")
+        logger.info(f"• First profit target: {PROFIT_TARGET:,} (measured move); if volume sustains momentum, extended target {EXTENDED_TARGET_LOW:,}–{EXTENDED_TARGET_HIGH:,}")
+        logger.info("")
+        logger.info(f"Current 4H Candle: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, volume={v0:,.0f}, avg20={avg20:,.0f}, rel_vol={rv:.2f}, RSI={rsi:.1f}")
+        logger.info(f"  - Close > $120,615: {'✅' if close > ENTRY_TRIGGER else '❌'}")
+        logger.info(f"  - Close in entry zone $120,615–$121,200: {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
+        logger.info(f"  - Volume ≥ 1.2x avg: {'✅' if rv >= VOLUME_THRESHOLD else '❌'}")
+        logger.info(f"  - RSI ≤ 70: {'✅' if rsi <= 70 else '❌'}")
+        logger.info(f"  - All breakout conditions met: {'✅' if (close > ENTRY_TRIGGER and ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH and rv >= VOLUME_THRESHOLD and rsi <= 70) else '❌'}")
+        logger.info("")
 
         # --- Entry logic ---
         cond_trigger = close > ENTRY_TRIGGER
         cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
-        cond_vol = rv >= VOLUME_THRESHOLD  # 20% above average volume for breakout confirmation
-        cond_rsi = rsi <= 70  # RSI not overbought
+        cond_vol = rv >= VOLUME_THRESHOLD
+        cond_rsi = rsi <= 70
 
         if cond_trigger and cond_price and cond_vol and cond_rsi and not trigger_state.get("triggered", False):
-            logger.info("🎯 Breakout conditions met - preparing to execute trade...")
-            logger.info(f"Breakout confirmed: close (${close:,.2f}) is above trigger (${ENTRY_TRIGGER:,}) and within entry zone (${ENTRY_ZONE_LOW:,}-${ENTRY_ZONE_HIGH:,}), rv={rv:.2f} >= {VOLUME_THRESHOLD:.2f}, RSI={rsi:.1f} ≤ 70")
+            logger.info("🎯 All breakout conditions met - preparing to execute trade...")
             logger.info(f"Trade Setup: Entry=${close:,.2f}, SL=${STOP_LOSS:,}, TP=${PROFIT_TARGET:,}, Risk=${MARGIN}, Leverage={LEVERAGE}x")
 
             logger.info("Playing alert sound...")
@@ -481,7 +473,7 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== BTC-USD 4H Breakout Alert completed (trade executed) ===")
+            logger.info("=== BTC-USD Bull-Pennant Breakout Alert completed (trade executed) ===")
             return ts
 
         # Reset trigger if any condition is no longer met
@@ -493,14 +485,14 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
 
-        logger.info("=== BTC-USD 4H Breakout Alert completed (no trade) ===")
+        logger.info("=== BTC-USD Bull-Pennant Breakout Alert completed (no trade) ===")
         return last_alert_ts
 
     except Exception as e:
-        logger.error(f"Error in BTC 4H breakout alert logic: {e}")
+        logger.error(f"Error in BTC Bull-Pennant breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== BTC-USD 4H Breakout Alert completed (with error) ===")
+        logger.info("=== BTC-USD Bull-Pennant Breakout Alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
