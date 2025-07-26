@@ -351,18 +351,18 @@ def get_btc_perp_position_size(cb_service):
 
 
 def btc_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== BTC-USD Bull-Pennant Breakout Alert ===")
+    logger.info("=== BTC-USD Megaphone Breakout Alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
     GRANULARITY = "FOUR_HOUR"  # 4-hour candles for breakout analysis
 
-    # Parameters from the screenshot
-    ENTRY_TRIGGER = 120615      # $120,615 (trigger for breakout)
-    ENTRY_ZONE_LOW = 120615     # $120,615 (entry zone lower bound)
-    ENTRY_ZONE_HIGH = 121200    # $121,200 (entry zone upper bound)
-    STOP_LOSS = 118600          # $118,600
-    PROFIT_TARGET = 125000      # $125,000
-    EXTENDED_TARGET_LOW = 129000  # $129,000
-    EXTENDED_TARGET_HIGH = 132000 # $132,000
+    # Parameters from the screenshot (megaphone breakout)
+    ENTRY_TRIGGER = 117000      # $117,000 (trigger for breakout)
+    ENTRY_ZONE_LOW = 117000     # $117,000 (entry zone lower bound)
+    ENTRY_ZONE_HIGH = 118000    # $118,000 (entry zone upper bound)
+    STOP_LOSS = 115000          # $115,000
+    PROFIT_TARGET = 135000      # $135,000
+    EXTENDED_TARGET_LOW = 143000  # $143,000
+    EXTENDED_TARGET_HIGH = 200000 # $200,000
     MARGIN = 250                # USD margin
     LEVERAGE = 20               # 20x leverage
 
@@ -389,7 +389,7 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
         if not candles or len(candles) < periods_needed:
             logger.warning(f"Not enough BTC {GRANULARITY} candle data for breakout alert.")
-            logger.info("=== BTC-USD Bull-Pennant Breakout Alert completed (insufficient data) ===")
+            logger.info("=== BTC-USD Megaphone Breakout Alert completed (insufficient data) ===")
             return last_alert_ts
 
         def get_candle_value(candle, key):
@@ -418,15 +418,15 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
         # --- Reporting (match screenshot style) ---
         logger.info("")
-        logger.info("1. BTC-USD — bull-pennant breakout to $125K+")
-        logger.info(f"• Entry trigger: Daily or 4-hr close > $120,615 with ≥20% volume surge")
+        logger.info("1. BTC-USD — megaphone breakout above $117K retest")
+        logger.info(f"• Entry trigger: Daily or 4-hr close above $117,000 on ≥20% above-average volume")
         logger.info(f"• Entry zone: {ENTRY_ZONE_LOW:,}–{ENTRY_ZONE_HIGH:,}")
-        logger.info(f"• Stop-loss: {STOP_LOSS:,} (20EMA and pattern support)")
-        logger.info(f"• First profit target: {PROFIT_TARGET:,} (measured move); if volume sustains momentum, extended target {EXTENDED_TARGET_LOW:,}–{EXTENDED_TARGET_HIGH:,}")
+        logger.info(f"• Stop-loss: {STOP_LOSS:,} (recent retest hold; invalidates breakout)")
+        logger.info(f"• First profit target: {PROFIT_TARGET:,} (Citi base case projection plus measured move); aggressive upside toward {EXTENDED_TARGET_LOW:,}–{EXTENDED_TARGET_HIGH:,} if momentum reinforces breakout thesis")
         logger.info("")
         logger.info(f"Current 4H Candle: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, volume={v0:,.0f}, avg20={avg20:,.0f}, rel_vol={rv:.2f}, RSI={rsi:.1f}")
-        logger.info(f"  - Close > $120,615: {'✅' if close > ENTRY_TRIGGER else '❌'}")
-        logger.info(f"  - Close in entry zone $120,615–$121,200: {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
+        logger.info(f"  - Close > $117,000: {'✅' if close > ENTRY_TRIGGER else '❌'}")
+        logger.info(f"  - Close in entry zone $117,000–$118,000: {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
         logger.info(f"  - Volume ≥ 1.2x avg: {'✅' if rv >= VOLUME_THRESHOLD else '❌'}")
         logger.info(f"  - RSI ≤ 70: {'✅' if rsi <= 70 else '❌'}")
         logger.info(f"  - All breakout conditions met: {'✅' if (close > ENTRY_TRIGGER and ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH and rv >= VOLUME_THRESHOLD and rsi <= 70) else '❌'}")
@@ -452,7 +452,7 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
             logger.info("Executing breakout trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC-USD 4H bull-pennant breakout entry",
+                trade_type="BTC-USD 4H megaphone breakout entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -464,16 +464,16 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
             logger.info(f"Trade execution completed: success={trade_success}")
             if trade_success:
-                logger.info(f"🎉 BTC-USD 4H breakout trade executed successfully!")
+                logger.info(f"🎉 BTC-USD 4H megaphone breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"❌ BTC-USD 4H breakout trade failed: {trade_result}")
+                logger.error(f"❌ BTC-USD 4H megaphone breakout trade failed: {trade_result}")
 
             logger.info("Saving trigger state...")
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== BTC-USD Bull-Pennant Breakout Alert completed (trade executed) ===")
+            logger.info("=== BTC-USD Megaphone Breakout Alert completed (trade executed) ===")
             return ts
 
         # Reset trigger if any condition is no longer met
@@ -485,14 +485,14 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
 
-        logger.info("=== BTC-USD Bull-Pennant Breakout Alert completed (no trade) ===")
+        logger.info("=== BTC-USD Megaphone Breakout Alert completed (no trade) ===")
         return last_alert_ts
 
     except Exception as e:
-        logger.error(f"Error in BTC Bull-Pennant breakout alert logic: {e}")
+        logger.error(f"Error in BTC Megaphone breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== BTC-USD Bull-Pennant Breakout Alert completed (with error) ===")
+        logger.info("=== BTC-USD Megaphone Breakout Alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions

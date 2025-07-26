@@ -74,16 +74,17 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH bull-flag continuation parameters (based on image)
+# ETH bull-flag breakout continuation parameters (from image)
 PRODUCT_ID = "ETH-PERP-INTX"
-GRANULARITY = "ONE_HOUR"  # Using 1-hour candles for more precise entry
+GRANULARITY = "ONE_DAY"  # Using daily candles for entry trigger
 VOLUME_PERIOD = 20
-BREAKOUT_LEVEL = 3600  # Breakout above $3,600 from bull-flag
-ENTRY_ZONE_LOW = 3640  # Shallow retest post breakout
-ENTRY_ZONE_HIGH = 3670
-STOP_LOSS = 3500  # Below flag lower boundary & 20-EMA
-PROFIT_TARGET = 4000  # Projection from flag height & psychological level
-EXTENDED_TARGET = 4100  # Additional upside potential
+BREAKOUT_LEVEL = 3830  # Breakout above $3,830 from bull-flag
+ENTRY_ZONE_LOW = 3830  # Entry zone as per image
+ENTRY_ZONE_HIGH = 3900
+STOP_LOSS = 3720  # EMA/trendline support zone as per image
+PROFIT_TARGET = 4000  # Resistance + structural target as per image
+EXTENDED_TARGET_LOW = 4500  # Stretch target per on-chain MVRV and flag projection
+EXTENDED_TARGET_HIGH = 4900
 ETH_MARGIN = 250  # USD
 ETH_LEVERAGE = 20  # 20x leverage
 TRIGGER_STATE_FILE = "eth_bullflag_trigger_state.json"
@@ -91,18 +92,11 @@ MARGIN = 250
 LEVERAGE = 20
 
 # === STRATEGY PARAMETERS (from image) ===
-BREAKOUT_TRIGGER_LOW = 3830  # Daily close lower bound
+BREAKOUT_TRIGGER_LOW = 3830  # Daily close > $3,830
 BREAKOUT_TRIGGER_HIGH = 3900  # Daily close upper bound
-ENTRY_ZONE_LOW = 3830
-ENTRY_ZONE_HIGH = 3900
-STOP_LOSS = 3720
-PROFIT_TARGET_LOW = 4000
-EXTENDED_TARGET_LOW = 4200
-EXTENDED_TARGET_HIGH = 4250
 VOLUME_LOOKBACK = 20  # For above-average volume
 EMA_PERIOD = 20  # Key EMA trend
-TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
-VOLUME_SURGE_FACTOR = 1.2  # 20% above average
+VOLUME_SURGE_FACTOR = 1.2  # 20% above average volume pickup
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -204,9 +198,15 @@ def save_trigger_state(state):
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-# --- New alert logic for breakout past $3,830 resistance ---
+# --- ETH-USD Bull-Flag Breakout Continuation Alert (from image) ---
 def eth_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting ETH-USD Breakout Alert ($3,830–3,900 resistance) ===")
+    logger.info("=== Starting ETH-USD Bull-Flag Breakout Continuation Alert ===")
+    logger.info("🎯 Strategy: Daily close > $3,830 with ≥20% volume pickup")
+    logger.info("📍 Entry zone: $3,830–3,900")
+    logger.info("🛑 Stop-loss: $3,720 (EMA/trendline support)")
+    logger.info("🎯 First target: $4,000 (resistance + structural)")
+    logger.info("🚀 Stretch target: $4,500–4,900 (on-chain MVRV + flag projection)")
+    
     trigger_state = load_trigger_state()
     try:
         now = datetime.now(UTC)
@@ -220,99 +220,105 @@ def eth_breakout_alert(cb_service, last_alert_ts=None):
         if not candles or len(candles) < VOLUME_LOOKBACK + 1:
             logger.warning("Not enough daily candle data for breakout alert.")
             return last_alert_ts
+        
         # Sort by timestamp ascending
         candles = sorted(candles, key=lambda x: int(x['start']))
         last_candle = candles[-1]
         prev_candles = candles[-(VOLUME_LOOKBACK+1):-1]
+        
         close = float(last_candle['close'])
         high = float(last_candle['high'])
         low = float(last_candle['low'])
         volume = float(last_candle['volume'])
         ts = datetime.fromtimestamp(int(last_candle['start']), UTC)
+        
         # Calculate average volume (excluding current candle)
         avg_volume = sum(float(c['volume']) for c in prev_candles) / len(prev_candles)
+        
         # Calculate EMA (using pandas for simplicity)
         closes = [float(c['close']) for c in candles]
         ema = pd.Series(closes).ewm(span=EMA_PERIOD, adjust=False).mean().iloc[-1]
-        # --- Entry trigger logic ---
-        daily_close_trigger = (close > BREAKOUT_TRIGGER_LOW) and (close <= BREAKOUT_TRIGGER_HIGH)
-        volume_trigger = volume >= VOLUME_SURGE_FACTOR * avg_volume
-        ema_trend_trigger = close > ema
-        logger.info(f"Daily close: ${close:,.2f} (trigger: >${BREAKOUT_TRIGGER_LOW} and <=${BREAKOUT_TRIGGER_HIGH}) -> {'✅' if daily_close_trigger else '❌'}")
-        logger.info(f"Volume: {volume:,.0f} (avg: {avg_volume:,.0f}, surge: {VOLUME_SURGE_FACTOR}x) -> {'✅' if volume_trigger else '❌'}")
-        logger.info(f"EMA({EMA_PERIOD}): {ema:,.2f} (close above EMA) -> {'✅' if ema_trend_trigger else '❌'}")
+        
+        # --- Entry trigger logic (from image) ---
+        daily_close_trigger = close > BREAKOUT_TRIGGER_LOW  # Daily close > $3,830
+        volume_trigger = volume >= VOLUME_SURGE_FACTOR * avg_volume  # ≥20% volume pickup
+        ema_trend_trigger = close > ema  # Price above EMA for trend confirmation
+        
+        logger.info(f"📊 Daily Analysis:")
+        logger.info(f"   Close: ${close:,.2f} (trigger: >${BREAKOUT_TRIGGER_LOW}) -> {'✅' if daily_close_trigger else '❌'}")
+        logger.info(f"   Volume: {volume:,.0f} (avg: {avg_volume:,.0f}, surge: {VOLUME_SURGE_FACTOR}x) -> {'✅' if volume_trigger else '❌'}")
+        logger.info(f"   EMA({EMA_PERIOD}): {ema:,.2f} (close above EMA) -> {'✅' if ema_trend_trigger else '❌'}")
+        
         entry_triggered = daily_close_trigger and volume_trigger and ema_trend_trigger
-        # --- If entry trigger is met, check for entry zone on hourly candles ---
+        
         if entry_triggered:
-            logger.info("Entry trigger met. Checking for entry zone on hourly candles...")
-            # Get last 24 hours of hourly candles
-            h_start = now - timedelta(hours=48)
-            h_start_ts = int(h_start.timestamp())
-            h_end_ts = int(now.timestamp())
-            h_candles = safe_get_candles(cb_service, PRODUCT_ID, h_start_ts, h_end_ts, "ONE_HOUR")
-            if not h_candles:
-                logger.warning("No hourly candles available.")
-                return last_alert_ts
-            # Use most recent hourly close
-            h_last = max(h_candles, key=lambda x: int(x['start']))
-            h_close = float(h_last['close'])
-            # Optionally, get hourly EMA for stop-loss logic
-            h_closes = [float(c['close']) for c in h_candles]
-            h_ema = pd.Series(h_closes).ewm(span=EMA_PERIOD, adjust=False).mean().iloc[-1]
-            logger.info(f"Most recent hourly close: ${h_close:,.2f}")
-            in_entry_zone = (h_close >= ENTRY_ZONE_LOW) and (h_close <= ENTRY_ZONE_HIGH)
-            logger.info(f"Entry zone: ${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH} -> {'✅' if in_entry_zone else '❌'}")
-            # Use stop-loss as the higher of 3,720 and hourly EMA
-            stop_loss = max(STOP_LOSS, h_ema)
-            logger.info(f"Stop-loss set at: ${stop_loss:,.2f} (max of fixed: ${STOP_LOSS}, hourly EMA: ${h_ema:,.2f})")
-            all_conditions_met = in_entry_zone
-            if all_conditions_met and not trigger_state.get("triggered", False):
-                logger.info("🎯 ALL BREAKOUT CONDITIONS MET - EXECUTING TRADE!")
+            logger.info("🎯 ENTRY TRIGGER MET - Daily close > $3,830 with ≥20% volume pickup!")
+            
+            # Check if we're in the entry zone ($3,830–3,900)
+            in_entry_zone = (close >= ENTRY_ZONE_LOW) and (close <= ENTRY_ZONE_HIGH)
+            logger.info(f"📍 Entry zone check: ${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH} -> {'✅' if in_entry_zone else '❌'}")
+            
+            if in_entry_zone and not trigger_state.get("triggered", False):
+                logger.info("🚀 ALL CONDITIONS MET - EXECUTING BULL-FLAG BREAKOUT TRADE!")
                 play_alert_sound()
+                
+                # Execute the trade with parameters from image
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD Breakout Trade",
-                    entry_price=h_close,
-                    stop_loss=stop_loss,
-                    take_profit=PROFIT_TARGET_LOW,
+                    trade_type="ETH-USD Bull-Flag Breakout Trade",
+                    entry_price=close,
+                    stop_loss=STOP_LOSS,  # $3,720
+                    take_profit=PROFIT_TARGET,  # $4,000
                     margin=MARGIN,
                     leverage=LEVERAGE,
                     side="BUY",
                     product=PRODUCT_ID
                 )
+                
                 logger.info(f"Trade execution completed: success={trade_success}")
                 if trade_success:
-                    logger.info("🎉 ETH-USD Breakout trade executed successfully!")
+                    logger.info("🎉 ETH-USD Bull-Flag Breakout trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
-                    logger.info(f"First profit target: ${PROFIT_TARGET_LOW}")
-                    logger.info(f"If momentum holds, consider extending target to ${EXTENDED_TARGET_LOW}-${EXTENDED_TARGET_HIGH}")
+                    logger.info(f"🎯 First profit target: ${PROFIT_TARGET:,.2f}")
+                    logger.info(f"🚀 Stretch target: ${EXTENDED_TARGET_LOW:,.2f}-${EXTENDED_TARGET_HIGH:,.2f}")
+                    logger.info("💡 Consider extending target if momentum holds")
                 else:
-                    logger.error(f"❌ ETH-USD Breakout trade failed: {trade_result}")
-                trigger_state = {"triggered": True, "trigger_ts": int(h_last['start'])}
+                    logger.error(f"❌ ETH-USD Bull-Flag Breakout trade failed: {trade_result}")
+                
+                trigger_state = {"triggered": True, "trigger_ts": int(last_candle['start'])}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state saved")
-                logger.info("=== ETH-USD Breakout Alert completed (trade executed) ===")
+                logger.info("=== ETH-USD Bull-Flag Breakout Alert completed (trade executed) ===")
                 return ts
+            elif not in_entry_zone:
+                logger.info("⚠️ Entry trigger met but not in entry zone - monitoring for pullback")
+        
         # Reset trigger if price falls below stop loss
         if trigger_state.get("triggered", False):
             if close < STOP_LOSS:
-                logger.info("🔄 Resetting trigger state - price fell below stop loss level")
+                logger.info("🔄 Resetting trigger state - price fell below stop loss level ($3,720)")
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
-        logger.info("=== ETH-USD Breakout Alert completed (no trade) ===")
+        
+        logger.info("=== ETH-USD Bull-Flag Breakout Alert completed (no trade) ===")
         return last_alert_ts
+        
     except Exception as e:
-        logger.error(f"Error in ETH-USD Breakout Alert logic: {e}")
+        logger.error(f"Error in ETH-USD Bull-Flag Breakout Alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH-USD Breakout Alert completed (with error) ===")
+        logger.info("=== ETH-USD Bull-Flag Breakout Alert completed (with error) ===")
     return last_alert_ts
 
 # Replace main loop to use new alert
 def main():
-    logger.info("Starting ETH-USD Breakout Alert Monitor ($3,830 resistance)")
-    logger.info("🎯 Monitoring for breakout entry at $3,830–3,900 with above-average volume and EMA trend")
+    logger.info("Starting ETH-USD Bull-Flag Breakout Continuation Monitor")
+    logger.info("🎯 Strategy: Daily close > $3,830 with ≥20% volume pickup")
+    logger.info("📍 Entry zone: $3,830–3,900")
+    logger.info("🛑 Stop-loss: $3,720 (EMA/trendline support)")
+    logger.info("🎯 First target: $4,000 (resistance + structural)")
+    logger.info("🚀 Stretch target: $4,500–4,900 (on-chain MVRV + flag projection)")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
         logger.error(f"❌ Alert sound file '{alert_sound_file}' not found!")
