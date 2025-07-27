@@ -116,7 +116,7 @@ BTC_HORIZONTAL_LEVERAGE = 20  # 20x leverage
 # Trade tracking
 btc_continuation_trade_taken = False
 
-TRIGGER_STATE_FILE = "btc_breakout_trigger_state.json"
+TRIGGER_STATE_FILE = "btc_cup_handle_breakout_trigger_state.json"
 
 def load_trigger_state():
     if os.path.exists(TRIGGER_STATE_FILE):
@@ -351,45 +351,43 @@ def get_btc_perp_position_size(cb_service):
 
 
 def btc_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== BTC-USD Megaphone Breakout Alert ===")
+    logger.info("=== BTC-USD Cup-and-Handle / Triangle Breakout Alert ===")
     PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "FOUR_HOUR"  # 4-hour candles for breakout analysis
+    GRANULARITY = "ONE_DAY"  # Daily candles for cup-and-handle/triangle breakout analysis
 
-    # Parameters from the screenshot (megaphone breakout)
-    ENTRY_TRIGGER = 117000      # $117,000 (trigger for breakout)
-    ENTRY_ZONE_LOW = 117000     # $117,000 (entry zone lower bound)
-    ENTRY_ZONE_HIGH = 118000    # $118,000 (entry zone upper bound)
-    STOP_LOSS = 115000          # $115,000
-    PROFIT_TARGET = 135000      # $135,000
-    EXTENDED_TARGET_LOW = 143000  # $143,000
-    EXTENDED_TARGET_HIGH = 200000 # $200,000
+    # Parameters from the image (cup-and-handle / triangle breakout)
+    ENTRY_TRIGGER = 120250      # $120,250 (trigger for breakout above handle top and key resistance)
+    ENTRY_ZONE_LOW = 119300     # $119,300 (entry zone lower bound)
+    ENTRY_ZONE_HIGH = 120250    # $120,250 (entry zone upper bound)
+    STOP_LOSS = 117000          # $117,000 (below handle low and channel support)
+    PROFIT_TARGET = 134500      # $134,500 (analyst target supported by measured move)
     MARGIN = 250                # USD margin
     LEVERAGE = 20               # 20x leverage
 
     # Volume confirmation parameters
     VOLUME_PERIOD = 20
-    VOLUME_THRESHOLD = 1.2    # 20% above average volume for breakout confirmation
+    VOLUME_THRESHOLD = 1.25    # 25% above average volume for breakout confirmation
     periods_needed = VOLUME_PERIOD + 2
 
     trigger_state = load_trigger_state()
     try:
-        logger.info("Setting up time parameters for 4H candles...")
+        logger.info("Setting up time parameters for daily candles...")
         now = datetime.now(UTC)
-        hour = (now.hour // 4) * 4
-        now = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=4 * periods_needed)
+        # Get the start of the current day
+        now = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start = now - timedelta(days=periods_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         logger.info(f"Time range: {start} to {end}")
 
-        logger.info("Fetching 4-hour candles from API...")
+        logger.info("Fetching daily candles from API...")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
 
         if not candles or len(candles) < periods_needed:
             logger.warning(f"Not enough BTC {GRANULARITY} candle data for breakout alert.")
-            logger.info("=== BTC-USD Megaphone Breakout Alert completed (insufficient data) ===")
+            logger.info("=== BTC-USD Cup-and-Handle / Triangle Breakout Alert completed (insufficient data) ===")
             return last_alert_ts
 
         def get_candle_value(candle, key):
@@ -416,18 +414,22 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         closes = [float(get_candle_value(c, 'close')) for c in candles[1:VOLUME_PERIOD+2]]
         rsi = calculate_rsi(closes, 14) if len(closes) >= 14 else 50
 
-        # --- Reporting (match screenshot style) ---
+        # --- Reporting (match image style) ---
         logger.info("")
-        logger.info("1. BTC-USD — megaphone breakout above $117K retest")
-        logger.info(f"• Entry trigger: Daily or 4-hr close above $117,000 on ≥20% above-average volume")
-        logger.info(f"• Entry zone: {ENTRY_ZONE_LOW:,}–{ENTRY_ZONE_HIGH:,}")
-        logger.info(f"• Stop-loss: {STOP_LOSS:,} (recent retest hold; invalidates breakout)")
-        logger.info(f"• First profit target: {PROFIT_TARGET:,} (Citi base case projection plus measured move); aggressive upside toward {EXTENDED_TARGET_LOW:,}–{EXTENDED_TARGET_HIGH:,} if momentum reinforces breakout thesis")
+        logger.info("2. Bitcoin (BTC/USD) – Daily Cup-and-Handle / Triangle Breakout")
+        logger.info(f"• Timeframe: Daily")
+        logger.info(f"• Trade type: Breakout continuation from a cup-and-handle or ascending triangle pattern, occurring near the All-Time High (ATH)")
+        logger.info(f"• Entry zone: ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (above handle top and key resistance)")
+        logger.info(f"• Stop-loss: ${STOP_LOSS:,} (below handle low and channel support)")
+        logger.info(f"• First profit target: ${PROFIT_TARGET:,} (analyst target supported by measured move)")
+        logger.info("• Why high-probability: Bitcoin (BTC) recently cleared a descending channel and hit a new ATH near $123,000. Cup-and-handle formation and strong institutional ETF inflows (~$51 billion in 2025)")
+        logger.info(f"• Volume confirmation: Only enter if breakout candle shows ≥25% above 20-day average volume")
+        logger.info("• Status: Waiting – price consolidating below resistance; trigger only on high-volume close above $120,250")
         logger.info("")
-        logger.info(f"Current 4H Candle: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, volume={v0:,.0f}, avg20={avg20:,.0f}, rel_vol={rv:.2f}, RSI={rsi:.1f}")
-        logger.info(f"  - Close > $117,000: {'✅' if close > ENTRY_TRIGGER else '❌'}")
-        logger.info(f"  - Close in entry zone $117,000–$118,000: {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
-        logger.info(f"  - Volume ≥ 1.2x avg: {'✅' if rv >= VOLUME_THRESHOLD else '❌'}")
+        logger.info(f"Current Daily Candle: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, volume={v0:,.0f}, avg20={avg20:,.0f}, rel_vol={rv:.2f}, RSI={rsi:.1f}")
+        logger.info(f"  - Close > ${ENTRY_TRIGGER:,}: {'✅' if close > ENTRY_TRIGGER else '❌'}")
+        logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,}: {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
+        logger.info(f"  - Volume ≥ 1.25x avg: {'✅' if rv >= VOLUME_THRESHOLD else '❌'}")
         logger.info(f"  - RSI ≤ 70: {'✅' if rsi <= 70 else '❌'}")
         logger.info(f"  - All breakout conditions met: {'✅' if (close > ENTRY_TRIGGER and ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH and rv >= VOLUME_THRESHOLD and rsi <= 70) else '❌'}")
         logger.info("")
@@ -449,10 +451,10 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
 
-            logger.info("Executing breakout trade...")
+            logger.info("Executing cup-and-handle/triangle breakout trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC-USD 4H megaphone breakout entry",
+                trade_type="BTC-USD Daily cup-and-handle/triangle breakout entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -464,16 +466,16 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
             logger.info(f"Trade execution completed: success={trade_success}")
             if trade_success:
-                logger.info(f"🎉 BTC-USD 4H megaphone breakout trade executed successfully!")
+                logger.info(f"🎉 BTC-USD Daily cup-and-handle/triangle breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"❌ BTC-USD 4H megaphone breakout trade failed: {trade_result}")
+                logger.error(f"❌ BTC-USD Daily cup-and-handle/triangle breakout trade failed: {trade_result}")
 
             logger.info("Saving trigger state...")
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== BTC-USD Megaphone Breakout Alert completed (trade executed) ===")
+            logger.info("=== BTC-USD Cup-and-Handle / Triangle Breakout Alert completed (trade executed) ===")
             return ts
 
         # Reset trigger if any condition is no longer met
@@ -485,19 +487,19 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
 
-        logger.info("=== BTC-USD Megaphone Breakout Alert completed (no trade) ===")
+        logger.info("=== BTC-USD Cup-and-Handle / Triangle Breakout Alert completed (no trade) ===")
         return last_alert_ts
 
     except Exception as e:
-        logger.error(f"Error in BTC Megaphone breakout alert logic: {e}")
+        logger.error(f"Error in BTC Cup-and-Handle / Triangle breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== BTC-USD Megaphone Breakout Alert completed (with error) ===")
+        logger.info("=== BTC-USD Cup-and-Handle / Triangle Breakout Alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
 def main():
-    logger.info("Starting BTC-USD Triangle Breakout Alert Monitor")
+    logger.info("Starting BTC-USD Cup-and-Handle / Triangle Breakout Alert Monitor")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -517,7 +519,7 @@ def main():
         iteration_start_time = time.time()
         last_alert_ts = btc_breakout_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
-        logger.info(f"✅ Triangle breakout alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
+        logger.info(f"✅ Cup-and-Handle / Triangle breakout alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
