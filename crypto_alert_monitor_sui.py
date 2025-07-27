@@ -365,20 +365,18 @@ def sui_breakout_alert(cb_service, last_alert_ts=None):
         logger.info("• Status: Waiting – price extended but consolidating; only enter on clean breakout above $4.30 with volume")
         logger.info("")
         logger.info(f"Current 4-Hour Candle: close=${close:.4f}, high=${high:.4f}, low=${low:.4f}, volume={v0:,.0f}, avg20={avg20:,.0f}, rel_vol={rv:.2f}, RSI={rsi:.1f}")
-        logger.info(f"  - Close > ${ENTRY_TRIGGER:.2f}: {'✅' if close > ENTRY_TRIGGER else '❌'}")
         logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:.2f}–${ENTRY_ZONE_HIGH:.2f}: {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
         logger.info(f"  - Volume ≥ 1.25x avg: {'✅' if rv >= VOLUME_THRESHOLD else '❌'}")
         logger.info(f"  - RSI ≤ 70: {'✅' if rsi <= 70 else '❌'}")
-        logger.info(f"  - All breakout conditions met: {'✅' if (close > ENTRY_TRIGGER and ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH and rv >= VOLUME_THRESHOLD and rsi <= 70) else '❌'}")
+        logger.info(f"  - All breakout conditions met: {'✅' if (ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH and rv >= VOLUME_THRESHOLD and rsi <= 70) else '❌'}")
         logger.info("")
 
         # --- Entry logic ---
-        cond_trigger = close > ENTRY_TRIGGER
         cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH
         cond_vol = rv >= VOLUME_THRESHOLD
         cond_rsi = rsi <= 70
 
-        if cond_trigger and cond_price and cond_vol and cond_rsi and not trigger_state.get("triggered", False):
+        if cond_price and cond_vol and cond_rsi and not trigger_state.get("triggered", False):
             logger.info("🎯 All breakout conditions met - preparing to execute trade...")
             logger.info(f"Trade Setup: Entry=${close:.4f}, SL=${STOP_LOSS:.2f}, TP=${PROFIT_TARGET_HIGH:.2f}, Risk=${MARGIN}, Leverage={LEVERAGE}x")
 
@@ -419,7 +417,7 @@ def sui_breakout_alert(cb_service, last_alert_ts=None):
         # Reset trigger if any condition is no longer met
         logger.info("Checking if trigger should be reset...")
         if trigger_state.get("triggered", False):
-            if not (cond_trigger and cond_price and cond_vol and cond_rsi):
+            if not (cond_price and cond_vol and cond_rsi):
                 logger.info("Resetting trigger state (conditions no longer met)...")
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
