@@ -356,11 +356,10 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
     GRANULARITY = "FOUR_HOUR"  # 4-hour candles for bull flag breakout analysis
 
     # Parameters from the image (4-hour bull flag breakout)
-    ENTRY_TRIGGER = 118800      # $118,800 (trigger for breakout above flag upper trendline)
-    ENTRY_ZONE_LOW = 118800     # $118,800 (entry zone lower bound - break above flag upper trendline)
-    ENTRY_ZONE_HIGH = 119200    # $119,200 (entry zone upper bound)
-    STOP_LOSS = 117500          # $117,500 (below lower flag boundary ~ATR buffer)
-    PROFIT_TARGET = 122000      # $122,000 (measured flag pole projection)
+    ENTRY_ZONE_LOW = 120000     # $120,000 (entry zone lower bound - bull flag breakout)
+    ENTRY_ZONE_HIGH = 121500    # $121,500 (entry zone upper bound)
+    STOP_LOSS = 115000          # $115,000 (stop-loss)
+    PROFIT_TARGET = 126000      # $126,000 (first profit target, next $130,000)
     MARGIN = 250                # USD margin
     LEVERAGE = 20               # 20x leverage
 
@@ -420,22 +419,21 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         logger.info("")
         logger.info("Setup 1: Bitcoin (BTC/USD) — 4-Hour Bull Flag (Active)")
         logger.info(f"• Ticker: BTC/USD")
-        logger.info(f"• Entry zone: ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (break above flag upper trendline)")
-        logger.info(f"• Stop-loss: below lower flag boundary ~${STOP_LOSS:,} (~ATR buffer)")
-        logger.info(f"• First profit target: ~${PROFIT_TARGET:,} (measured flag pole projection)")
-        logger.info("• Why high-probability: Recent breakout past $118,500 into tight bull flag consolidation, momentum strong, descending wedge nearing breakout on daily")
-        logger.info(f"• Volume confirmation: entry candle must exceed 20-period average 4h volume by ≥ 25%")
-        logger.info(f"• Timeframe: 4-hour")
-        logger.info(f"• Trade type: breakout entry")
+        logger.info(f"• Entry zone: ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (bull-flag breakout)")
+        logger.info(f"• Stop-loss: ≤${STOP_LOSS:,}")
+        logger.info(f"• First profit target: ${PROFIT_TARGET:,} (next $130,000)")
+        logger.info("• Rationale (keywords): Bull-flag & falling-wedge; repeated tests of $120k; higher lows; open interest >$40B")
+        logger.info(f"• Volume condition: ≥25% above 20-period avg")
+        logger.info(f"• Timeframe: 4-h")
+        logger.info(f"• Trade type: Breakout (continuation)")
         # Determine current status based on trigger state
         if trigger_state.get("triggered", False):
             status = "Active — breakout detected, waiting for entry zone"
         else:
-            status = "Active — price is testing upper flag line; trigger research spot"
+            status = "Waiting for trigger"
         logger.info(f"• Status: {status}")
         logger.info("")
         logger.info(f"Current 4-Hour Candle: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, volume={v0:,.0f}, avg20={avg20:,.0f}, rel_vol={rv:.2f}, RSI={rsi:.1f}")
-        logger.info(f"  - Close > ${ENTRY_TRIGGER:,} (breakout): {'✅' if close > ENTRY_TRIGGER else '❌'}")
         logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (entry): {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
         logger.info(f"  - Volume ≥ 1.25x avg: {'✅' if rv >= VOLUME_THRESHOLD else '❌'}")
         logger.info(f"  - RSI ≤ 70: {'✅' if rsi <= 70 else '❌'}")
@@ -443,24 +441,13 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         logger.info("")
 
         # --- Entry logic ---
-        # Two-stage trigger: first break above flag, then enter in zone
-        cond_trigger = close > ENTRY_TRIGGER  # Break above $118,800
-        cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH  # In entry zone $118,800-$119,200
+        # Single-stage entry: enter when price is in the entry zone with volume confirmation
+        cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH  # In entry zone $120,000-$121,500
         cond_vol = rv >= VOLUME_THRESHOLD
         cond_rsi = rsi <= 70
 
-        # Check if we should trigger (break above flag) or execute (in entry zone)
-        should_trigger = cond_trigger and cond_vol and cond_rsi and not trigger_state.get("triggered", False)
-        should_execute = cond_price and cond_vol and cond_rsi and trigger_state.get("triggered", False)
-
-        if should_trigger:
-            logger.info("🎯 First stage: Breakout above flag upper trendline detected!")
-            logger.info("Saving trigger state - waiting for entry zone...")
-            trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
-            save_trigger_state(trigger_state)
-            logger.info("Trigger state saved - monitoring for entry zone")
-            logger.info("=== BTC-USD 4-Hour Bull Flag Breakout Alert completed (triggered, waiting for entry) ===")
-            return ts
+        # Execute trade when all conditions are met
+        should_execute = cond_price and cond_vol and cond_rsi
 
         if should_execute:
             logger.info("🎯 All breakout conditions met - preparing to execute trade...")
@@ -499,16 +486,6 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
             logger.info("Trigger state saved")
             logger.info("=== BTC-USD 4-Hour Bull Flag Breakout Alert completed (trade executed) ===")
             return ts
-
-        # Reset trigger if price falls back below the flag (failed breakout)
-        logger.info("Checking if trigger should be reset...")
-        if trigger_state.get("triggered", False):
-            # Reset if price falls back below the flag upper trendline (failed breakout)
-            if close < ENTRY_TRIGGER:
-                logger.info("Resetting trigger state (price fell back below flag upper trendline)...")
-                trigger_state = {"triggered": False, "trigger_ts": None}
-                save_trigger_state(trigger_state)
-                logger.info("Trigger state reset - breakout failed")
 
         logger.info("=== BTC-USD 4-Hour Bull Flag Breakout Alert completed (no trade) ===")
         return last_alert_ts

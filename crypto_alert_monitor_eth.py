@@ -74,19 +74,22 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH 1-Hour Bull-Flag Breakout parameters (based on image)
+# ETH Breakout/Pullback Continuation parameters (based on image)
 PRODUCT_ID = "ETH-PERP-INTX"
-GRANULARITY = "ONE_HOUR"  # 1-hour candles for bull-flag breakout
+GRANULARITY = "FOUR_HOUR"  # 4-hour candles as specified in image
 VOLUME_PERIOD = 20  # For volume confirmation
-ENTRY_ZONE_LOW = 3740  # Entry zone: $3,740–$3,760 (above flag consolidation high)
-ENTRY_ZONE_HIGH = 3760
-STOP_LOSS = 3700  # Stop-loss: $3,700 (below flag low/100-hour MA support)
-PROFIT_TARGET = 3880  # First profit target: $3,880
+CURRENT_PRICE_ZONE_LOW = 3890  # Current price levels: $3,890–4,050 (above $4,089)
+CURRENT_PRICE_ZONE_HIGH = 4050
+ALT_PULLBACK_LOW = 3780  # Alt pullback at $3,780–3,850
+ALT_PULLBACK_HIGH = 3850
+SUPPORT_LEVEL = 3680  # Support level: ≤$3,680
+NEXT_TARGET_1 = 4300  # Next price targets: $4,300 (next $4,500)
+NEXT_TARGET_2 = 4500
 MARGIN = 250  # USD
 LEVERAGE = 20  # 20x leverage
-TRIGGER_STATE_FILE = "eth_bullflag_trigger_state.json"
+TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
 VOLUME_SURGE_FACTOR = 1.25  # 25% above average volume requirement
-MA_PERIOD = 100  # 100-hour Moving Average for support
+MA_PERIOD = 20  # 20-period average as mentioned in image
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -188,26 +191,27 @@ def save_trigger_state(state):
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-# --- 1-Hour Bull-Flag Breakout Alert Logic ---
-def eth_bullflag_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting ETH-USD 1-Hour Bull-Flag Breakout Alert ===")
-    logger.info("🎯 Monitoring for entry zone $3,740–$3,760 with volume confirmation")
+# --- ETH Breakout/Pullback Continuation Alert Logic ---
+def eth_breakout_pullback_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting ETH-USD 4-Hour Breakout/Pullback Continuation Alert ===")
+    logger.info("🎯 Monitoring for breakout or pullback continuation")
+    logger.info("📊 Strategy: Vertical rally from $2.8k; ascending channel; high-liquidity zone")
     trigger_state = load_trigger_state()
     
     try:
         now = datetime.now(UTC)
         
-        # Get hourly candles for bull-flag analysis
+        # Get 4-hour candles for analysis
         end = now
-        start = now - timedelta(hours=MA_PERIOD + 24)  # Enough data for MA and volume analysis
+        start = now - timedelta(hours=MA_PERIOD * 4 + 48)  # Enough data for MA and volume analysis
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         
-        logger.info(f"Fetching hourly candles for {MA_PERIOD + 24} hours...")
-        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, "ONE_HOUR")
+        logger.info(f"Fetching 4-hour candles for {MA_PERIOD * 4 + 48} hours...")
+        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, "FOUR_HOUR")
         
         if not candles or len(candles) < VOLUME_PERIOD + 1:
-            logger.warning("Not enough hourly candle data for bull-flag breakout alert.")
+            logger.warning("Not enough 4-hour candle data for breakout/pullback alert.")
             return last_alert_ts
             
         # Sort by timestamp ascending
@@ -225,39 +229,67 @@ def eth_bullflag_breakout_alert(cb_service, last_alert_ts=None):
         volume_candles = candles[-(VOLUME_PERIOD+1):-1]
         avg_volume = sum(float(c['volume']) for c in volume_candles) / len(volume_candles)
         
-        # Calculate 100-hour Moving Average
+        # Calculate 20-period Moving Average
         ma_candles = candles[-MA_PERIOD:]
         ma_closes = [float(c['close']) for c in ma_candles]
         ma_value = sum(ma_closes) / len(ma_closes)
         
-        # Check if price is in entry zone
-        in_entry_zone = (current_close >= ENTRY_ZONE_LOW) and (current_close <= ENTRY_ZONE_HIGH)
+        # Check if price is in current price zone
+        in_current_zone = (current_close >= CURRENT_PRICE_ZONE_LOW) and (current_close <= CURRENT_PRICE_ZONE_HIGH)
+        
+        # Check if price is in alt pullback zone
+        in_pullback_zone = (current_close >= ALT_PULLBACK_LOW) and (current_close <= ALT_PULLBACK_HIGH)
         
         # Check volume confirmation (25% above average)
         volume_confirmed = current_volume >= (VOLUME_SURGE_FACTOR * avg_volume)
         
-        # Check if price is above 100-hour MA (support level)
-        above_ma_support = current_close > ma_value
+        # Check if price is above 20-period MA (momentum confirmation)
+        above_ma = current_close > ma_value
+        
+        # Check if price is above support level
+        above_support = current_close > SUPPORT_LEVEL
         
         logger.info(f"Current ETH price: ${current_close:,.2f}")
-        logger.info(f"Entry zone: ${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH} -> {'✅' if in_entry_zone else '❌'}")
+        logger.info(f"Current price zone: ${CURRENT_PRICE_ZONE_LOW}-${CURRENT_PRICE_ZONE_HIGH} -> {'✅' if in_current_zone else '❌'}")
+        logger.info(f"Alt pullback zone: ${ALT_PULLBACK_LOW}-${ALT_PULLBACK_HIGH} -> {'✅' if in_pullback_zone else '❌'}")
         logger.info(f"Volume: {current_volume:,.0f} (avg: {avg_volume:,.0f}, required: {VOLUME_SURGE_FACTOR}x) -> {'✅' if volume_confirmed else '❌'}")
-        logger.info(f"100-hour MA: ${ma_value:,.2f} (above support) -> {'✅' if above_ma_support else '❌'}")
+        logger.info(f"20-period MA: ${ma_value:,.2f} (above MA) -> {'✅' if above_ma else '❌'}")
+        logger.info(f"Support level: ${SUPPORT_LEVEL} (above support) -> {'✅' if above_support else '❌'}")
+        
+        # Determine trade conditions based on image strategy
+        # Breakout condition: Price in current zone with volume confirmation
+        breakout_condition = in_current_zone and volume_confirmed and above_ma and above_support
+        
+        # Pullback continuation condition: Price in pullback zone with volume confirmation
+        pullback_condition = in_pullback_zone and volume_confirmed and above_ma and above_support
         
         # All conditions must be met for trade execution
-        all_conditions_met = in_entry_zone and volume_confirmed and above_ma_support
+        all_conditions_met = (breakout_condition or pullback_condition) and not trigger_state.get("triggered", False)
         
-        if all_conditions_met and not trigger_state.get("triggered", False):
-            logger.info("🎯 ALL BULL-FLAG BREAKOUT CONDITIONS MET - EXECUTING TRADE!")
+        if all_conditions_met:
+            # Determine trade type and parameters
+            if breakout_condition:
+                trade_type = "ETH-USD 4-Hour Breakout"
+                entry_price = current_close
+                stop_loss = SUPPORT_LEVEL
+                take_profit = NEXT_TARGET_1
+                logger.info("🎯 BREAKOUT CONDITION MET - EXECUTING TRADE!")
+            else:
+                trade_type = "ETH-USD 4-Hour Pullback Continuation"
+                entry_price = current_close
+                stop_loss = SUPPORT_LEVEL
+                take_profit = NEXT_TARGET_1
+                logger.info("🎯 PULLBACK CONTINUATION CONDITION MET - EXECUTING TRADE!")
+            
             play_alert_sound()
             
             # Execute the trade
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="ETH-USD 1-Hour Bull-Flag Breakout",
-                entry_price=current_close,
-                stop_loss=STOP_LOSS,
-                take_profit=PROFIT_TARGET,
+                trade_type=trade_type,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
                 margin=MARGIN,
                 leverage=LEVERAGE,
                 side="BUY",
@@ -267,58 +299,62 @@ def eth_bullflag_breakout_alert(cb_service, last_alert_ts=None):
             logger.info(f"Trade execution completed: success={trade_success}")
             
             if trade_success:
-                logger.info("🎉 ETH-USD Bull-Flag Breakout trade executed successfully!")
-                logger.info(f"Entry: ${current_close:,.2f}")
-                logger.info(f"Stop-loss: ${STOP_LOSS:,.2f}")
-                logger.info(f"First profit target: ${PROFIT_TARGET:,.2f}")
+                logger.info(f"🎉 {trade_type} trade executed successfully!")
+                logger.info(f"Entry: ${entry_price:,.2f}")
+                logger.info(f"Stop-loss: ${stop_loss:,.2f}")
+                logger.info(f"First profit target: ${take_profit:,.2f}")
+                logger.info(f"Second profit target: ${NEXT_TARGET_2:,.2f}")
                 logger.info(f"Trade output: {trade_result}")
-                logger.info("📊 Strategy: Momentum continuation off bull-flag formed after July rally")
-                logger.info("💡 High probability due to whale accumulation and ETF inflows")
+                logger.info("📊 Strategy: Vertical rally from $2.8k; ascending channel; high-liquidity zone")
+                logger.info("💡 High probability due to volume & open-interest surge")
             else:
-                logger.error(f"❌ ETH-USD Bull-Flag Breakout trade failed: {trade_result}")
+                logger.error(f"❌ {trade_type} trade failed: {trade_result}")
             
             # Save trigger state to prevent duplicate trades
             trigger_state = {"triggered": True, "trigger_ts": int(current_candle['start'])}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== ETH-USD Bull-Flag Breakout Alert completed (trade executed) ===")
+            logger.info("=== ETH-USD Breakout/Pullback Alert completed (trade executed) ===")
             return current_ts
             
         elif not all_conditions_met:
-            logger.info("⏳ Waiting for all conditions to be met...")
-            if not in_entry_zone:
-                logger.info(f"   Price ${current_close:,.2f} not in entry zone ${ENTRY_ZONE_LOW}-${ENTRY_ZONE_HIGH}")
+            logger.info("⏳ Waiting for breakout or pullback continuation conditions...")
+            if not in_current_zone and not in_pullback_zone:
+                logger.info(f"   Price ${current_close:,.2f} not in current zone ${CURRENT_PRICE_ZONE_LOW}-${CURRENT_PRICE_ZONE_HIGH} or pullback zone ${ALT_PULLBACK_LOW}-${ALT_PULLBACK_HIGH}")
             if not volume_confirmed:
                 logger.info(f"   Volume {current_volume:,.0f} below required {VOLUME_SURGE_FACTOR}x average")
-            if not above_ma_support:
-                logger.info(f"   Price ${current_close:,.2f} below 100-hour MA ${ma_value:,.2f}")
+            if not above_ma:
+                logger.info(f"   Price ${current_close:,.2f} below 20-period MA ${ma_value:,.2f}")
+            if not above_support:
+                logger.info(f"   Price ${current_close:,.2f} below support level ${SUPPORT_LEVEL}")
         
-        # Reset trigger if price falls below stop loss
+        # Reset trigger if price falls below support level
         if trigger_state.get("triggered", False):
-            if current_close < STOP_LOSS:
-                logger.info("🔄 Resetting trigger state - price fell below stop loss level")
+            if current_close < SUPPORT_LEVEL:
+                logger.info("🔄 Resetting trigger state - price fell below support level")
                 trigger_state = {"triggered": False, "trigger_ts": None}
                 save_trigger_state(trigger_state)
                 logger.info("Trigger state reset")
         
-        logger.info("=== ETH-USD Bull-Flag Breakout Alert completed (no trade) ===")
+        logger.info("=== ETH-USD Breakout/Pullback Alert completed (no trade) ===")
         return last_alert_ts
         
     except Exception as e:
-        logger.error(f"Error in ETH-USD Bull-Flag Breakout Alert logic: {e}")
+        logger.error(f"Error in ETH-USD Breakout/Pullback Alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH-USD Bull-Flag Breakout Alert completed (with error) ===")
+        logger.info("=== ETH-USD Breakout/Pullback Alert completed (with error) ===")
     return last_alert_ts
 
 # Replace main loop to use new alert
 def main():
-    logger.info("Starting ETH-USD 1-Hour Bull-Flag Breakout Monitor")
-    logger.info("🎯 Monitoring for entry zone $3,740–$3,760 with volume confirmation (25% above average)")
-    logger.info("📊 Strategy: Momentum continuation off bull-flag formed after July rally")
-    logger.info("💡 High probability due to whale accumulation and ETF inflows")
-    logger.info("🛑 Stop-loss: $3,700 (below flag low/100-hour MA support)")
-    logger.info("🎯 First profit target: $3,880")
+    logger.info("Starting ETH-USD 4-Hour Breakout/Pullback Continuation Monitor")
+    logger.info("🎯 Monitoring for breakout or pullback continuation")
+    logger.info("📊 Strategy: Vertical rally from $2.8k; ascending channel; high-liquidity zone at $3,890–4,200")
+    logger.info("💡 High probability due to volume & open-interest surge")
+    logger.info("🛑 Support level: $3,680")
+    logger.info("🎯 Next targets: $4,300 (next $4,500)")
+    logger.info("⏰ Timeframe: 4-hour/daily")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
         logger.error(f"❌ Alert sound file '{alert_sound_file}' not found!")
@@ -334,7 +370,7 @@ def main():
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = eth_bullflag_breakout_alert(cb_service, last_alert_ts)
+        last_alert_ts = eth_breakout_pullback_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
         logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:
