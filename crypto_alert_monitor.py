@@ -356,10 +356,10 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
     GRANULARITY = "FOUR_HOUR"  # 4-hour candles for bull flag breakout analysis
 
     # Parameters from the image (4-hour bull flag breakout)
-    ENTRY_ZONE_LOW = 120000     # $120,000 (entry zone lower bound - bull flag breakout)
-    ENTRY_ZONE_HIGH = 121500    # $121,500 (entry zone upper bound)
-    STOP_LOSS = 115000          # $115,000 (stop-loss)
-    PROFIT_TARGET = 126000      # $126,000 (first profit target, next $130,000)
+    ENTRY_ZONE_LOW = 121100     # $121,100 (entry zone lower bound - bull flag breakout)
+    ENTRY_ZONE_HIGH = 121300    # $121,300 (entry zone upper bound)
+    STOP_LOSS = 120000          # $120,000 (stop-loss just below lower flag boundary)
+    PROFIT_TARGET = 130000      # $130,000 (first profit target - measured flag pole projection)
     MARGIN = 250                # USD margin
     LEVERAGE = 20               # 20x leverage
 
@@ -417,21 +417,21 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
         # --- Reporting (match image style) ---
         logger.info("")
-        logger.info("Setup 1: Bitcoin (BTC/USD) — 4-Hour Bull Flag (Active)")
-        logger.info(f"• Ticker: BTC/USD")
-        logger.info(f"• Entry zone: ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (bull-flag breakout)")
-        logger.info(f"• Stop-loss: ≤${STOP_LOSS:,}")
-        logger.info(f"• First profit target: ${PROFIT_TARGET:,} (next $130,000)")
-        logger.info("• Rationale (keywords): Bull-flag & falling-wedge; repeated tests of $120k; higher lows; open interest >$40B")
-        logger.info(f"• Volume condition: ≥25% above 20-period avg")
-        logger.info(f"• Timeframe: 4-h")
-        logger.info(f"• Trade type: Breakout (continuation)")
+        logger.info("🚀 Setup 1: BTC/USD (Bitcoin) — 4-Hour Bull Flag")
+        logger.info(f"1. Ticker: BTC/USD")
+        logger.info(f"2. Entry zone: ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (break above flag resistance)")
+        logger.info(f"3. Stop-loss: ${STOP_LOSS:,} (just below lower flag boundary / recent swing low)")
+        logger.info(f"4. First profit target: ${PROFIT_TARGET:,} (measured flag pole projection)")
+        logger.info("5. Why high-probability: Classic bull-flag consolidation after a strong pole up from ~$115k; momentum building, tight range, healthy pause before continuation")
+        logger.info(f"6. Volume confirmation: breakout candle volume ≥ 25% above 20-period 4h average")
+        logger.info(f"7. Timeframe: 4h")
+        logger.info(f"8. Trade type: breakout entry")
         # Determine current status based on trigger state
         if trigger_state.get("triggered", False):
-            status = "Active — breakout detected, waiting for entry zone"
+            status = "Active — alert placed at breakout zone"
         else:
-            status = "Waiting for trigger"
-        logger.info(f"• Status: {status}")
+            status = "Waiting — alert placed at breakout zone"
+        logger.info(f"Status: {status}")
         logger.info("")
         logger.info(f"Current 4-Hour Candle: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, volume={v0:,.0f}, avg20={avg20:,.0f}, rel_vol={rv:.2f}, RSI={rsi:.1f}")
         logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (entry): {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
@@ -442,7 +442,7 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
         # --- Entry logic ---
         # Single-stage entry: enter when price is in the entry zone with volume confirmation
-        cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH  # In entry zone $120,000-$121,500
+        cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH  # In entry zone $121,100-$121,300
         cond_vol = rv >= VOLUME_THRESHOLD
         cond_rsi = rsi <= 70
 
@@ -460,10 +460,10 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
 
-            logger.info("Executing 4-hour bull flag breakout trade...")
+            logger.info("Executing BTC/USD 4-Hour Bull Flag breakout trade...")
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC-USD 4-hour bull flag breakout entry",
+                trade_type="BTC/USD 4-Hour Bull Flag breakout entry",
                 entry_price=close,
                 stop_loss=STOP_LOSS,
                 take_profit=PROFIT_TARGET,
@@ -475,31 +475,31 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
 
             logger.info(f"Trade execution completed: success={trade_success}")
             if trade_success:
-                logger.info(f"🎉 BTC-USD 4-hour bull flag breakout trade executed successfully!")
+                logger.info(f"🎉 BTC/USD 4-Hour Bull Flag breakout trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
             else:
-                logger.error(f"❌ BTC-USD 4-hour bull flag breakout trade failed: {trade_result}")
+                logger.error(f"❌ BTC/USD 4-Hour Bull Flag breakout trade failed: {trade_result}")
 
             logger.info("Saving trigger state...")
             trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
             save_trigger_state(trigger_state)
             logger.info("Trigger state saved")
-            logger.info("=== BTC-USD 4-Hour Bull Flag Breakout Alert completed (trade executed) ===")
+            logger.info("=== BTC/USD 4-Hour Bull Flag Breakout Alert completed (trade executed) ===")
             return ts
 
-        logger.info("=== BTC-USD 4-Hour Bull Flag Breakout Alert completed (no trade) ===")
+        logger.info("=== BTC/USD 4-Hour Bull Flag Breakout Alert completed (no trade) ===")
         return last_alert_ts
 
     except Exception as e:
-        logger.error(f"Error in BTC 4-Hour Bull Flag breakout alert logic: {e}")
+        logger.error(f"Error in BTC/USD 4-Hour Bull Flag breakout alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== BTC-USD 4-Hour Bull Flag Breakout Alert completed (with error) ===")
+        logger.info("=== BTC/USD 4-Hour Bull Flag Breakout Alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
 def main():
-    logger.info("Starting BTC-USD 4-Hour Bull Flag Breakout Alert Monitor")
+    logger.info("Starting BTC/USD 4-Hour Bull Flag Breakout Alert Monitor")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
