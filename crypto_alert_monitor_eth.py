@@ -74,22 +74,37 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH Breakout/Pullback Continuation parameters (based on image)
+# ETH Trading Plan Parameters (based on image)
 PRODUCT_ID = "ETH-PERP-INTX"
-GRANULARITY = "FOUR_HOUR"  # 4-hour candles as specified in image
+GRANULARITY = "ONE_HOUR"  # 1-hour candles as specified in image
 VOLUME_PERIOD = 20  # For volume confirmation
-CURRENT_PRICE_ZONE_LOW = 3890  # Current price levels: $3,890–4,050 (above $4,089)
-CURRENT_PRICE_ZONE_HIGH = 4050
-ALT_PULLBACK_LOW = 3780  # Alt pullback at $3,780–3,850
-ALT_PULLBACK_HIGH = 3850
-SUPPORT_LEVEL = 3680  # Support level: ≤$3,680
-NEXT_TARGET_1 = 4300  # Next price targets: $4,300 (next $4,500)
-NEXT_TARGET_2 = 4500
+
+# Plan A - Momentum Breakout Parameters
+BREAKOUT_RESISTANCE_LOW = 3920  # Buy on 1h close ≥ $3,920-3,930
+BREAKOUT_RESISTANCE_HIGH = 3930
+BREAKOUT_STOP_LOSS = 3860  # below the breakout candle or <$3,860 (whichever is lower)
+BREAKOUT_TP1 = 4050  # $4,050
+BREAKOUT_TP2_LOW = 4170  # $4,170-$4,300
+BREAKOUT_TP2_HIGH = 4300
+
+# Plan B - Pullback Buy Parameters
+PULLBACK_BID_LOW = 3700  # Bid $3,700-$3,730 (first support zone)
+PULLBACK_BID_HIGH = 3730
+PULLBACK_STOP_LOSS = 3640  # <$3,640 (or 1h close < $3,680)
+PULLBACK_STOP_LOSS_ALT = 3680  # 1h close < $3,680
+PULLBACK_TP_LOW = 3880  # back into $3,880-$3,920
+PULLBACK_TP_HIGH = 3920
+
+# Volume confirmation requirement
+VOLUME_SURGE_FACTOR = 1.25  # ≥1.25x 20-period 1h volume on the breakout bar
+
+# Trade parameters
 MARGIN = 250  # USD
 LEVERAGE = 20  # 20x leverage
-TRIGGER_STATE_FILE = "eth_breakout_trigger_state.json"
-VOLUME_SURGE_FACTOR = 1.25  # 25% above average volume requirement
-MA_PERIOD = 20  # 20-period average as mentioned in image
+
+# State files for each plan
+PLAN_A_TRIGGER_FILE = "eth_plan_a_trigger_state.json"
+PLAN_B_TRIGGER_FILE = "eth_plan_b_trigger_state.json"
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -175,43 +190,47 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         logger.error(f"Error executing crypto {trade_type} trade: {e}")
         return False, str(e)
 
-def load_trigger_state():
-    if os.path.exists(TRIGGER_STATE_FILE):
+def load_trigger_state(plan_file):
+    if os.path.exists(plan_file):
         try:
-            with open(TRIGGER_STATE_FILE, 'r') as f:
+            with open(plan_file, 'r') as f:
                 return json.load(f)
         except Exception:
             return {"triggered": False, "trigger_ts": None}
     return {"triggered": False, "trigger_ts": None}
 
-def save_trigger_state(state):
+def save_trigger_state(state, plan_file):
     try:
-        with open(TRIGGER_STATE_FILE, 'w') as f:
+        with open(plan_file, 'w') as f:
             json.dump(state, f)
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-# --- ETH Breakout/Pullback Continuation Alert Logic ---
-def eth_breakout_pullback_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting ETH-USD 4-Hour Breakout/Pullback Continuation Alert ===")
-    logger.info("🎯 Monitoring for breakout or pullback continuation")
-    logger.info("📊 Strategy: Vertical rally from $2.8k; ascending channel; high-liquidity zone")
-    trigger_state = load_trigger_state()
+# --- ETH Trading Plan Alert Logic ---
+def eth_trading_plan_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting ETH-USD 1-Hour Trading Plan Alert ===")
+    logger.info("🎯 Monitoring for Plan A (Momentum Breakout) and Plan B (Pullback Buy)")
+    logger.info("📊 Plan A: Buy on 1h close ≥ $3,920-3,930 (key resistance cluster)")
+    logger.info("📊 Plan B: Bid $3,700-$3,730 (first support zone)")
+    
+    # Load trigger states for both plans
+    plan_a_state = load_trigger_state(PLAN_A_TRIGGER_FILE)
+    plan_b_state = load_trigger_state(PLAN_B_TRIGGER_FILE)
     
     try:
         now = datetime.now(UTC)
         
-        # Get 4-hour candles for analysis
+        # Get 1-hour candles for analysis
         end = now
-        start = now - timedelta(hours=MA_PERIOD * 4 + 48)  # Enough data for MA and volume analysis
+        start = now - timedelta(hours=VOLUME_PERIOD + 24)  # Enough data for volume analysis
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         
-        logger.info(f"Fetching 4-hour candles for {MA_PERIOD * 4 + 48} hours...")
-        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, "FOUR_HOUR")
+        logger.info(f"Fetching 1-hour candles for {VOLUME_PERIOD + 24} hours...")
+        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         
         if not candles or len(candles) < VOLUME_PERIOD + 1:
-            logger.warning("Not enough 4-hour candle data for breakout/pullback alert.")
+            logger.warning("Not enough 1-hour candle data for trading plan alert.")
             return last_alert_ts
             
         # Sort by timestamp ascending
@@ -229,132 +248,152 @@ def eth_breakout_pullback_alert(cb_service, last_alert_ts=None):
         volume_candles = candles[-(VOLUME_PERIOD+1):-1]
         avg_volume = sum(float(c['volume']) for c in volume_candles) / len(volume_candles)
         
-        # Calculate 20-period Moving Average
-        ma_candles = candles[-MA_PERIOD:]
-        ma_closes = [float(c['close']) for c in ma_candles]
-        ma_value = sum(ma_closes) / len(ma_closes)
-        
-        # Check if price is in current price zone
-        in_current_zone = (current_close >= CURRENT_PRICE_ZONE_LOW) and (current_close <= CURRENT_PRICE_ZONE_HIGH)
-        
-        # Check if price is in alt pullback zone
-        in_pullback_zone = (current_close >= ALT_PULLBACK_LOW) and (current_close <= ALT_PULLBACK_HIGH)
-        
-        # Check volume confirmation (25% above average)
+        # Check volume confirmation (1.25x above average)
         volume_confirmed = current_volume >= (VOLUME_SURGE_FACTOR * avg_volume)
         
-        # Check if price is above 20-period MA (momentum confirmation)
-        above_ma = current_close > ma_value
-        
-        # Check if price is above support level
-        above_support = current_close > SUPPORT_LEVEL
-        
         logger.info(f"Current ETH price: ${current_close:,.2f}")
-        logger.info(f"Current price zone: ${CURRENT_PRICE_ZONE_LOW}-${CURRENT_PRICE_ZONE_HIGH} -> {'✅' if in_current_zone else '❌'}")
-        logger.info(f"Alt pullback zone: ${ALT_PULLBACK_LOW}-${ALT_PULLBACK_HIGH} -> {'✅' if in_pullback_zone else '❌'}")
         logger.info(f"Volume: {current_volume:,.0f} (avg: {avg_volume:,.0f}, required: {VOLUME_SURGE_FACTOR}x) -> {'✅' if volume_confirmed else '❌'}")
-        logger.info(f"20-period MA: ${ma_value:,.2f} (above MA) -> {'✅' if above_ma else '❌'}")
-        logger.info(f"Support level: ${SUPPORT_LEVEL} (above support) -> {'✅' if above_support else '❌'}")
         
-        # Determine trade conditions based on image strategy
-        # Breakout condition: Price in current zone with volume confirmation
-        breakout_condition = in_current_zone and volume_confirmed and above_ma and above_support
+        # Plan A - Momentum Breakout Conditions
+        breakout_condition = (
+            current_close >= BREAKOUT_RESISTANCE_LOW and 
+            current_close <= BREAKOUT_RESISTANCE_HIGH and 
+            volume_confirmed and 
+            not plan_a_state.get("triggered", False)
+        )
         
-        # Pullback continuation condition: Price in pullback zone with volume confirmation
-        pullback_condition = in_pullback_zone and volume_confirmed and above_ma and above_support
+        # Plan B - Pullback Buy Conditions
+        pullback_condition = (
+            current_close >= PULLBACK_BID_LOW and 
+            current_close <= PULLBACK_BID_HIGH and 
+            volume_confirmed and 
+            not plan_b_state.get("triggered", False)
+        )
         
-        # All conditions must be met for trade execution
-        all_conditions_met = (breakout_condition or pullback_condition) and not trigger_state.get("triggered", False)
+        logger.info(f"Plan A (Breakout): ${BREAKOUT_RESISTANCE_LOW}-${BREAKOUT_RESISTANCE_HIGH} -> {'✅' if breakout_condition else '❌'}")
+        logger.info(f"Plan B (Pullback): ${PULLBACK_BID_LOW}-${PULLBACK_BID_HIGH} -> {'✅' if pullback_condition else '❌'}")
         
-        if all_conditions_met:
-            # Determine trade type and parameters
-            if breakout_condition:
-                trade_type = "ETH-USD 4-Hour Breakout"
-                entry_price = current_close
-                stop_loss = SUPPORT_LEVEL
-                take_profit = NEXT_TARGET_1
-                logger.info("🎯 BREAKOUT CONDITION MET - EXECUTING TRADE!")
-            else:
-                trade_type = "ETH-USD 4-Hour Pullback Continuation"
-                entry_price = current_close
-                stop_loss = SUPPORT_LEVEL
-                take_profit = NEXT_TARGET_1
-                logger.info("🎯 PULLBACK CONTINUATION CONDITION MET - EXECUTING TRADE!")
-            
+        # Execute Plan A - Momentum Breakout
+        if breakout_condition:
+            logger.info("🎯 PLAN A CONDITION MET - EXECUTING MOMENTUM BREAKOUT TRADE!")
             play_alert_sound()
             
-            # Execute the trade
+            # Calculate stop loss (below breakout candle or <$3,860, whichever is lower)
+            stop_loss = min(current_low, BREAKOUT_STOP_LOSS)
+            
+            # Execute the trade with first target
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type=trade_type,
-                entry_price=entry_price,
+                trade_type="ETH-USD Plan A - Momentum Breakout",
+                entry_price=current_close,
                 stop_loss=stop_loss,
-                take_profit=take_profit,
+                take_profit=BREAKOUT_TP1,  # First target at $4,050
                 margin=MARGIN,
                 leverage=LEVERAGE,
                 side="BUY",
                 product=PRODUCT_ID
             )
             
-            logger.info(f"Trade execution completed: success={trade_success}")
+            logger.info(f"Plan A trade execution completed: success={trade_success}")
             
             if trade_success:
-                logger.info(f"🎉 {trade_type} trade executed successfully!")
-                logger.info(f"Entry: ${entry_price:,.2f}")
+                logger.info(f"🎉 Plan A - Momentum Breakout trade executed successfully!")
+                logger.info(f"Entry: ${current_close:,.2f}")
                 logger.info(f"Stop-loss: ${stop_loss:,.2f}")
-                logger.info(f"First profit target: ${take_profit:,.2f}")
-                logger.info(f"Second profit target: ${NEXT_TARGET_2:,.2f}")
+                logger.info(f"First profit target: ${BREAKOUT_TP1:,.2f}")
+                logger.info(f"Second profit target: ${BREAKOUT_TP2_LOW}-${BREAKOUT_TP2_HIGH:,.2f}")
                 logger.info(f"Trade output: {trade_result}")
-                logger.info("📊 Strategy: Vertical rally from $2.8k; ascending channel; high-liquidity zone")
-                logger.info("💡 High probability due to volume & open-interest surge")
+                logger.info("📊 Strategy: Key resistance cluster break opens $4,050-$4,170")
             else:
-                logger.error(f"❌ {trade_type} trade failed: {trade_result}")
+                logger.error(f"❌ Plan A trade failed: {trade_result}")
             
             # Save trigger state to prevent duplicate trades
-            trigger_state = {"triggered": True, "trigger_ts": int(current_candle['start'])}
-            save_trigger_state(trigger_state)
-            logger.info("Trigger state saved")
-            logger.info("=== ETH-USD Breakout/Pullback Alert completed (trade executed) ===")
-            return current_ts
+            plan_a_state = {"triggered": True, "trigger_ts": int(current_candle['start'])}
+            save_trigger_state(plan_a_state, PLAN_A_TRIGGER_FILE)
+            logger.info("Plan A trigger state saved")
+        
+        # Execute Plan B - Pullback Buy
+        elif pullback_condition:
+            logger.info("🎯 PLAN B CONDITION MET - EXECUTING PULLBACK BUY TRADE!")
+            play_alert_sound()
             
-        elif not all_conditions_met:
-            logger.info("⏳ Waiting for breakout or pullback continuation conditions...")
-            if not in_current_zone and not in_pullback_zone:
-                logger.info(f"   Price ${current_close:,.2f} not in current zone ${CURRENT_PRICE_ZONE_LOW}-${CURRENT_PRICE_ZONE_HIGH} or pullback zone ${ALT_PULLBACK_LOW}-${ALT_PULLBACK_HIGH}")
+            # Calculate stop loss (<$3,640 or 1h close < $3,680)
+            stop_loss = min(PULLBACK_STOP_LOSS, PULLBACK_STOP_LOSS_ALT)
+            
+            # Execute the trade
+            trade_success, trade_result = execute_crypto_trade(
+                cb_service=cb_service,
+                trade_type="ETH-USD Plan B - Pullback Buy",
+                entry_price=current_close,
+                stop_loss=stop_loss,
+                take_profit=PULLBACK_TP_HIGH,  # Target back into $3,880-$3,920
+                margin=MARGIN,
+                leverage=LEVERAGE,
+                side="BUY",
+                product=PRODUCT_ID
+            )
+            
+            logger.info(f"Plan B trade execution completed: success={trade_success}")
+            
+            if trade_success:
+                logger.info(f"🎉 Plan B - Pullback Buy trade executed successfully!")
+                logger.info(f"Entry: ${current_close:,.2f}")
+                logger.info(f"Stop-loss: ${stop_loss:,.2f}")
+                logger.info(f"Profit target: ${PULLBACK_TP_LOW}-${PULLBACK_TP_HIGH:,.2f}")
+                logger.info(f"Trade output: {trade_result}")
+                logger.info("📊 Strategy: First support zone that's been holding recently")
+            else:
+                logger.error(f"❌ Plan B trade failed: {trade_result}")
+            
+            # Save trigger state to prevent duplicate trades
+            plan_b_state = {"triggered": True, "trigger_ts": int(current_candle['start'])}
+            save_trigger_state(plan_b_state, PLAN_B_TRIGGER_FILE)
+            logger.info("Plan B trigger state saved")
+        
+        else:
+            logger.info("⏳ Waiting for Plan A or Plan B conditions...")
             if not volume_confirmed:
                 logger.info(f"   Volume {current_volume:,.0f} below required {VOLUME_SURGE_FACTOR}x average")
-            if not above_ma:
-                logger.info(f"   Price ${current_close:,.2f} below 20-period MA ${ma_value:,.2f}")
-            if not above_support:
-                logger.info(f"   Price ${current_close:,.2f} below support level ${SUPPORT_LEVEL}")
+            if plan_a_state.get("triggered", False):
+                logger.info("   Plan A already triggered")
+            if plan_b_state.get("triggered", False):
+                logger.info("   Plan B already triggered")
         
-        # Reset trigger if price falls below support level
-        if trigger_state.get("triggered", False):
-            if current_close < SUPPORT_LEVEL:
-                logger.info("🔄 Resetting trigger state - price fell below support level")
-                trigger_state = {"triggered": False, "trigger_ts": None}
-                save_trigger_state(trigger_state)
-                logger.info("Trigger state reset")
+        # Reset triggers if price moves significantly away from entry zones
+        if plan_a_state.get("triggered", False):
+            if current_close < BREAKOUT_STOP_LOSS:
+                logger.info("🔄 Resetting Plan A trigger state - price fell below stop loss")
+                plan_a_state = {"triggered": False, "trigger_ts": None}
+                save_trigger_state(plan_a_state, PLAN_A_TRIGGER_FILE)
+                logger.info("Plan A trigger state reset")
         
-        logger.info("=== ETH-USD Breakout/Pullback Alert completed (no trade) ===")
-        return last_alert_ts
+        if plan_b_state.get("triggered", False):
+            if current_close < PULLBACK_STOP_LOSS:
+                logger.info("🔄 Resetting Plan B trigger state - price fell below stop loss")
+                plan_b_state = {"triggered": False, "trigger_ts": None}
+                save_trigger_state(plan_b_state, PLAN_B_TRIGGER_FILE)
+                logger.info("Plan B trigger state reset")
+        
+        logger.info("=== ETH-USD Trading Plan Alert completed ===")
+        return current_ts
         
     except Exception as e:
-        logger.error(f"Error in ETH-USD Breakout/Pullback Alert logic: {e}")
+        logger.error(f"Error in ETH-USD Trading Plan Alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH-USD Breakout/Pullback Alert completed (with error) ===")
+        logger.info("=== ETH-USD Trading Plan Alert completed (with error) ===")
     return last_alert_ts
 
 # Replace main loop to use new alert
 def main():
-    logger.info("Starting ETH-USD 4-Hour Breakout/Pullback Continuation Monitor")
-    logger.info("🎯 Monitoring for breakout or pullback continuation")
-    logger.info("📊 Strategy: Vertical rally from $2.8k; ascending channel; high-liquidity zone at $3,890–4,200")
-    logger.info("💡 High probability due to volume & open-interest surge")
-    logger.info("🛑 Support level: $3,680")
-    logger.info("🎯 Next targets: $4,300 (next $4,500)")
-    logger.info("⏰ Timeframe: 4-hour/daily")
+    logger.info("Starting ETH-USD 1-Hour Trading Plan Monitor")
+    logger.info("🎯 Monitoring for Plan A (Momentum Breakout) and Plan B (Pullback Buy)")
+    logger.info("📊 Plan A: Buy on 1h close ≥ $3,920-3,930 (key resistance cluster)")
+    logger.info("📊 Plan B: Bid $3,700-$3,730 (first support zone)")
+    logger.info("💡 Volume confirmation: ≥1.25x 20-period 1h volume")
+    logger.info("🛑 Plan A SL: <$3,860, Plan B SL: <$3,640")
+    logger.info("🎯 Plan A TP: $4,050 / $4,170-$4,300, Plan B TP: $3,880-$3,920")
+    logger.info("⏰ Timeframe: 1-hour")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
         logger.error(f"❌ Alert sound file '{alert_sound_file}' not found!")
@@ -370,7 +409,7 @@ def main():
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = eth_breakout_pullback_alert(cb_service, last_alert_ts)
+        last_alert_ts = eth_trading_plan_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
         logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:

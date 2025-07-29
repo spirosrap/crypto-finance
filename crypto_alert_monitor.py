@@ -17,7 +17,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('btc_breakout_alert_debug.log'),
+        logging.FileHandler('btc_dual_strategy_alert_debug.log'),
         logging.StreamHandler()  # Keep console output too
     ]
 )
@@ -104,19 +104,18 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
     
     return retry_with_backoff(_get_candles)
 
-# Constants for get_recent_hourly_candles
+# Constants for dual strategy monitoring
 GRANULARITY = "ONE_HOUR"
 PRODUCT_ID = "BTC-PERP-INTX"
 
-# Trade parameters for BTC horizontal resistance breakout
-BTC_HORIZONTAL_MARGIN = 250  # USD
-BTC_HORIZONTAL_LEVERAGE = 20  # 20x leverage
-
+# Trade parameters for BTC dual strategy
+BTC_DUAL_STRATEGY_MARGIN = 250  # USD
+BTC_DUAL_STRATEGY_LEVERAGE = 20  # 20x leverage
 
 # Trade tracking
-btc_continuation_trade_taken = False
+btc_dual_strategy_trade_taken = False
 
-TRIGGER_STATE_FILE = "btc_bull_flag_breakout_trigger_state.json"
+TRIGGER_STATE_FILE = "btc_dual_strategy_trigger_state.json"
 
 def load_trigger_state():
     if os.path.exists(TRIGGER_STATE_FILE):
@@ -350,45 +349,77 @@ def get_btc_perp_position_size(cb_service):
         return 0.0
 
 
-def btc_breakout_alert(cb_service, last_alert_ts=None):
-    logger.info("=== BTC-USD 4-Hour Bull Flag Breakout Alert ===")
+def btc_dual_strategy_alert(cb_service, last_alert_ts=None):
+    """
+    BTC Dual Strategy Alert - Implements both Plan A (breakout) and Plan B (pullback)
+    Based on the trading plans from the image
+    """
+    logger.info("=== BTC-USD Dual Strategy Alert (Plan A: Breakout + Plan B: Pullback) ===")
     PRODUCT_ID = "BTC-PERP-INTX"
-    GRANULARITY = "FOUR_HOUR"  # 4-hour candles for bull flag breakout analysis
+    GRANULARITY = "ONE_HOUR"  # 1-hour candles for both strategies
 
-    # Parameters from the image (4-hour bull flag breakout)
-    ENTRY_ZONE_LOW = 121100     # $121,100 (entry zone lower bound - bull flag breakout)
-    ENTRY_ZONE_HIGH = 121300    # $121,300 (entry zone upper bound)
-    STOP_LOSS = 120000          # $120,000 (stop-loss just below lower flag boundary)
-    PROFIT_TARGET = 130000      # $130,000 (first profit target - measured flag pole projection)
-    MARGIN = 250                # USD margin
-    LEVERAGE = 20               # 20x leverage
+    # Plan A: Breakout Long (Momentum) Parameters
+    PLAN_A_TRIGGER_CONSERVATIVE = 119650  # $119,650 (conservative trigger)
+    PLAN_A_TRIGGER_AGGRESSIVE = 120150    # $120,150 (alternative trigger)
+    PLAN_A_STOP_LOSS = 118800            # $118,800 (below breakout bar)
+    PLAN_A_TP1 = 120900                  # $120,900 (first target)
+    PLAN_A_TP2_LOW = 122500              # $122,500 (second target range)
+    PLAN_A_TP2_HIGH = 123500             # $123,500 (second target range)
+    PLAN_A_VOLUME_THRESHOLD = 1.25       # 1.25x 20-period SMA volume
 
-    # Volume confirmation parameters
-    VOLUME_PERIOD = 20
-    VOLUME_THRESHOLD = 1.25    # 25% above average volume for breakout confirmation
-    periods_needed = VOLUME_PERIOD + 2
+    # Plan B: Pullback Long (Fade to Support) Parameters
+    PLAN_B_BID_ZONE_LOW = 117350         # $117,350 (bid zone)
+    PLAN_B_BID_ZONE_HIGH = 117600        # $117,600 (bid zone)
+    PLAN_B_STOP_LOSS = 116600            # $116,600
+    PLAN_B_TP_LOW = 118900               # $118,900 (take profit range)
+    PLAN_B_TP_HIGH = 119500              # $119,500 (take profit range)
 
-    trigger_state = load_trigger_state()
+    # Common parameters
+    MARGIN = 250                         # USD margin
+    LEVERAGE = 20                        # 20x leverage
+    VOLUME_PERIOD = 20                   # For volume SMA calculation
+    RSI_PERIOD = 14                      # RSI period
+    periods_needed = max(VOLUME_PERIOD, RSI_PERIOD) + 5
+
+    # Load trigger states for both plans
+    trigger_state_file = "btc_dual_strategy_trigger_state.json"
+    
+    def load_dual_trigger_state():
+        if os.path.exists(trigger_state_file):
+            try:
+                with open(trigger_state_file, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                return {"plan_a_triggered": False, "plan_b_triggered": False, "last_trigger_ts": None}
+        return {"plan_a_triggered": False, "plan_b_triggered": False, "last_trigger_ts": None}
+
+    def save_dual_trigger_state(state):
+        try:
+            with open(trigger_state_file, 'w') as f:
+                json.dump(state, f)
+        except Exception as e:
+            logger.error(f"Failed to save dual trigger state: {e}")
+
+    trigger_state = load_dual_trigger_state()
+
     try:
-        logger.info("Setting up time parameters for 4-hour candles...")
+        logger.info("Setting up time parameters for 1-hour candles...")
         now = datetime.now(UTC)
-        # Get the start of the current 4-hour period
-        current_hour = now.hour
-        current_4h_period = (current_hour // 4) * 4
-        now = now.replace(hour=current_4h_period, minute=0, second=0, microsecond=0)
-        start = now - timedelta(hours=periods_needed * 4)  # 4-hour periods
+        # Get the start of the current hour
+        now = now.replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=periods_needed)
         end = now
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         logger.info(f"Time range: {start} to {end}")
 
-        logger.info("Fetching daily candles from API...")
+        logger.info("Fetching 1-hour candles from API...")
         candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
         logger.info(f"Candles fetched: {len(candles) if candles else 0} candles")
 
         if not candles or len(candles) < periods_needed:
-            logger.warning(f"Not enough BTC {GRANULARITY} candle data for breakout alert.")
-            logger.info("=== BTC-USD 4-Hour Bull Flag Breakout Alert completed (insufficient data) ===")
+            logger.warning(f"Not enough BTC {GRANULARITY} candle data for dual strategy alert.")
+            logger.info("=== BTC-USD Dual Strategy Alert completed (insufficient data) ===")
             return last_alert_ts
 
         def get_candle_value(candle, key):
@@ -404,102 +435,205 @@ def btc_breakout_alert(cb_service, last_alert_ts=None):
         close = float(get_candle_value(last_candle, 'close'))
         high = float(get_candle_value(last_candle, 'high'))
         low = float(get_candle_value(last_candle, 'low'))
-        v0 = float(get_candle_value(last_candle, 'volume'))
+        volume = float(get_candle_value(last_candle, 'volume'))
 
-        # Calculate volume confirmation
+        # Calculate volume confirmation for Plan A
         historical_candles = candles[2:VOLUME_PERIOD+2]
-        avg20 = sum(float(get_candle_value(c, 'volume')) for c in historical_candles) / len(historical_candles)
-        rv = v0 / avg20 if avg20 > 0 else 0
+        avg_volume = sum(float(get_candle_value(c, 'volume')) for c in historical_candles) / len(historical_candles)
+        relative_volume = volume / avg_volume if avg_volume > 0 else 0
 
-        # Calculate RSI to ensure not overbought
-        closes = [float(get_candle_value(c, 'close')) for c in candles[1:VOLUME_PERIOD+2]]
-        rsi = calculate_rsi(closes, 14) if len(closes) >= 14 else 50
+        # Calculate RSI
+        closes = [float(get_candle_value(c, 'close')) for c in candles[1:RSI_PERIOD+2]]
+        rsi = calculate_rsi(closes, RSI_PERIOD) if len(closes) >= RSI_PERIOD else 50
 
-        # --- Reporting (match image style) ---
+        # Get previous candle for Plan B analysis
+        prev_candle = candles[2] if len(candles) > 2 else None
+        prev_close = float(get_candle_value(prev_candle, 'close')) if prev_candle else close
+        prev_volume = float(get_candle_value(prev_candle, 'volume')) if prev_candle else volume
+
+        # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Setup 1: BTC/USD (Bitcoin) — 4-Hour Bull Flag")
-        logger.info(f"1. Ticker: BTC/USD")
-        logger.info(f"2. Entry zone: ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (break above flag resistance)")
-        logger.info(f"3. Stop-loss: ${STOP_LOSS:,} (just below lower flag boundary / recent swing low)")
-        logger.info(f"4. First profit target: ${PROFIT_TARGET:,} (measured flag pole projection)")
-        logger.info("5. Why high-probability: Classic bull-flag consolidation after a strong pole up from ~$115k; momentum building, tight range, healthy pause before continuation")
-        logger.info(f"6. Volume confirmation: breakout candle volume ≥ 25% above 20-period 4h average")
-        logger.info(f"7. Timeframe: 4h")
-        logger.info(f"8. Trade type: breakout entry")
-        # Determine current status based on trigger state
-        if trigger_state.get("triggered", False):
-            status = "Active — alert placed at breakout zone"
-        else:
-            status = "Waiting — alert placed at breakout zone"
-        logger.info(f"Status: {status}")
+        logger.info("🚀 BTC/USD Dual Strategy Alert")
         logger.info("")
-        logger.info(f"Current 4-Hour Candle: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}, volume={v0:,.0f}, avg20={avg20:,.0f}, rel_vol={rv:.2f}, RSI={rsi:.1f}")
-        logger.info(f"  - Close in entry zone ${ENTRY_ZONE_LOW:,}–${ENTRY_ZONE_HIGH:,} (entry): {'✅' if ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH else '❌'}")
-        logger.info(f"  - Volume ≥ 1.25x avg: {'✅' if rv >= VOLUME_THRESHOLD else '❌'}")
-        logger.info(f"  - RSI ≤ 70: {'✅' if rsi <= 70 else '❌'}")
-        logger.info(f"  - Trigger state: {'🔴 TRIGGERED' if trigger_state.get('triggered', False) else '🟡 WATCHING'}")
+        logger.info("📊 Plan A: Breakout Long (Momentum)")
+        logger.info(f"   • Trigger: 1h close ≥ ${PLAN_A_TRIGGER_CONSERVATIVE:,} (conservative) or ≥ ${PLAN_A_TRIGGER_AGGRESSIVE:,} (aggressive)")
+        logger.info(f"   • Entry: Buy-stop at ${PLAN_A_TRIGGER_CONSERVATIVE:,} or ${PLAN_A_TRIGGER_AGGRESSIVE:,}")
+        logger.info(f"   • Stop Loss: ${PLAN_A_STOP_LOSS:,} (below breakout bar)")
+        logger.info(f"   • TP1: ${PLAN_A_TP1:,}")
+        logger.info(f"   • TP2: ${PLAN_A_TP2_LOW:,}-${PLAN_A_TP2_HIGH:,}")
+        logger.info(f"   • Volume Condition: ≥ {PLAN_A_VOLUME_THRESHOLD}x 20-period SMA")
+        logger.info("")
+        logger.info("📊 Plan B: Pullback Long (Fade to Support)")
+        logger.info(f"   • Bid Zone: ${PLAN_B_BID_ZONE_LOW:,}-${PLAN_B_BID_ZONE_HIGH:,} (wick + quick reclaim only)")
+        logger.info(f"   • Stop Loss: ${PLAN_B_STOP_LOSS:,}")
+        logger.info(f"   • Take Profit: ${PLAN_B_TP_LOW:,}-${PLAN_B_TP_HIGH:,} (trail if strength persists)")
+        logger.info(f"   • Conditions: Zone reclaimed within 1-2 candles, no fill on heavy sell volume")
+        logger.info("")
+        logger.info(f"Current 1-Hour Candle: close=${close:,.2f}, high=${high:,.2f}, low=${low:,.2f}")
+        logger.info(f"Volume: {volume:,.0f}, Avg20: {avg_volume:,.0f}, Rel_Vol: {relative_volume:.2f}")
+        logger.info(f"RSI: {rsi:.1f}")
         logger.info("")
 
-        # --- Entry logic ---
-        # Single-stage entry: enter when price is in the entry zone with volume confirmation
-        cond_price = ENTRY_ZONE_LOW <= close <= ENTRY_ZONE_HIGH  # In entry zone $121,100-$121,300
-        cond_vol = rv >= VOLUME_THRESHOLD
-        cond_rsi = rsi <= 70
+        # --- Plan A: Breakout Long Logic ---
+        plan_a_conditions = []
+        
+        # Check if price closed above either trigger level
+        conservative_trigger = close >= PLAN_A_TRIGGER_CONSERVATIVE
+        aggressive_trigger = close >= PLAN_A_TRIGGER_AGGRESSIVE
+        price_trigger = conservative_trigger or aggressive_trigger
+        
+        # Volume confirmation
+        volume_confirmed = relative_volume >= PLAN_A_VOLUME_THRESHOLD
+        
+        # RSI not overbought
+        rsi_ok = rsi <= 70
+        
+        plan_a_conditions = [price_trigger, volume_confirmed, rsi_ok]
+        plan_a_ready = all(plan_a_conditions) and not trigger_state.get("plan_a_triggered", False)
 
-        # Execute trade when all conditions are met
-        should_execute = cond_price and cond_vol and cond_rsi
+        logger.info("🔍 Plan A (Breakout) Analysis:")
+        logger.info(f"   • Price trigger (≥${PLAN_A_TRIGGER_CONSERVATIVE:,} or ≥${PLAN_A_TRIGGER_AGGRESSIVE:,}): {'✅' if price_trigger else '❌'}")
+        logger.info(f"   • Volume ≥ {PLAN_A_VOLUME_THRESHOLD}x avg: {'✅' if volume_confirmed else '❌'}")
+        logger.info(f"   • RSI ≤ 70: {'✅' if rsi_ok else '❌'}")
+        logger.info(f"   • Not already triggered: {'✅' if not trigger_state.get("plan_a_triggered", False) else '❌'}")
+        logger.info(f"   • Plan A Ready: {'🎯 YES' if plan_a_ready else '⏳ NO'}")
 
-        if should_execute:
-            logger.info("🎯 All breakout conditions met - preparing to execute trade...")
-            logger.info(f"Trade Setup: Entry=${close:,.2f}, SL=${STOP_LOSS:,}, TP=${PROFIT_TARGET:,}, Risk=${MARGIN}, Leverage={LEVERAGE}x")
+        # --- Plan B: Pullback Long Logic ---
+        plan_b_conditions = []
+        
+        # Check if price is in bid zone
+        in_bid_zone = PLAN_B_BID_ZONE_LOW <= low <= PLAN_B_BID_ZONE_HIGH
+        
+        # Check for wick (price touched the zone)
+        wick_in_zone = low <= PLAN_B_BID_ZONE_HIGH and low >= PLAN_B_BID_ZONE_LOW
+        
+        # Check for quick reclaim (price closed above the zone)
+        quick_reclaim = close > PLAN_B_BID_ZONE_HIGH
+        
+        # Check for no heavy sell volume (volume not significantly higher than average)
+        no_heavy_sell = relative_volume <= 2.0  # Not more than 2x average volume
+        
+        # Check if we haven't already triggered Plan B
+        not_already_triggered = not trigger_state.get("plan_b_triggered", False)
+        
+        plan_b_conditions = [wick_in_zone, quick_reclaim, no_heavy_sell, not_already_triggered]
+        plan_b_ready = all(plan_b_conditions)
 
-            logger.info("Playing alert sound...")
+        logger.info("")
+        logger.info("🔍 Plan B (Pullback) Analysis:")
+        logger.info(f"   • Wick in bid zone (${PLAN_B_BID_ZONE_LOW:,}-${PLAN_B_BID_ZONE_HIGH:,}): {'✅' if wick_in_zone else '❌'}")
+        logger.info(f"   • Quick reclaim (close > ${PLAN_B_BID_ZONE_HIGH:,}): {'✅' if quick_reclaim else '❌'}")
+        logger.info(f"   • No heavy sell volume (≤2x avg): {'✅' if no_heavy_sell else '❌'}")
+        logger.info(f"   • Not already triggered: {'✅' if not_already_triggered else '❌'}")
+        logger.info(f"   • Plan B Ready: {'🎯 YES' if plan_b_ready else '⏳ NO'}")
+
+        # --- Execute Trades ---
+        trade_executed = False
+
+        if plan_a_ready:
+            logger.info("")
+            logger.info("🎯 Plan A (Breakout) conditions met - executing trade...")
+            
+            # Determine entry price based on which trigger was hit
+            if conservative_trigger:
+                entry_price = PLAN_A_TRIGGER_CONSERVATIVE
+                trigger_type = "conservative"
+            else:
+                entry_price = PLAN_A_TRIGGER_AGGRESSIVE
+                trigger_type = "aggressive"
+            
+            logger.info(f"Trade Setup: Entry=${entry_price:,} ({trigger_type}), SL=${PLAN_A_STOP_LOSS:,}, TP1=${PLAN_A_TP1:,}, TP2=${PLAN_A_TP2_LOW:,}-${PLAN_A_TP2_HIGH:,}")
+            logger.info(f"Risk: ${MARGIN}, Leverage: {LEVERAGE}x")
+
+            # Play alert sound
             try:
                 play_alert_sound()
                 logger.info("Alert sound played successfully")
             except Exception as e:
                 logger.error(f"Failed to play alert sound: {e}")
 
-            logger.info("Executing BTC/USD 4-Hour Bull Flag breakout trade...")
+            # Execute Plan A trade
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="BTC/USD 4-Hour Bull Flag breakout entry",
-                entry_price=close,
-                stop_loss=STOP_LOSS,
-                take_profit=PROFIT_TARGET,
+                trade_type="BTC/USD Plan A Breakout Long",
+                entry_price=entry_price,
+                stop_loss=PLAN_A_STOP_LOSS,
+                take_profit=PLAN_A_TP1,  # Use TP1 as primary target
                 margin=MARGIN,
                 leverage=LEVERAGE,
                 side="BUY",
                 product=PRODUCT_ID
             )
 
-            logger.info(f"Trade execution completed: success={trade_success}")
             if trade_success:
-                logger.info(f"🎉 BTC/USD 4-Hour Bull Flag breakout trade executed successfully!")
+                logger.info(f"🎉 Plan A (Breakout) trade executed successfully!")
                 logger.info(f"Trade output: {trade_result}")
+                trigger_state["plan_a_triggered"] = True
+                trigger_state["last_trigger_ts"] = int(get_candle_value(last_candle, 'start'))
+                save_dual_trigger_state(trigger_state)
+                trade_executed = True
             else:
-                logger.error(f"❌ BTC/USD 4-Hour Bull Flag breakout trade failed: {trade_result}")
+                logger.error(f"❌ Plan A (Breakout) trade failed: {trade_result}")
 
-            logger.info("Saving trigger state...")
-            trigger_state = {"triggered": True, "trigger_ts": int(get_candle_value(last_candle, 'start'))}
-            save_trigger_state(trigger_state)
-            logger.info("Trigger state saved")
-            logger.info("=== BTC/USD 4-Hour Bull Flag Breakout Alert completed (trade executed) ===")
-            return ts
+        elif plan_b_ready:
+            logger.info("")
+            logger.info("🎯 Plan B (Pullback) conditions met - executing trade...")
+            
+            # Use the current close price as entry (since we're buying after the reclaim)
+            entry_price = close
+            
+            logger.info(f"Trade Setup: Entry=${entry_price:,}, SL=${PLAN_B_STOP_LOSS:,}, TP=${PLAN_B_TP_LOW:,}-${PLAN_B_TP_HIGH:,}")
+            logger.info(f"Risk: ${MARGIN}, Leverage: {LEVERAGE}x")
 
-        logger.info("=== BTC/USD 4-Hour Bull Flag Breakout Alert completed (no trade) ===")
-        return last_alert_ts
+            # Play alert sound
+            try:
+                play_alert_sound()
+                logger.info("Alert sound played successfully")
+            except Exception as e:
+                logger.error(f"Failed to play alert sound: {e}")
+
+            # Execute Plan B trade
+            trade_success, trade_result = execute_crypto_trade(
+                cb_service=cb_service,
+                trade_type="BTC/USD Plan B Pullback Long",
+                entry_price=entry_price,
+                stop_loss=PLAN_B_STOP_LOSS,
+                take_profit=PLAN_B_TP_LOW,  # Use lower TP as primary target
+                margin=MARGIN,
+                leverage=LEVERAGE,
+                side="BUY",
+                product=PRODUCT_ID
+            )
+
+            if trade_success:
+                logger.info(f"🎉 Plan B (Pullback) trade executed successfully!")
+                logger.info(f"Trade output: {trade_result}")
+                trigger_state["plan_b_triggered"] = True
+                trigger_state["last_trigger_ts"] = int(get_candle_value(last_candle, 'start'))
+                save_dual_trigger_state(trigger_state)
+                trade_executed = True
+            else:
+                logger.error(f"❌ Plan B (Pullback) trade failed: {trade_result}")
+
+        if not trade_executed:
+            logger.info("")
+            logger.info("⏳ No trade conditions met for either plan")
+            logger.info(f"Plan A triggered: {trigger_state.get('plan_a_triggered', False)}")
+            logger.info(f"Plan B triggered: {trigger_state.get('plan_b_triggered', False)}")
+
+        logger.info("=== BTC-USD Dual Strategy Alert completed ===")
+        return ts if trade_executed else last_alert_ts
 
     except Exception as e:
-        logger.error(f"Error in BTC/USD 4-Hour Bull Flag breakout alert logic: {e}")
+        logger.error(f"Error in BTC-USD Dual Strategy alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== BTC/USD 4-Hour Bull Flag Breakout Alert completed (with error) ===")
+        logger.info("=== BTC-USD Dual Strategy Alert completed (with error) ===")
     return last_alert_ts
 
 # Remove old alert functions
 def main():
-    logger.info("Starting BTC/USD 4-Hour Bull Flag Breakout Alert Monitor")
+    logger.info("Starting BTC/USD Dual Strategy Alert Monitor (Plan A: Breakout + Plan B: Pullback)")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -517,9 +651,9 @@ def main():
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = btc_breakout_alert(cb_service, last_alert_ts)
+        last_alert_ts = btc_dual_strategy_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
-        logger.info(f"✅ 4-Hour Bull Flag breakout alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
+        logger.info(f"✅ Dual Strategy alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     while True:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
