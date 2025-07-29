@@ -84,7 +84,7 @@ def preview_order(cb_service, product_id: str, side: str, size: float, leverage:
 
 def validate_params(product_id: str, side: str, size_usd: float, leverage: float, tp_price: float, sl_price: float, limit_price: float, cb_service):
     """Validate input parameters."""
-    valid_products = ['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX",'NEAR-PERP-INTX', 'SUI-PERP-INTX']
+    valid_products = ['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX",'NEAR-PERP-INTX', 'SUI-PERP-INTX', 'ATOM-PERP-INTX']
     if product_id not in valid_products:
         raise ValueError(f"Invalid product. Must be one of: {', '.join(valid_products)}")
 
