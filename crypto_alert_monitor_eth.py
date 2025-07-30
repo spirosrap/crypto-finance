@@ -74,37 +74,46 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH Trading Plan Parameters (based on image)
+# ETH Trading Strategy Parameters (based on image)
 PRODUCT_ID = "ETH-PERP-INTX"
-GRANULARITY = "ONE_HOUR"  # 1-hour candles as specified in image
+GRANULARITY_1H = "ONE_HOUR"  # 1-hour chart for trigger
+GRANULARITY_5M = "FIVE_MINUTE"  # 5-minute chart for execution
 VOLUME_PERIOD = 20  # For volume confirmation
 
-# Plan A - Momentum Breakout Parameters
-BREAKOUT_RESISTANCE_LOW = 3920  # Buy on 1h close ≥ $3,920-3,930
-BREAKOUT_RESISTANCE_HIGH = 3930
-BREAKOUT_STOP_LOSS = 3860  # below the breakout candle or <$3,860 (whichever is lower)
-BREAKOUT_TP1 = 4050  # $4,050
-BREAKOUT_TP2_LOW = 4170  # $4,170-$4,300
-BREAKOUT_TP2_HIGH = 4300
+# LONG (breakout) Strategy Parameters
+BREAKOUT_ENTRY_LOW = 3885  # Buy-stop order range
+BREAKOUT_ENTRY_HIGH = 3895
+BREAKOUT_STOP_LOSS = 3838  # Back inside prior range
+BREAKOUT_TP1 = 3950  # First take profit
+BREAKOUT_TP2_LOW = 4015  # Second take profit range
+BREAKOUT_TP2_HIGH = 4035
 
-# Plan B - Pullback Buy Parameters
-PULLBACK_BID_LOW = 3700  # Bid $3,700-$3,730 (first support zone)
-PULLBACK_BID_HIGH = 3730
-PULLBACK_STOP_LOSS = 3640  # <$3,640 (or 1h close < $3,680)
-PULLBACK_STOP_LOSS_ALT = 3680  # 1h close < $3,680
-PULLBACK_TP_LOW = 3880  # back into $3,880-$3,920
-PULLBACK_TP_HIGH = 3920
+# LONG (retest) Strategy Parameters
+RETEST_ENTRY_LOW = 3775  # Entry range after sweep
+RETEST_ENTRY_HIGH = 3800
+RETEST_SWEEP_LOW = 3760  # Sweep zone
+RETEST_SWEEP_HIGH = 3780
+RETEST_STOP_LOSS = 3718  # Below LOD structure
+RETEST_TP1 = 3850  # First take profit
+RETEST_TP2_LOW = 3920  # Second take profit range
+RETEST_TP2_HIGH = 3940
 
-# Volume confirmation requirement
-VOLUME_SURGE_FACTOR = 1.25  # ≥1.25x 20-period 1h volume on the breakout bar
+# Volume confirmation requirements
+VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25x 20-period volume on 1h chart
+VOLUME_SURGE_FACTOR_5M = 2.0   # ≥2x 20-period SMA volume on 5m chart
+
+# Risk management
+RISK_PERCENTAGE = 0.8  # 0.8-1.2% of price for 1R
+PARTIAL_PROFIT_RANGE_LOW = 1.0  # Partial profit at +1.0R
+PARTIAL_PROFIT_RANGE_HIGH = 1.5  # Partial profit at +1.5R
 
 # Trade parameters
 MARGIN = 250  # USD
 LEVERAGE = 20  # 20x leverage
 
-# State files for each plan
-PLAN_A_TRIGGER_FILE = "eth_plan_a_trigger_state.json"
-PLAN_B_TRIGGER_FILE = "eth_plan_b_trigger_state.json"
+# State files for each strategy
+BREAKOUT_TRIGGER_FILE = "eth_breakout_trigger_state.json"
+RETEST_TRIGGER_FILE = "eth_retest_trigger_state.json"
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -140,7 +149,7 @@ def setup_coinbase():
                 product_id=PRODUCT_ID,
                 start=int((datetime.now(UTC) - timedelta(days=2)).timestamp()),
                 end=int(datetime.now(UTC).timestamp()),
-                granularity=GRANULARITY
+                granularity=GRANULARITY_1H
             )
             logger.info("✅ Coinbase connection validated successfully")
             return service
@@ -190,32 +199,88 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         logger.error(f"Error executing crypto {trade_type} trade: {e}")
         return False, str(e)
 
-def load_trigger_state(plan_file):
-    if os.path.exists(plan_file):
+def load_trigger_state(strategy_file):
+    if os.path.exists(strategy_file):
         try:
-            with open(plan_file, 'r') as f:
+            with open(strategy_file, 'r') as f:
                 return json.load(f)
         except Exception:
-            return {"triggered": False, "trigger_ts": None}
-    return {"triggered": False, "trigger_ts": None}
+            return {"triggered": False, "trigger_ts": None, "entry_price": None}
+    return {"triggered": False, "trigger_ts": None, "entry_price": None}
 
-def save_trigger_state(state, plan_file):
+def save_trigger_state(state, strategy_file):
     try:
-        with open(plan_file, 'w') as f:
+        with open(strategy_file, 'w') as f:
             json.dump(state, f)
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-# --- ETH Trading Plan Alert Logic ---
-def eth_trading_plan_alert(cb_service, last_alert_ts=None):
-    logger.info("=== Starting ETH-USD 1-Hour Trading Plan Alert ===")
-    logger.info("🎯 Monitoring for Plan A (Momentum Breakout) and Plan B (Pullback Buy)")
-    logger.info("📊 Plan A: Buy on 1h close ≥ $3,920-3,930 (key resistance cluster)")
-    logger.info("📊 Plan B: Bid $3,700-$3,730 (first support zone)")
+def check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, avg_volume_1h, avg_volume_5m):
+    """Check volume confirmation on both 1h and 5m timeframes"""
+    volume_1h_confirmed = current_volume_1h >= (VOLUME_SURGE_FACTOR_1H * avg_volume_1h)
+    volume_5m_confirmed = current_volume_5m >= (VOLUME_SURGE_FACTOR_5M * avg_volume_5m)
     
-    # Load trigger states for both plans
-    plan_a_state = load_trigger_state(PLAN_A_TRIGGER_FILE)
-    plan_b_state = load_trigger_state(PLAN_B_TRIGGER_FILE)
+    # Volume must be confirmed on either 1h OR 5m timeframe
+    volume_confirmed = volume_1h_confirmed or volume_5m_confirmed
+    
+    logger.info(f"Volume confirmation check:")
+    logger.info(f"  1H: {current_volume_1h:,.0f} vs {VOLUME_SURGE_FACTOR_1H}x avg ({avg_volume_1h:,.0f}) -> {'✅' if volume_1h_confirmed else '❌'}")
+    logger.info(f"  5M: {current_volume_5m:,.0f} vs {VOLUME_SURGE_FACTOR_5M}x avg ({avg_volume_5m:,.0f}) -> {'✅' if volume_5m_confirmed else '❌'}")
+    logger.info(f"  Overall: {'✅' if volume_confirmed else '❌'}")
+    
+    return volume_confirmed
+
+def check_sweep_and_reclaim(cb_service, current_price, current_ts):
+    """Check if there was a sweep of 3760-3780 and reclaim on 5-15m"""
+    try:
+        # Get recent 5-minute candles to check for sweep
+        end = current_ts
+        start = end - timedelta(hours=2)  # Check last 2 hours
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        
+        candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_5M)
+        
+        if not candles_5m or len(candles_5m) < 3:
+            return False
+            
+        # Sort by timestamp ascending
+        candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
+        
+        # Check if there was a sweep of the zone
+        sweep_occurred = False
+        for candle in candles_5m[:-1]:  # Exclude current candle
+            low = float(candle['low'])
+            if low <= RETEST_SWEEP_HIGH and low >= RETEST_SWEEP_LOW:
+                sweep_occurred = True
+                logger.info(f"Sweep detected at ${low:,.2f} in 5m candle")
+                break
+        
+        if not sweep_occurred:
+            logger.info("No sweep of 3760-3780 zone detected")
+            return False
+        
+        # Check if price has reclaimed above entry zone
+        reclaim_confirmed = current_price >= RETEST_ENTRY_LOW
+        
+        logger.info(f"Reclaim check: current price ${current_price:,.2f} vs entry zone ${RETEST_ENTRY_LOW}-${RETEST_ENTRY_HIGH} -> {'✅' if reclaim_confirmed else '❌'}")
+        
+        return reclaim_confirmed
+        
+    except Exception as e:
+        logger.error(f"Error checking sweep and reclaim: {e}")
+        return False
+
+# --- ETH Trading Strategy Alert Logic ---
+def eth_trading_strategy_alert(cb_service, last_alert_ts=None):
+    logger.info("=== Starting ETH-USD Trading Strategy Alert ===")
+    logger.info("🎯 Monitoring for LONG (breakout) and LONG (retest) strategies")
+    logger.info("📊 Breakout: Buy-stop $3,885-$3,895 (above HOD + buffer)")
+    logger.info("📊 Retest: Entry $3,775-$3,800 (after sweep of $3,760-$3,780 and reclaim)")
+    
+    # Load trigger states for both strategies
+    breakout_state = load_trigger_state(BREAKOUT_TRIGGER_FILE)
+    retest_state = load_trigger_state(RETEST_TRIGGER_FILE)
     
     try:
         now = datetime.now(UTC)
@@ -227,173 +292,212 @@ def eth_trading_plan_alert(cb_service, last_alert_ts=None):
         end_ts = int(end.timestamp())
         
         logger.info(f"Fetching 1-hour candles for {VOLUME_PERIOD + 24} hours...")
-        candles = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY)
+        candles_1h = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_1H)
         
-        if not candles or len(candles) < VOLUME_PERIOD + 1:
-            logger.warning("Not enough 1-hour candle data for trading plan alert.")
+        if not candles_1h or len(candles_1h) < VOLUME_PERIOD + 1:
+            logger.warning("Not enough 1-hour candle data for trading strategy alert.")
             return last_alert_ts
             
         # Sort by timestamp ascending
-        candles = sorted(candles, key=lambda x: int(x['start']))
+        candles_1h = sorted(candles_1h, key=lambda x: int(x['start']))
         
-        # Get current candle data
-        current_candle = candles[-1]
-        current_close = float(current_candle['close'])
-        current_high = float(current_candle['high'])
-        current_low = float(current_candle['low'])
-        current_volume = float(current_candle['volume'])
-        current_ts = datetime.fromtimestamp(int(current_candle['start']), UTC)
+        # Get current 1-hour candle data
+        current_candle_1h = candles_1h[-1]
+        current_close_1h = float(current_candle_1h['close'])
+        current_high_1h = float(current_candle_1h['high'])
+        current_low_1h = float(current_candle_1h['low'])
+        current_volume_1h = float(current_candle_1h['volume'])
+        current_ts_1h = datetime.fromtimestamp(int(current_candle_1h['start']), UTC)
         
-        # Calculate 20-period average volume (excluding current candle)
-        volume_candles = candles[-(VOLUME_PERIOD+1):-1]
-        avg_volume = sum(float(c['volume']) for c in volume_candles) / len(volume_candles)
+        # Calculate 20-period average volume for 1h (excluding current candle)
+        volume_candles_1h = candles_1h[-(VOLUME_PERIOD+1):-1]
+        avg_volume_1h = sum(float(c['volume']) for c in volume_candles_1h) / len(volume_candles_1h)
         
-        # Check volume confirmation (1.25x above average)
-        volume_confirmed = current_volume >= (VOLUME_SURGE_FACTOR * avg_volume)
+        # Get 5-minute candles for volume confirmation and retest analysis
+        start_5m = now - timedelta(hours=2)
+        start_ts_5m = int(start_5m.timestamp())
+        end_ts_5m = int(now.timestamp())
         
-        logger.info(f"Current ETH price: ${current_close:,.2f}")
-        logger.info(f"Volume: {current_volume:,.0f} (avg: {avg_volume:,.0f}, required: {VOLUME_SURGE_FACTOR}x) -> {'✅' if volume_confirmed else '❌'}")
+        candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts_5m, end_ts_5m, GRANULARITY_5M)
         
-        # Plan A - Momentum Breakout Conditions
+        if candles_5m and len(candles_5m) >= VOLUME_PERIOD + 1:
+            candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
+            current_candle_5m = candles_5m[-1]
+            current_volume_5m = float(current_candle_5m['volume'])
+            
+            # Calculate 20-period average volume for 5m (excluding current candle)
+            volume_candles_5m = candles_5m[-(VOLUME_PERIOD+1):-1]
+            avg_volume_5m = sum(float(c['volume']) for c in volume_candles_5m) / len(volume_candles_5m)
+        else:
+            current_volume_5m = 0
+            avg_volume_5m = 0
+        
+        # Check volume confirmation
+        volume_confirmed = check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, avg_volume_1h, avg_volume_5m)
+        
+        logger.info(f"Current ETH price (1H): ${current_close_1h:,.2f}")
+        logger.info(f"Current ETH price (5M): ${float(current_candle_5m['close']):,.2f}" if candles_5m else "No 5M data")
+        
+        # LONG (breakout) Strategy Conditions
         breakout_condition = (
-            current_close >= BREAKOUT_RESISTANCE_LOW and 
-            current_close <= BREAKOUT_RESISTANCE_HIGH and 
+            current_close_1h >= BREAKOUT_ENTRY_LOW and 
+            current_close_1h <= BREAKOUT_ENTRY_HIGH and 
             volume_confirmed and 
-            not plan_a_state.get("triggered", False)
+            not breakout_state.get("triggered", False)
         )
         
-        # Plan B - Pullback Buy Conditions
-        pullback_condition = (
-            current_close >= PULLBACK_BID_LOW and 
-            current_close <= PULLBACK_BID_HIGH and 
+        # LONG (retest) Strategy Conditions
+        retest_condition = (
+            current_close_1h >= RETEST_ENTRY_LOW and 
+            current_close_1h <= RETEST_ENTRY_HIGH and 
             volume_confirmed and 
-            not plan_b_state.get("triggered", False)
+            not retest_state.get("triggered", False) and
+            check_sweep_and_reclaim(cb_service, current_close_1h, current_ts_1h)
         )
         
-        logger.info(f"Plan A (Breakout): ${BREAKOUT_RESISTANCE_LOW}-${BREAKOUT_RESISTANCE_HIGH} -> {'✅' if breakout_condition else '❌'}")
-        logger.info(f"Plan B (Pullback): ${PULLBACK_BID_LOW}-${PULLBACK_BID_HIGH} -> {'✅' if pullback_condition else '❌'}")
+        logger.info(f"Breakout condition: ${BREAKOUT_ENTRY_LOW}-${BREAKOUT_ENTRY_HIGH} -> {'✅' if breakout_condition else '❌'}")
+        logger.info(f"Retest condition: ${RETEST_ENTRY_LOW}-${RETEST_ENTRY_HIGH} -> {'✅' if retest_condition else '❌'}")
         
-        # Execute Plan A - Momentum Breakout
+        # Execute LONG (breakout) Strategy
         if breakout_condition:
-            logger.info("🎯 PLAN A CONDITION MET - EXECUTING MOMENTUM BREAKOUT TRADE!")
+            logger.info("🎯 BREAKOUT CONDITION MET - EXECUTING LONG BREAKOUT TRADE!")
             play_alert_sound()
             
-            # Calculate stop loss (below breakout candle or <$3,860, whichever is lower)
-            stop_loss = min(current_low, BREAKOUT_STOP_LOSS)
+            # Calculate position size based on risk percentage
+            risk_amount = current_close_1h * (RISK_PERCENTAGE / 100)
+            stop_distance = current_close_1h - BREAKOUT_STOP_LOSS
+            position_size = risk_amount / stop_distance if stop_distance > 0 else MARGIN * LEVERAGE
             
             # Execute the trade with first target
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="ETH-USD Plan A - Momentum Breakout",
-                entry_price=current_close,
-                stop_loss=stop_loss,
-                take_profit=BREAKOUT_TP1,  # First target at $4,050
+                trade_type="ETH-USD LONG Breakout",
+                entry_price=current_close_1h,
+                stop_loss=BREAKOUT_STOP_LOSS,
+                take_profit=BREAKOUT_TP1,  # First target
                 margin=MARGIN,
                 leverage=LEVERAGE,
                 side="BUY",
                 product=PRODUCT_ID
             )
             
-            logger.info(f"Plan A trade execution completed: success={trade_success}")
+            logger.info(f"Breakout trade execution completed: success={trade_success}")
             
             if trade_success:
-                logger.info(f"🎉 Plan A - Momentum Breakout trade executed successfully!")
-                logger.info(f"Entry: ${current_close:,.2f}")
-                logger.info(f"Stop-loss: ${stop_loss:,.2f}")
+                logger.info(f"🎉 LONG Breakout trade executed successfully!")
+                logger.info(f"Entry: ${current_close_1h:,.2f}")
+                logger.info(f"Stop-loss: ${BREAKOUT_STOP_LOSS:,.2f}")
                 logger.info(f"First profit target: ${BREAKOUT_TP1:,.2f}")
                 logger.info(f"Second profit target: ${BREAKOUT_TP2_LOW}-${BREAKOUT_TP2_HIGH:,.2f}")
+                logger.info(f"Risk: {RISK_PERCENTAGE}% of price for 1R")
+                logger.info(f"Partial profit: +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
                 logger.info(f"Trade output: {trade_result}")
-                logger.info("📊 Strategy: Key resistance cluster break opens $4,050-$4,170")
+                logger.info("📊 Strategy: Expansion above today's range high; momentum continuation if volume confirms")
             else:
-                logger.error(f"❌ Plan A trade failed: {trade_result}")
+                logger.error(f"❌ Breakout trade failed: {trade_result}")
             
             # Save trigger state to prevent duplicate trades
-            plan_a_state = {"triggered": True, "trigger_ts": int(current_candle['start'])}
-            save_trigger_state(plan_a_state, PLAN_A_TRIGGER_FILE)
-            logger.info("Plan A trigger state saved")
+            breakout_state = {
+                "triggered": True, 
+                "trigger_ts": int(current_candle_1h['start']),
+                "entry_price": current_close_1h
+            }
+            save_trigger_state(breakout_state, BREAKOUT_TRIGGER_FILE)
+            logger.info("Breakout trigger state saved")
         
-        # Execute Plan B - Pullback Buy
-        elif pullback_condition:
-            logger.info("🎯 PLAN B CONDITION MET - EXECUTING PULLBACK BUY TRADE!")
+        # Execute LONG (retest) Strategy
+        elif retest_condition:
+            logger.info("🎯 RETEST CONDITION MET - EXECUTING LONG RETEST TRADE!")
             play_alert_sound()
             
-            # Calculate stop loss (<$3,640 or 1h close < $3,680)
-            stop_loss = min(PULLBACK_STOP_LOSS, PULLBACK_STOP_LOSS_ALT)
+            # Calculate position size based on risk percentage
+            risk_amount = current_close_1h * (RISK_PERCENTAGE / 100)
+            stop_distance = current_close_1h - RETEST_STOP_LOSS
+            position_size = risk_amount / stop_distance if stop_distance > 0 else MARGIN * LEVERAGE
             
             # Execute the trade
             trade_success, trade_result = execute_crypto_trade(
                 cb_service=cb_service,
-                trade_type="ETH-USD Plan B - Pullback Buy",
-                entry_price=current_close,
-                stop_loss=stop_loss,
-                take_profit=PULLBACK_TP_HIGH,  # Target back into $3,880-$3,920
+                trade_type="ETH-USD LONG Retest",
+                entry_price=current_close_1h,
+                stop_loss=RETEST_STOP_LOSS,
+                take_profit=RETEST_TP1,  # First target
                 margin=MARGIN,
                 leverage=LEVERAGE,
                 side="BUY",
                 product=PRODUCT_ID
             )
             
-            logger.info(f"Plan B trade execution completed: success={trade_success}")
+            logger.info(f"Retest trade execution completed: success={trade_success}")
             
             if trade_success:
-                logger.info(f"🎉 Plan B - Pullback Buy trade executed successfully!")
-                logger.info(f"Entry: ${current_close:,.2f}")
-                logger.info(f"Stop-loss: ${stop_loss:,.2f}")
-                logger.info(f"Profit target: ${PULLBACK_TP_LOW}-${PULLBACK_TP_HIGH:,.2f}")
+                logger.info(f"🎉 LONG Retest trade executed successfully!")
+                logger.info(f"Entry: ${current_close_1h:,.2f}")
+                logger.info(f"Stop-loss: ${RETEST_STOP_LOSS:,.2f}")
+                logger.info(f"First profit target: ${RETEST_TP1:,.2f}")
+                logger.info(f"Second profit target: ${RETEST_TP2_LOW}-${RETEST_TP2_HIGH:,.2f}")
+                logger.info(f"Risk: {RISK_PERCENTAGE}% of price for 1R")
+                logger.info(f"Partial profit: +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
                 logger.info(f"Trade output: {trade_result}")
-                logger.info("📊 Strategy: First support zone that's been holding recently")
+                logger.info("📊 Strategy: Higher low at mid-range; catch bid without chasing")
             else:
-                logger.error(f"❌ Plan B trade failed: {trade_result}")
+                logger.error(f"❌ Retest trade failed: {trade_result}")
             
             # Save trigger state to prevent duplicate trades
-            plan_b_state = {"triggered": True, "trigger_ts": int(current_candle['start'])}
-            save_trigger_state(plan_b_state, PLAN_B_TRIGGER_FILE)
-            logger.info("Plan B trigger state saved")
+            retest_state = {
+                "triggered": True, 
+                "trigger_ts": int(current_candle_1h['start']),
+                "entry_price": current_close_1h
+            }
+            save_trigger_state(retest_state, RETEST_TRIGGER_FILE)
+            logger.info("Retest trigger state saved")
         
         else:
-            logger.info("⏳ Waiting for Plan A or Plan B conditions...")
+            logger.info("⏳ Waiting for Breakout or Retest conditions...")
             if not volume_confirmed:
-                logger.info(f"   Volume {current_volume:,.0f} below required {VOLUME_SURGE_FACTOR}x average")
-            if plan_a_state.get("triggered", False):
-                logger.info("   Plan A already triggered")
-            if plan_b_state.get("triggered", False):
-                logger.info("   Plan B already triggered")
+                logger.info(f"   Volume confirmation not met")
+            if breakout_state.get("triggered", False):
+                logger.info("   Breakout strategy already triggered")
+            if retest_state.get("triggered", False):
+                logger.info("   Retest strategy already triggered")
         
         # Reset triggers if price moves significantly away from entry zones
-        if plan_a_state.get("triggered", False):
-            if current_close < BREAKOUT_STOP_LOSS:
-                logger.info("🔄 Resetting Plan A trigger state - price fell below stop loss")
-                plan_a_state = {"triggered": False, "trigger_ts": None}
-                save_trigger_state(plan_a_state, PLAN_A_TRIGGER_FILE)
-                logger.info("Plan A trigger state reset")
+        if breakout_state.get("triggered", False):
+            if current_close_1h < BREAKOUT_STOP_LOSS:
+                logger.info("🔄 Resetting Breakout trigger state - price fell below stop loss")
+                breakout_state = {"triggered": False, "trigger_ts": None, "entry_price": None}
+                save_trigger_state(breakout_state, BREAKOUT_TRIGGER_FILE)
+                logger.info("Breakout trigger state reset")
         
-        if plan_b_state.get("triggered", False):
-            if current_close < PULLBACK_STOP_LOSS:
-                logger.info("🔄 Resetting Plan B trigger state - price fell below stop loss")
-                plan_b_state = {"triggered": False, "trigger_ts": None}
-                save_trigger_state(plan_b_state, PLAN_B_TRIGGER_FILE)
-                logger.info("Plan B trigger state reset")
+        if retest_state.get("triggered", False):
+            if current_close_1h < RETEST_STOP_LOSS:
+                logger.info("🔄 Resetting Retest trigger state - price fell below stop loss")
+                retest_state = {"triggered": False, "trigger_ts": None, "entry_price": None}
+                save_trigger_state(retest_state, RETEST_TRIGGER_FILE)
+                logger.info("Retest trigger state reset")
         
-        logger.info("=== ETH-USD Trading Plan Alert completed ===")
-        return current_ts
+        logger.info("=== ETH-USD Trading Strategy Alert completed ===")
+        return current_ts_1h
         
     except Exception as e:
-        logger.error(f"Error in ETH-USD Trading Plan Alert logic: {e}")
+        logger.error(f"Error in ETH-USD Trading Strategy Alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH-USD Trading Plan Alert completed (with error) ===")
+        logger.info("=== ETH-USD Trading Strategy Alert completed (with error) ===")
     return last_alert_ts
 
 # Replace main loop to use new alert
 def main():
-    logger.info("Starting ETH-USD 1-Hour Trading Plan Monitor")
-    logger.info("🎯 Monitoring for Plan A (Momentum Breakout) and Plan B (Pullback Buy)")
-    logger.info("📊 Plan A: Buy on 1h close ≥ $3,920-3,930 (key resistance cluster)")
-    logger.info("📊 Plan B: Bid $3,700-$3,730 (first support zone)")
-    logger.info("💡 Volume confirmation: ≥1.25x 20-period 1h volume")
-    logger.info("🛑 Plan A SL: <$3,860, Plan B SL: <$3,640")
-    logger.info("🎯 Plan A TP: $4,050 / $4,170-$4,300, Plan B TP: $3,880-$3,920")
-    logger.info("⏰ Timeframe: 1-hour")
+    logger.info("Starting ETH-USD Trading Strategy Monitor")
+    logger.info("🎯 Monitoring for LONG (breakout) and LONG (retest) strategies")
+    logger.info("📊 Breakout: Buy-stop $3,885-$3,895 (above HOD + buffer)")
+    logger.info("📊 Retest: Entry $3,775-$3,800 (after sweep of $3,760-$3,780 and reclaim)")
+    logger.info("💡 Volume confirmation: ≥1.25x 20-period 1h volume OR ≥2x 20-period 5m volume")
+    logger.info("🛑 Breakout SL: $3,838, Retest SL: $3,718")
+    logger.info("🎯 Breakout TP: $3,950 / $4,015-$4,035, Retest TP: $3,850 / $3,920-$3,940")
+    logger.info("⏰ Timeframe: 1-hour trigger, 5-15 minute execution")
+    logger.info("💰 Risk: 0.8-1.2% of price for 1R, Partial profit at +1.0-1.5R")
+    
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
         logger.error(f"❌ Alert sound file '{alert_sound_file}' not found!")
@@ -402,16 +506,19 @@ def main():
         return
     else:
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
+    
     cb_service = setup_coinbase()
     last_alert_ts = None
     consecutive_failures = 0
     max_consecutive_failures = 5
+    
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = eth_trading_plan_alert(cb_service, last_alert_ts)
+        last_alert_ts = eth_trading_strategy_alert(cb_service, last_alert_ts)
         consecutive_failures = 0
         logger.info(f"✅ Alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
+    
     while True:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
