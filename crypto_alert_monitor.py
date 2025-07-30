@@ -129,29 +129,28 @@ PRODUCT_ID = "BTC-PERP-INTX"
 
 # Global Rules from the plan
 MARGIN = 250  # USD
-LEVERAGE = 20  # 20x leverage
+LEVERAGE = 20  # 20x leverage (margin x leverage = 5000 USD position size)
 RISK_PERCENTAGE = 0.8  # 0.8-1.2% of price as 1R
 VOLUME_THRESHOLD_1H = 1.25  # 1.25x 20-SMA volume on 1h
 VOLUME_THRESHOLD_5M = 2.0   # 2x 20-SMA volume on 5m
 
-# LONG - Breakout Strategy Parameters
-BREAKOUT_ENTRY_LOW = 119050   # $119,050 (above HOD + buffer)
-BREAKOUT_ENTRY_HIGH = 119250  # $119,250 (above HOD + buffer)
-BREAKOUT_STOP_LOSS = 118450   # $118,450
-BREAKOUT_TP1_LOW = 120000     # $120,000 (below ~ATH/52-wk high)
-BREAKOUT_TP1_HIGH = 120200    # $120,200
-BREAKOUT_TP2_LOW = 121800     # $121,800
-BREAKOUT_TP2_HIGH = 122300    # $122,300
+# LONG - Breakout Strategy Parameters (from image)
+BREAKOUT_ENTRY_LOW = 118700   # $118,700 (above HOD + buffer)
+BREAKOUT_ENTRY_HIGH = 118850  # $118,850 (above HOD + buffer)
+BREAKOUT_STOP_LOSS = 118250   # $118,250 (back inside range)
+BREAKOUT_TP1 = 119400         # $119,400
+BREAKOUT_TP2_LOW = 120200     # $120,200
+BREAKOUT_TP2_HIGH = 120600    # $120,600
 
-# LONG - Retest Strategy Parameters
-RETEST_ENTRY_LOW = 117800     # $117,800
-RETEST_ENTRY_HIGH = 118100    # $118,100
-RETEST_SWEEP_LOW = 117300     # $117,300 (sweep into this zone)
+# LONG - Retest Strategy Parameters (from image)
+RETEST_ENTRY_LOW = 117650     # $117,650
+RETEST_ENTRY_HIGH = 117900    # $117,900
+RETEST_SWEEP_LOW = 117400     # $117,400 (sweep into this zone)
 RETEST_SWEEP_HIGH = 117600    # $117,600 (sweep into this zone)
-RETEST_STOP_LOSS = 116900     # $116,900
-RETEST_TP1 = 118900           # $118,900
-RETEST_TP2_LOW = 119800       # $119,800
-RETEST_TP2_HIGH = 120000      # $120,000
+RETEST_STOP_LOSS = 116950     # $116,950 (below LOD structure)
+RETEST_TP1 = 118600           # $118,600
+RETEST_TP2_LOW = 119300       # $119,300
+RETEST_TP2_HIGH = 119800      # $119,800
 
 # Trade tracking
 TRIGGER_STATE_FILE = "btc_intraday_trigger_state.json"
@@ -410,18 +409,18 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
         logger.info("")
         logger.info("📊 LONG - Breakout Strategy:")
         logger.info(f"   • Entry: Buy-stop at ${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,} (above HOD + buffer)")
-        logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,}")
-        logger.info(f"   • TP1: ${BREAKOUT_TP1_LOW:,}-${BREAKOUT_TP1_HIGH:,}")
-        logger.info(f"   • TP2: ${BREAKOUT_TP2_LOW:,}-${BREAKOUT_TP2_HIGH:,} (below ~ATH/52-wk high)")
-        logger.info(f"   • Why: Range expansion through HOD with room before prior extremes")
+        logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,} (back inside range)")
+        logger.info(f"   • TP1: ${BREAKOUT_TP1:,}")
+        logger.info(f"   • TP2: ${BREAKOUT_TP2_LOW:,}-${BREAKOUT_TP2_HIGH:,}")
+        logger.info(f"   • Why: Expansion above session high with momentum")
         logger.info("")
         logger.info("📊 LONG - Retest Strategy:")
         logger.info(f"   • Entry: ${RETEST_ENTRY_LOW:,}-${RETEST_ENTRY_HIGH:,}")
         logger.info(f"   • Conditions: Only after sweep into ${RETEST_SWEEP_LOW:,}-${RETEST_SWEEP_HIGH:,} and 5-15m reclaim")
-        logger.info(f"   • SL: ${RETEST_STOP_LOSS:,}")
+        logger.info(f"   • SL: ${RETEST_STOP_LOSS:,} (below LOD structure)")
         logger.info(f"   • TP1: ${RETEST_TP1:,}")
         logger.info(f"   • TP2: ${RETEST_TP2_LOW:,}-${RETEST_TP2_HIGH:,}")
-        logger.info(f"   • Why: Higher low at mid-range without chasing")
+        logger.info(f"   • Why: Higher low at mid-range; avoids chasing")
         logger.info("")
         logger.info(f"Current Price: ${current_price:,.2f}")
         logger.info(f"Last 1H Close: ${last_close:,.2f}, High: ${last_high:,.2f}, Low: ${last_low:,.2f}")
@@ -490,9 +489,9 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
             entry_price = current_price
             
             logger.info(f"Trade Setup: Entry=${entry_price:,.2f}, SL=${BREAKOUT_STOP_LOSS:,.2f}")
-            logger.info(f"TP1: ${BREAKOUT_TP1_LOW:,.2f}-${BREAKOUT_TP1_HIGH:,.2f}")
+            logger.info(f"TP1: ${BREAKOUT_TP1:,.2f}")
             logger.info(f"TP2: ${BREAKOUT_TP2_LOW:,.2f}-${BREAKOUT_TP2_HIGH:,.2f}")
-            logger.info(f"Risk: ${MARGIN}, Leverage: {LEVERAGE}x")
+            logger.info(f"Position Size: ${MARGIN * LEVERAGE:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
             
             # Play alert sound
             try:
@@ -507,7 +506,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
                 trade_type="BTC Intraday Breakout Long",
                 entry_price=entry_price,
                 stop_loss=BREAKOUT_STOP_LOSS,
-                take_profit=BREAKOUT_TP1_LOW,  # Use TP1 as primary target
+                take_profit=BREAKOUT_TP1,  # Use TP1 as primary target
                 margin=MARGIN,
                 leverage=LEVERAGE,
                 side="BUY",
@@ -534,7 +533,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
             logger.info(f"Trade Setup: Entry=${entry_price:,.2f}, SL=${RETEST_STOP_LOSS:,.2f}")
             logger.info(f"TP1: ${RETEST_TP1:,.2f}")
             logger.info(f"TP2: ${RETEST_TP2_LOW:,.2f}-${RETEST_TP2_HIGH:,.2f}")
-            logger.info(f"Risk: ${MARGIN}, Leverage: {LEVERAGE}x")
+            logger.info(f"Position Size: ${MARGIN * LEVERAGE:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
             
             # Play alert sound
             try:
