@@ -335,25 +335,25 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
     
     try:
         # Get current time and calculate time ranges
-        now = datetime.now(UTC)
-        now = now.replace(minute=0, second=0, microsecond=0)  # Start of current hour
+        current_time = datetime.now(UTC)
+        now_hour = current_time.replace(minute=0, second=0, microsecond=0)  # Start of current hour
         
         # Get 1-hour candles for main analysis
-        start_1h = now - timedelta(hours=25)  # Get 25 hours of data
-        end_1h = now
+        start_1h = now_hour - timedelta(hours=25)  # Get 25 hours of data
+        end_1h = now_hour
         start_ts_1h = int(start_1h.timestamp())
         end_ts_1h = int(end_1h.timestamp())
         
-        # Get 5-minute candles for volume confirmation
-        start_5m = now - timedelta(hours=2)  # Get 2 hours of 5m data
-        end_5m = now
+        # Get 5-minute candles for volume confirmation (use actual current time)
+        start_5m = current_time - timedelta(hours=2)  # Get 2 hours of 5m data
+        end_5m = current_time  # Use actual current time, not rounded hour
         start_ts_5m = int(start_5m.timestamp())
         end_ts_5m = int(end_5m.timestamp())
         
         logger.info(f"Fetching 1-hour candles from {start_1h} to {end_1h}")
         candles_1h = safe_get_candles(cb_service, PRODUCT_ID, start_ts_1h, end_ts_1h, GRANULARITY_1H)
         
-        logger.info(f"Fetching 5-minute candles from {start_5m} to {end_5m}")
+        logger.info(f"Fetching 5-minute candles from {start_5m} to {end_5m} (current time: {current_time})")
         candles_5m = safe_get_5m_candles(cb_service, PRODUCT_ID, start_ts_5m, end_ts_5m)
         
         if not candles_1h or len(candles_1h) < 3:
@@ -378,6 +378,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
         
         # Get current price from most recent 5-minute candle
         current_5m = candles_5m[0]
+        print(current_5m)
         current_price = float(get_candle_value(current_5m, 'close'))
         
         # Calculate volume SMAs
