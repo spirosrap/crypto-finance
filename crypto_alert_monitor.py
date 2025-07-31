@@ -130,43 +130,44 @@ PRODUCT_ID = "BTC-PERP-INTX"
 # Global Rules from the plan
 MARGIN = 250  # USD
 LEVERAGE = 20  # 20x leverage (margin x leverage = 5000 USD position size)
-RISK_PERCENTAGE = 0.8  # 0.8-1.2% of price as 1R
+RISK_PERCENTAGE = 0.8  # 0.8-1.0% of price as 1R
 VOLUME_THRESHOLD_1H = 1.25  # 1.25x 20-SMA volume on 1h
 VOLUME_THRESHOLD_5M = 2.0   # 2x 20-SMA volume on 5m
 
-# LONG - Breakout Strategy Parameters (from image)
-BREAKOUT_ENTRY_LOW = 118980   # $118,980 (above HOD + buffer)
-BREAKOUT_ENTRY_HIGH = 119120  # $119,120 (above HOD + buffer)
-BREAKOUT_STOP_LOSS = 118050   # $118,050 (back inside range)
-BREAKOUT_TP1 = 120250         # $120,250
-BREAKOUT_TP2_LOW = 121600     # $121,600
-BREAKOUT_TP2_HIGH = 121900    # $121,900
+# Today's session levels from the plan
+HOD = 118891  # High of Day
+LOD = 116040  # Low of Day  
+MID = 117466  # Mid point of today's range
 
-# LONG - Retest Strategy Parameters (from image)
-RETEST_ENTRY_LOW = 116900     # $116,900
-RETEST_ENTRY_HIGH = 117400    # $117,400
-RETEST_SWEEP_LOW = 116000     # $116,000 (sweep into this zone)
-RETEST_SWEEP_HIGH = 116300    # $116,300 (sweep into this zone)
-RETEST_STOP_LOSS = 115880     # $115,880 (below LOD)
-RETEST_TP1 = 118300           # $118,300
-RETEST_TP2_LOW = 119300       # $119,300
-RETEST_TP2_HIGH = 119900      # $119,900
+# LONG - Breakout continuation strategy
+BREAKOUT_ENTRY_LOW = 118950   # Entry zone low (above HOD by ~0.05%)
+BREAKOUT_ENTRY_HIGH = 119150  # Entry zone high (above HOD by ~0.22%)
+BREAKOUT_STOP_LOSS = 118480   # SL back inside range (0.45-0.60% below entry)
+BREAKOUT_TP1 = 120320         # TP1 ≈ 0.5× today's range
+BREAKOUT_TP2 = 121740         # TP2 ≈ 1.0× today's range
 
-# SHORT - Breakdown Strategy Parameters (from image)
-BREAKDOWN_ENTRY_LOW = 115900   # $115,900 (through LOD)
-BREAKDOWN_ENTRY_HIGH = 116100  # $116,100 (through LOD)
-BREAKDOWN_STOP_LOSS = 116950   # $116,950
-BREAKDOWN_TP1 = 114700         # $114,700
-BREAKDOWN_TP2_LOW = 113200     # $113,200
-BREAKDOWN_TP2_HIGH = 113800    # $113,800
+# LONG - Failed break / LOD reclaim strategy
+RECLAIM_SWEEP_LOW = 115900    # Brief sweep ≤ 0.15% below LOD (115900 = LOD * 0.9985)
+RECLAIM_ENTRY_LOW = 116100    # Entry zone low on reclaim
+RECLAIM_ENTRY_HIGH = 116250   # Entry zone high on reclaim
+RECLAIM_STOP_LOSS = 115750    # SL below sweep
+RECLAIM_TP1 = 117460          # TP1 range mid
+RECLAIM_TP2 = 118800          # TP2 revisit HOD
 
-# SHORT - Fade into Resistance Strategy Parameters (from image)
-FADE_ENTRY_LOW = 119600        # $119,600
-FADE_ENTRY_HIGH = 120000       # $120,000
-FADE_STOP_LOSS = 120650        # $120,650
-FADE_TP1 = 118900              # $118,900
-FADE_TP2_LOW = 118000          # $118,000
-FADE_TP2_HIGH = 117400         # $117,400
+# SHORT - Breakdown continuation strategy
+BREAKDOWN_ENTRY_LOW = 115900   # Entry zone low (below LOD by ~0.12%)
+BREAKDOWN_ENTRY_HIGH = 115700  # Entry zone high (below LOD by ~0.29%)
+BREAKDOWN_STOP_LOSS = 116250   # SL back inside range
+BREAKDOWN_TP1 = 114615         # TP1 ≈ 0.5× range extension
+BREAKDOWN_TP2 = 113190         # TP2 ≈ 1.0× range extension
+
+# SHORT - Fade under HOD strategy
+FADE_ENTRY_LOW = 118700        # Entry zone low (stall ≤118850-118890)
+FADE_ENTRY_HIGH = 118820       # Entry zone high
+FADE_STOP_LOSS = 119200        # SL above HOD
+FADE_TP1 = 118000              # TP1 VWAP/first flush
+FADE_TP2 = 117460              # TP2 mid
+FADE_TP3 = 116150              # TP3 final target
 
 # Trade tracking
 TRIGGER_STATE_FILE = "btc_intraday_trigger_state.json"
@@ -179,14 +180,14 @@ def load_trigger_state():
         except Exception:
             return {
                 "breakout_triggered": False, 
-                "retest_triggered": False, 
+                "reclaim_triggered": False, 
                 "breakdown_triggered": False,
                 "fade_triggered": False,
                 "last_trigger_ts": None
             }
     return {
         "breakout_triggered": False, 
-        "retest_triggered": False, 
+        "reclaim_triggered": False, 
         "breakdown_triggered": False,
         "fade_triggered": False,
         "last_trigger_ts": None
@@ -387,7 +388,7 @@ def check_spike_rejection(candles_5m, resistance_level):
 def btc_intraday_alert(cb_service, last_alert_ts=None):
     """
     BTC Intraday Alert - Implements complete trading plan with both LONG and SHORT strategies
-    Based on the trading plan: "Spiros - BTC intraday plan (both sides) using live levels"
+    Based on the trading plan: "Spiros — BTC plan for today (live levels)"
     """
     logger.info("=== BTC Intraday Alert (Complete Strategy - LONG & SHORT) ===")
     
@@ -454,16 +455,22 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
         sweep_detected = False
         for candle in candles_5m[1:13]:  # Check last hour of 5m candles
             low = float(get_candle_value(candle, 'low'))
-            if RETEST_SWEEP_LOW <= low <= RETEST_SWEEP_HIGH:
+            if RECLAIM_SWEEP_LOW <= low <= RECLAIM_ENTRY_HIGH: # Changed to RECLAIM_SWEEP_LOW and RECLAIM_ENTRY_HIGH
                 sweep_detected = True
                 break
         
-        # Check for spike rejection at resistance level
-        spike_rejection_detected = check_spike_rejection(candles_5m, FADE_ENTRY_HIGH)
+        # Check for spike rejection at resistance level (HOD area)
+        spike_rejection_detected = check_spike_rejection(candles_5m, HOD)
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 BTC Intraday Trading Plan Alert")
+        logger.info("🚀 BTC Plan for Today (Live Levels) Alert")
+        logger.info("")
+        logger.info("📊 Today's Levels:")
+        logger.info(f"   • BTC ≈ ${current_price:,.0f}")
+        logger.info(f"   • HOD: ${HOD:,}")
+        logger.info(f"   • LOD: ${LOD:,}")
+        logger.info(f"   • MID: ${MID:,}")
         logger.info("")
         logger.info("📊 Global Rules:")
         logger.info(f"   • Timeframe: 1h trigger; execute on 5-15m")
@@ -475,29 +482,30 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
         logger.info(f"   • Entry: ${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,} (above HOD + buffer)")
         logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,} (back inside range)")
         logger.info(f"   • TP1: ${BREAKOUT_TP1:,}")
-        logger.info(f"   • TP2: ${BREAKOUT_TP2_LOW:,}-${BREAKOUT_TP2_HIGH:,}")
+        logger.info(f"   • TP2: ${BREAKOUT_TP2:,}")
         logger.info(f"   • Why: Fresh expansion through HOD; continuation if volume confirms")
         logger.info("")
-        logger.info("📊 LONG - Retest Strategy:")
-        logger.info(f"   • Entry: ${RETEST_ENTRY_LOW:,}-${RETEST_ENTRY_HIGH:,}")
-        logger.info(f"   • Conditions: Only after sweep of ${RETEST_SWEEP_LOW:,}-${RETEST_SWEEP_HIGH:,} and 5-15m reclaim")
-        logger.info(f"   • SL: ${RETEST_STOP_LOSS:,} (below LOD)")
-        logger.info(f"   • TP1: ${RETEST_TP1:,}")
-        logger.info(f"   • TP2: ${RETEST_TP2_LOW:,}-${RETEST_TP2_HIGH:,}")
+        logger.info("📊 LONG - Reclaim Strategy:")
+        logger.info(f"   • Entry: ${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,}")
+        logger.info(f"   • Conditions: Only after sweep of ${RECLAIM_SWEEP_LOW:,}-${RECLAIM_ENTRY_HIGH:,} and 5-15m reclaim")
+        logger.info(f"   • SL: ${RECLAIM_STOP_LOSS:,} (below LOD)")
+        logger.info(f"   • TP1: ${RECLAIM_TP1:,}")
+        logger.info(f"   • TP2: ${RECLAIM_TP2:,}")
         logger.info(f"   • Why: Liquidity sweep of LOD then higher-low reclaim")
         logger.info("")
         logger.info("📊 SHORT - Breakdown Strategy:")
         logger.info(f"   • Entry: ${BREAKDOWN_ENTRY_LOW:,}-${BREAKDOWN_ENTRY_HIGH:,} (through LOD)")
         logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,}")
         logger.info(f"   • TP1: ${BREAKDOWN_TP1:,}")
-        logger.info(f"   • TP2: ${BREAKDOWN_TP2_LOW:,}-${BREAKDOWN_TP2_HIGH:,}")
+        logger.info(f"   • TP2: ${BREAKDOWN_TP2:,}")
         logger.info(f"   • Why: Range failure + continuation if 1h closes below LOD on volume")
         logger.info("")
-        logger.info("📊 SHORT - Fade into Resistance Strategy:")
+        logger.info("📊 SHORT - Fade under HOD Strategy:")
         logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,} only if spike + rejection")
         logger.info(f"   • SL: ${FADE_STOP_LOSS:,}")
         logger.info(f"   • TP1: ${FADE_TP1:,}")
-        logger.info(f"   • TP2: ${FADE_TP2_LOW:,}-${FADE_TP2_HIGH:,}")
+        logger.info(f"   • TP2: ${FADE_TP2:,}")
+        logger.info(f"   • TP3: ${FADE_TP3:,}")
         logger.info(f"   • Why: First test into round-number/overhead supply tends to mean-revert intraday")
         logger.info("")
         logger.info(f"Current Price: ${current_price:,.2f}")
@@ -560,23 +568,23 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
                 else:
                     logger.error(f"❌ Breakout trade failed: {trade_result}")
         
-        # 2. LONG - Retest Strategy
-        if not trade_executed and not trigger_state.get("retest_triggered", False):
-            in_retest_zone = RETEST_ENTRY_LOW <= current_price <= RETEST_ENTRY_HIGH
-            reclaim_condition = current_price > RETEST_SWEEP_HIGH
-            retest_ready = in_retest_zone and sweep_detected and reclaim_condition and volume_confirmed
+        # 2. LONG - Reclaim Strategy
+        if not trade_executed and not trigger_state.get("reclaim_triggered", False):
+            in_reclaim_zone = RECLAIM_ENTRY_LOW <= current_price <= RECLAIM_ENTRY_HIGH
+            reclaim_condition = current_price > RECLAIM_ENTRY_HIGH # Changed to RECLAIM_ENTRY_HIGH
+            reclaim_ready = in_reclaim_zone and sweep_detected and reclaim_condition and volume_confirmed
             
             logger.info("")
-            logger.info("🔍 LONG - Retest Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${RETEST_ENTRY_LOW:,}-${RETEST_ENTRY_HIGH:,}): {'✅' if in_retest_zone else '❌'}")
-            logger.info(f"   • Sweep detected (${RETEST_SWEEP_LOW:,}-${RETEST_SWEEP_HIGH:,}): {'✅' if sweep_detected else '❌'}")
-            logger.info(f"   • 5-15m reclaim (price > ${RETEST_SWEEP_HIGH:,}): {'✅' if reclaim_condition else '❌'}")
+            logger.info("🔍 LONG - Reclaim Strategy Analysis:")
+            logger.info(f"   • Price in entry zone (${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,}): {'✅' if in_reclaim_zone else '❌'}")
+            logger.info(f"   • Sweep detected (${RECLAIM_SWEEP_LOW:,}-${RECLAIM_ENTRY_HIGH:,}): {'✅' if sweep_detected else '❌'}")
+            logger.info(f"   • 5-15m reclaim (price > ${RECLAIM_ENTRY_HIGH:,}): {'✅' if reclaim_condition else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Retest Ready: {'🎯 YES' if retest_ready else '⏳ NO'}")
+            logger.info(f"   • Reclaim Ready: {'🎯 YES' if reclaim_ready else '⏳ NO'}")
             
-            if retest_ready:
+            if reclaim_ready:
                 logger.info("")
-                logger.info("🎯 LONG - Retest Strategy conditions met - executing trade...")
+                logger.info("🎯 LONG - Reclaim Strategy conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -585,13 +593,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute Retest trade
+                # Execute Reclaim trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="BTC Intraday Retest Long",
+                    trade_type="BTC Intraday Reclaim Long",
                     entry_price=current_price,
-                    stop_loss=RETEST_STOP_LOSS,
-                    take_profit=RETEST_TP1,  # Use TP1 as primary target
+                    stop_loss=RECLAIM_STOP_LOSS,
+                    take_profit=RECLAIM_TP1,  # Use TP1 as primary target
                     margin=MARGIN,
                     leverage=LEVERAGE,
                     side="BUY",
@@ -599,14 +607,14 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
                 )
                 
                 if trade_success:
-                    logger.info(f"🎉 Retest trade executed successfully!")
+                    logger.info(f"🎉 Reclaim trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
-                    trigger_state["retest_triggered"] = True
+                    trigger_state["reclaim_triggered"] = True
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
                     save_trigger_state(trigger_state)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Retest trade failed: {trade_result}")
+                    logger.error(f"❌ Reclaim trade failed: {trade_result}")
         
         # 3. SHORT - Breakdown Strategy
         if not trade_executed and not trigger_state.get("breakdown_triggered", False):
@@ -659,7 +667,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
             fade_ready = in_fade_zone and spike_rejection_detected and volume_confirmed
             
             logger.info("")
-            logger.info("🔍 SHORT - Fade into Resistance Strategy Analysis:")
+            logger.info("🔍 SHORT - Fade under HOD Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,}): {'✅' if in_fade_zone else '❌'}")
             logger.info(f"   • Spike rejection detected: {'✅' if spike_rejection_detected else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
@@ -667,7 +675,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
             
             if fade_ready:
                 logger.info("")
-                logger.info("🎯 SHORT - Fade into Resistance Strategy conditions met - executing trade...")
+                logger.info("🎯 SHORT - Fade under HOD Strategy conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -679,7 +687,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
                 # Execute Fade trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="BTC Intraday Fade Short",
+                    trade_type="BTC Intraday Fade under HOD Short",
                     entry_price=current_price,
                     stop_loss=FADE_STOP_LOSS,
                     take_profit=FADE_TP1,  # Use TP1 as primary target
@@ -703,7 +711,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
             logger.info("")
             logger.info("⏳ No trade conditions met for any strategy")
             logger.info(f"Breakout triggered: {trigger_state.get('breakout_triggered', False)}")
-            logger.info(f"Retest triggered: {trigger_state.get('retest_triggered', False)}")
+            logger.info(f"Reclaim triggered: {trigger_state.get('reclaim_triggered', False)}")
             logger.info(f"Breakdown triggered: {trigger_state.get('breakdown_triggered', False)}")
             logger.info(f"Fade triggered: {trigger_state.get('fade_triggered', False)}")
         
@@ -718,7 +726,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
     return last_alert_ts
 
 def main():
-    logger.info("Starting BTC Intraday Alert Monitor (Complete Strategy - LONG & SHORT)")
+    logger.info("Starting BTC Plan for Today Alert Monitor (Complete Strategy - LONG & SHORT)")
     logger.info("")
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
