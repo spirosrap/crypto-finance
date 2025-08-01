@@ -554,10 +554,17 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 logger.info("🎯 Prioritizing breakdown strategies (price near bottom of range)")
                 breakdown_priority = True
                 breakout_priority = False
-            else:  # Middle of range - both paths possible
-                logger.info("🎯 Both breakout and breakdown paths possible (price in middle of range)")
-                breakdown_priority = True
-                breakout_priority = True
+            else:  # Middle of range - pick one path based on momentum
+                logger.info("🎯 Middle of range - picking path based on momentum")
+                # In middle of range, prefer the path that aligns with recent price action
+                if current_close_1h > current_mid_range:
+                    breakdown_priority = False
+                    breakout_priority = True
+                    logger.info("   → Preferring breakout (price above mid-range)")
+                else:
+                    breakdown_priority = True
+                    breakout_priority = False
+                    logger.info("   → Preferring breakdown (price below mid-range)")
         
         # LONG (breakout) Strategy Conditions
         breakout_condition = (
@@ -583,8 +590,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # SHORT (breakdown) Strategy Conditions
         breakdown_condition = (
             breakdown_priority and
-            current_close_1h >= BREAKDOWN_ENTRY_LOW and 
             current_close_1h <= BREAKDOWN_ENTRY_HIGH and 
+            current_close_1h >= BREAKDOWN_ENTRY_LOW and 
             volume_confirmed and 
             not breakdown_state.get("triggered", False) and
             not breakdown_state.get("stopped_out", False)  # Don't re-enter if stopped out
@@ -593,8 +600,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # SHORT (fade into resistance) Strategy Conditions
         fade_condition = (
             breakdown_priority and
-            current_close_1h >= FADE_ENTRY_LOW and 
             current_close_1h <= FADE_ENTRY_HIGH and 
+            current_close_1h >= FADE_ENTRY_LOW and 
             volume_confirmed and 
             not fade_state.get("triggered", False) and
             not fade_state.get("stopped_out", False) and  # Don't re-enter if stopped out
@@ -618,8 +625,11 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             if fade_state.get("stopped_out", False):
                 logger.info("   ⏸️ Fade strategy standing down (stopped out)")
         
-        # Execute LONG strategies (if direction allows)
-        if direction in ['LONG', 'BOTH']:
+        # Execute strategies (pick one path - breakout or breakdown)
+        strategy_executed = False
+        
+        # Execute LONG strategies first (if direction allows and priority is set)
+        if direction in ['LONG', 'BOTH'] and breakout_priority:
             # Execute LONG (breakout) Strategy
             if breakout_condition:
                 logger.info("🎯 BREAKOUT CONDITION MET - EXECUTING LONG BREAKOUT TRADE!")
@@ -660,6 +670,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 }
                 save_trigger_state(breakout_state, BREAKOUT_TRIGGER_FILE)
                 logger.info("Breakout trigger state saved")
+                strategy_executed = True
             
             # Execute LONG (retest) Strategy
             elif retest_condition:
@@ -701,9 +712,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 }
                 save_trigger_state(retest_state, RETEST_TRIGGER_FILE)
                 logger.info("Retest trigger state saved")
+                strategy_executed = True
         
-        # Execute SHORT strategies (if direction allows)
-        if direction in ['SHORT', 'BOTH']:
+        # Execute SHORT strategies only if no LONG strategy was executed (if direction allows and priority is set)
+        if not strategy_executed and direction in ['SHORT', 'BOTH'] and breakdown_priority:
             # Execute SHORT (breakdown) Strategy
             if breakdown_condition:
                 logger.info("🎯 BREAKDOWN CONDITION MET - EXECUTING SHORT BREAKDOWN TRADE!")
@@ -744,6 +756,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 }
                 save_trigger_state(breakdown_state, BREAKDOWN_TRIGGER_FILE)
                 logger.info("Breakdown trigger state saved")
+                strategy_executed = True
             
             # Execute SHORT (fade into resistance) Strategy
             elif fade_condition:
@@ -785,8 +798,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 }
                 save_trigger_state(fade_state, FADE_TRIGGER_FILE)
                 logger.info("Fade trigger state saved")
+                strategy_executed = True
         
-        else:
+        # Check if any strategy was triggered
+        if not strategy_executed:
             logger.info("⏳ Waiting for strategy conditions...")
             if direction != 'BOTH':
                 logger.info(f"   Direction filter: {direction} only")

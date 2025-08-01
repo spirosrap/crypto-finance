@@ -191,7 +191,7 @@ FADE_ENTRY_HIGH = 119300       # Entry zone high (upper wick on 5-15m)
 FADE_STOP_LOSS = 119800        # SL above resistance
 FADE_TP1 = 118000              # TP1
 FADE_TP2 = 116800              # TP2 low
-FADE_TP2_HIGH = 116800         # TP2 high
+FADE_TP2_HIGH = 117200         # TP2 high
 
 # Trade tracking
 TRIGGER_STATE_FILE = "btc_intraday_trigger_state.json"
@@ -361,7 +361,7 @@ def calculate_volume_sma(candles, period=20):
         return 0
     
     volumes = []
-    for candle in candles[1:period+1]:  # Skip current candle, use previous period candles
+    for candle in candles[1:period+1]:  # Use most recent period candles (skip current incomplete candle)
         if isinstance(candle, dict):
             volume = float(candle.get('volume', 0))
         else:
@@ -577,8 +577,8 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
             RECLAIM_ENTRY_HIGH
         )
         
-        # Check for spike rejection at resistance level (HOD area)
-        spike_rejection_detected = check_spike_rejection(candles_5m, candles_15m, HOD)
+        # Check for spike rejection at fade entry zone
+        spike_rejection_detected = check_spike_rejection(candles_5m, candles_15m, FADE_ENTRY_HIGH)
         
         # Filter strategies based on direction parameter
         long_strategies_enabled = direction in ['LONG', 'BOTH']
