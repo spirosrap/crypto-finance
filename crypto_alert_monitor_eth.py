@@ -134,8 +134,8 @@ PARTIAL_PROFIT_RANGE_LOW = 1.0  # Partial profit at +1.0R
 PARTIAL_PROFIT_RANGE_HIGH = 1.5  # Partial profit at +1.5R
 
 # Trade parameters - Position size: margin x leverage = 20 x 250 = 5000 USD
-MARGIN = 20  # USD
-LEVERAGE = 250  # 250x leverage
+MARGIN = 250  # USD
+LEVERAGE = 20  # 20x leverage
 POSITION_SIZE_USD = MARGIN * LEVERAGE  # 5000 USD
 
 # State files for each strategy
