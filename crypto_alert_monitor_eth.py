@@ -75,65 +75,64 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH Trading Strategy Parameters (based on new rules)
+# ETH Trading Strategy Parameters (based on new two-sided ETH plan)
 PRODUCT_ID = "ETH-PERP-INTX"
 GRANULARITY_1H = "ONE_HOUR"  # 1-hour chart for trigger
 GRANULARITY_5M = "FIVE_MINUTE"  # 5-minute chart for execution
 VOLUME_PERIOD = 20  # For volume confirmation
 
-# Range context from the rules
-TODAYS_RANGE_LOW = 3632
-TODAYS_RANGE_HIGH = 3870
-RANGE_WIDTH = 238
-MID_RANGE_PIVOT = 3751
-HOD = 3869.9  # High of day
-LOD = 3631.8  # Low of day
+# Current market context (ETH ≈ $3,626; HOD $3,815; LOD $3,585)
+CURRENT_ETH_PRICE = 3626
+HOD = 3815  # High of day
+LOD = 3585  # Low of day
+TODAYS_RANGE_WIDTH = HOD - LOD  # 230 points
+MID_RANGE_PIVOT = (HOD + LOD) / 2  # 3700
 
 # LONG (breakout) Strategy Parameters
-BREAKOUT_ENTRY_LOW = 3880  # Entry range above HOD + ~10-20
-BREAKOUT_ENTRY_HIGH = 3890
-BREAKOUT_STOP_LOSS = 3835  # Back inside prior range
-BREAKOUT_TP1 = 3950  # First take profit
-BREAKOUT_TP2_LOW = 4010  # Second take profit range
-BREAKOUT_TP2_HIGH = 4040
+BREAKOUT_ENTRY_LOW = 3820  # buy-stop $3,820–3,835 (above HOD + buffer)
+BREAKOUT_ENTRY_HIGH = 3835
+BREAKOUT_STOP_LOSS = 3788  # $3,788 (back inside prior range)
+BREAKOUT_TP1 = 3890  # TP1: $3,890
+BREAKOUT_TP2_LOW = 3960  # TP2: $3,960–3,990
+BREAKOUT_TP2_HIGH = 3990
 
 # LONG (retest) Strategy Parameters
-RETEST_ENTRY_LOW = 3655  # Entry range after sweep and reclaim
-RETEST_ENTRY_HIGH = 3675
-RETEST_SWEEP_LOW = 3615  # Sweep zone
-RETEST_SWEEP_HIGH = 3630
-RETEST_STOP_LOSS = 3595  # Below sweep origin
-RETEST_TP1 = 3720  # First take profit
-RETEST_TP2_LOW = 3790  # Second take profit range
-RETEST_TP2_HIGH = 3820
+RETEST_ENTRY_LOW = 3680  # $3,680–3,710 only after sweep and reclaim
+RETEST_ENTRY_HIGH = 3710
+RETEST_SWEEP_LOW = 3660  # sweep of $3,660–3,680
+RETEST_SWEEP_HIGH = 3680
+RETEST_STOP_LOSS = 3628  # $3,628 (below reclaimed structure)
+RETEST_TP1 = 3760  # TP1: $3,760
+RETEST_TP2_LOW = 3820  # TP2: $3,820–3,850
+RETEST_TP2_HIGH = 3850
 
 # SHORT (breakdown) Strategy Parameters
-BREAKDOWN_ENTRY_LOW = 3618  # Entry range through LOD with momentum
-BREAKDOWN_ENTRY_HIGH = 3628
-BREAKDOWN_STOP_LOSS = 3658  # Back above LOD
-BREAKDOWN_TP1 = 3575  # First take profit
-BREAKDOWN_TP2_LOW = 3510  # Second take profit range
-BREAKDOWN_TP2_HIGH = 3530
+BREAKDOWN_ENTRY_LOW = 3575  # sell-stop $3,575–3,590 (through LOD)
+BREAKDOWN_ENTRY_HIGH = 3590
+BREAKDOWN_STOP_LOSS = 3620  # $3,620
+BREAKDOWN_TP1 = 3520  # TP1: $3,520
+BREAKDOWN_TP2_LOW = 3460  # TP2: $3,460–3,480
+BREAKDOWN_TP2_HIGH = 3480
 
 # SHORT (fade into resistance) Strategy Parameters
-FADE_ENTRY_LOW = 3855  # Entry range on stop-run + rejection
-FADE_ENTRY_HIGH = 3875
-FADE_STOP_LOSS = 3905  # Above resistance
-FADE_TP1 = 3790  # First take profit
-FADE_TP2_LOW = 3725  # Second take profit
+FADE_ENTRY_LOW = 3890  # $3,890–3,920 only if spike + rejection
+FADE_ENTRY_HIGH = 3920
+FADE_STOP_LOSS = 3950  # $3,950
+FADE_TP1 = 3820  # TP1: $3,820
+FADE_TP2_LOW = 3750  # TP2: $3,750
 FADE_TP2_HIGH = 3750
 
 # Volume confirmation requirements
-VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25x 20-period volume on 1h chart
-VOLUME_SURGE_FACTOR_5M = 2.0   # ≥2x 20-SMA volume on 5m chart
+VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25× 20-period vol on 1h
+VOLUME_SURGE_FACTOR_5M = 2.0   # ≥2× 20-SMA vol on 5m at trigger
 
 # Risk management
-RISK_PERCENTAGE_LOW = 0.8  # 0.8-1.2% of price for 1R
+RISK_PERCENTAGE_LOW = 0.8  # 1R ≈ 0.8–1.2% of price
 RISK_PERCENTAGE_HIGH = 1.2
-PARTIAL_PROFIT_RANGE_LOW = 1.0  # Partial profit at +1.0R
-PARTIAL_PROFIT_RANGE_HIGH = 1.5  # Partial profit at +1.5R
+PARTIAL_PROFIT_RANGE_LOW = 1.0  # Partial at +1.0R
+PARTIAL_PROFIT_RANGE_HIGH = 1.5  # Partial at +1.5R
 
-# Trade parameters - Position size: margin x leverage = 20 x 250 = 5000 USD
+# Trade parameters - Position size: margin x leverage = 250 x 20 = 5000 USD
 MARGIN = 250  # USD
 LEVERAGE = 20  # 20x leverage
 POSITION_SIZE_USD = MARGIN * LEVERAGE  # 5000 USD
@@ -191,7 +190,7 @@ def setup_coinbase():
     return service
 
 def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_loss: float, take_profit: float, 
-                     margin: float = 20, leverage: int = 250, side: str = "BUY", product: str = PRODUCT_ID, 
+                     margin: float = 250, leverage: int = 20, side: str = "BUY", product: str = PRODUCT_ID, 
                      volume_confirmed: bool = True):
     def _execute_trade():
         logger.info(f"Executing crypto trade: {trade_type} at ${entry_price:,.2f}")
@@ -268,7 +267,7 @@ def check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, 
     return volume_confirmed
 
 def check_sweep_and_reclaim(cb_service, current_price, current_ts):
-    """Check if there was a sweep of 3750-3770 and reclaim on 5-15m"""
+    """Check if there was a sweep of $3,660-$3,680 and reclaim on 5-15m"""
     try:
         # Get recent 5-minute candles to check for sweep
         end = current_ts
@@ -387,7 +386,7 @@ def check_spike_and_rejection(cb_service, current_price, current_ts):
             if (upper_wick > body_size * 0.5 and  # Upper wick is significant
                 upper_wick > lower_wick * 2 and    # Upper wick is much larger than lower wick
                 high >= FADE_ENTRY_LOW and         # Spike reached entry zone
-                close < high * 0.95):              # Price rejected from high
+                close < 3875):                     # Close back below $3,875
                 
                 logger.info(f"Spike and rejection detected: high=${high:,.2f}, close=${close:,.2f}, upper_wick=${upper_wick:,.2f}")
                 return True
@@ -406,13 +405,13 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
     
     if direction in ['LONG', 'BOTH']:
         logger.info("📊 LONG strategies enabled:")
-        logger.info("   - LONG (breakout): Entry $3,880-$3,890 (above HOD + ~10-20)")
-        logger.info("   - LONG (retest): Entry $3,655-$3,675 (after sweep of $3,615-$3,630 and reclaim)")
+        logger.info("   - LONG (breakout): Entry $3,820-$3,835 (above HOD + buffer)")
+        logger.info("   - LONG (retest): Entry $3,680-$3,710 (after sweep of $3,660-$3,680 and reclaim)")
     
     if direction in ['SHORT', 'BOTH']:
         logger.info("📊 SHORT strategies enabled:")
-        logger.info("   - SHORT (breakdown): Entry $3,618-$3,628 (through LOD with momentum)")
-        logger.info("   - SHORT (fade): Entry $3,855-$3,875 (stop-run + rejection at resistance)")
+        logger.info("   - SHORT (breakdown): Entry $3,575-$3,590 (through LOD)")
+        logger.info("   - SHORT (fade): Entry $3,890-$3,920 (spike + rejection at resistance)")
     
     # Load trigger states for all strategies
     breakout_state = load_trigger_state(BREAKOUT_TRIGGER_FILE)
@@ -649,7 +648,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Risk: {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price for 1R")
                     logger.info(f"Partial profit: +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
                     logger.info(f"Trade output: {trade_result}")
-                    logger.info("📊 Strategy: Expansion > HOD with confirmation often squeezes late shorts")
+                    logger.info("📊 Strategy: Range expansion above today's high with confirmation")
                 else:
                     logger.error(f"❌ Breakout trade failed: {trade_result}")
                 
@@ -690,7 +689,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Risk: {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price for 1R")
                     logger.info(f"Partial profit: +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
                     logger.info(f"Trade output: {trade_result}")
-                    logger.info("📊 Strategy: Failure to break down below LOD, reclaim, and hold bids → mean-revert toward mid-range (~3751) then prior supply")
+                    logger.info("📊 Strategy: Higher-low near mid-range (today's range ≈ $3,585–3,815)")
                 else:
                     logger.error(f"❌ Retest trade failed: {trade_result}")
                 
@@ -733,7 +732,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Risk: {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price for 1R")
                     logger.info(f"Partial profit: +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
                     logger.info(f"Trade output: {trade_result}")
-                    logger.info("📊 Strategy: Fresh range break + continuation if 1h closes below LOD on volume")
+                    logger.info("📊 Strategy: Range failure + continuation if 1h closes below LOD on volume")
                 else:
                     logger.error(f"❌ Breakdown trade failed: {trade_result}")
                 
@@ -774,7 +773,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Risk: {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price for 1R")
                     logger.info(f"Partial profit: +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
                     logger.info(f"Trade output: {trade_result}")
-                    logger.info("📊 Strategy: First test into HOD/round-number supply frequently mean-reverts back to mid-range")
+                    logger.info("📊 Strategy: First test into overhead supply tends to mean-revert intraday")
                 else:
                     logger.error(f"❌ Fade trade failed: {trade_result}")
                 
@@ -872,23 +871,23 @@ def main():
     
     if direction in ['LONG', 'BOTH']:
         logger.info("📊 LONG strategies enabled:")
-        logger.info("   - LONG (breakout): Entry $3,880-$3,890 (above HOD + ~10-20)")
-        logger.info("   - LONG (retest): Entry $3,655-$3,675 (after sweep of $3,615-$3,630 and reclaim)")
+        logger.info("   - LONG (breakout): Entry $3,820-$3,835 (above HOD + buffer)")
+        logger.info("   - LONG (retest): Entry $3,680-$3,710 (after sweep of $3,660-$3,680 and reclaim)")
     
     if direction in ['SHORT', 'BOTH']:
         logger.info("📊 SHORT strategies enabled:")
-        logger.info("   - SHORT (breakdown): Entry $3,618-$3,628 (through LOD with momentum)")
-        logger.info("   - SHORT (fade): Entry $3,855-$3,875 (stop-run + rejection at resistance)")
+        logger.info("   - SHORT (breakdown): Entry $3,575-$3,590 (through LOD)")
+        logger.info("   - SHORT (fade): Entry $3,890-$3,920 (spike + rejection at resistance)")
     
-    logger.info("💡 Volume confirmation: ≥1.25x 20-period 1h volume OR ≥2x 20-SMA 5m volume")
-    logger.info("🛑 LONG SL: Breakout $3,835, Retest $3,595 | SHORT SL: Breakdown $3,658, Fade $3,905")
-    logger.info("🎯 LONG TP: Breakout $3,950 / $4,010-$4,040, Retest $3,720 / $3,790-$3,820")
-    logger.info("🎯 SHORT TP: Breakdown $3,575 / $3,510-$3,530, Fade $3,790 / $3,725-$3,750")
-    logger.info("⏰ Timeframe: 1-hour trigger, 5-15 minute execution")
-    logger.info("💰 Risk: 0.8-1.2% of price for 1R, Partial profit at +1.0-1.5R")
+    logger.info("💡 Volume confirmation: ≥1.25× 20-period vol on 1h OR ≥2× 20-SMA vol on 5m")
+    logger.info("🛑 LONG SL: Breakout $3,788, Retest $3,628 | SHORT SL: Breakdown $3,620, Fade $3,950")
+    logger.info("🎯 LONG TP: Breakout $3,890 / $3,960-$3,990, Retest $3,760 / $3,820-$3,850")
+    logger.info("🎯 SHORT TP: Breakdown $3,520 / $3,460-$3,480, Fade $3,820 / $3,750")
+    logger.info("⏰ Timeframe: 1h trigger, 5-15m execution")
+    logger.info("💰 Risk: 1R ≈ 0.8-1.2% of price, Partial at +1.0-1.5R")
     logger.info(f"💰 Position size: ${MARGIN} x {LEVERAGE} = ${POSITION_SIZE_USD:,} USD")
-    logger.info("📊 Range context: Today's range $3,632-$3,870 (width ≈ 238), mid-range pivot ≈ $3,751")
-    logger.info("📊 HOD: $3,869.9, LOD: $3,631.8")
+    logger.info("📊 Range context: Today's range $3,585-$3,815 (width ≈ 230), mid-range pivot ≈ $3,700")
+    logger.info("📊 HOD: $3,815, LOD: $3,585")
     
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
