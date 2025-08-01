@@ -11,6 +11,7 @@ import platform
 import os
 import json
 import concurrent.futures
+import argparse
 
 # Set up file logging
 logging.basicConfig(
@@ -476,12 +477,20 @@ def check_sweep_and_reclaim(candles_5m, candles_15m, sweep_low, sweep_high, recl
     
     return sweep_detected and reclaim_detected
 
-def btc_intraday_alert(cb_service, last_alert_ts=None):
+def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
     BTC Intraday Alert - Implements complete trading plan with both LONG and SHORT strategies
     Based on the trading plan: "Spiros — here's a clean, two-sided BTC plan for today"
+    
+    Args:
+        cb_service: Coinbase service instance
+        last_alert_ts: Last alert timestamp
+        direction: Trading direction to monitor ('LONG', 'SHORT', or 'BOTH')
     """
-    logger.info("=== BTC Intraday Alert (Complete Strategy - LONG & SHORT) ===")
+    if direction == 'BOTH':
+        logger.info("=== BTC Intraday Alert (Complete Strategy - LONG & SHORT) ===")
+    else:
+        logger.info(f"=== BTC Intraday Alert ({direction} Strategy Only) ===")
     
     # Load trigger state
     trigger_state = load_trigger_state()
@@ -565,6 +574,10 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
         # Check for spike rejection at resistance level (HOD area)
         spike_rejection_detected = check_spike_rejection(candles_5m, candles_15m, HOD)
         
+        # Filter strategies based on direction parameter
+        long_strategies_enabled = direction in ['LONG', 'BOTH']
+        short_strategies_enabled = direction in ['SHORT', 'BOTH']
+        
         # --- Reporting ---
         logger.info("")
         logger.info("🚀 BTC Plan for Today (Live Levels) Alert")
@@ -581,34 +594,40 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
         logger.info(f"   • Risk: Size so 1R is ~{RISK_PERCENTAGE}% of price")
         logger.info(f"   • Position Size: ${MARGIN * LEVERAGE:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
         logger.info("")
-        logger.info("📊 LONG - Breakout Strategy:")
-        logger.info(f"   • Entry: ${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,} (above HOD + buffer)")
-        logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,} (back inside prior range)")
-        logger.info(f"   • TP1: ${BREAKOUT_TP1:,}")
-        logger.info(f"   • TP2: ${BREAKOUT_TP2:,}-${BREAKOUT_TP2_HIGH:,}")
-        logger.info(f"   • Why: Range expansion; momentum continuation only with volume")
-        logger.info("")
-        logger.info("📊 LONG - Retest Strategy:")
-        logger.info(f"   • Entry: ${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,} only after sweep and reclaim")
-        logger.info(f"   • Conditions: Sweep of ${RECLAIM_SWEEP_LOW:,}-${RECLAIM_SWEEP_HIGH:,} and 5-15m reclaim")
-        logger.info(f"   • SL: ${RECLAIM_STOP_LOSS:,}")
-        logger.info(f"   • TP1: ${RECLAIM_TP1:,}")
-        logger.info(f"   • TP2: ${RECLAIM_TP2:,}-${RECLAIM_TP2_HIGH:,}")
-        logger.info(f"   • Why: Higher-low at mid-range; avoids chasing")
-        logger.info("")
-        logger.info("📊 SHORT - Breakdown Strategy:")
-        logger.info(f"   • Entry: ${BREAKDOWN_ENTRY_LOW:,}-${BREAKDOWN_ENTRY_HIGH:,} (through LOD)")
-        logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,}")
-        logger.info(f"   • TP1: ${BREAKDOWN_TP1:,}")
-        logger.info(f"   • TP2: ${BREAKDOWN_TP2:,}-${BREAKDOWN_TP2_HIGH:,}")
-        logger.info(f"   • Why: Range failure + continuation if 1h closes below LOD on volume")
-        logger.info("")
-        logger.info("📊 SHORT - Fade into Resistance Strategy:")
-        logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,} only if spike + rejection")
-        logger.info(f"   • SL: ${FADE_STOP_LOSS:,}")
-        logger.info(f"   • TP1: ${FADE_TP1:,}")
-        logger.info(f"   • TP2: ${FADE_TP2:,}-${FADE_TP2_HIGH:,}")
-        logger.info(f"   • Why: First test of round-number/overhead supply tends to mean-revert intraday")
+        
+        # Show only relevant strategies based on direction
+        if long_strategies_enabled:
+            logger.info("📊 LONG - Breakout Strategy:")
+            logger.info(f"   • Entry: ${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,} (above HOD + buffer)")
+            logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,} (back inside prior range)")
+            logger.info(f"   • TP1: ${BREAKOUT_TP1:,}")
+            logger.info(f"   • TP2: ${BREAKOUT_TP2:,}-${BREAKOUT_TP2_HIGH:,}")
+            logger.info(f"   • Why: Range expansion; momentum continuation only with volume")
+            logger.info("")
+            logger.info("📊 LONG - Retest Strategy:")
+            logger.info(f"   • Entry: ${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,} only after sweep and reclaim")
+            logger.info(f"   • Conditions: Sweep of ${RECLAIM_SWEEP_LOW:,}-${RECLAIM_SWEEP_HIGH:,} and 5-15m reclaim")
+            logger.info(f"   • SL: ${RECLAIM_STOP_LOSS:,}")
+            logger.info(f"   • TP1: ${RECLAIM_TP1:,}")
+            logger.info(f"   • TP2: ${RECLAIM_TP2:,}-${RECLAIM_TP2_HIGH:,}")
+            logger.info(f"   • Why: Higher-low at mid-range; avoids chasing")
+            logger.info("")
+        
+        if short_strategies_enabled:
+            logger.info("📊 SHORT - Breakdown Strategy:")
+            logger.info(f"   • Entry: ${BREAKDOWN_ENTRY_LOW:,}-${BREAKDOWN_ENTRY_HIGH:,} (through LOD)")
+            logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,}")
+            logger.info(f"   • TP1: ${BREAKDOWN_TP1:,}")
+            logger.info(f"   • TP2: ${BREAKDOWN_TP2:,}-${BREAKDOWN_TP2_HIGH:,}")
+            logger.info(f"   • Why: Range failure + continuation if 1h closes below LOD on volume")
+            logger.info("")
+            logger.info("📊 SHORT - Fade into Resistance Strategy:")
+            logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,} only if spike + rejection")
+            logger.info(f"   • SL: ${FADE_STOP_LOSS:,}")
+            logger.info(f"   • TP1: ${FADE_TP1:,}")
+            logger.info(f"   • TP2: ${FADE_TP2:,}-${FADE_TP2_HIGH:,}")
+            logger.info(f"   • Why: First test of round-number/overhead supply tends to mean-revert intraday")
+            logger.info("")
         logger.info("")
         logger.info(f"Current Price: ${current_price:,.2f}")
         logger.info(f"Last 1H Close: ${last_close:,.2f}, High: ${last_high:,.2f}, Low: ${last_low:,.2f}")
@@ -627,7 +646,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
         trade_executed = False
         
         # 1. LONG - Breakout Strategy
-        if not trigger_state.get("breakout_triggered", False):
+        if long_strategies_enabled and not trigger_state.get("breakout_triggered", False):
             in_breakout_zone = BREAKOUT_ENTRY_LOW <= current_price <= BREAKOUT_ENTRY_HIGH
             breakout_ready = in_breakout_zone and volume_confirmed
             
@@ -671,7 +690,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
                     logger.error(f"❌ Breakout trade failed: {trade_result}")
         
         # 2. LONG - Retest Strategy
-        if not trade_executed and not trigger_state.get("reclaim_triggered", False):
+        if long_strategies_enabled and not trade_executed and not trigger_state.get("reclaim_triggered", False):
             in_reclaim_zone = RECLAIM_ENTRY_LOW <= current_price <= RECLAIM_ENTRY_HIGH
             reclaim_ready = in_reclaim_zone and sweep_reclaim_detected and volume_confirmed
             
@@ -717,7 +736,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
                     logger.error(f"❌ Retest trade failed: {trade_result}")
         
         # 3. SHORT - Breakdown Strategy
-        if not trade_executed and not trigger_state.get("breakdown_triggered", False):
+        if short_strategies_enabled and not trade_executed and not trigger_state.get("breakdown_triggered", False):
             in_breakdown_zone = BREAKDOWN_ENTRY_LOW <= current_price <= BREAKDOWN_ENTRY_HIGH
             breakdown_ready = in_breakdown_zone and volume_confirmed
             
@@ -762,7 +781,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
                     logger.error(f"❌ Breakdown trade failed: {trade_result}")
         
         # 4. SHORT - Fade into Resistance Strategy
-        if not trade_executed and not trigger_state.get("fade_triggered", False):
+        if short_strategies_enabled and not trade_executed and not trigger_state.get("fade_triggered", False):
             in_fade_zone = FADE_ENTRY_LOW <= current_price <= FADE_ENTRY_HIGH
             fade_ready = in_fade_zone and spike_rejection_detected and volume_confirmed
             
@@ -826,8 +845,28 @@ def btc_intraday_alert(cb_service, last_alert_ts=None):
     return last_alert_ts
 
 def main():
-    logger.info("Starting BTC Plan for Today Alert Monitor (Complete Strategy - LONG & SHORT)")
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='BTC Intraday Alert Monitor with optional direction filter')
+    parser.add_argument('--direction', choices=['LONG', 'SHORT', 'BOTH'], default='BOTH',
+                       help='Trading direction to monitor: LONG, SHORT, or BOTH (default: BOTH)')
+    args = parser.parse_args()
+    
+    # Print usage examples
+    logger.info("Usage examples:")
+    logger.info("  python crypto_alert_monitor.py                    # Monitor both LONG and SHORT strategies")
+    logger.info("  python crypto_alert_monitor.py --direction LONG   # Monitor only LONG strategies")
+    logger.info("  python crypto_alert_monitor.py --direction SHORT  # Monitor only SHORT strategies")
     logger.info("")
+    
+    direction = args.direction.upper()
+    
+    logger.info("Starting BTC Plan for Today Alert Monitor")
+    if direction == 'BOTH':
+        logger.info("Strategy: Complete Strategy - LONG & SHORT")
+    else:
+        logger.info(f"Strategy: {direction} only")
+    logger.info("")
+    
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
         logger.error(f"❌ Alert sound file '{alert_sound_file}' not found!")
@@ -845,7 +884,7 @@ def main():
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = btc_intraday_alert(cb_service, last_alert_ts)
+        last_alert_ts = btc_intraday_alert(cb_service, last_alert_ts, direction)
         consecutive_failures = 0
         logger.info(f"✅ Intraday alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     
