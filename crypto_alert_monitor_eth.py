@@ -81,46 +81,46 @@ GRANULARITY_1H = "ONE_HOUR"  # 1-hour chart for trigger
 GRANULARITY_5M = "FIVE_MINUTE"  # 5-minute chart for execution
 VOLUME_PERIOD = 20  # For volume confirmation
 
-# Current market context (ETH ≈ $3,626; HOD $3,815; LOD $3,585)
-CURRENT_ETH_PRICE = 3626
-HOD = 3815  # High of day
-LOD = 3585  # Low of day
-TODAYS_RANGE_WIDTH = HOD - LOD  # 230 points
-MID_RANGE_PIVOT = (HOD + LOD) / 2  # 3700
+# Current market context (ETH ≈ $3,499, HOD $3,671, LOD $3,454)
+CURRENT_ETH_PRICE = 3499
+HOD = 3671  # High of day
+LOD = 3454  # Low of day
+TODAYS_RANGE_WIDTH = HOD - LOD  # 217 points
+MID_RANGE_PIVOT = (HOD + LOD) / 2  # 3562.5
 
 # LONG (breakout) Strategy Parameters
-BREAKOUT_ENTRY_LOW = 3820  # buy-stop $3,820–3,835 (above HOD + buffer)
-BREAKOUT_ENTRY_HIGH = 3835
-BREAKOUT_STOP_LOSS = 3788  # $3,788 (back inside prior range)
-BREAKOUT_TP1 = 3890  # TP1: $3,890
-BREAKOUT_TP2_LOW = 3960  # TP2: $3,960–3,990
-BREAKOUT_TP2_HIGH = 3990
+BREAKOUT_ENTRY_LOW = 3678  # $3,678–3,690 (above HOD + buffer)
+BREAKOUT_ENTRY_HIGH = 3690
+BREAKOUT_STOP_LOSS = 3638  # $3,638 (back inside prior range)
+BREAKOUT_TP1 = 3735  # TP1: $3,735
+BREAKOUT_TP2_LOW = 3800  # TP2: $3,800–3,820
+BREAKOUT_TP2_HIGH = 3820
 
 # LONG (retest) Strategy Parameters
-RETEST_ENTRY_LOW = 3680  # $3,680–3,710 only after sweep and reclaim
-RETEST_ENTRY_HIGH = 3710
-RETEST_SWEEP_LOW = 3660  # sweep of $3,660–3,680
-RETEST_SWEEP_HIGH = 3680
-RETEST_STOP_LOSS = 3628  # $3,628 (below reclaimed structure)
-RETEST_TP1 = 3760  # TP1: $3,760
-RETEST_TP2_LOW = 3820  # TP2: $3,820–3,850
-RETEST_TP2_HIGH = 3850
+RETEST_ENTRY_LOW = 3465  # $3,465–3,485 only after sweep and reclaim
+RETEST_ENTRY_HIGH = 3485
+RETEST_SWEEP_LOW = 3440  # sweep of $3,440–3,460
+RETEST_SWEEP_HIGH = 3460
+RETEST_STOP_LOSS = 3420  # $3,420 (below LOD structure)
+RETEST_TP1 = 3530  # TP1: $3,530
+RETEST_TP2_LOW = 3590  # TP2: $3,590–3,610
+RETEST_TP2_HIGH = 3610
 
 # SHORT (breakdown) Strategy Parameters
-BREAKDOWN_ENTRY_LOW = 3575  # sell-stop $3,575–3,590 (through LOD)
-BREAKDOWN_ENTRY_HIGH = 3590
-BREAKDOWN_STOP_LOSS = 3620  # $3,620
-BREAKDOWN_TP1 = 3520  # TP1: $3,520
-BREAKDOWN_TP2_LOW = 3460  # TP2: $3,460–3,480
-BREAKDOWN_TP2_HIGH = 3480
+BREAKDOWN_ENTRY_LOW = 3445  # $3,445–3,455 (through LOD)
+BREAKDOWN_ENTRY_HIGH = 3455
+BREAKDOWN_STOP_LOSS = 3490  # $3,490
+BREAKDOWN_TP1 = 3385  # TP1: $3,385
+BREAKDOWN_TP2_LOW = 3320  # TP2: $3,320–3,340
+BREAKDOWN_TP2_HIGH = 3340
 
 # SHORT (fade into resistance) Strategy Parameters
-FADE_ENTRY_LOW = 3890  # $3,890–3,920 only if spike + rejection
-FADE_ENTRY_HIGH = 3920
-FADE_STOP_LOSS = 3950  # $3,950
-FADE_TP1 = 3820  # TP1: $3,820
-FADE_TP2_LOW = 3750  # TP2: $3,750
-FADE_TP2_HIGH = 3750
+FADE_ENTRY_LOW = 3725  # $3,725–3,745 only if spike + rejection
+FADE_ENTRY_HIGH = 3745
+FADE_STOP_LOSS = 3775  # $3,775
+FADE_TP1 = 3655  # TP1: $3,655
+FADE_TP2_LOW = 3585  # TP2: $3,585–3,605
+FADE_TP2_HIGH = 3605
 
 # Volume confirmation requirements
 VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25× 20-period vol on 1h
@@ -402,7 +402,7 @@ def check_spike_and_rejection(cb_service, current_price, current_ts):
 def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
     ETH-USD Trading Strategy Alert - Implements two-sided ETH plan with both LONG and SHORT strategies
-    Based on the trading plan: "Spiros — two-sided ETH plan for today using live levels"
+    Based on the trading plan: "Spiros — here's a clean, two-sided ETH plan for today based on live levels"
     
     Rules (both directions):
     - Timeframe: 1h trigger; execute on 5–15m
@@ -410,13 +410,18 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
     - Risk: size so 1R ≈ 0.8–1.2% of price; partial at +1.0–1.5R
     - Position Size: Always margin x leverage = 250 x 20 = $5,000 USD
     
+    LONG (breakout): Entry $3,678–3,690, SL $3,638, TP1 $3,735, TP2 $3,800–3,820
+    LONG (retest): Entry $3,465–3,485 after sweep $3,440–3,460, SL $3,420, TP1 $3,530, TP2 $3,590–3,610
+    SHORT (breakdown): Entry $3,445–3,455, SL $3,490, TP1 $3,385, TP2 $3,320–3,340
+    SHORT (fade): Entry $3,725–3,745 if spike + rejection, SL $3,775, TP1 $3,655, TP2 $3,585–3,605
+    
     Args:
         cb_service: Coinbase service instance
         last_alert_ts: Last alert timestamp
         direction: Trading direction to monitor ('LONG', 'SHORT', or 'BOTH')
     """
     if direction == 'BOTH':
-        logger.info("=== ETH-USD Trading Strategy Alert (Complete Strategy - LONG & SHORT) ===")
+        logger.info("=== ETH-USD Trading Strategy Alert (Clean Two-Sided ETH Plan - LONG & SHORT) ===")
     else:
         logger.info(f"=== ETH-USD Trading Strategy Alert ({direction} Strategy Only) ===")
     
@@ -550,8 +555,9 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info("")
         logger.info("📊 Global Rules:")
         logger.info(f"   • Timeframe: 1h trigger; execute on 5-15m")
-        logger.info(f"   • Volume confirm: ≥{VOLUME_SURGE_FACTOR_1H}x 20-SMA on 1h OR ≥{VOLUME_SURGE_FACTOR_5M}x 20-SMA on 5m")
+        logger.info(f"   • Volume confirm: ≥{VOLUME_SURGE_FACTOR_1H}x 20-period vol on 1h OR ≥{VOLUME_SURGE_FACTOR_5M}x 20-SMA vol on 5m")
         logger.info(f"   • Risk: Size so 1R is ~{RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price")
+        logger.info(f"   • Partial at +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
         logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
         logger.info("")
         
@@ -562,15 +568,15 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,.0f} (back inside prior range)")
             logger.info(f"   • TP1: ${BREAKOUT_TP1:,.0f}")
             logger.info(f"   • TP2: ${BREAKOUT_TP2_LOW:,.0f}-${BREAKOUT_TP2_HIGH:,.0f}")
-            logger.info(f"   • Why: Range expansion above today's high with confirmation")
+            logger.info(f"   • Why: Range expansion through today's high with momentum if vol confirms")
             logger.info("")
             logger.info("📊 LONG - Retest Strategy:")
             logger.info(f"   • Entry: ${RETEST_ENTRY_LOW:,.0f}-${RETEST_ENTRY_HIGH:,.0f} only after sweep and reclaim")
             logger.info(f"   • Conditions: Sweep of ${RETEST_SWEEP_LOW:,.0f}-${RETEST_SWEEP_HIGH:,.0f} and 5-15m reclaim")
-            logger.info(f"   • SL: ${RETEST_STOP_LOSS:,.0f}")
+            logger.info(f"   • SL: ${RETEST_STOP_LOSS:,.0f} (below LOD structure)")
             logger.info(f"   • TP1: ${RETEST_TP1:,.0f}")
             logger.info(f"   • TP2: ${RETEST_TP2_LOW:,.0f}-${RETEST_TP2_HIGH:,.0f}")
-            logger.info(f"   • Why: Higher-low near mid-range (today's range ≈ ${current_lod:,.0f}–${current_hod:,.0f})")
+            logger.info(f"   • Why: Higher-low at mid-range; catch bid without chasing")
             logger.info("")
         
         if short_strategies_enabled:
@@ -586,7 +592,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • SL: ${FADE_STOP_LOSS:,.0f}")
             logger.info(f"   • TP1: ${FADE_TP1:,.0f}")
             logger.info(f"   • TP2: ${FADE_TP2_LOW:,.0f}-${FADE_TP2_HIGH:,.0f}")
-            logger.info(f"   • Why: First test into overhead supply tends to mean-revert intraday")
+            logger.info(f"   • Why: First test of overhead supply/round-number area tends to mean-revert intraday")
             logger.info("")
         logger.info("")
         logger.info(f"Current Price: ${current_close_1h:,.2f}")
@@ -597,8 +603,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info("")
         
         # Execution guardrails: Pick one path (breakout or breakdown)
-        # If we're near the top of the range, prefer breakout strategies
-        # If we're near the bottom of the range, prefer breakdown strategies
+        # Don't run both. If trigger fires without volume confirmation, pass or halve size.
+        # If first entry stops, don't re-enter until a fresh 1h structure forms.
         price_position_in_range = (current_close_1h - current_lod) / current_range_width if current_range_width > 0 else 0.5
         logger.info(f"Price position in range: {price_position_in_range:.2%} (0% = LOD, 100% = HOD)")
         
@@ -717,7 +723,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Stop-loss: ${BREAKOUT_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${BREAKOUT_TP1:,.2f}")
                     logger.info(f"TP2: ${BREAKOUT_TP2_LOW:,.2f}-${BREAKOUT_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: Range expansion above today's high with confirmation")
+                    logger.info("Strategy: Range expansion through today's high with momentum if vol confirms")
                     
                     # Save trigger state
                     breakout_state = {
@@ -772,7 +778,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Stop-loss: ${RETEST_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${RETEST_TP1:,.2f}")
                     logger.info(f"TP2: ${RETEST_TP2_LOW:,.2f}-${RETEST_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: Higher-low near mid-range (today's range ≈ $3,585–3,815)")
+                    logger.info("Strategy: Higher-low at mid-range; catch bid without chasing")
                     
                     # Save trigger state
                     retest_state = {
@@ -880,7 +886,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Stop-loss: ${FADE_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${FADE_TP1:,.2f}")
                     logger.info(f"TP2: ${FADE_TP2_LOW:,.2f}-${FADE_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: First test into overhead supply tends to mean-revert intraday")
+                    logger.info("Strategy: First test of overhead supply/round-number area tends to mean-revert intraday")
                     
                     # Save trigger state
                     fade_state = {
@@ -978,7 +984,7 @@ def main():
     
     logger.info("Starting ETH-USD Trading Strategy Monitor")
     if direction == 'BOTH':
-        logger.info("Strategy: Complete Strategy - LONG & SHORT")
+        logger.info("Strategy: Clean Two-Sided ETH Plan - LONG & SHORT")
     else:
         logger.info(f"Strategy: {direction} only")
     logger.info("")

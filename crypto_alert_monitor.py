@@ -154,44 +154,44 @@ RISK_PERCENTAGE = 0.8  # 0.8-1.2% of price as 1R
 VOLUME_THRESHOLD_1H = 1.25  # 1.25x 20-period vol on 1h
 VOLUME_THRESHOLD_5M = 2.0   # 2x 20-SMA vol on 5m
 
-# Today's session levels from the plan (BTC ≈ $115,571; HOD $118,710; LOD $114,211)
-HOD = 118710  # High of Day
-LOD = 114211  # Low of Day  
-MID = 116460  # Mid point of today's range
+# Today's session levels from the plan (BTC ≈ 113,755; HOD 115,899; LOD 112,831)
+HOD = 115899  # High of Day
+LOD = 112831  # Low of Day  
+MID = 114365  # Mid point of today's range
 
 # LONG - Breakout strategy
-BREAKOUT_ENTRY_LOW = 118800   # Entry zone low (above HOD + buffer)
-BREAKOUT_ENTRY_HIGH = 118950  # Entry zone high (above HOD + buffer)
-BREAKOUT_STOP_LOSS = 118200   # SL back inside range
-BREAKOUT_TP1 = 119800         # TP1
-BREAKOUT_TP2 = 121200         # TP2 low
-BREAKOUT_TP2_HIGH = 121800    # TP2 high
+BREAKOUT_ENTRY_LOW = 116000   # Entry zone low (above HOD + buffer)
+BREAKOUT_ENTRY_HIGH = 116150  # Entry zone high (above HOD + buffer)
+BREAKOUT_STOP_LOSS = 115200   # SL back inside prior range
+BREAKOUT_TP1 = 117200         # TP1
+BREAKOUT_TP2 = 118800         # TP2 low
+BREAKOUT_TP2_HIGH = 119400    # TP2 high
 
 # LONG - Retest strategy
-RECLAIM_SWEEP_LOW = 114200    # Sweep zone low
-RECLAIM_SWEEP_HIGH = 114500   # Sweep zone high
-RECLAIM_ENTRY_LOW = 115000    # Entry zone low after sweep and reclaim
-RECLAIM_ENTRY_HIGH = 115300   # Entry zone high after sweep and reclaim
-RECLAIM_STOP_LOSS = 113980    # SL cleanly below LOD structure
-RECLAIM_TP1 = 116800          # TP1
-RECLAIM_TP2 = 118200          # TP2 low
-RECLAIM_TP2_HIGH = 118600     # TP2 high
+RECLAIM_SWEEP_LOW = 112900    # Sweep zone low
+RECLAIM_SWEEP_HIGH = 113100   # Sweep zone high
+RECLAIM_ENTRY_LOW = 113300    # Entry zone low after sweep and reclaim
+RECLAIM_ENTRY_HIGH = 113800   # Entry zone high after sweep and reclaim
+RECLAIM_STOP_LOSS = 112500    # SL below LOD structure
+RECLAIM_TP1 = 114800          # TP1
+RECLAIM_TP2 = 115800          # TP2 low
+RECLAIM_TP2_HIGH = 116200     # TP2 high
 
 # SHORT - Breakdown strategy
-BREAKDOWN_ENTRY_LOW = 114150   # Entry zone low (through LOD)
-BREAKDOWN_ENTRY_HIGH = 114250  # Entry zone high (through LOD)
-BREAKDOWN_STOP_LOSS = 114900   # SL back inside range
-BREAKDOWN_TP1 = 112800         # TP1
-BREAKDOWN_TP2 = 111000         # TP2 low
-BREAKDOWN_TP2_HIGH = 110500    # TP2 high
+BREAKDOWN_ENTRY_LOW = 112700   # Entry zone low (through LOD)
+BREAKDOWN_ENTRY_HIGH = 112900  # Entry zone high (through LOD)
+BREAKDOWN_STOP_LOSS = 113400   # SL back inside range
+BREAKDOWN_TP1 = 111600         # TP1
+BREAKDOWN_TP2 = 110800         # TP2 low
+BREAKDOWN_TP2_HIGH = 111200    # TP2 high
 
 # SHORT - Fade into resistance strategy
-FADE_ENTRY_LOW = 118900        # Entry zone low (upper wick on 5-15m)
-FADE_ENTRY_HIGH = 119300       # Entry zone high (upper wick on 5-15m)
-FADE_STOP_LOSS = 119800        # SL above resistance
-FADE_TP1 = 118000              # TP1
-FADE_TP2 = 116800              # TP2 low
-FADE_TP2_HIGH = 117200         # TP2 high
+FADE_ENTRY_LOW = 115600        # Entry zone low (upper wick on 5-15m)
+FADE_ENTRY_HIGH = 115900       # Entry zone high (upper wick on 5-15m)
+FADE_STOP_LOSS = 116400        # SL above resistance
+FADE_TP1 = 114600              # TP1
+FADE_TP2 = 113400              # TP2 low
+FADE_TP2_HIGH = 113400         # TP2 high
 
 # Trade tracking
 TRIGGER_STATE_FILE = "btc_intraday_trigger_state.json"
@@ -480,12 +480,12 @@ def check_sweep_and_reclaim(candles_5m, candles_15m, sweep_low, sweep_high, recl
 def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
     BTC Intraday Alert - Implements complete trading plan with both LONG and SHORT strategies
-    Based on the trading plan: "Spiros — here's a clean, two-sided BTC plan for today based on live levels"
+    Based on the trading plan: "Spiros — here's a clean, two-sided BTC plan for today based on live levels (BTC ≈ 113,755, HOD 115,899, LOD 112,831)"
     
     Rules (both directions):
     - Timeframe: 1h trigger, execute on 5–15m
     - Volume confirm: ≥ 1.25× 20-period vol on 1h or ≥ 2× 20-SMA vol on 5m at trigger
-    - Risk: size so 1R ≈ 0.8–1.2% of price; partial at +1.0–1.5R
+    - Risk: size for 1R ≈ 0.8–1.2% of price; partial at +1.0–1.5R
     - Position Size: Always margin x leverage = 250 x 20 = $5,000 USD
     
     Args:
@@ -596,28 +596,28 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         logger.info("")
         logger.info("📊 Global Rules:")
         logger.info(f"   • Timeframe: 1h trigger; execute on 5-15m")
-        logger.info(f"   • Volume confirm: ≥{VOLUME_THRESHOLD_1H}x 20-SMA on 1h OR ≥{VOLUME_THRESHOLD_5M}x 20-SMA on 5m")
-        logger.info(f"   • Risk: Size so 1R is ~{RISK_PERCENTAGE}% of price")
+        logger.info(f"   • Volume confirm: ≥{VOLUME_THRESHOLD_1H}x 20-period vol on 1h OR ≥{VOLUME_THRESHOLD_5M}x 20-SMA vol on 5m")
+        logger.info(f"   • Risk: Size for 1R ≈ {RISK_PERCENTAGE}% of price; partial at +1.0-1.5R")
         logger.info(f"   • Position Size: ${MARGIN * LEVERAGE:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
         logger.info("")
         
         # Show only relevant strategies based on direction
         if long_strategies_enabled:
-            logger.info("📊 LONG - Breakout Strategy:")
-            logger.info(f"   • Entry: ${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,} (above HOD + buffer)")
-            logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,} (back inside range)")
-            logger.info(f"   • TP1: ${BREAKOUT_TP1:,}")
-            logger.info(f"   • TP2: ${BREAKOUT_TP2:,}-${BREAKOUT_TP2_HIGH:,}")
-            logger.info(f"   • Why: Range expansion; avoid false break by clearing HOD with volume")
-            logger.info("")
-            logger.info("📊 LONG - Retest Strategy:")
-            logger.info(f"   • Entry: ${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,} only after sweep and reclaim")
-            logger.info(f"   • Conditions: Sweep of ${RECLAIM_SWEEP_LOW:,}-${RECLAIM_SWEEP_HIGH:,} and 5-15m reclaim")
-            logger.info(f"   • SL: ${RECLAIM_STOP_LOSS:,}")
-            logger.info(f"   • TP1: ${RECLAIM_TP1:,}")
-            logger.info(f"   • TP2: ${RECLAIM_TP2:,}-${RECLAIM_TP2_HIGH:,}")
-            logger.info(f"   • Why: Higher low at mid-range; catch bid without chasing")
-            logger.info("")
+                    logger.info("📊 LONG - Breakout Strategy:")
+        logger.info(f"   • Entry: ${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,} (above HOD + buffer)")
+        logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,} (back inside prior range)")
+        logger.info(f"   • TP1: ${BREAKOUT_TP1:,}")
+        logger.info(f"   • TP2: ${BREAKOUT_TP2:,}-${BREAKOUT_TP2_HIGH:,}")
+        logger.info(f"   • Why: Expansion through today's high with momentum if volume confirms")
+        logger.info("")
+        logger.info("📊 LONG - Retest Strategy:")
+        logger.info(f"   • Entry: ${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,} only after sweep and reclaim")
+        logger.info(f"   • Conditions: Sweep of ${RECLAIM_SWEEP_LOW:,}-${RECLAIM_SWEEP_HIGH:,} and 5-15m reclaim")
+        logger.info(f"   • SL: ${RECLAIM_STOP_LOSS:,} (below LOD structure)")
+        logger.info(f"   • TP1: ${RECLAIM_TP1:,}")
+        logger.info(f"   • TP2: ${RECLAIM_TP2:,}-${RECLAIM_TP2_HIGH:,}")
+        logger.info(f"   • Why: Higher low at mid-range; catch bid without chasing")
+        logger.info("")
         
         if short_strategies_enabled:
             logger.info("📊 SHORT - Breakdown Strategy:")
@@ -628,11 +628,11 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
             logger.info(f"   • Why: Range failure + continuation if 1h closes below LOD on volume")
             logger.info("")
             logger.info("📊 SHORT - Fade into Resistance Strategy:")
-            logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,} only if spike + rejection")
+            logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,} only if spike + rejection (upper wick on 5-15m)")
             logger.info(f"   • SL: ${FADE_STOP_LOSS:,}")
             logger.info(f"   • TP1: ${FADE_TP1:,}")
             logger.info(f"   • TP2: ${FADE_TP2:,}-${FADE_TP2_HIGH:,}")
-            logger.info(f"   • Why: First tag of overhead supply often mean-reverts intraday")
+            logger.info(f"   • Why: First test of overhead supply/round-number often mean-reverts intraday")
             logger.info("")
         logger.info("")
         logger.info(f"Current Price: ${current_price:,.2f}")
