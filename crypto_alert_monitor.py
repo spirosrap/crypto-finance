@@ -147,47 +147,49 @@ GRANULARITY_5M = "FIVE_MINUTE"
 GRANULARITY_15M = "FIFTEEN_MINUTE"
 PRODUCT_ID = "BTC-PERP-INTX"
 
-# Global Rules from the plan
+# Global Rules from the new plan
 MARGIN = 250  # USD
 LEVERAGE = 20  # 20x leverage (margin x leverage = 5000 USD position size)
 RISK_PERCENTAGE = 0.8  # 0.8-1.2% of price as 1R
 VOLUME_THRESHOLD_1H = 1.25  # 1.25x 20-period vol on 1h
 VOLUME_THRESHOLD_5M = 2.0   # 2x 20-SMA vol on 5m
 
-# Today's session levels from the plan (BTC ≈ 113,664, HOD 113,963, LOD 112,107)
-HOD = 113963  # High of Day
-LOD = 112107  # Low of Day  
-MID = 113035  # Mid point of today's range
+# Today's session levels from the new plan (BTC ≈ $114,484, H: $114,880, L: $113,571)
+HOD = 114880  # High of Day
+LOD = 113571  # Low of Day  
+MID = 114225  # Mid point of today's range
 
 # LONG - Breakout continuation strategy
-BREAKOUT_ENTRY_LOW = 114020   # Entry zone low (HOD + small buffer)
-BREAKOUT_ENTRY_HIGH = 114100  # Entry zone high (HOD + small buffer)
-BREAKOUT_STOP_LOSS = 113400   # SL back inside prior range
-BREAKOUT_TP1 = 114800         # TP1
-BREAKOUT_TP2 = 115800         # TP2
+BREAKOUT_ENTRY_LOW = 115100   # Entry zone low (HOD + ~0.2% buffer)
+BREAKOUT_ENTRY_HIGH = 115300  # Entry zone high (HOD + ~0.2% buffer)
+BREAKOUT_STOP_LOSS = 114550   # SL back inside range
+BREAKOUT_TP1 = 115800         # TP1
+BREAKOUT_TP2 = 116800         # TP2
 
-# LONG - Sweep & reclaim strategy
-RECLAIM_SWEEP_LOW = 112107    # Sweep zone low (LOD)
-RECLAIM_SWEEP_HIGH = 112300   # Sweep zone high (LOD + buffer)
-RECLAIM_ENTRY_LOW = 112150    # Entry zone low after sweep and reclaim
-RECLAIM_ENTRY_HIGH = 112250   # Entry zone high after sweep and reclaim
-RECLAIM_STOP_LOSS = 111800    # SL below the sweep
-RECLAIM_TP1 = 113100          # TP1
-RECLAIM_TP2 = 113700          # TP2
+# LONG - Retest/reclaim strategy
+RECLAIM_ENTRY_LOW = 114800    # Entry zone low (post-breakout higher-low)
+RECLAIM_ENTRY_HIGH = 114980   # Entry zone high (post-breakout higher-low)
+RECLAIM_STOP_LOSS = 114450    # SL
+RECLAIM_TP1 = 115400          # TP1
+RECLAIM_TP2 = 115900          # TP2
 
-# SHORT - Breakdown continuation strategy
-BREAKDOWN_ENTRY_LOW = 111800   # Entry zone low (clean break below LOD)
-BREAKDOWN_ENTRY_HIGH = 111980  # Entry zone high (clean break below LOD)
-BREAKDOWN_STOP_LOSS = 112350   # SL
-BREAKDOWN_TP1 = 111000         # TP1
-BREAKDOWN_TP2 = 110300         # TP2
+# SHORT - Range break strategy
+BREAKDOWN_ENTRY_LOW = 113300   # Entry zone low (LOD - ~0.2% buffer)
+BREAKDOWN_ENTRY_HIGH = 113450  # Entry zone high (LOD - ~0.2% buffer)
+BREAKDOWN_STOP_LOSS = 113900   # SL
+BREAKDOWN_TP1 = 112700         # TP1
+BREAKDOWN_TP2 = 111900         # TP2
 
-# SHORT - Failed breakout / rejection strategy
-FADE_ENTRY_LOW = 113940        # Entry zone low (breakout wicks)
-FADE_ENTRY_HIGH = 114050       # Entry zone high (breakout wicks)
-FADE_STOP_LOSS = 114450        # SL above breakout buffer
-FADE_TP1 = 113250              # TP1
+# SHORT - Retest/reject strategy
+FADE_ENTRY_LOW = 114100        # Entry zone low (lower-high + rejection)
+FADE_ENTRY_HIGH = 114250       # Entry zone high (lower-high + rejection)
+FADE_STOP_LOSS = 114650        # SL
+FADE_TP1 = 113600              # TP1
 FADE_TP2 = 112700              # TP2
+
+# Pivot bands for execution
+PIVOT_BAND_HIGH = 114900  # Upper pivot band
+PIVOT_BAND_LOW = 113900   # Lower pivot band
 
 # Trade tracking
 TRIGGER_STATE_FILE = "btc_intraday_trigger_state.json"
@@ -200,19 +202,21 @@ def load_trigger_state():
         except Exception:
             return {
                 "breakout_triggered": False, 
-                "reclaim_triggered": False, 
-                "breakdown_triggered": False,
-                "fade_triggered": False,
+                "retest_reclaim_triggered": False, 
+                "range_break_triggered": False,
+                "retest_reject_triggered": False,
                 "last_trigger_ts": None,
-                "last_1h_structure": None
+                "last_1h_structure": None,
+                "active_trade_direction": None  # Track which direction is active
             }
     return {
         "breakout_triggered": False, 
-        "reclaim_triggered": False, 
-        "breakdown_triggered": False,
-        "fade_triggered": False,
+        "retest_reclaim_triggered": False, 
+        "range_break_triggered": False,
+        "retest_reject_triggered": False,
         "last_trigger_ts": None,
-        "last_1h_structure": None
+        "last_1h_structure": None,
+        "active_trade_direction": None  # Track which direction is active
     }
 
 def save_trigger_state(state):
@@ -373,22 +377,38 @@ def get_candle_value(candle, key):
     else:
         return getattr(candle, key, None)
 
-def check_failed_breakout(candles_5m, candles_15m):
+def check_retest_reject(candles_5m, candles_15m):
     """
-    Check for failed breakout / rejection (breakout wicks and 5-15m closes back below entry zone)
+    Check for retest/reject pattern (lower-high + rejection wick on 5-15m)
     
     Args:
         candles_5m: List of 5-minute candles
         candles_15m: List of 15-minute candles
     
     Returns:
-        True if failed breakout detected, False otherwise
+        True if retest/reject detected, False otherwise
     """
-    breakout_wick_detected = False
-    close_below_detected = False
+    lower_high_detected = False
+    rejection_wick_detected = False
     
-    # Check for breakout wicks in the entry zone
-    if len(candles_5m) >= 3:
+    # Check for lower-high formation (price below pivot band high)
+    if len(candles_5m) >= 6:  # Check last 30 minutes
+        recent_highs = []
+        for i in range(min(6, len(candles_5m))):
+            candle = candles_5m[i]
+            high = float(get_candle_value(candle, 'high'))
+            recent_highs.append(high)
+        
+        # Check if we have a lower-high pattern
+        if len(recent_highs) >= 3:
+            # Look for a high that's below the pivot band but shows rejection
+            for i, high in enumerate(recent_highs):
+                if FADE_ENTRY_LOW <= high <= FADE_ENTRY_HIGH:
+                    lower_high_detected = True
+                    break
+    
+    # Check for rejection wick in the entry zone
+    if lower_high_detected and len(candles_5m) >= 3:
         for i in range(min(3, len(candles_5m))):
             candle = candles_5m[i]
             high = float(get_candle_value(candle, 'high'))
@@ -396,19 +416,19 @@ def check_failed_breakout(candles_5m, candles_15m):
             close = float(get_candle_value(candle, 'close'))
             open_price = float(get_candle_value(candle, 'open'))
             
-            # Check if candle wicks into breakout zone
+            # Check if candle wicks into entry zone
             if FADE_ENTRY_LOW <= high <= FADE_ENTRY_HIGH:
                 # Check for significant upper wick (rejection)
                 upper_wick = high - max(open_price, close)
                 body = abs(close - open_price)
                 
-                # Significant rejection (upper wick at least 30% of body)
-                if upper_wick > 0.3 * body:
-                    breakout_wick_detected = True
+                # Significant rejection (upper wick at least 25% of body)
+                if upper_wick > 0.25 * body and body > 0:
+                    rejection_wick_detected = True
                     break
     
-    # Also check 15-minute candles for breakout wicks
-    if not breakout_wick_detected and len(candles_15m) >= 2:
+    # Also check 15-minute candles for rejection
+    if not rejection_wick_detected and len(candles_15m) >= 2:
         for i in range(min(2, len(candles_15m))):
             candle = candles_15m[i]
             high = float(get_candle_value(candle, 'high'))
@@ -416,100 +436,103 @@ def check_failed_breakout(candles_5m, candles_15m):
             close = float(get_candle_value(candle, 'close'))
             open_price = float(get_candle_value(candle, 'open'))
             
-            # Check if candle wicks into breakout zone
+            # Check if candle wicks into entry zone
             if FADE_ENTRY_LOW <= high <= FADE_ENTRY_HIGH:
                 # Check for significant upper wick (rejection)
                 upper_wick = high - max(open_price, close)
                 body = abs(close - open_price)
                 
-                # Significant rejection (upper wick at least 30% of body)
-                if upper_wick > 0.3 * body:
-                    breakout_wick_detected = True
+                # Significant rejection (upper wick at least 25% of body)
+                if upper_wick > 0.25 * body and body > 0:
+                    rejection_wick_detected = True
                     break
     
-    # Check for 5-15m close back below entry zone
-    if breakout_wick_detected:
-        current_5m = candles_5m[0]
-        current_15m = candles_15m[0] if candles_15m else None
-        
-        current_price_5m = float(get_candle_value(current_5m, 'close'))
-        if current_price_5m < (FADE_ENTRY_LOW - 50):  # Close back below entry zone
-            close_below_detected = True
-        
-        if current_15m:
-            current_price_15m = float(get_candle_value(current_15m, 'close'))
-            if current_price_15m < (FADE_ENTRY_LOW - 50):  # Close back below entry zone
-                close_below_detected = True
-    
-    return breakout_wick_detected and close_below_detected
+    return lower_high_detected and rejection_wick_detected
 
-def check_sweep_and_reclaim(candles_5m, candles_15m, sweep_low, sweep_high, reclaim_level):
+def check_retest_reclaim(candles_5m, candles_15m):
     """
-    Check for sweep of support zone followed by reclaim on 5-15m timeframes
+    Check for retest/reclaim pattern (post-breakout pullback that holds above prior high)
     
     Args:
         candles_5m: List of 5-minute candles
         candles_15m: List of 15-minute candles
-        sweep_low: Lower bound of sweep zone (LOD)
-        sweep_high: Upper bound of sweep zone (LOD + buffer)
-        reclaim_level: Price level that needs to be reclaimed
     
     Returns:
-        True if sweep and reclaim detected, False otherwise
+        True if retest/reclaim detected, False otherwise
     """
-    sweep_detected = False
+    breakout_occurred = False
+    pullback_detected = False
     reclaim_detected = False
     
-    # Check for sweep in recent candles (quick sweep below LOD)
-    for candle in candles_5m[1:13]:  # Check last hour of 5m candles
-        low = float(get_candle_value(candle, 'low'))
-        if low <= sweep_high:  # Sweep below LOD + buffer
-            sweep_detected = True
-            break
-    
-    # Also check 15m candles for sweep
-    if not sweep_detected and len(candles_15m) >= 4:
-        for candle in candles_15m[1:4]:  # Check last hour of 15m candles
-            low = float(get_candle_value(candle, 'low'))
-            if low <= sweep_high:  # Sweep below LOD + buffer
-                sweep_detected = True
+    # Check if breakout has occurred (price above HOD)
+    if len(candles_5m) >= 12:  # Check last hour
+        for i in range(min(12, len(candles_5m))):
+            candle = candles_5m[i]
+            high = float(get_candle_value(candle, 'high'))
+            if high > HOD:
+                breakout_occurred = True
                 break
     
-    # Check for reclaim (5-15m close back above reclaim level)
-    if sweep_detected:
+    # Also check 15m candles for breakout
+    if not breakout_occurred and len(candles_15m) >= 4:
+        for i in range(min(4, len(candles_15m))):
+            candle = candles_15m[i]
+            high = float(get_candle_value(candle, 'high'))
+            if high > HOD:
+                breakout_occurred = True
+                break
+    
+    # Check for pullback that holds above prior high
+    if breakout_occurred:
         current_5m = candles_5m[0]
         current_15m = candles_15m[0] if candles_15m else None
         
         current_price_5m = float(get_candle_value(current_5m, 'close'))
-        if current_price_5m > reclaim_level:
+        current_price_15m = float(get_candle_value(current_15m, 'close')) if current_15m else None
+        
+        # Check if price is in the retest zone (above prior high but below breakout entry)
+        if RECLAIM_ENTRY_LOW <= current_price_5m <= RECLAIM_ENTRY_HIGH:
+            pullback_detected = True
+        
+        if current_15m and RECLAIM_ENTRY_LOW <= current_price_15m <= RECLAIM_ENTRY_HIGH:
+            pullback_detected = True
+    
+    # Check for reclaim (5-15m close above entry zone with volume)
+    if pullback_detected:
+        current_5m = candles_5m[0]
+        current_15m = candles_15m[0] if candles_15m else None
+        
+        current_price_5m = float(get_candle_value(current_5m, 'close'))
+        if current_price_5m > RECLAIM_ENTRY_HIGH:
             reclaim_detected = True
         
         if current_15m:
             current_price_15m = float(get_candle_value(current_15m, 'close'))
-            if current_price_15m > reclaim_level:
+            if current_price_15m > RECLAIM_ENTRY_HIGH:
                 reclaim_detected = True
     
-    return sweep_detected and reclaim_detected
+    return breakout_occurred and pullback_detected and reclaim_detected
 
 def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
-    BTC Intraday Alert - Implements complete trading plan with both LONG and SHORT strategies
-    Based on the trading plan: "Spiros — here's a clean, two-sided BTC plan for today based on live levels (BTC ≈ 113,664, HOD 113,963, LOD 112,107)"
+    BTC Intraday Alert - Implements new two-sided trading plan
+    Based on the trading plan: "Spiros — BTC two-sided plan for today (as of now: $114,484, H: $114,880, L: $113,571)"
     
-    Rules (both directions):
+    Global rules (both directions):
     - Timeframe: 1h trigger; execute on 5–15m
-    - Volume confirm: ≥ 1.25× 20-SMA vol on 1h or ≥ 2× 20-SMA vol on 5m at trigger
-    - Risk: size for 1R ≈ 0.8–1.2%; partial at +1.0-1.5R; move stop to BE after partial
+    - Volume confirm: ≥ 1.25× 20-period vol on 1h or ≥ 2× 20-SMA vol on 5m at trigger
+    - Risk: size so 1R ≈ 0.8–1.2% of price; take partial at +1.0–1.5R; move stop to BE after partial
     - Position Size: Always margin x leverage = 250 x 20 = $5,000 USD
-    - One direction at a time. If in a trade, ignore the opposite setup until flat
+    - Do nothing if price chops between ~$113,900–$114,900 without volume expansion
+    - Trade one idea at a time; cancel the opposite if triggered
     
     LONG Strategies:
-    - Breakout Continuation: buy-stop 114,020–114,100 (HOD + small buffer)
-    - Sweep & Reclaim: 112,250–112,150 on a quick sweep below LOD then 5–15m close back above 112,300
+    - Breakout Continuation: buy-stop $115,100–$115,300 (≈ HOD + ~0.2% buffer)
+    - Retest/Reclaim: $114,900–$114,980 on reclaim + volume (post-breakout higher-low)
     
     SHORT Strategies:
-    - Breakdown Continuation: sell-stop 111,980–111,800 (clean break below LOD)
-    - Failed Breakout / Rejection: 113,940–114,050 only if breakout wicks and 5–15m closes back below 113,900
+    - Range Break: sell-stop $113,300–$113,450 (≈ LOD − ~0.2% buffer)
+    - Retest/Reject: $114,100–$114,250 on rejection + rising 5m volume (lower-high + rejection)
     
     Args:
         cb_service: Coinbase service instance
@@ -593,15 +616,14 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         current_5m_volume = float(get_candle_value(current_5m, 'volume'))
         relative_volume_5m = current_5m_volume / volume_sma_5m if volume_sma_5m > 0 else 0
         
-        # Check for sweep and reclaim pattern
-        sweep_reclaim_detected = check_sweep_and_reclaim(
-            candles_5m, candles_15m, 
-            RECLAIM_SWEEP_LOW, RECLAIM_SWEEP_HIGH, 
-            RECLAIM_ENTRY_HIGH
-        )
+        # Check for retest and reclaim pattern
+        retest_reclaim_detected = check_retest_reclaim(candles_5m, candles_15m)
         
-        # Check for failed breakout / rejection
-        failed_breakout_detected = check_failed_breakout(candles_5m, candles_15m)
+        # Check for retest and reject pattern
+        retest_reject_detected = check_retest_reject(candles_5m, candles_15m)
+        
+        # Check if price is chopping in the no-trade zone
+        in_chop_zone = PIVOT_BAND_LOW <= current_price <= PIVOT_BAND_HIGH
         
         # Filter strategies based on direction parameter
         long_strategies_enabled = direction in ['LONG', 'BOTH']
@@ -609,7 +631,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 BTC Plan for Today (Live Levels) Alert")
+        logger.info("🚀 BTC Two-Sided Plan for Today Alert")
         logger.info("")
         logger.info("📊 Today's Levels:")
         logger.info(f"   • BTC ≈ ${current_price:,.0f}")
@@ -618,46 +640,48 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         logger.info("")
         logger.info("📊 Global Rules:")
         logger.info(f"   • Timeframe: 1h trigger; execute on 5-15m")
-        logger.info(f"   • Volume confirm: ≥{VOLUME_THRESHOLD_1H}x 20-SMA vol on 1h OR ≥{VOLUME_THRESHOLD_5M}x 20-SMA vol on 5m at trigger")
-        logger.info(f"   • Risk: size for 1R ≈ {RISK_PERCENTAGE}%; partial at +1.0-1.5R; move stop to BE after partial")
+        logger.info(f"   • Volume confirm: ≥{VOLUME_THRESHOLD_1H}x 20-period vol on 1h OR ≥{VOLUME_THRESHOLD_5M}x 20-SMA vol on 5m at trigger")
+        logger.info(f"   • Risk: size so 1R ≈ {RISK_PERCENTAGE}% of price; take partial at +1.0-1.5R; move stop to BE after partial")
         logger.info(f"   • Position Size: ${MARGIN * LEVERAGE:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
+        logger.info(f"   • Do nothing if price chops between ~${PIVOT_BAND_LOW:,}-${PIVOT_BAND_HIGH:,} without volume expansion")
         logger.info("")
         
         # Show only relevant strategies based on direction
         if long_strategies_enabled:
             logger.info("📊 LONG - Breakout Continuation:")
-            logger.info(f"   • Entry: buy-stop ${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,} (HOD + small buffer)")
-            logger.info(f"   • Invalidation (SL): ${BREAKOUT_STOP_LOSS:,} (back inside prior range)")
-            logger.info(f"   • TP1 / TP2: ${BREAKOUT_TP1:,} / ${BREAKOUT_TP2:,}")
-            logger.info(f"   • Why: Expansion above today's high; trend follow if volume confirms and no immediate rejection")
+            logger.info(f"   • Entry: buy-stop ${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,} (≈ HOD + ~0.2% buffer)")
+            logger.info(f"   • Invalidation (SL): ${BREAKOUT_STOP_LOSS:,} (back inside range)")
+            logger.info(f"   • TP1 / TP2: ${BREAKOUT_TP1:,}-${BREAKOUT_TP1+200:,} / ${BREAKOUT_TP2:,}-${BREAKOUT_TP2+700:,}")
+            logger.info(f"   • Why: Range expansion above today's high; momentum continuation if volume spikes")
             logger.info("")
-            logger.info("📊 LONG - Sweep & Reclaim:")
-            logger.info(f"   • Entry: ${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,} on a quick sweep below LOD then 5-15m close back above ${RECLAIM_ENTRY_HIGH:,}")
+            logger.info("📊 LONG - Retest/Reclaim:")
+            logger.info(f"   • Entry: ${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,} on reclaim + volume")
             logger.info(f"   • SL: ${RECLAIM_STOP_LOSS:,}")
-            logger.info(f"   • TP1 / TP2: ${RECLAIM_TP1:,} / ${RECLAIM_TP2:,}")
-            logger.info(f"   • Why: Liquidity grab at the low; fade back into the day's range")
+            logger.info(f"   • TP1 / TP2: ${RECLAIM_TP1:,}-${RECLAIM_TP1+200:,} / ${RECLAIM_TP2:,}-${RECLAIM_TP2+400:,}")
+            logger.info(f"   • Why: Post-breakout higher-low that keeps price above prior high")
             logger.info("")
         
         if short_strategies_enabled:
-            logger.info("📊 SHORT - Breakdown Continuation:")
-            logger.info(f"   • Entry: sell-stop ${BREAKDOWN_ENTRY_LOW:,}-${BREAKDOWN_ENTRY_HIGH:,} (clean break below LOD)")
+            logger.info("📊 SHORT - Range Break:")
+            logger.info(f"   • Entry: sell-stop ${BREAKDOWN_ENTRY_LOW:,}-${BREAKDOWN_ENTRY_HIGH:,} (≈ LOD − ~0.2% buffer)")
             logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,}")
-            logger.info(f"   • TP1 / TP2: ${BREAKDOWN_TP1:,} / ${BREAKDOWN_TP2:,}")
-            logger.info(f"   • Why: Range break with downside momentum; aim for round-number magnets")
+            logger.info(f"   • TP1 / TP2: ${BREAKDOWN_TP1:,}-${BREAKDOWN_TP1+200:,} / ${BREAKDOWN_TP2:,}-${BREAKDOWN_TP2+300:,}")
+            logger.info(f"   • Why: Breakdown from today's floor with follow-through if liquidity gives way")
             logger.info("")
-            logger.info("📊 SHORT - Failed Breakout / Rejection:")
-            logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,} only if breakout wicks and 5-15m closes back below ${FADE_ENTRY_LOW - 50:,}")
+            logger.info("📊 SHORT - Retest/Reject:")
+            logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,} on rejection + rising 5m volume")
             logger.info(f"   • SL: ${FADE_STOP_LOSS:,}")
-            logger.info(f"   • TP1 / TP2: ${FADE_TP1:,} / ${FADE_TP2:,}")
-            logger.info(f"   • Why: Trap above HOD; fade back into value")
+            logger.info(f"   • TP1 / TP2: ${FADE_TP1:,} / ${FADE_TP2:,}-${FADE_TP2+200:,}")
+            logger.info(f"   • Why: Mean-revert back into the range if buyers can't sustain above mid/high")
             logger.info("")
         logger.info("")
         logger.info(f"Current Price: ${current_price:,.2f}")
         logger.info(f"Last 1H Close: ${last_close:,.2f}, High: ${last_high:,.2f}, Low: ${last_low:,.2f}")
         logger.info(f"1H Volume: {last_volume:,.0f}, 1H SMA: {volume_sma_1h:,.0f}, Rel_Vol: {relative_volume_1h:.2f}")
         logger.info(f"5M Volume: {current_5m_volume:,.0f}, 5M SMA: {volume_sma_5m:,.0f}, Rel_Vol: {relative_volume_5m:.2f}")
-        logger.info(f"Sweep & Reclaim Detected: {'✅' if sweep_reclaim_detected else '❌'}")
-        logger.info(f"Failed Breakout Detected: {'✅' if failed_breakout_detected else '❌'}")
+        logger.info(f"Retest & Reclaim Detected: {'✅' if retest_reclaim_detected else '❌'}")
+        logger.info(f"Retest & Reject Detected: {'✅' if retest_reject_detected else '❌'}")
+        logger.info(f"In Chop Zone (${PIVOT_BAND_LOW:,}-${PIVOT_BAND_HIGH:,}): {'✅' if in_chop_zone else '❌'}")
         logger.info("")
         
         # --- Volume Confirmation Check ---
@@ -668,194 +692,205 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         # --- Strategy Analysis ---
         trade_executed = False
         
-        # 1. LONG - Breakout Continuation Strategy
-        if long_strategies_enabled and not trigger_state.get("breakout_triggered", False):
-            in_breakout_zone = BREAKOUT_ENTRY_LOW <= current_price <= BREAKOUT_ENTRY_HIGH
-            breakout_ready = in_breakout_zone and volume_confirmed
-            
-            logger.info("🔍 LONG - Breakout Continuation Analysis:")
-            logger.info(f"   • Price in buy-stop zone (${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,}): {'✅' if in_breakout_zone else '❌'}")
-            logger.info(f"   • Volume confirmed (1H: {relative_volume_1h:.2f}x, 5M: {relative_volume_5m:.2f}x): {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Breakout Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
-            
-            if breakout_ready:
-                logger.info("")
-                logger.info("🎯 LONG - Breakout Continuation conditions met - executing trade...")
-                
-                # Play alert sound
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-                
-                # Execute Breakout trade
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="BTC Intraday Breakout Long",
-                    entry_price=current_price,
-                    stop_loss=BREAKOUT_STOP_LOSS,
-                    take_profit=BREAKOUT_TP1,  # Use TP1 as primary target
-                    margin=MARGIN,
-                    leverage=LEVERAGE,
-                    side="BUY",
-                    product=PRODUCT_ID
-                )
-                
-                if trade_success:
-                    logger.info(f"🎉 Breakout trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                    trigger_state["breakout_triggered"] = True
-                    trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
-                    save_trigger_state(trigger_state)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ Breakout trade failed: {trade_result}")
-        
-        # 2. LONG - Sweep & Reclaim Strategy
-        if long_strategies_enabled and not trade_executed and not trigger_state.get("reclaim_triggered", False):
-            in_reclaim_zone = RECLAIM_ENTRY_LOW <= current_price <= RECLAIM_ENTRY_HIGH
-            reclaim_ready = in_reclaim_zone and sweep_reclaim_detected and volume_confirmed
-            
+        # Check if we should skip trading due to chop zone
+        if in_chop_zone and not volume_confirmed:
             logger.info("")
-            logger.info("🔍 LONG - Sweep & Reclaim Analysis:")
-            logger.info(f"   • Price in entry zone (${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,}): {'✅' if in_reclaim_zone else '❌'}")
-            logger.info(f"   • Sweep & reclaim detected: {'✅' if sweep_reclaim_detected else '❌'}")
-            logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Sweep & Reclaim Ready: {'🎯 YES' if reclaim_ready else '⏳ NO'}")
-            
-            if reclaim_ready:
-                logger.info("")
-                logger.info("🎯 LONG - Sweep & Reclaim conditions met - executing trade...")
-                
-                # Play alert sound
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-                
-                # Execute Sweep & Reclaim trade
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="BTC Intraday Sweep & Reclaim Long",
-                    entry_price=current_price,
-                    stop_loss=RECLAIM_STOP_LOSS,
-                    take_profit=RECLAIM_TP1,  # Use TP1 as primary target
-                    margin=MARGIN,
-                    leverage=LEVERAGE,
-                    side="BUY",
-                    product=PRODUCT_ID
-                )
-                
-                if trade_success:
-                    logger.info(f"🎉 Sweep & Reclaim trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                    trigger_state["reclaim_triggered"] = True
-                    trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
-                    save_trigger_state(trigger_state)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ Sweep & Reclaim trade failed: {trade_result}")
-        
-        # 3. SHORT - Breakdown Continuation Strategy
-        if short_strategies_enabled and not trade_executed and not trigger_state.get("breakdown_triggered", False):
-            in_breakdown_zone = BREAKDOWN_ENTRY_LOW <= current_price <= BREAKDOWN_ENTRY_HIGH
-            breakdown_ready = in_breakdown_zone and volume_confirmed
-            
+            logger.info("⏸️ Price chopping in no-trade zone without volume expansion - skipping all strategies")
             logger.info("")
-            logger.info("🔍 SHORT - Breakdown Continuation Analysis:")
-            logger.info(f"   • Price in sell-stop zone (${BREAKDOWN_ENTRY_LOW:,}-${BREAKDOWN_ENTRY_HIGH:,}): {'✅' if in_breakdown_zone else '❌'}")
-            logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Breakdown Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
+        else:
+            # 1. LONG - Breakout Continuation Strategy
+            if long_strategies_enabled and not trigger_state.get("breakout_triggered", False):
+                in_breakout_zone = BREAKOUT_ENTRY_LOW <= current_price <= BREAKOUT_ENTRY_HIGH
+                breakout_ready = in_breakout_zone and volume_confirmed
+                
+                logger.info("🔍 LONG - Breakout Continuation Analysis:")
+                logger.info(f"   • Price in buy-stop zone (${BREAKOUT_ENTRY_LOW:,}-${BREAKOUT_ENTRY_HIGH:,}): {'✅' if in_breakout_zone else '❌'}")
+                logger.info(f"   • Volume confirmed (1H: {relative_volume_1h:.2f}x, 5M: {relative_volume_5m:.2f}x): {'✅' if volume_confirmed else '❌'}")
+                logger.info(f"   • Breakout Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
+                
+                if breakout_ready:
+                    logger.info("")
+                    logger.info("🎯 LONG - Breakout Continuation conditions met - executing trade...")
+                    
+                    # Play alert sound
+                    try:
+                        play_alert_sound()
+                        logger.info("Alert sound played successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to play alert sound: {e}")
+                    
+                    # Execute Breakout trade
+                    trade_success, trade_result = execute_crypto_trade(
+                        cb_service=cb_service,
+                        trade_type="BTC Two-Sided Plan Breakout Long",
+                        entry_price=current_price,
+                        stop_loss=BREAKOUT_STOP_LOSS,
+                        take_profit=BREAKOUT_TP1,  # Use TP1 as primary target
+                        margin=MARGIN,
+                        leverage=LEVERAGE,
+                        side="BUY",
+                        product=PRODUCT_ID
+                    )
+                    
+                    if trade_success:
+                        logger.info(f"🎉 Breakout trade executed successfully!")
+                        logger.info(f"Trade output: {trade_result}")
+                        trigger_state["breakout_triggered"] = True
+                        trigger_state["active_trade_direction"] = "LONG"
+                        trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
+                        save_trigger_state(trigger_state)
+                        trade_executed = True
+                    else:
+                        logger.error(f"❌ Breakout trade failed: {trade_result}")
             
-            if breakdown_ready:
+            # 2. LONG - Retest/Reclaim Strategy
+            if long_strategies_enabled and not trade_executed and not trigger_state.get("retest_reclaim_triggered", False):
+                in_reclaim_zone = RECLAIM_ENTRY_LOW <= current_price <= RECLAIM_ENTRY_HIGH
+                reclaim_ready = in_reclaim_zone and retest_reclaim_detected and volume_confirmed
+                
                 logger.info("")
-                logger.info("🎯 SHORT - Breakdown Continuation conditions met - executing trade...")
+                logger.info("🔍 LONG - Retest/Reclaim Analysis:")
+                logger.info(f"   • Price in entry zone (${RECLAIM_ENTRY_LOW:,}-${RECLAIM_ENTRY_HIGH:,}): {'✅' if in_reclaim_zone else '❌'}")
+                logger.info(f"   • Retest & reclaim detected: {'✅' if retest_reclaim_detected else '❌'}")
+                logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
+                logger.info(f"   • Retest & Reclaim Ready: {'🎯 YES' if reclaim_ready else '⏳ NO'}")
                 
-                # Play alert sound
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-                
-                # Execute Breakdown trade
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="BTC Intraday Breakdown Short",
-                    entry_price=current_price,
-                    stop_loss=BREAKDOWN_STOP_LOSS,
-                    take_profit=BREAKDOWN_TP1,  # Use TP1 as primary target
-                    margin=MARGIN,
-                    leverage=LEVERAGE,
-                    side="SELL",
-                    product=PRODUCT_ID
-                )
-                
-                if trade_success:
-                    logger.info(f"🎉 Breakdown trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                    trigger_state["breakdown_triggered"] = True
-                    trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
-                    save_trigger_state(trigger_state)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ Breakdown trade failed: {trade_result}")
-        
-        # 4. SHORT - Failed Breakout / Rejection Strategy
-        if short_strategies_enabled and not trade_executed and not trigger_state.get("fade_triggered", False):
-            in_fade_zone = FADE_ENTRY_LOW <= current_price <= FADE_ENTRY_HIGH
-            fade_ready = in_fade_zone and failed_breakout_detected and volume_confirmed
+                if reclaim_ready:
+                    logger.info("")
+                    logger.info("🎯 LONG - Retest/Reclaim conditions met - executing trade...")
+                    
+                    # Play alert sound
+                    try:
+                        play_alert_sound()
+                        logger.info("Alert sound played successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to play alert sound: {e}")
+                    
+                    # Execute Retest/Reclaim trade
+                    trade_success, trade_result = execute_crypto_trade(
+                        cb_service=cb_service,
+                        trade_type="BTC Two-Sided Plan Retest/Reclaim Long",
+                        entry_price=current_price,
+                        stop_loss=RECLAIM_STOP_LOSS,
+                        take_profit=RECLAIM_TP1,  # Use TP1 as primary target
+                        margin=MARGIN,
+                        leverage=LEVERAGE,
+                        side="BUY",
+                        product=PRODUCT_ID
+                    )
+                    
+                    if trade_success:
+                        logger.info(f"🎉 Retest/Reclaim trade executed successfully!")
+                        logger.info(f"Trade output: {trade_result}")
+                        trigger_state["retest_reclaim_triggered"] = True
+                        trigger_state["active_trade_direction"] = "LONG"
+                        trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
+                        save_trigger_state(trigger_state)
+                        trade_executed = True
+                    else:
+                        logger.error(f"❌ Retest/Reclaim trade failed: {trade_result}")
             
-            logger.info("")
-            logger.info("🔍 SHORT - Failed Breakout / Rejection Analysis:")
-            logger.info(f"   • Price in breakout zone (${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,}): {'✅' if in_fade_zone else '❌'}")
-            logger.info(f"   • Failed breakout detected: {'✅' if failed_breakout_detected else '❌'}")
-            logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Failed Breakout Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
-            
-            if fade_ready:
+            # 3. SHORT - Range Break Strategy
+            if short_strategies_enabled and not trade_executed and not trigger_state.get("range_break_triggered", False):
+                in_breakdown_zone = BREAKDOWN_ENTRY_LOW <= current_price <= BREAKDOWN_ENTRY_HIGH
+                breakdown_ready = in_breakdown_zone and volume_confirmed
+                
                 logger.info("")
-                logger.info("🎯 SHORT - Failed Breakout / Rejection conditions met - executing trade...")
+                logger.info("🔍 SHORT - Range Break Analysis:")
+                logger.info(f"   • Price in sell-stop zone (${BREAKDOWN_ENTRY_LOW:,}-${BREAKDOWN_ENTRY_HIGH:,}): {'✅' if in_breakdown_zone else '❌'}")
+                logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
+                logger.info(f"   • Range Break Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
                 
-                # Play alert sound
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
+                if breakdown_ready:
+                    logger.info("")
+                    logger.info("🎯 SHORT - Range Break conditions met - executing trade...")
+                    
+                    # Play alert sound
+                    try:
+                        play_alert_sound()
+                        logger.info("Alert sound played successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to play alert sound: {e}")
+                    
+                    # Execute Range Break trade
+                    trade_success, trade_result = execute_crypto_trade(
+                        cb_service=cb_service,
+                        trade_type="BTC Two-Sided Plan Range Break Short",
+                        entry_price=current_price,
+                        stop_loss=BREAKDOWN_STOP_LOSS,
+                        take_profit=BREAKDOWN_TP1,  # Use TP1 as primary target
+                        margin=MARGIN,
+                        leverage=LEVERAGE,
+                        side="SELL",
+                        product=PRODUCT_ID
+                    )
+                    
+                    if trade_success:
+                        logger.info(f"🎉 Range Break trade executed successfully!")
+                        logger.info(f"Trade output: {trade_result}")
+                        trigger_state["range_break_triggered"] = True
+                        trigger_state["active_trade_direction"] = "SHORT"
+                        trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
+                        save_trigger_state(trigger_state)
+                        trade_executed = True
+                    else:
+                        logger.error(f"❌ Range Break trade failed: {trade_result}")
+            
+            # 4. SHORT - Retest/Reject Strategy
+            if short_strategies_enabled and not trade_executed and not trigger_state.get("retest_reject_triggered", False):
+                in_fade_zone = FADE_ENTRY_LOW <= current_price <= FADE_ENTRY_HIGH
+                fade_ready = in_fade_zone and retest_reject_detected and volume_confirmed
                 
-                # Execute Failed Breakout trade
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="BTC Intraday Failed Breakout Short",
-                    entry_price=current_price,
-                    stop_loss=FADE_STOP_LOSS,
-                    take_profit=FADE_TP1,  # Use TP1 as primary target
-                    margin=MARGIN,
-                    leverage=LEVERAGE,
-                    side="SELL",
-                    product=PRODUCT_ID
-                )
+                logger.info("")
+                logger.info("🔍 SHORT - Retest/Reject Analysis:")
+                logger.info(f"   • Price in entry zone (${FADE_ENTRY_LOW:,}-${FADE_ENTRY_HIGH:,}): {'✅' if in_fade_zone else '❌'}")
+                logger.info(f"   • Retest & reject detected: {'✅' if retest_reject_detected else '❌'}")
+                logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
+                logger.info(f"   • Retest & Reject Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
                 
-                if trade_success:
-                    logger.info(f"🎉 Failed Breakout trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                    trigger_state["fade_triggered"] = True
-                    trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
-                    save_trigger_state(trigger_state)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ Failed Breakout trade failed: {trade_result}")
+                if fade_ready:
+                    logger.info("")
+                    logger.info("🎯 SHORT - Retest/Reject conditions met - executing trade...")
+                    
+                    # Play alert sound
+                    try:
+                        play_alert_sound()
+                        logger.info("Alert sound played successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to play alert sound: {e}")
+                    
+                    # Execute Retest/Reject trade
+                    trade_success, trade_result = execute_crypto_trade(
+                        cb_service=cb_service,
+                        trade_type="BTC Two-Sided Plan Retest/Reject Short",
+                        entry_price=current_price,
+                        stop_loss=FADE_STOP_LOSS,
+                        take_profit=FADE_TP1,  # Use TP1 as primary target
+                        margin=MARGIN,
+                        leverage=LEVERAGE,
+                        side="SELL",
+                        product=PRODUCT_ID
+                    )
+                    
+                    if trade_success:
+                        logger.info(f"🎉 Retest/Reject trade executed successfully!")
+                        logger.info(f"Trade output: {trade_result}")
+                        trigger_state["retest_reject_triggered"] = True
+                        trigger_state["active_trade_direction"] = "SHORT"
+                        trigger_state["last_trigger_ts"] = int(get_candle_value(last_1h, 'start'))
+                        save_trigger_state(trigger_state)
+                        trade_executed = True
+                    else:
+                        logger.error(f"❌ Retest/Reject trade failed: {trade_result}")
         
         if not trade_executed:
             logger.info("")
             logger.info("⏳ No trade conditions met for any strategy")
             logger.info(f"Breakout triggered: {trigger_state.get('breakout_triggered', False)}")
-            logger.info(f"Sweep & Reclaim triggered: {trigger_state.get('reclaim_triggered', False)}")
-            logger.info(f"Breakdown triggered: {trigger_state.get('breakdown_triggered', False)}")
-            logger.info(f"Failed Breakout triggered: {trigger_state.get('fade_triggered', False)}")
+            logger.info(f"Retest/Reclaim triggered: {trigger_state.get('retest_reclaim_triggered', False)}")
+            logger.info(f"Range Break triggered: {trigger_state.get('range_break_triggered', False)}")
+            logger.info(f"Retest/Reject triggered: {trigger_state.get('retest_reject_triggered', False)}")
+            logger.info(f"Active trade direction: {trigger_state.get('active_trade_direction', 'None')}")
         
         logger.info("=== BTC Intraday Alert completed ===")
         return last_ts if trade_executed else last_alert_ts
@@ -880,10 +915,17 @@ def main():
     logger.info("  python crypto_alert_monitor.py --direction LONG   # Monitor only LONG strategies")
     logger.info("  python crypto_alert_monitor.py --direction SHORT  # Monitor only SHORT strategies")
     logger.info("")
+    logger.info("Strategy Overview:")
+    logger.info("  • LONG Breakout: Buy-stop $115,100-$115,300 (HOD + buffer)")
+    logger.info("  • LONG Retest/Reclaim: $114,900-$114,980 (post-breakout higher-low)")
+    logger.info("  • SHORT Range Break: Sell-stop $113,300-$113,450 (LOD - buffer)")
+    logger.info("  • SHORT Retest/Reject: $114,100-$114,250 (lower-high + rejection)")
+    logger.info("  • Position Size: $5,000 USD (250 margin x 20x leverage)")
+    logger.info("")
     
     direction = args.direction.upper()
     
-    logger.info("Starting BTC Plan for Today Alert Monitor")
+    logger.info("Starting BTC Two-Sided Plan Alert Monitor")
     if direction == 'BOTH':
         logger.info("Strategy: Complete Two-Sided BTC Plan - LONG & SHORT")
     else:
