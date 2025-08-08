@@ -79,6 +79,7 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
 PRODUCT_ID = "ETH-PERP-INTX"
 GRANULARITY_1H = "ONE_HOUR"  # 1-hour chart for trigger
 GRANULARITY_5M = "FIVE_MINUTE"  # 5-minute chart for execution
+GRANULARITY_15M = "FIFTEEN_MINUTE"  # 15-minute chart for confirmation
 VOLUME_PERIOD = 20  # For volume confirmation
 
 # Current market context (ETH ≈ $3,686, HOD $3,715.95, LOD $3,578.18)
@@ -89,36 +90,36 @@ TODAYS_RANGE_WIDTH = HOD - LOD  # 137.77 points
 MID_RANGE_PIVOT = (HOD + LOD) / 2  # 3647.065
 
 # LONG (breakout) Strategy Parameters
-BREAKOUT_ENTRY_LOW = 3723  # $3,723–3,730 (HOD + ~0.2%)
-BREAKOUT_ENTRY_HIGH = 3730
-BREAKOUT_STOP_LOSS = 3698  # $3,698 (back inside range)
-BREAKOUT_TP1 = 3780  # TP1: $3,780
-BREAKOUT_TP2_LOW = 3820  # TP2: $3,820–3,850
-BREAKOUT_TP2_HIGH = 3850
+BREAKOUT_ENTRY_LOW = 3955  # Retest zone per plan
+BREAKOUT_ENTRY_HIGH = 3965
+BREAKOUT_STOP_LOSS = 3930  # Invalidation
+BREAKOUT_TP1 = 4000  # TP1
+BREAKOUT_TP2_LOW = 4065  # TP2 range low
+BREAKOUT_TP2_HIGH = 4100  # TP2 range high
 
 # LONG (retest) Strategy Parameters
-RETEST_ENTRY_LOW = 3660  # $3,660–3,670 (prior 1h pivot / VWAP)
-RETEST_ENTRY_HIGH = 3670
-RETEST_STOP_LOSS = 3630  # $3,630
-RETEST_TP1 = 3710  # TP1: $3,710
-RETEST_TP2_LOW = 3750  # TP2: $3,750
-RETEST_TP2_HIGH = 3750
+RETEST_ENTRY_LOW = 3915  # PDH flip zone
+RETEST_ENTRY_HIGH = 3925
+RETEST_STOP_LOSS = 3895  # Invalidation
+RETEST_TP1 = 3965  # TP1
+RETEST_TP2_LOW = 4020  # TP2
+RETEST_TP2_HIGH = 4020
 
 # SHORT (breakdown) Strategy Parameters
-BREAKDOWN_ENTRY_LOW = 3570  # $3,570–3,560 (LOD – ~0.2%)
-BREAKDOWN_ENTRY_HIGH = 3560
-BREAKDOWN_STOP_LOSS = 3598  # $3,598
-BREAKDOWN_TP1 = 3500  # TP1: $3,500
-BREAKDOWN_TP2_LOW = 3450  # TP2: $3,450–3,420
-BREAKDOWN_TP2_HIGH = 3420
+BREAKDOWN_ENTRY_LOW = 3820
+BREAKDOWN_ENTRY_HIGH = 3900
+BREAKDOWN_STOP_LOSS = 3920
+BREAKDOWN_TP1 = 3860
+BREAKDOWN_TP2_LOW = 3820
+BREAKDOWN_TP2_HIGH = 3820
 
 # SHORT (retest) Strategy Parameters
-FADE_ENTRY_LOW = 3620  # $3,620–3,635 (retest broken 1h support)
-FADE_ENTRY_HIGH = 3635
-FADE_STOP_LOSS = 3660  # $3,660
-FADE_TP1 = 3585  # TP1: $3,585
-FADE_TP2_LOW = 3520  # TP2: $3,520
-FADE_TP2_HIGH = 3520
+FADE_ENTRY_LOW = 3955
+FADE_ENTRY_HIGH = 3970
+FADE_STOP_LOSS = 3975
+FADE_TP1 = 3915
+FADE_TP2_LOW = 3890
+FADE_TP2_HIGH = 3890
 
 # Volume confirmation requirements
 VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25× 20-period vol on 1h
@@ -194,12 +195,8 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         logger.info(f"Executing crypto trade: {trade_type} at ${entry_price:,.2f}")
         logger.info(f"Trade params: Margin=${margin}, Leverage={leverage}x, Side={side}, Product={product}")
         
-        # Apply execution guardrails: halve size if volume confirmation not met
-        if not volume_confirmed:
-            position_size_usd = POSITION_SIZE_USD // 2  # Halve the position size
-            logger.warning(f"⚠️ Volume confirmation not met - halving position size to ${position_size_usd:,} USD")
-        else:
-            position_size_usd = POSITION_SIZE_USD  # Use the full position size
+        # Always use full position size per requirement (margin x leverage = $5,000)
+        position_size_usd = POSITION_SIZE_USD
         
         cmd = [
             sys.executable, 'trade_btc_perp.py',
@@ -257,7 +254,7 @@ def check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, 
     # Volume must be confirmed on either 1h OR 5m timeframe
     volume_confirmed = volume_1h_confirmed or volume_5m_confirmed
     
-    logger.info(f"Volume confirmation check:")
+    logger.info("Volume confirmation check:")
     logger.info(f"  1H: {current_volume_1h:,.0f} vs {VOLUME_SURGE_FACTOR_1H}x avg ({avg_volume_1h:,.0f}) -> {'✅' if volume_1h_confirmed else '❌'}")
     logger.info(f"  5M: {current_volume_5m:,.0f} vs {VOLUME_SURGE_FACTOR_5M}x avg ({avg_volume_5m:,.0f}) -> {'✅' if volume_5m_confirmed else '❌'}")
     logger.info(f"  Overall: {'✅' if volume_confirmed else '❌'}")
@@ -456,6 +453,60 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         
         # Check volume confirmation
         volume_confirmed = check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, avg_volume_1h, avg_volume_5m)
+        # === Additional signals per Aug 8, 2025 plan ===
+        volume_1h_confirmed = current_volume_1h >= (VOLUME_SURGE_FACTOR_1H * avg_volume_1h) if avg_volume_1h > 0 else False
+
+        # 15m candles for confirmation / acceptance
+        start_15m = now - timedelta(hours=12)
+        candles_15m = safe_get_candles(cb_service, PRODUCT_ID, int(start_15m.timestamp()), int(now.timestamp()), "FIFTEEN_MINUTE")
+        if candles_15m and len(candles_15m) >= 3:
+            candles_15m = sorted(candles_15m, key=lambda x: int(x['start']))
+            last_15m_close = float(candles_15m[-1]['close'])
+            prev_15m_close = float(candles_15m[-2]['close'])
+        else:
+            last_15m_close = current_close_1h
+            prev_15m_close = current_close_1h
+
+        # 5m latest and previous
+        if candles_5m and len(candles_5m) >= 3:
+            prev_candle_5m = candles_5m[-2]
+            last_5m_close = float(current_candle_5m['close'])
+            last_5m_open = float(current_candle_5m['open'])
+            prev_5m_low = float(prev_candle_5m['low'])
+            last_5m_low = float(current_candle_5m['low'])
+            last_5m_vol = float(current_candle_5m['volume'])
+        else:
+            last_5m_close = float(current_close_1h)
+            last_5m_open = last_5m_close
+            prev_5m_low = last_5m_close
+            last_5m_low = last_5m_close
+            last_5m_vol = 0.0
+
+        # Derived conditions
+        bo_breakout_confirmed = last_15m_close > 3955.0
+        wick_guard = last_5m_close > 3955.0
+        hl_ok = (last_5m_low > prev_5m_low) and (last_5m_close > last_5m_open)
+
+        # Spike into 3955-3970 in recent 5m bars
+        had_spike = False
+        if candles_5m:
+            for c in candles_5m[-18:]:
+                try:
+                    h = float(c['high'])
+                except Exception:
+                    continue
+                if 3955.0 <= h <= 3970.0:
+                    had_spike = True
+                    break
+        reject_close_ok = (last_5m_close < 3950.0) or (last_15m_close < 3950.0)
+
+        # Selling pressure approx: red 5m candle + volume >= 1.3x 5m SMA20 (approx using avg_volume_5m)
+        sma20_prev_5m = avg_volume_5m if avg_volume_5m > 0 else None
+        sell_pressure = (last_5m_close < last_5m_open) and (sma20_prev_5m is not None and last_5m_vol >= 1.3 * sma20_prev_5m)
+
+        # Acceptance below 3900: two consecutive 15m closes below 3900
+        last_two_15m_below = (last_15m_close < 3900.0) and (prev_15m_close < 3900.0)
+
         
         # Filter strategies based on direction parameter
         long_strategies_enabled = direction in ['LONG', 'BOTH']
@@ -472,7 +523,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info(f"   • MID: ${current_mid_range:,.0f}")
         logger.info("")
         logger.info("📊 Global Rules:")
-        logger.info(f"   • Time-frame: 1h trigger, execute on 5–15m")
+        logger.info("   • Time-frame: 1h trigger, execute on 5–15m")
         logger.info(f"   • Volume confirm: ≥{VOLUME_SURGE_FACTOR_1H}x 20-period vol on 1h OR ≥{VOLUME_SURGE_FACTOR_5M}x 20-SMA vol on 5m")
         logger.info(f"   • Risk: size for 1R = {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price")
         logger.info(f"   • Take 30-50% off at +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R; trail remainder")
@@ -488,14 +539,14 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,.0f} (back inside range)")
             logger.info(f"   • TP1: ${BREAKOUT_TP1:,.0f}")
             logger.info(f"   • TP2: ${BREAKOUT_TP2_LOW:,.0f}–${BREAKOUT_TP2_HIGH:,.0f}")
-            logger.info(f"   • Rationale: Fresh expansion beyond HOD with momentum & confirmation")
+            logger.info("   • Rationale: Fresh expansion beyond HOD with momentum & confirmation")
             logger.info("")
             logger.info("Type: Retest")
             logger.info(f"   • Entry: ${RETEST_ENTRY_LOW:,.0f}–${RETEST_ENTRY_HIGH:,.0f} (prior 1h pivot / VWAP)")
             logger.info(f"   • SL: ${RETEST_STOP_LOSS:,.0f}")
             logger.info(f"   • TP1: ${RETEST_TP1:,.0f}")
             logger.info(f"   • TP2: ${RETEST_TP2_LOW:,.0f}")
-            logger.info(f"   • Rationale: Pullback to intraday support; hold > 20 EMA keeps bullish structure")
+            logger.info("   • Rationale: Pullback to intraday support; hold > 20 EMA keeps bullish structure")
             logger.info("")
         
         if short_strategies_enabled:
@@ -506,14 +557,14 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,.0f}")
             logger.info(f"   • TP1: ${BREAKDOWN_TP1:,.0f}")
             logger.info(f"   • TP2: ${BREAKDOWN_TP2_LOW:,.0f}–${BREAKDOWN_TP2_HIGH:,.0f}")
-            logger.info(f"   • Rationale: Range failure + fresh low; room to prior 4h demand")
+            logger.info("   • Rationale: Range failure + fresh low; room to prior 4h demand")
             logger.info("")
             logger.info("Type: Retest")
             logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,.0f}–${FADE_ENTRY_HIGH:,.0f} (retest broken 1h support)")
             logger.info(f"   • SL: ${FADE_STOP_LOSS:,.0f}")
             logger.info(f"   • TP1: ${FADE_TP1:,.0f}")
             logger.info(f"   • TP2: ${FADE_TP2_LOW:,.0f}")
-            logger.info(f"   • Rationale: Acceptance below VWAP; weak bids on rebound signal continuation")
+            logger.info("   • Rationale: Acceptance below VWAP; weak bids on rebound signal continuation")
             logger.info("")
         logger.info("")
         logger.info(f"Current Price: ${current_close_1h:,.2f}")
@@ -609,7 +660,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # 1. LONG - Breakout Strategy
         if long_strategies_enabled and not breakout_state.get("triggered", False) and not breakout_state.get("stopped_out", False):
             in_breakout_zone = BREAKOUT_ENTRY_LOW <= current_close_1h <= BREAKOUT_ENTRY_HIGH
-            breakout_ready = in_breakout_zone and volume_confirmed and breakout_priority
+            breakout_ready = in_breakout_zone and breakout_priority and bo_breakout_confirmed and wick_guard and volume_1h_confirmed
             
             logger.info("🔍 LONG - Breakout Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${BREAKOUT_ENTRY_LOW:,.0f}-${BREAKOUT_ENTRY_HIGH:,.0f}): {'✅' if in_breakout_zone else '❌'}")
@@ -662,7 +713,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # 2. LONG - Retest Strategy
         if not trade_executed and long_strategies_enabled and not retest_state.get("triggered", False) and not retest_state.get("stopped_out", False):
             in_retest_zone = RETEST_ENTRY_LOW <= current_close_1h <= RETEST_ENTRY_HIGH
-            retest_ready = in_retest_zone and volume_confirmed and breakout_priority
+            retest_ready = in_retest_zone and breakout_priority and hl_ok
             
             logger.info("🔍 LONG - Retest Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${RETEST_ENTRY_LOW:,.0f}-${RETEST_ENTRY_HIGH:,.0f}): {'✅' if in_retest_zone else '❌'}")
@@ -715,7 +766,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # 3. SHORT - Breakdown Strategy
         if not trade_executed and short_strategies_enabled and not breakdown_state.get("triggered", False) and not breakdown_state.get("stopped_out", False):
             in_breakdown_zone = BREAKDOWN_ENTRY_LOW <= current_close_1h <= BREAKDOWN_ENTRY_HIGH
-            breakdown_ready = in_breakdown_zone and volume_confirmed and breakdown_priority
+            breakdown_ready = in_breakdown_zone and breakdown_priority and last_two_15m_below and volume_1h_confirmed
             
             logger.info("🔍 SHORT - Breakdown Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${BREAKDOWN_ENTRY_LOW:,.0f}-${BREAKDOWN_ENTRY_HIGH:,.0f}): {'✅' if in_breakdown_zone else '❌'}")
@@ -768,7 +819,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # 4. SHORT - Retest Strategy
         if not trade_executed and short_strategies_enabled and not fade_state.get("triggered", False) and not fade_state.get("stopped_out", False):
             in_fade_zone = FADE_ENTRY_LOW <= current_close_1h <= FADE_ENTRY_HIGH
-            fade_ready = in_fade_zone and volume_confirmed and breakdown_priority
+            fade_ready = in_fade_zone and breakdown_priority and had_spike and reject_close_ok and sell_pressure
             
             logger.info("🔍 SHORT - Retest Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${FADE_ENTRY_LOW:,.0f}-${FADE_ENTRY_HIGH:,.0f}): {'✅' if in_fade_zone else '❌'}")
@@ -824,7 +875,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             if direction != 'BOTH':
                 logger.info(f"   Direction filter: {direction} only")
             if not volume_confirmed:
-                logger.info(f"   Volume confirmation not met")
+                logger.info("   Volume confirmation not met")
             
             if long_strategies_enabled:
                 if breakout_state.get("triggered", False):
@@ -948,7 +999,7 @@ def main():
             consecutive_failures += 1
             logger.error(f"🔗 Connection error (failure {consecutive_failures}/{max_consecutive_failures}): {e}")
             if consecutive_failures >= max_consecutive_failures:
-                logger.error(f"❌ Too many consecutive connection failures. Attempting to reconnect...")
+                logger.error("❌ Too many consecutive connection failures. Attempting to reconnect...")
                 try:
                     cb_service = setup_coinbase()
                     consecutive_failures = 0
