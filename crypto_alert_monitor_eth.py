@@ -935,29 +935,330 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
 
 
+# --- ETH Intraday Plan (Aug 9, 2025) ---
+def eth_intraday_plan_alert(cb_service, last_alert_ts=None, max_trades_per_day: int = 1):
+    """
+    ETH intraday plan per Aug 9, 2025:
+    - Trigger/Acceptance on 15m with 1h VWAP filter
+    - Volume: 15m volume >= 1.25x SMA20
+    - Entry: limit on retest of level ±$3; else market on new 15m HH/LL within 30m
+    - SL: trigger bar extreme ± 0.5× ATR(14, 15m) with floor/ceiling 0.8%
+    - TP: 1.2R (primary bracket). Log 2.2R and 21-EMA trailing plan
+    - Guards: max trades/day, chop filter, news-gap safety, 45m no-fill timeout
+    - Position size: $5,000 notional (250 × 20)
+    """
+
+    def candles_to_df(candles_list):
+        if not candles_list:
+            return pd.DataFrame(columns=["start", "open", "high", "low", "close", "volume"])
+        rows = []
+        for c in candles_list:
+            try:
+                rows.append({
+                    'start': int(c['start']),
+                    'open': float(c['open']),
+                    'high': float(c['high']),
+                    'low': float(c['low']),
+                    'close': float(c['close']),
+                    'volume': float(c['volume'])
+                })
+            except Exception:
+                continue
+        return pd.DataFrame(rows).sort_values('start').reset_index(drop=True)
+
+    def compute_atr(df: pd.DataFrame, period: int = 14) -> float:
+        if df is None or df.empty or len(df) < period + 1:
+            return 0.0
+        highs = df['high']
+        lows = df['low']
+        closes = df['close']
+        tr1 = highs - lows
+        tr2 = (highs - closes.shift(1)).abs()
+        tr3 = (lows - closes.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr_series = tr.rolling(window=period).mean()
+        return float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else 0.0
+
+    def ema(series: pd.Series, length: int) -> float:
+        if series is None or len(series) < length:
+            return 0.0
+        return float(series.ewm(span=length, adjust=False).mean().iloc[-1])
+
+    def compute_vwap(df: pd.DataFrame) -> float:
+        if df is None or df.empty:
+            return 0.0
+        tp = (df['high'] + df['low'] + df['close']) / 3.0
+        pv = tp * df['volume']
+        total_vol = df['volume'].sum()
+        return float(pv.sum() / total_vol) if total_vol > 0 else 0.0
+
+    def get_min_base_size(product_id: str) -> float:
+        return {'ETH-PERP-INTX': 0.001}.get(product_id, 0.001)
+
+    def calc_base_size(product_id: str, notional_usd: float, px: float) -> float:
+        min_sz = get_min_base_size(product_id)
+        raw = notional_usd / max(px, 1e-9)
+        decimals = len(str(min_sz).split('.')[-1])
+        size = round(raw, decimals)
+        return max(size, min_sz)
+
+    # --- State ---
+    state_file = "eth_intraday_trigger_state.json"
+    state = load_trigger_state(state_file)
+    now = datetime.now(UTC)
+
+    # Reset daily counter
+    today_str = now.strftime('%Y-%m-%d')
+    if state.get('last_trade_date') != today_str:
+        state['trades_today'] = 0
+        state['last_trade_date'] = today_str
+        state['active_side'] = None
+        state['awaiting_acceptance'] = False
+        state['trigger_info'] = None
+        state['accepted_info'] = None
+        state['entry_done'] = False
+        save_trigger_state(state, state_file)
+
+    if int(state.get('trades_today', 0)) >= max_trades_per_day:
+        logger.info(f"⏹ Max trades for the day reached ({max_trades_per_day}).")
+        return last_alert_ts
+
+    try:
+        # 15m for trigger/volume/ATR
+        start_15m = now - timedelta(hours=48)
+        candles_15m = safe_get_candles(cb_service, PRODUCT_ID, int(start_15m.timestamp()), int(now.timestamp()), GRANULARITY_15M)
+        if not candles_15m or len(candles_15m) < 40:
+            logger.warning("Not enough 15m data")
+            return last_alert_ts
+        df15 = candles_to_df(candles_15m)
+
+        # 5m for 1h VWAP (12 bars)
+        start_5m = now - timedelta(hours=1, minutes=5)
+        candles_5m = safe_get_candles(cb_service, PRODUCT_ID, int(start_5m.timestamp()), int(now.timestamp()), GRANULARITY_5M)
+        df5 = candles_to_df(candles_5m)
+
+        current_price = float(df15['close'].iloc[-1])
+
+        # Volume SMA20 on 15m (use last completed bar for SMA)
+        df15['vol_sma20'] = df15['volume'].rolling(window=20).mean()
+        last_vol_15m = float(df15['volume'].iloc[-1])
+        vol_sma20_prev = float(df15['vol_sma20'].iloc[-2]) if len(df15) >= 22 else 0.0
+        vol_ok = (last_vol_15m >= 1.25 * vol_sma20_prev) if vol_sma20_prev > 0 else False
+
+        # ATR and ATR%
+        atr_val = compute_atr(df15)
+        atr_pct = (atr_val / current_price) * 100 if current_price > 0 else 0.0
+
+        # 1h VWAP from last 12×5m
+        vwap_1h = compute_vwap(df5.tail(12))
+
+        # 21-EMA(15m) for trailing plan (logged only)
+        ema21_15m = ema(df15['close'], 21)
+
+        # Last completed and current 15m bars
+        cprev = df15.iloc[-2]
+        clast = df15.iloc[-1]
+
+        LONG_LEVEL = 4095.0
+        SHORT_LEVEL = 3881.0
+        BAND = 3.0
+
+        long_trigger = clast['close'] > LONG_LEVEL
+        short_trigger = clast['close'] < SHORT_LEVEL
+
+        # Chop filter at trigger
+        chop = (atr_pct < 0.25) and (abs(clast['close'] - vwap_1h) / clast['close'] < 0.001)
+
+        trg = state.get('trigger_info')
+        acc = state.get('accepted_info')
+
+        # Record trigger
+        if state.get('active_side') is None and not state.get('awaiting_acceptance', False):
+            if long_trigger and vol_ok and not chop:
+                state['active_side'] = 'LONG'
+                state['awaiting_acceptance'] = True
+                state['trigger_info'] = {
+                    'level': LONG_LEVEL,
+                    'bar_close': float(clast['close']),
+                    'bar_low': float(clast['low']),
+                    'bar_high': float(clast['high']),
+                    'bar_start': int(clast['start'])
+                }
+                save_trigger_state(state, state_file)
+                logger.info("🔔 LONG trigger fired (15m close > 4095). Waiting for acceptance…")
+                play_alert_sound()
+            elif short_trigger and vol_ok and not chop:
+                state['active_side'] = 'SHORT'
+                state['awaiting_acceptance'] = True
+                state['trigger_info'] = {
+                    'level': SHORT_LEVEL,
+                    'bar_close': float(clast['close']),
+                    'bar_low': float(clast['low']),
+                    'bar_high': float(clast['high']),
+                    'bar_start': int(clast['start'])
+                }
+                save_trigger_state(state, state_file)
+                logger.info("🔔 SHORT trigger fired (15m close < 3881). Waiting for acceptance…")
+                play_alert_sound()
+
+        # Acceptance check on next bar
+        if state.get('awaiting_acceptance', False) and trg is None:
+            trg = state.get('trigger_info')
+
+        if state.get('awaiting_acceptance', False) and trg is not None and acc is None:
+            side = state.get('active_side')
+            accept_ok = False
+            trigger_start = trg['bar_start']
+            idx_list = df15.index[df15['start'] == trigger_start].tolist()
+            if idx_list:
+                i = idx_list[0]
+                if i + 1 < len(df15):
+                    acc_bar = df15.iloc[i + 1]
+                    gap = abs(float(acc_bar['open']) - float(trg['bar_close'])) / float(trg['bar_close']) if trg['bar_close'] > 0 else 0.0
+                    if gap > 0.007:
+                        logger.info("⛔ News-gap safety tripped (>0.7%). Standing down.")
+                        state['active_side'] = None
+                        state['awaiting_acceptance'] = False
+                        state['trigger_info'] = None
+                        save_trigger_state(state, state_file)
+                        return last_alert_ts
+                    if side == 'LONG':
+                        accept_ok = (float(acc_bar['close']) > LONG_LEVEL) and (current_price > vwap_1h)
+                    else:
+                        accept_ok = (float(acc_bar['close']) < SHORT_LEVEL) and (current_price < vwap_1h)
+                    if accept_ok:
+                        state['accepted_info'] = {
+                            'bar_start': int(acc_bar['start']),
+                            'bar_high': float(acc_bar['high']),
+                            'bar_low': float(acc_bar['low']),
+                            'accepted_at': int(now.timestamp())
+                        }
+                        state['awaiting_acceptance'] = False
+                        save_trigger_state(state, state_file)
+                        logger.info(f"✅ {side} acceptance confirmed; 1h VWAP filter passed. Watching for retest or HH/LL…")
+                        play_alert_sound()
+
+        # Entry logic after acceptance
+        acc = state.get('accepted_info')
+        if acc is not None and state.get('active_side') in ['LONG', 'SHORT'] and not state.get('entry_done', False):
+            side = state['active_side']
+            level = LONG_LEVEL if side == 'LONG' else SHORT_LEVEL
+            lower = level - BAND
+            upper = level + BAND
+            in_band = (lower <= float(clast['low']) <= upper) or (lower <= float(clast['high']) <= upper)
+            accept_time = datetime.fromtimestamp(int(acc['accepted_at']), UTC)
+            timeout_30m = now >= (accept_time + timedelta(minutes=30))
+            hh_ll = (side == 'LONG' and float(clast['high']) > float(acc['bar_high'])) or \
+                    (side == 'SHORT' and float(clast['low']) < float(acc['bar_low']))
+
+            # Compute SL/TP using trigger extremes and ATR
+            trigger_low = float(state['trigger_info']['bar_low']) if state.get('trigger_info') else float(cprev['low'])
+            trigger_high = float(state['trigger_info']['bar_high']) if state.get('trigger_info') else float(cprev['high'])
+            entry_ref = level if in_band and not timeout_30m else current_price
+            if side == 'LONG':
+                sl_raw = trigger_low - 0.5 * atr_val
+                sl_floor = entry_ref * (1 - 0.008)
+                sl = min(sl_raw, sl_floor)
+                r = entry_ref - sl
+                tp1 = round(entry_ref + 1.2 * r, 2)
+            else:
+                sl_raw = trigger_high + 0.5 * atr_val
+                sl_ceiling = entry_ref * (1 + 0.008)
+                sl = max(sl_raw, sl_ceiling)
+                r = sl - entry_ref
+                tp1 = round(entry_ref - 1.2 * r, 2)
+            sl = round(sl, 2)
+
+            # Entry preference: limit on retest; else market on HH/LL within 30m
+            if in_band and not timeout_30m:
+                limit_price = round(level, 2)
+                base_sz = calc_base_size(PRODUCT_ID, POSITION_SIZE_USD, limit_price)
+                logger.info(f"🎯 {side} retest entry via limit: level=${limit_price:.2f} | SL=${sl:.2f} | TP1=${tp1:.2f} | ATR%={atr_pct:.2f}% | VWAP1h=${vwap_1h:.2f}")
+                try:
+                    play_alert_sound()
+                except Exception:
+                    pass
+                try:
+                    res = cb_service.place_limit_order_with_targets(
+                        product_id=PRODUCT_ID,
+                        side='BUY' if side == 'LONG' else 'SELL',
+                        size=base_sz,
+                        entry_price=limit_price,
+                        take_profit_price=tp1,
+                        stop_loss_price=sl,
+                        leverage=str(LEVERAGE)
+                    )
+                    if 'error' in res:
+                        logger.error(f"❌ Limit order error: {res['error']}")
+                    else:
+                        logger.info("⏳ Monitoring limit for fill up to 45m and placing brackets if needed…")
+                        mon = cb_service.monitor_limit_order_and_place_bracket(
+                            product_id=PRODUCT_ID,
+                            order_id=res.get('order_id'),
+                            size=base_sz,
+                            take_profit_price=tp1,
+                            stop_loss_price=sl,
+                            leverage=str(LEVERAGE),
+                            max_wait_time=2700
+                        )
+                        if mon.get('status') == 'success':
+                            state['entry_done'] = True
+                            state['trades_today'] = int(state.get('trades_today', 0)) + 1
+                            save_trigger_state(state, state_file)
+                            logger.info("✅ Limit filled and bracket placed")
+                except Exception as e:
+                    logger.error(f"Limit entry failed: {e}")
+            elif timeout_30m and hh_ll:
+                entry_price = current_price
+                base_sz = calc_base_size(PRODUCT_ID, POSITION_SIZE_USD, entry_price)
+                logger.info(f"🎯 {side} market entry on HH/LL: entry≈${entry_price:.2f} | SL=${sl:.2f} | TP1=${tp1:.2f}")
+                try:
+                    play_alert_sound()
+                except Exception:
+                    pass
+                try:
+                    result = cb_service.place_market_order_with_targets(
+                        product_id=PRODUCT_ID,
+                        side='BUY' if side == 'LONG' else 'SELL',
+                        size=base_sz,
+                        take_profit_price=tp1,
+                        stop_loss_price=sl,
+                        leverage=str(LEVERAGE)
+                    )
+                    if 'error' in result:
+                        logger.error(f"❌ Order error: {result['error']}")
+                    else:
+                        logger.info("✅ Order placed with TP1/SL bracket")
+                        state['entry_done'] = True
+                        state['trades_today'] = int(state.get('trades_today', 0)) + 1
+                        save_trigger_state(state, state_file)
+                except Exception as e:
+                    logger.error(f"Market entry failed: {e}")
+
+            # No-fill timeout after acceptance
+            if now >= (datetime.fromtimestamp(int(acc['accepted_at']), UTC) + timedelta(minutes=45)) and not state.get('entry_done'):
+                logger.info("⏹ No-fill timeout (45m) after acceptance — standing down.")
+                state['active_side'] = None
+                state['trigger_info'] = None
+                state['accepted_info'] = None
+                state['awaiting_acceptance'] = False
+                save_trigger_state(state, state_file)
+
+        logger.info("=== ETH intraday plan check completed ===")
+        return now
+    except Exception as e:
+        logger.error(f"Error in ETH intraday plan: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return last_alert_ts
 # Replace main loop to use new alert
 def main():
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description='ETH-USD Trading Strategy Monitor with optional direction filter')
-    parser.add_argument('--direction', choices=['LONG', 'SHORT', 'BOTH'], default='BOTH',
-                       help='Trading direction to monitor: LONG, SHORT, or BOTH (default: BOTH)')
+    parser = argparse.ArgumentParser(description='ETH Intraday Plan Monitor')
+    parser.add_argument('--max-trades', type=int, default=1, help='Max trades per day (default: 1)')
     args = parser.parse_args()
-    
-    # Print usage examples
-    logger.info("Usage examples:")
-    logger.info("  python crypto_alert_monitor_eth.py                    # Monitor both LONG and SHORT strategies")
-    logger.info("  python crypto_alert_monitor_eth.py --direction LONG   # Monitor only LONG strategies")
-    logger.info("  python crypto_alert_monitor_eth.py --direction SHORT  # Monitor only SHORT strategies")
-    logger.info("")
-    
-    direction = args.direction.upper()
-    
-    logger.info("Starting ETH-USD Trading Strategy Monitor")
-    if direction == 'BOTH':
-        logger.info("Strategy: Clean Two-Sided ETH Plan - LONG & SHORT with One-Side Management")
-    else:
-        logger.info(f"Strategy: {direction} only")
-    logger.info("")
+
+    logger.info("Starting ETH Intraday Plan Monitor (15m triggers, 1h VWAP acceptance, retest-or-market entries)")
+    logger.info(f"Max trades today: {args.max_trades}")
     
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -972,13 +1273,13 @@ def main():
     last_alert_ts = None
     consecutive_failures = 0
     max_consecutive_failures = 5
-    
+
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = eth_trading_strategy_alert(cb_service, last_alert_ts, direction)
+        last_alert_ts = eth_intraday_plan_alert(cb_service, last_alert_ts, max_trades_per_day=args.max_trades)
         consecutive_failures = 0
-        logger.info(f"✅ ETH alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
+        logger.info(f"✅ ETH alert cycle completed in {time.time() - iteration_start_time:.1f} seconds")
     
     while True:
         try:
