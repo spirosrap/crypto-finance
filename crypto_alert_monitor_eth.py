@@ -747,8 +747,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • Price in entry zone (${BREAKOUT_ENTRY_LOW:,.0f}-${BREAKOUT_ENTRY_HIGH:,.0f}): {'✅' if in_breakout_zone else '❌'}")
             logger.info(f"   • Volume confirmed (1H: {current_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}x, 5M: {current_volume_5m/avg_volume_5m if avg_volume_5m > 0 else 0:.2f}x): {'✅' if volume_confirmed else '❌'}")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
-            logger.info(f"   • Already triggered: {'✅' if breakout_state.get("triggered", False) else '❌'}")
-            logger.info(f"   • Stopped out: {'✅' if breakout_state.get("stopped_out", False) else '❌'}")
+            logger.info(f"   • Already triggered: {'✅' if breakout_state.get('triggered', False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if breakout_state.get('stopped_out', False) else '❌'}")
             logger.info(f"   • Breakout Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
             
             if breakout_ready:
@@ -803,8 +803,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
             logger.info(f"   • Sweep and reclaim confirmed: {'✅' if sweep_and_reclaim_confirmed else '❌'} ({sweep_reclaim_status})")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
-            logger.info(f"   • Already triggered: {'✅' if retest_state.get("triggered", False) else '❌'}")
-            logger.info(f"   • Stopped out: {'✅' if retest_state.get("stopped_out", False) else '❌'}")
+            logger.info(f"   • Already triggered: {'✅' if retest_state.get('triggered', False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if retest_state.get('stopped_out', False) else '❌'}")
             logger.info(f"   • Retest Ready: {'🎯 YES' if retest_ready else '⏳ NO'}")
             
             if retest_ready:
@@ -858,8 +858,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • Price in entry zone (${BREAKDOWN_ENTRY_LOW:,.0f}-${BREAKDOWN_ENTRY_HIGH:,.0f}): {'✅' if in_breakdown_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
-            logger.info(f"   • Already triggered: {'✅' if breakdown_state.get("triggered", False) else '❌'}")
-            logger.info(f"   • Stopped out: {'✅' if breakdown_state.get("stopped_out", False) else '❌'}")
+            logger.info(f"   • Already triggered: {'✅' if breakdown_state.get('triggered', False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if breakdown_state.get('stopped_out', False) else '❌'}")
             logger.info(f"   • Breakdown Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
             
             if breakdown_ready:
@@ -914,8 +914,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
             logger.info(f"   • Spike and rejection confirmed: {'✅' if spike_and_rejection_confirmed else '❌'} ({spike_rejection_status})")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
-            logger.info(f"   • Already triggered: {'✅' if fade_state.get("triggered", False) else '❌'}")
-            logger.info(f"   • Stopped out: {'✅' if fade_state.get("stopped_out", False) else '❌'}")
+            logger.info(f"   • Already triggered: {'✅' if fade_state.get('triggered', False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if fade_state.get('stopped_out', False) else '❌'}")
             logger.info(f"   • Fade Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
             
             if fade_ready:
