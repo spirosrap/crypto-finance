@@ -81,44 +81,44 @@ GRANULARITY_1H = "ONE_HOUR"  # 1-hour chart for trigger
 GRANULARITY_5M = "FIVE_MINUTE"  # 5-minute chart for execution
 VOLUME_PERIOD = 20  # For volume confirmation
 
-# Current market context (ETH ≈ $3,686, HOD $3,715.95, LOD $3,578.18)
-CURRENT_ETH_PRICE = 3686.00
-HOD = 3715.95  # High of day
-LOD = 3578.18  # Low of day
-TODAYS_RANGE_WIDTH = HOD - LOD  # 137.77 points
-MID_RANGE_PIVOT = (HOD + LOD) / 2  # 3647.065
+# Current market context (ETH ≈ $4,170, HOD $4,200, LOD $4,008 as of Aug 9)
+CURRENT_ETH_PRICE = 4170.00
+HOD = 4200.00  # High of day
+LOD = 4008.00  # Low of day
+TODAYS_RANGE_WIDTH = HOD - LOD  # 192 points
+MID_RANGE_PIVOT = (HOD + LOD) / 2  # 4104.00
 
 # LONG (breakout) Strategy Parameters
-BREAKOUT_ENTRY_LOW = 3723  # $3,723–3,730 (HOD + ~0.2%)
-BREAKOUT_ENTRY_HIGH = 3730
-BREAKOUT_STOP_LOSS = 3698  # $3,698 (back inside range)
-BREAKOUT_TP1 = 3780  # TP1: $3,780
-BREAKOUT_TP2_LOW = 3820  # TP2: $3,820–3,850
-BREAKOUT_TP2_HIGH = 3850
+BREAKOUT_ENTRY_LOW = 4205  # $4,205–4,215 (above HOD + buffer)
+BREAKOUT_ENTRY_HIGH = 4215
+BREAKOUT_STOP_LOSS = 4160  # $4,160 (back inside prior range)
+BREAKOUT_TP1 = 4245  # TP1: $4,245
+BREAKOUT_TP2_LOW = 4265  # TP2: $4,265–4,290
+BREAKOUT_TP2_HIGH = 4290
 
 # LONG (retest) Strategy Parameters
-RETEST_ENTRY_LOW = 3660  # $3,660–3,670 (prior 1h pivot / VWAP)
-RETEST_ENTRY_HIGH = 3670
-RETEST_STOP_LOSS = 3630  # $3,630
-RETEST_TP1 = 3710  # TP1: $3,710
-RETEST_TP2_LOW = 3750  # TP2: $3,750
-RETEST_TP2_HIGH = 3750
+RETEST_ENTRY_LOW = 4090  # $4,090–4,110 only after sweep of 4,080–4,100 and 5–15m reclaim
+RETEST_ENTRY_HIGH = 4110
+RETEST_STOP_LOSS = 4045  # $4,045 (beneath reclaimed base)
+RETEST_TP1 = 4160  # TP1: $4,160
+RETEST_TP2_LOW = 4200  # TP2: $4,200–4,220
+RETEST_TP2_HIGH = 4220
 
 # SHORT (breakdown) Strategy Parameters
-BREAKDOWN_ENTRY_LOW = 3570  # $3,570–3,560 (LOD – ~0.2%)
-BREAKDOWN_ENTRY_HIGH = 3560
-BREAKDOWN_STOP_LOSS = 3598  # $3,598
-BREAKDOWN_TP1 = 3500  # TP1: $3,500
-BREAKDOWN_TP2_LOW = 3450  # TP2: $3,450–3,420
-BREAKDOWN_TP2_HIGH = 3420
+BREAKDOWN_ENTRY_LOW = 3990  # $3,990–4,000 (through LOD/psych 4k)
+BREAKDOWN_ENTRY_HIGH = 4000
+BREAKDOWN_STOP_LOSS = 4045  # $4,045
+BREAKDOWN_TP1 = 3925  # TP1: $3,925
+BREAKDOWN_TP2_LOW = 3860  # TP2: $3,860–3,880
+BREAKDOWN_TP2_HIGH = 3880
 
-# SHORT (retest) Strategy Parameters
-FADE_ENTRY_LOW = 3620  # $3,620–3,635 (retest broken 1h support)
-FADE_ENTRY_HIGH = 3635
-FADE_STOP_LOSS = 3660  # $3,660
-FADE_TP1 = 3585  # TP1: $3,585
-FADE_TP2_LOW = 3520  # TP2: $3,520
-FADE_TP2_HIGH = 3520
+# SHORT (fade into resistance) Strategy Parameters
+FADE_ENTRY_LOW = 4210  # $4,210–4,225 only if spike + rejection (upper wick on 5–15m and RSI/MACD roll)
+FADE_ENTRY_HIGH = 4225
+FADE_STOP_LOSS = 4245  # $4,245
+FADE_TP1 = 4160  # TP1: $4,160
+FADE_TP2_LOW = 4110  # TP2: $4,110
+FADE_TP2_HIGH = 4110
 
 # Volume confirmation requirements
 VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25× 20-period vol on 1h
@@ -134,6 +134,11 @@ PARTIAL_PROFIT_RANGE_HIGH = 1.5  # Partial at +1.5R
 MARGIN = 250  # USD
 LEVERAGE = 20  # 20x leverage
 POSITION_SIZE_USD = MARGIN * LEVERAGE  # 5000 USD
+
+# Execution guardrails
+MAX_TRADES_PER_DAY = 2  # Session limit: max 2 trades today
+MODE = "FAST"  # FAST = 5–15m break + volume; CONSERVATIVE = wait 1h close through the level
+VCONF = True  # enforce volume rule
 
 # State files for each strategy
 BREAKOUT_TRIGGER_FILE = "eth_breakout_trigger_state.json"
@@ -311,27 +316,139 @@ def check_new_structure_formation(cb_service, current_ts, previous_hod, previous
         logger.error(f"Error checking new structure formation: {e}")
         return False, previous_hod, previous_lod
 
+def check_sweep_and_reclaim(cb_service, current_ts):
+    """
+    Check for sweep of 4080–4100 and 5–15m reclaim (close back above 4,100)
+    Required for LONG retest strategy
+    """
+    try:
+        # Get recent 5-minute candles to check for sweep and reclaim
+        end = current_ts
+        start = current_ts - timedelta(hours=2)  # Check last 2 hours
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        
+        candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_5M)
+        
+        if not candles_5m or len(candles_5m) < 10:
+            return False, "Not enough 5m data"
+        
+        candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
+        
+        # Check for sweep of 4080-4100 (price went below 4100)
+        sweep_zone_low = 4080
+        sweep_zone_high = 4100
+        reclaim_level = 4100
+        
+        sweep_detected = False
+        reclaim_detected = False
+        
+        for candle in candles_5m[-20:]:  # Check last 20 5m candles
+            high = float(candle['high'])
+            low = float(candle['low'])
+            close = float(candle['close'])
+            
+            # Check for sweep (price went below 4100)
+            if low <= sweep_zone_high and not sweep_detected:
+                sweep_detected = True
+                logger.info(f"Sweep detected: 5m low ${low:,.2f} <= ${sweep_zone_high:,.2f}")
+            
+            # Check for reclaim (close back above 4100) after sweep
+            if sweep_detected and close >= reclaim_level and not reclaim_detected:
+                reclaim_detected = True
+                logger.info(f"Reclaim detected: 5m close ${close:,.2f} >= ${reclaim_level:,.2f}")
+        
+        sweep_and_reclaim = sweep_detected and reclaim_detected
+        
+        logger.info(f"Sweep and reclaim check: Sweep={'✅' if sweep_detected else '❌'}, Reclaim={'✅' if reclaim_detected else '❌'}")
+        logger.info(f"Overall: {'✅' if sweep_and_reclaim else '❌'}")
+        
+        return sweep_and_reclaim, f"Sweep: {sweep_detected}, Reclaim: {reclaim_detected}"
+        
+    except Exception as e:
+        logger.error(f"Error checking sweep and reclaim: {e}")
+        return False, str(e)
+
+def check_spike_and_rejection(cb_service, current_ts):
+    """
+    Check for spike + rejection (upper wick on 5–15m and RSI/MACD roll)
+    Required for SHORT fade strategy
+    """
+    try:
+        # Get recent 5-minute candles to check for spike and rejection
+        end = current_ts
+        start = current_ts - timedelta(hours=2)  # Check last 2 hours
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        
+        candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_5M)
+        
+        if not candles_5m or len(candles_5m) < 10:
+            return False, "Not enough 5m data"
+        
+        candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
+        
+        # Check last few 5m candles for spike and rejection pattern
+        recent_candles = candles_5m[-5:]  # Last 5 candles
+        
+        spike_detected = False
+        rejection_detected = False
+        
+        for i, candle in enumerate(recent_candles):
+            high = float(candle['high'])
+            low = float(candle['low'])
+            close = float(candle['close'])
+            open_price = float(candle['open'])
+            
+            # Calculate wick size
+            upper_wick = high - max(open_price, close)
+            body_size = abs(close - open_price)
+            
+            # Check for spike (upper wick > 50% of body size)
+            if upper_wick > (body_size * 0.5) and high >= 4210:
+                spike_detected = True
+                logger.info(f"Spike detected: 5m high ${high:,.2f}, upper wick ${upper_wick:,.2f} > ${body_size * 0.5:,.2f}")
+            
+            # Check for rejection (close below open after spike, or close near low)
+            if spike_detected and (close < open_price or close <= (low + (high - low) * 0.3)):
+                rejection_detected = True
+                logger.info(f"Rejection detected: 5m close ${close:,.2f} < open ${open_price:,.2f}")
+        
+        spike_and_rejection = spike_detected and rejection_detected
+        
+        logger.info(f"Spike and rejection check: Spike={'✅' if spike_detected else '❌'}, Rejection={'✅' if rejection_detected else '❌'}")
+        logger.info(f"Overall: {'✅' if spike_and_rejection else '❌'}")
+        
+        return spike_and_rejection, f"Spike: {spike_detected}, Rejection: {rejection_detected}"
+        
+    except Exception as e:
+        logger.error(f"Error checking spike and rejection: {e}")
+        return False, str(e)
+
 
 
 # --- ETH Trading Strategy Alert Logic ---
 def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
     ETH-USD Trading Strategy Alert - Implements clean two-sided ETH plan with current levels
-    Based on the trading plan: "Spiros — here's a clean, two-sided plan for today based on live levels"
+    Based on the trading plan: "Spiros — here's a clean, two-sided ETH plan for today using UTC session levels"
     
     Rules (both directions):
-    - Time-frame: 1h trigger, execute on 5–15m
-    - Volume confirm: ≥ 1.25× 20-period vol on 1h OR ≥ 2× 20-SMA vol on 5m at trigger
-    - Risk: size for 1R = 0.8–1.2% of price; take 30-50% off at +1.0–1.5R; trail remainder
+    - Timeframe: 1h structure; execute on 5–15m
+    - Trigger acceptance: FAST (default) = 5–15m break + volume; CONSERVATIVE = wait 1h close through the level
+    - Volume confirm: ≥1.25× 20-period vol on 1h OR ≥2× 20-SMA vol on 5m at trigger
+    - Orders: market-on-trigger bracket (OCO) only; bot scans for conditions
+    - Risk: size so 1R ≈ 0.8–1.2% of price; partial at +1.0–1.5R
+    - Session limit: max 2 trades today; do not run long + short simultaneously
     - Position Size: Always margin x leverage = 250 x 20 = $5,000 USD
     
     LONG SETUPS:
-    - Breakout: Buy-stop $3,723–3,730 (HOD + ~0.2%), SL $3,698, TP1 $3,780, TP2 $3,820–3,850
-    - Retest: $3,660–3,670 (prior 1h pivot/VWAP), SL $3,630, TP1 $3,710, TP2 $3,750
+    - Breakout: market buy on break 4205–4215 (above HOD + buffer), SL 4160, TP1 4245, TP2 4265–4290
+    - Retest: 4090–4110 only after sweep of 4080–4100 and 5–15m reclaim (close back above 4,100), SL 4045, TP1 4160, TP2 4200–4220
     
     SHORT SETUPS:
-    - Breakdown: Sell-stop $3,570–3,560 (LOD – ~0.2%), SL $3,598, TP1 $3,500, TP2 $3,450–3,420
-    - Retest: $3,620–3,635 (retest broken 1h support), SL $3,660, TP1 $3,585, TP2 $3,520
+    - Breakdown: market sell on break 3990–4000 (through LOD/psych 4k), SL 4045, TP1 3925, TP2 3860–3880
+    - Fade: 4210–4225 only if spike + rejection (upper wick on 5–15m and RSI/MACD roll), SL 4245, TP1 4160, TP2 4110
     
     Args:
         cb_service: Coinbase service instance
@@ -463,7 +580,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Spiros — Clean Two-Sided ETH Plan for Today (Live Levels) Alert")
+        logger.info("🚀 Spiros — Clean Two-Sided ETH Plan for Today (UTC Session Levels) Alert")
         logger.info("")
         logger.info("📊 Today's Levels:")
         logger.info(f"   • ETH ≈ ${current_close_1h:,.0f}")
@@ -472,10 +589,13 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info(f"   • MID: ${current_mid_range:,.0f}")
         logger.info("")
         logger.info("📊 Global Rules:")
-        logger.info(f"   • Time-frame: 1h trigger, execute on 5–15m")
+        logger.info(f"   • Timeframe: 1h structure; execute on 5–15m")
+        logger.info(f"   • Trigger acceptance: {MODE} = 5–15m break + volume")
         logger.info(f"   • Volume confirm: ≥{VOLUME_SURGE_FACTOR_1H}x 20-period vol on 1h OR ≥{VOLUME_SURGE_FACTOR_5M}x 20-SMA vol on 5m")
-        logger.info(f"   • Risk: size for 1R = {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price")
-        logger.info(f"   • Take 30-50% off at +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R; trail remainder")
+        logger.info(f"   • Orders: market-on-trigger bracket (OCO) only")
+        logger.info(f"   • Risk: size so 1R ≈ {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price")
+        logger.info(f"   • Partial at +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
+        logger.info(f"   • Session limit: max {MAX_TRADES_PER_DAY} trades today")
         logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
         logger.info("")
         
@@ -484,36 +604,36 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info("📊 LONG SETUPS:")
             logger.info("")
             logger.info("Type: Breakout")
-            logger.info(f"   • Entry: Buy-stop ${BREAKOUT_ENTRY_LOW:,.0f}–${BREAKOUT_ENTRY_HIGH:,.0f} (HOD + ~0.2%)")
-            logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,.0f} (back inside range)")
+            logger.info(f"   • Entry: market buy on break ${BREAKOUT_ENTRY_LOW:,.0f}–${BREAKOUT_ENTRY_HIGH:,.0f} (above HOD + buffer)")
+            logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,.0f} (back inside prior range)")
             logger.info(f"   • TP1: ${BREAKOUT_TP1:,.0f}")
             logger.info(f"   • TP2: ${BREAKOUT_TP2_LOW:,.0f}–${BREAKOUT_TP2_HIGH:,.0f}")
-            logger.info(f"   • Rationale: Fresh expansion beyond HOD with momentum & confirmation")
+            logger.info(f"   • Rationale: Expansion above session highs with strong tape tends to trend when 4.2k clears on volume")
             logger.info("")
             logger.info("Type: Retest")
-            logger.info(f"   • Entry: ${RETEST_ENTRY_LOW:,.0f}–${RETEST_ENTRY_HIGH:,.0f} (prior 1h pivot / VWAP)")
-            logger.info(f"   • SL: ${RETEST_STOP_LOSS:,.0f}")
+            logger.info(f"   • Entry: ${RETEST_ENTRY_LOW:,.0f}–${RETEST_ENTRY_HIGH:,.0f} only after sweep of 4,080–4,100 and 5–15m reclaim (close back above 4,100)")
+            logger.info(f"   • SL: ${RETEST_STOP_LOSS:,.0f} (beneath reclaimed base)")
             logger.info(f"   • TP1: ${RETEST_TP1:,.0f}")
-            logger.info(f"   • TP2: ${RETEST_TP2_LOW:,.0f}")
-            logger.info(f"   • Rationale: Pullback to intraday support; hold > 20 EMA keeps bullish structure")
+            logger.info(f"   • TP2: ${RETEST_TP2_LOW:,.0f}–${RETEST_TP2_HIGH:,.0f}")
+            logger.info(f"   • Rationale: Buy the higher-low around mid-range (≈4,103) without chasing the top")
             logger.info("")
         
         if short_strategies_enabled:
             logger.info("📊 SHORT SETUPS:")
             logger.info("")
             logger.info("Type: Breakdown")
-            logger.info(f"   • Entry: Sell-stop ${BREAKDOWN_ENTRY_LOW:,.0f}–${BREAKDOWN_ENTRY_HIGH:,.0f} (LOD – ~0.2%)")
+            logger.info(f"   • Entry: market sell on break ${BREAKDOWN_ENTRY_LOW:,.0f}–${BREAKDOWN_ENTRY_HIGH:,.0f} (through LOD/psych 4k)")
             logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,.0f}")
             logger.info(f"   • TP1: ${BREAKDOWN_TP1:,.0f}")
             logger.info(f"   • TP2: ${BREAKDOWN_TP2_LOW:,.0f}–${BREAKDOWN_TP2_HIGH:,.0f}")
-            logger.info(f"   • Rationale: Range failure + fresh low; room to prior 4h demand")
+            logger.info(f"   • Rationale: Range failure through 4k with 1h confirmation often extends")
             logger.info("")
-            logger.info("Type: Retest")
-            logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,.0f}–${FADE_ENTRY_HIGH:,.0f} (retest broken 1h support)")
+            logger.info("Type: Fade into Resistance")
+            logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,.0f}–${FADE_ENTRY_HIGH:,.0f} only if spike + rejection (upper wick on 5–15m and RSI/MACD roll)")
             logger.info(f"   • SL: ${FADE_STOP_LOSS:,.0f}")
             logger.info(f"   • TP1: ${FADE_TP1:,.0f}")
             logger.info(f"   • TP2: ${FADE_TP2_LOW:,.0f}")
-            logger.info(f"   • Rationale: Acceptance below VWAP; weak bids on rebound signal continuation")
+            logger.info(f"   • Rationale: First push into fresh highs frequently mean-reverts when volume stalls")
             logger.info("")
         logger.info("")
         logger.info(f"Current Price: ${current_close_1h:,.2f}")
@@ -523,13 +643,14 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info(f"Volume Confirmed: {'✅' if volume_confirmed else '❌'}")
         logger.info("")
         
-        # Execution guardrails: Pick one path (breakout or breakdown)
-        # Don't run both. If trigger fires without volume confirmation, pass or halve size.
-        # If first entry stops, don't re-enter until a fresh 1h structure forms.
+        # Execution guardrails
+        # If trigger fires without volume confirmation → skip or halve size
+        # After a stopped trade, stand down unless a fresh 1h structure forms
+        # Prefer the breakout long path if >4,120 holds on 15m with rising 1h volume; otherwise neutral until 4k breaks (then take breakdown)
         price_position_in_range = (current_close_1h - current_lod) / current_range_width if current_range_width > 0 else 0.5
         logger.info(f"Price position in range: {price_position_in_range:.2%} (0% = LOD, 100% = HOD)")
         
-        # Determine which path to prioritize based on direction filter and one-side management
+        # Determine which path to prioritize based on direction filter and execution guardrails
         if direction == 'LONG':
             logger.info("🎯 Direction filter: LONG only - prioritizing breakout strategies")
             breakdown_priority = False
@@ -538,30 +659,33 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info("🎯 Direction filter: SHORT only - prioritizing breakdown strategies")
             breakdown_priority = True
             breakout_priority = False
-        else:  # BOTH - use one-side management rule
-            # Check if any long strategy is already triggered
+        else:  # BOTH - use execution guardrails
+            # Check if any strategy is already triggered (do not run long + short simultaneously)
             long_triggered = breakout_state.get("triggered", False) or retest_state.get("triggered", False)
             short_triggered = breakdown_state.get("triggered", False) or fade_state.get("triggered", False)
             
             if long_triggered:
-                logger.info("🎯 One-side management: LONG strategy already triggered - prioritizing LONG")
+                logger.info("🎯 Execution guardrail: LONG strategy already triggered - prioritizing LONG")
                 breakdown_priority = False
                 breakout_priority = True
             elif short_triggered:
-                logger.info("🎯 One-side management: SHORT strategy already triggered - prioritizing SHORT")
+                logger.info("🎯 Execution guardrail: SHORT strategy already triggered - prioritizing SHORT")
                 breakdown_priority = True
                 breakout_priority = False
             else:
-                # No strategy triggered yet - use price position relative to day mid
-                below_day_mid = current_close_1h < current_mid_range
-                if below_day_mid:
-                    logger.info(f"🎯 One-side management: Price (${current_close_1h:,.2f}) below day mid (${current_mid_range:,.2f}) = SHORT priority")
-                    breakdown_priority = True
-                    breakout_priority = False
-                else:
-                    logger.info(f"🎯 One-side management: Price (${current_close_1h:,.2f}) above day mid (${current_mid_range:,.2f}) = LONG priority")
+                # No strategy triggered yet - use execution guardrail preference
+                # Prefer breakout long path if >4,120 holds on 15m with rising 1h volume
+                above_4120 = current_close_1h > 4120
+                volume_rising = current_volume_1h > avg_volume_1h
+                
+                if above_4120 and volume_rising:
+                    logger.info(f"🎯 Execution guardrail: Price (${current_close_1h:,.2f}) > $4,120 with rising volume = LONG priority")
                     breakdown_priority = False
                     breakout_priority = True
+                else:
+                    logger.info(f"🎯 Execution guardrail: Neutral until 4k breaks (then take breakdown)")
+                    breakdown_priority = True
+                    breakout_priority = False
         
         # LONG (breakout) Strategy Conditions
         breakout_condition = (
@@ -573,12 +697,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             not breakout_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
         
+        # Check for sweep and reclaim (required for retest strategy)
+        sweep_and_reclaim_confirmed, sweep_reclaim_status = check_sweep_and_reclaim(cb_service, current_ts_1h)
+        
         # LONG (retest) Strategy Conditions
         retest_condition = (
             breakout_priority and
             current_close_1h >= RETEST_ENTRY_LOW and 
             current_close_1h <= RETEST_ENTRY_HIGH and 
             volume_confirmed and 
+            sweep_and_reclaim_confirmed and  # Must have sweep and reclaim
             not retest_state.get("triggered", False) and
             not retest_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
@@ -593,12 +721,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             not breakdown_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
         
-        # SHORT (retest) Strategy Conditions
+        # Check for spike and rejection (required for fade strategy)
+        spike_and_rejection_confirmed, spike_rejection_status = check_spike_and_rejection(cb_service, current_ts_1h)
+        
+        # SHORT (fade into resistance) Strategy Conditions
         fade_condition = (
             breakdown_priority and
             current_close_1h <= FADE_ENTRY_HIGH and 
             current_close_1h >= FADE_ENTRY_LOW and 
             volume_confirmed and 
+            spike_and_rejection_confirmed and  # Must have spike and rejection
             not fade_state.get("triggered", False) and
             not fade_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
@@ -662,11 +794,12 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # 2. LONG - Retest Strategy
         if not trade_executed and long_strategies_enabled and not retest_state.get("triggered", False) and not retest_state.get("stopped_out", False):
             in_retest_zone = RETEST_ENTRY_LOW <= current_close_1h <= RETEST_ENTRY_HIGH
-            retest_ready = in_retest_zone and volume_confirmed and breakout_priority
+            retest_ready = in_retest_zone and volume_confirmed and sweep_and_reclaim_confirmed and breakout_priority
             
             logger.info("🔍 LONG - Retest Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${RETEST_ENTRY_LOW:,.0f}-${RETEST_ENTRY_HIGH:,.0f}): {'✅' if in_retest_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
+            logger.info(f"   • Sweep and reclaim confirmed: {'✅' if sweep_and_reclaim_confirmed else '❌'} ({sweep_reclaim_status})")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
             logger.info(f"   • Retest Ready: {'🎯 YES' if retest_ready else '⏳ NO'}")
             
@@ -684,7 +817,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 # Execute Retest trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD LONG Retest",
+                    trade_type="ETH-USD LONG Retest (Sweep & Reclaim)",
                     entry_price=current_close_1h,
                     stop_loss=RETEST_STOP_LOSS,
                     take_profit=RETEST_TP1,
@@ -698,8 +831,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Entry: ${current_close_1h:,.2f}")
                     logger.info(f"Stop-loss: ${RETEST_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${RETEST_TP1:,.2f}")
-                    logger.info(f"TP2: ${RETEST_TP2_LOW:,.2f}")
-                    logger.info("Strategy: Pullback to intraday support; hold > 20 EMA keeps bullish structure")
+                    logger.info(f"TP2: ${RETEST_TP2_LOW:,.2f}-${RETEST_TP2_HIGH:,.2f}")
+                    logger.info("Strategy: Buy the higher-low around mid-range (≈4,103) without chasing the top")
                     
                     # Save trigger state
                     retest_state = {
@@ -765,16 +898,17 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 else:
                     logger.error(f"❌ Breakdown trade failed: {trade_result}")
         
-        # 4. SHORT - Retest Strategy
+        # 4. SHORT - Fade into Resistance Strategy
         if not trade_executed and short_strategies_enabled and not fade_state.get("triggered", False) and not fade_state.get("stopped_out", False):
             in_fade_zone = FADE_ENTRY_LOW <= current_close_1h <= FADE_ENTRY_HIGH
-            fade_ready = in_fade_zone and volume_confirmed and breakdown_priority
+            fade_ready = in_fade_zone and volume_confirmed and spike_and_rejection_confirmed and breakdown_priority
             
-            logger.info("🔍 SHORT - Retest Strategy Analysis:")
+            logger.info("🔍 SHORT - Fade into Resistance Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${FADE_ENTRY_LOW:,.0f}-${FADE_ENTRY_HIGH:,.0f}): {'✅' if in_fade_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
+            logger.info(f"   • Spike and rejection confirmed: {'✅' if spike_and_rejection_confirmed else '❌'} ({spike_rejection_status})")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
-            logger.info(f"   • Retest Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
+            logger.info(f"   • Fade Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
             
             if fade_ready:
                 logger.info("")
@@ -787,10 +921,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute Retest trade
+                # Execute Fade into Resistance trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD SHORT Retest",
+                    trade_type="ETH-USD SHORT Fade (Spike & Rejection)",
                     entry_price=current_close_1h,
                     stop_loss=FADE_STOP_LOSS,
                     take_profit=FADE_TP1,
@@ -800,12 +934,12 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 )
                 
                 if trade_success:
-                    logger.info("🎉 SHORT - Retest trade executed successfully!")
+                    logger.info("🎉 SHORT - Fade into Resistance trade executed successfully!")
                     logger.info(f"Entry: ${current_close_1h:,.2f}")
                     logger.info(f"Stop-loss: ${FADE_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${FADE_TP1:,.2f}")
                     logger.info(f"TP2: ${FADE_TP2_LOW:,.2f}")
-                    logger.info("Strategy: Acceptance below VWAP; weak bids on rebound signal continuation")
+                    logger.info("Strategy: First push into fresh highs frequently mean-reverts when volume stalls")
                     
                     # Save trigger state
                     fade_state = {
@@ -831,12 +965,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info("   Breakout strategy already triggered")
                 if retest_state.get("triggered", False):
                     logger.info("   Retest strategy already triggered")
+                elif not sweep_and_reclaim_confirmed:
+                    logger.info("   Retest: Sweep and reclaim not confirmed")
             
             if short_strategies_enabled:
                 if breakdown_state.get("triggered", False):
                     logger.info("   Breakdown strategy already triggered")
                 if fade_state.get("triggered", False):
-                    logger.info("   Retest strategy already triggered")
+                    logger.info("   Fade into resistance strategy already triggered")
+                elif not spike_and_rejection_confirmed:
+                    logger.info("   Fade: Spike and rejection not confirmed")
         
         # Reset triggers if price moves significantly away from entry zones
         # Execution guardrails: If first entry stops, stand down until new 1h structure forms
@@ -903,7 +1041,7 @@ def main():
     
     logger.info("Starting ETH-USD Trading Strategy Monitor")
     if direction == 'BOTH':
-        logger.info("Strategy: Clean Two-Sided ETH Plan - LONG & SHORT with One-Side Management")
+        logger.info("Strategy: Clean Two-Sided ETH Plan - LONG & SHORT with Execution Guardrails")
     else:
         logger.info(f"Strategy: {direction} only")
     logger.info("")
