@@ -739,14 +739,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         trade_executed = False
         
         # 1. LONG - Breakout Strategy
-        if long_strategies_enabled and not breakout_state.get("triggered", False) and not breakout_state.get("stopped_out", False):
+        if long_strategies_enabled:
             in_breakout_zone = BREAKOUT_ENTRY_LOW <= current_close_1h <= BREAKOUT_ENTRY_HIGH
-            breakout_ready = in_breakout_zone and volume_confirmed and breakout_priority
+            breakout_ready = in_breakout_zone and volume_confirmed and breakout_priority and not breakout_state.get("triggered", False) and not breakout_state.get("stopped_out", False)
             
             logger.info("🔍 LONG - Breakout Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${BREAKOUT_ENTRY_LOW:,.0f}-${BREAKOUT_ENTRY_HIGH:,.0f}): {'✅' if in_breakout_zone else '❌'}")
             logger.info(f"   • Volume confirmed (1H: {current_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}x, 5M: {current_volume_5m/avg_volume_5m if avg_volume_5m > 0 else 0:.2f}x): {'✅' if volume_confirmed else '❌'}")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
+            logger.info(f"   • Already triggered: {'✅' if breakout_state.get("triggered", False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if breakout_state.get("stopped_out", False) else '❌'}")
             logger.info(f"   • Breakout Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
             
             if breakout_ready:
@@ -778,7 +780,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Stop-loss: ${BREAKOUT_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${BREAKOUT_TP1:,.2f}")
                     logger.info(f"TP2: ${BREAKOUT_TP2_LOW:,.2f}-${BREAKOUT_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: Fresh expansion beyond HOD with momentum & confirmation")
+                    logger.info("Strategy: Expansion above session highs with strong tape tends to trend when 4.2k clears on volume")
                     
                     # Save trigger state
                     breakout_state = {
@@ -792,15 +794,17 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.error(f"❌ Breakout trade failed: {trade_result}")
         
         # 2. LONG - Retest Strategy
-        if not trade_executed and long_strategies_enabled and not retest_state.get("triggered", False) and not retest_state.get("stopped_out", False):
+        if not trade_executed and long_strategies_enabled:
             in_retest_zone = RETEST_ENTRY_LOW <= current_close_1h <= RETEST_ENTRY_HIGH
-            retest_ready = in_retest_zone and volume_confirmed and sweep_and_reclaim_confirmed and breakout_priority
+            retest_ready = in_retest_zone and volume_confirmed and sweep_and_reclaim_confirmed and breakout_priority and not retest_state.get("triggered", False) and not retest_state.get("stopped_out", False)
             
             logger.info("🔍 LONG - Retest Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${RETEST_ENTRY_LOW:,.0f}-${RETEST_ENTRY_HIGH:,.0f}): {'✅' if in_retest_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
             logger.info(f"   • Sweep and reclaim confirmed: {'✅' if sweep_and_reclaim_confirmed else '❌'} ({sweep_reclaim_status})")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
+            logger.info(f"   • Already triggered: {'✅' if retest_state.get("triggered", False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if retest_state.get("stopped_out", False) else '❌'}")
             logger.info(f"   • Retest Ready: {'🎯 YES' if retest_ready else '⏳ NO'}")
             
             if retest_ready:
@@ -846,14 +850,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.error(f"❌ Retest trade failed: {trade_result}")
         
         # 3. SHORT - Breakdown Strategy
-        if not trade_executed and short_strategies_enabled and not breakdown_state.get("triggered", False) and not breakdown_state.get("stopped_out", False):
+        if not trade_executed and short_strategies_enabled:
             in_breakdown_zone = BREAKDOWN_ENTRY_LOW <= current_close_1h <= BREAKDOWN_ENTRY_HIGH
-            breakdown_ready = in_breakdown_zone and volume_confirmed and breakdown_priority
+            breakdown_ready = in_breakdown_zone and volume_confirmed and breakdown_priority and not breakdown_state.get("triggered", False) and not breakdown_state.get("stopped_out", False)
             
             logger.info("🔍 SHORT - Breakdown Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${BREAKDOWN_ENTRY_LOW:,.0f}-${BREAKDOWN_ENTRY_HIGH:,.0f}): {'✅' if in_breakdown_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
+            logger.info(f"   • Already triggered: {'✅' if breakdown_state.get("triggered", False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if breakdown_state.get("stopped_out", False) else '❌'}")
             logger.info(f"   • Breakdown Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
             
             if breakdown_ready:
@@ -885,7 +891,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Stop-loss: ${BREAKDOWN_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${BREAKDOWN_TP1:,.2f}")
                     logger.info(f"TP2: ${BREAKDOWN_TP2_LOW:,.2f}-${BREAKDOWN_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: Range failure + fresh low; room to prior 4h demand")
+                    logger.info("Strategy: Range failure through 4k with 1h confirmation often extends")
                     
                     # Save trigger state
                     breakdown_state = {
@@ -899,20 +905,22 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.error(f"❌ Breakdown trade failed: {trade_result}")
         
         # 4. SHORT - Fade into Resistance Strategy
-        if not trade_executed and short_strategies_enabled and not fade_state.get("triggered", False) and not fade_state.get("stopped_out", False):
+        if not trade_executed and short_strategies_enabled:
             in_fade_zone = FADE_ENTRY_LOW <= current_close_1h <= FADE_ENTRY_HIGH
-            fade_ready = in_fade_zone and volume_confirmed and spike_and_rejection_confirmed and breakdown_priority
+            fade_ready = in_fade_zone and volume_confirmed and spike_and_rejection_confirmed and breakdown_priority and not fade_state.get("triggered", False) and not fade_state.get("stopped_out", False)
             
             logger.info("🔍 SHORT - Fade into Resistance Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${FADE_ENTRY_LOW:,.0f}-${FADE_ENTRY_HIGH:,.0f}): {'✅' if in_fade_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
             logger.info(f"   • Spike and rejection confirmed: {'✅' if spike_and_rejection_confirmed else '❌'} ({spike_rejection_status})")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
+            logger.info(f"   • Already triggered: {'✅' if fade_state.get("triggered", False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if fade_state.get("stopped_out", False) else '❌'}")
             logger.info(f"   • Fade Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
             
             if fade_ready:
                 logger.info("")
-                logger.info("🎯 SHORT - Retest Strategy conditions met - executing trade...")
+                logger.info("🎯 SHORT - Fade into Resistance Strategy conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -950,7 +958,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     save_trigger_state(fade_state, FADE_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Retest trade failed: {trade_result}")
+                    logger.error(f"❌ Fade trade failed: {trade_result}")
         
         # Check if any strategy was triggered
         if not trade_executed:
