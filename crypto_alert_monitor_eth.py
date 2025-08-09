@@ -18,7 +18,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('eth_alert_debug.log'),
+        logging.FileHandler('btc_intraday_alert.log'),
         logging.StreamHandler()  # Keep console output too
     ]
 )
@@ -39,12 +39,25 @@ CONNECTION_ERRORS = (
 )
 
 def exponential_backoff_delay(attempt):
+    """Calculate exponential backoff delay with jitter"""
     import random
     delay = min(INITIAL_RETRY_DELAY * (BACKOFF_MULTIPLIER ** attempt), MAX_RETRY_DELAY)
+    # Add jitter to prevent thundering herd
     jitter = delay * 0.1 * random.random()
     return delay + jitter
 
 def retry_with_backoff(func, *args, **kwargs):
+    """
+    Retry a function with exponential backoff on connection errors
+    
+    Args:
+        func: Function to retry
+        *args: Arguments to pass to the function
+        **kwargs: Keyword arguments to pass to the function
+    
+    Returns:
+        Function result on success, None on permanent failure
+    """
     for attempt in range(MAX_RETRIES):
         try:
             return func(*args, **kwargs)
@@ -52,16 +65,32 @@ def retry_with_backoff(func, *args, **kwargs):
             if attempt == MAX_RETRIES - 1:
                 logger.error(f"❌ Permanent failure after {MAX_RETRIES} attempts: {e}")
                 return None
+            
             delay = exponential_backoff_delay(attempt)
             logger.warning(f"⚠️ Connection error (attempt {attempt + 1}/{MAX_RETRIES}): {e}")
             logger.info(f"🔄 Retrying in {delay:.1f} seconds...")
             time.sleep(delay)
         except Exception as e:
+            # For non-connection errors, don't retry
             logger.error(f"❌ Non-recoverable error: {e}")
             return None
+    
     return None
 
 def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
+    """
+    Safely get candles with retry logic
+    
+    Args:
+        cb_service: Coinbase service instance
+        product_id: Trading product ID
+        start_ts: Start timestamp
+        end_ts: End timestamp
+        granularity: Candle granularity
+    
+    Returns:
+        Candles list on success, None on failure
+    """
     def _get_candles():
         response = cb_service.client.get_public_candles(
             product_id=product_id,
@@ -73,79 +102,142 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.candles
         else:
             return response.get('candles', [])
+    
     return retry_with_backoff(_get_candles)
 
-# ETH Trading Strategy Parameters (based on new ETH plan - current levels)
-PRODUCT_ID = "ETH-PERP-INTX"
-GRANULARITY_1H = "ONE_HOUR"  # 1-hour chart for trigger
-GRANULARITY_5M = "FIVE_MINUTE"  # 5-minute chart for execution
-GRANULARITY_15M = "FIFTEEN_MINUTE"  # 15-minute chart for confirmation
-VOLUME_PERIOD = 20  # For volume confirmation
+def safe_get_5m_candles(cb_service, product_id, start_ts, end_ts):
+    """
+    Safely get 5-minute candles with retry logic
+    """
+    def _get_5m_candles():
+        response = cb_service.client.get_public_candles(
+            product_id=product_id,
+            start=start_ts,
+            end=end_ts,
+            granularity="FIVE_MINUTE"
+        )
+        if hasattr(response, 'candles'):
+            return response.candles
+        else:
+            return response.get('candles', [])
+    
+    return retry_with_backoff(_get_5m_candles)
 
-# Current market context (ETH ≈ $3,686, HOD $3,715.95, LOD $3,578.18)
-CURRENT_ETH_PRICE = 3686.00
-HOD = 3715.95  # High of day
-LOD = 3578.18  # Low of day
-TODAYS_RANGE_WIDTH = HOD - LOD  # 137.77 points
-MID_RANGE_PIVOT = (HOD + LOD) / 2  # 3647.065
+def safe_get_15m_candles(cb_service, product_id, start_ts, end_ts):
+    """
+    Safely get 15-minute candles with retry logic
+    """
+    def _get_15m_candles():
+        response = cb_service.client.get_public_candles(
+            product_id=product_id,
+            start=start_ts,
+            end=end_ts,
+            granularity="FIFTEEN_MINUTE"
+        )
+        if hasattr(response, 'candles'):
+            return response.candles
+        else:
+            return response.get('candles', [])
+    
+    return retry_with_backoff(_get_15m_candles)
 
-# LONG (breakout) Strategy Parameters
-BREAKOUT_ENTRY_LOW = 3955  # Retest zone per plan
-BREAKOUT_ENTRY_HIGH = 3965
-BREAKOUT_STOP_LOSS = 3930  # Invalidation
-BREAKOUT_TP1 = 4000  # TP1
-BREAKOUT_TP2_LOW = 4065  # TP2 range low
-BREAKOUT_TP2_HIGH = 4100  # TP2 range high
+# Constants for BTC intraday strategy
+GRANULARITY_1H = "ONE_HOUR"
+GRANULARITY_5M = "FIVE_MINUTE"
+GRANULARITY_15M = "FIFTEEN_MINUTE"
+PRODUCT_ID = "BTC-PERP-INTX"
 
-# LONG (retest) Strategy Parameters
-RETEST_ENTRY_LOW = 3915  # PDH flip zone
-RETEST_ENTRY_HIGH = 3925
-RETEST_STOP_LOSS = 3895  # Invalidation
-RETEST_TP1 = 3965  # TP1
-RETEST_TP2_LOW = 4020  # TP2
-RETEST_TP2_HIGH = 4020
-
-# SHORT (breakdown) Strategy Parameters
-BREAKDOWN_ENTRY_LOW = 3820
-BREAKDOWN_ENTRY_HIGH = 3900
-BREAKDOWN_STOP_LOSS = 3920
-BREAKDOWN_TP1 = 3860
-BREAKDOWN_TP2_LOW = 3820
-BREAKDOWN_TP2_HIGH = 3820
-
-# SHORT (retest) Strategy Parameters
-FADE_ENTRY_LOW = 3955
-FADE_ENTRY_HIGH = 3970
-FADE_STOP_LOSS = 3975
-FADE_TP1 = 3915
-FADE_TP2_LOW = 3890
-FADE_TP2_HIGH = 3890
-
-# Volume confirmation requirements
-VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25× 20-period vol on 1h
-VOLUME_SURGE_FACTOR_5M = 2.0   # ≥2× 20-SMA vol on 5m at trigger
-
-# Risk management
-RISK_PERCENTAGE_LOW = 0.8  # 1R ≈ 0.8–1.2% of price
-RISK_PERCENTAGE_HIGH = 1.2
-PARTIAL_PROFIT_RANGE_LOW = 1.0  # Partial at +1.0R
-PARTIAL_PROFIT_RANGE_HIGH = 1.5  # Partial at +1.5R
-
-# Trade parameters - Position size: margin x leverage = 250 x 20 = 5000 USD
+# Global execution settings
 MARGIN = 250  # USD
-LEVERAGE = 20  # 20x leverage
-POSITION_SIZE_USD = MARGIN * LEVERAGE  # 5000 USD
+LEVERAGE = 20  # 20x leverage (margin x leverage = $5,000 notional)
 
-# State files for each strategy
-BREAKOUT_TRIGGER_FILE = "eth_breakout_trigger_state.json"
-RETEST_TRIGGER_FILE = "eth_retest_trigger_state.json"
-BREAKDOWN_TRIGGER_FILE = "eth_breakdown_trigger_state.json"
-FADE_TRIGGER_FILE = "eth_fade_trigger_state.json"
+# Intraday reference (from brief):
+INTRADAY_HIGH = 117596.0
+INTRADAY_LOW = 114314.0
+
+# Setups and levels (from brief)
+# 1) Breakout-continuation (intraday high breach)
+BREAKOUT_CONFIRM_LEVEL_15M = 117600.0  # 15m close above this
+BREAKOUT_BUY_ZONE_LOW = 117700.0       # buy the strength zone
+BREAKOUT_BUY_ZONE_HIGH = 118000.0
+BREAKOUT_SL = 116950.0
+BREAKOUT_TP1 = 118800.0
+BREAKOUT_TP2 = 120400.0
+
+# 2) VWAP reclaim after sweep (fade the low)
+SWEEP_ZONE_LOW = 114300.0
+SWEEP_ZONE_HIGH = 114400.0
+VWAP_SL_BUFFER_PCT = 0.003  # 0.3% below sweep low
+RECLAIM_TP1 = 116400.0
+RECLAIM_TP2 = 117200.0
+RECLAIM_TP3 = 118000.0
+
+# 3) Failed-breakout short
+FAILED_BO_PUSH_LEVEL = 117600.0  # push above
+FAILED_BO_REJECT_CLOSE_5M = 117200.0  # then close back below on 5m
+FAILED_BO_SELL_ZONE_LOW = 116900.0
+FAILED_BO_SELL_ZONE_HIGH = 117100.0
+FAILED_BO_SL = 117700.0
+FAILED_BO_TP1 = 116000.0
+FAILED_BO_TP2 = 115000.0
+
+# 4) Breakdown-retest
+BREAKDOWN_CONFIRM_LEVEL_15M = 114300.0  # 15m close below this
+BREAKDOWN_RETEST_ZONE_LOW = 114200.0
+BREAKDOWN_RETEST_ZONE_HIGH = 114400.0
+BREAKDOWN_SL = 114900.0
+BREAKDOWN_TP1 = 113200.0
+BREAKDOWN_TP2 = 112300.0
+
+# Volume confirmation thresholds
+VOLUME_FACTOR_15M_BREAKOUT = 1.25
+VOLUME_FACTOR_5M_RECLAIM = 1.30
+VOLUME_FACTOR_5M_FAILED_BO = 1.40
+VOLUME_FACTOR_15M_BREAKDOWN = 1.30
+
+# Trade tracking
+TRIGGER_STATE_FILE = "btc_intraday_trigger_state.json"
+
+def load_trigger_state():
+    if os.path.exists(TRIGGER_STATE_FILE):
+        try:
+            with open(TRIGGER_STATE_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {
+                "breakout_triggered": False, 
+                "retest_triggered": False, 
+                "breakdown_triggered": False,
+                "fade_triggered": False,
+                "last_trigger_ts": None,
+                "last_1h_structure": None,
+                "active_trade_direction": None  # Track which direction is active
+            }
+    return {
+        "breakout_triggered": False, 
+        "retest_triggered": False, 
+        "breakdown_triggered": False,
+        "fade_triggered": False,
+        "last_trigger_ts": None,
+        "last_1h_structure": None,
+        "active_trade_direction": None  # Track which direction is active
+    }
+
+def save_trigger_state(state):
+    try:
+        with open(TRIGGER_STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except Exception as e:
+        logger.error(f"Failed to save trigger state: {e}")
 
 def play_alert_sound(filename="alert_sound.wav"):
+    """
+    Play the alert sound using system commands
+    """
     try:
         system = platform.system()
-        if system == "Darwin":
+        
+        if system == "Darwin":  # macOS
             cmd = ["afplay", filename]
         elif system == "Linux":
             cmd = ["aplay", filename]
@@ -154,9 +246,11 @@ def play_alert_sound(filename="alert_sound.wav"):
         else:
             logger.warning(f"Unknown operating system: {system}. Cannot play sound.")
             return False
+        
         subprocess.run(cmd, check=True, timeout=5)
         logger.info("Alert sound played successfully")
         return True
+        
     except subprocess.TimeoutExpired:
         logger.error("Sound playback timed out")
         return False
@@ -165,39 +259,58 @@ def play_alert_sound(filename="alert_sound.wav"):
         return False
 
 def setup_coinbase():
+    """Setup Coinbase service with connection validation"""
     api_key = API_KEY_PERPS
     api_secret = API_SECRET_PERPS
     if not api_key or not api_secret:
         raise ValueError("API credentials not found")
+    
     def _create_service():
         service = CoinbaseService(api_key, api_secret)
+        # Test the connection with a simple API call
         try:
+            # Try to get a small amount of candle data to validate connection
             test_response = service.client.get_public_candles(
-                product_id=PRODUCT_ID,
-                start=int((datetime.now(UTC) - timedelta(days=2)).timestamp()),
+                product_id="BTC-PERP-INTX",
+                start=int((datetime.now(UTC) - timedelta(hours=2)).timestamp()),
                 end=int(datetime.now(UTC).timestamp()),
-                granularity=GRANULARITY_1H
+                granularity="ONE_HOUR"
             )
             logger.info("✅ Coinbase connection validated successfully")
             return service
         except Exception as e:
             logger.error(f"❌ Failed to validate Coinbase connection: {e}")
             raise
+    
     service = retry_with_backoff(_create_service)
     if service is None:
         raise ConnectionError("Failed to establish Coinbase connection after retries")
     return service
 
 def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_loss: float, take_profit: float, 
-                     margin: float = 250, leverage: int = 20, side: str = "BUY", product: str = PRODUCT_ID, 
-                     volume_confirmed: bool = True):
+                     margin: float = 250, leverage: int = 20, side: str = "BUY", product: str = "BTC-PERP-INTX"):
+    """
+    General crypto trade execution function using trade_btc_perp.py with retry logic
+    
+    Args:
+        cb_service: Coinbase service instance
+        trade_type: Description of the trade type for logging
+        entry_price: Entry price for logging
+        stop_loss: Stop-loss price
+        take_profit: Take-profit price
+        margin: USD amount to risk (default: 250)
+        leverage: Leverage multiplier (default: 20)
+        side: Trade side - "BUY" or "SELL" (default: "BUY")
+        product: Trading product (default: "BTC-PERP-INTX")
+    """
     def _execute_trade():
         logger.info(f"Executing crypto trade: {trade_type} at ${entry_price:,.2f}")
         logger.info(f"Trade params: Margin=${margin}, Leverage={leverage}x, Side={side}, Product={product}")
         
-        # Always use full position size per requirement (margin x leverage = $5,000)
-        position_size_usd = POSITION_SIZE_USD
+        # Calculate position size based on margin and leverage
+        position_size_usd = margin * leverage
         
+        # Use subprocess to call trade_btc_perp.py
         cmd = [
             sys.executable, 'trade_btc_perp.py',
             '--product', product,
@@ -206,10 +319,14 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
             '--leverage', str(leverage),
             '--tp', str(take_profit),
             '--sl', str(stop_loss),
-            '--no-confirm'
+            '--no-confirm'  # Skip confirmation for automated trading
         ]
+        
         logger.info(f"Executing command: {' '.join(cmd)}")
+        
+        # Execute the trade command
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
         if result.returncode == 0:
             logger.info(f"Crypto {trade_type} trade executed successfully!")
             logger.info(f"Trade output: {result.stdout}")
@@ -218,11 +335,14 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
             logger.error(f"Crypto {trade_type} trade failed!")
             logger.error(f"Error output: {result.stderr}")
             return False, result.stderr
+    
     try:
+        # Use retry logic for trade execution
         result = retry_with_backoff(_execute_trade)
         if result is None:
             return False, "Failed after multiple retry attempts"
         return result
+            
     except subprocess.TimeoutExpired:
         logger.error("Trade execution timed out")
         return False, "Timeout"
@@ -230,105 +350,90 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
         logger.error(f"Error executing crypto {trade_type} trade: {e}")
         return False, str(e)
 
-def load_trigger_state(strategy_file):
-    if os.path.exists(strategy_file):
-        try:
-            with open(strategy_file, 'r') as f:
-                return json.load(f)
-        except Exception:
-            return {"triggered": False, "trigger_ts": None, "entry_price": None}
-    return {"triggered": False, "trigger_ts": None, "entry_price": None}
-
-def save_trigger_state(state, strategy_file):
-    try:
-        with open(strategy_file, 'w') as f:
-            json.dump(state, f)
-    except Exception as e:
-        logger.error(f"Failed to save trigger state: {e}")
-
-def check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, avg_volume_1h, avg_volume_5m):
-    """Check volume confirmation on both 1h and 5m timeframes"""
-    volume_1h_confirmed = current_volume_1h >= (VOLUME_SURGE_FACTOR_1H * avg_volume_1h)
-    volume_5m_confirmed = current_volume_5m >= (VOLUME_SURGE_FACTOR_5M * avg_volume_5m)
-    
-    # Volume must be confirmed on either 1h OR 5m timeframe
-    volume_confirmed = volume_1h_confirmed or volume_5m_confirmed
-    
-    logger.info("Volume confirmation check:")
-    logger.info(f"  1H: {current_volume_1h:,.0f} vs {VOLUME_SURGE_FACTOR_1H}x avg ({avg_volume_1h:,.0f}) -> {'✅' if volume_1h_confirmed else '❌'}")
-    logger.info(f"  5M: {current_volume_5m:,.0f} vs {VOLUME_SURGE_FACTOR_5M}x avg ({avg_volume_5m:,.0f}) -> {'✅' if volume_5m_confirmed else '❌'}")
-    logger.info(f"  Overall: {'✅' if volume_confirmed else '❌'}")
-    
-    return volume_confirmed
-
-
-
-def get_current_day_hod_lod(cb_service, current_ts):
-    """Get current day's HOD and LOD"""
-    try:
-        # Get today's candles starting from market open (UTC)
-        today_start = current_ts.replace(hour=0, minute=0, second=0, microsecond=0)
-        start_ts = int(today_start.timestamp())
-        end_ts = int(current_ts.timestamp())
-        
-        candles_1h = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_1H)
-        
-        if not candles_1h:
-            return HOD, LOD  # Use default values if no data
-        
-        # Calculate HOD and LOD from today's candles
-        hod = max(float(candle['high']) for candle in candles_1h)
-        lod = min(float(candle['low']) for candle in candles_1h)
-        
-        logger.info(f"Current day HOD: ${hod:,.2f}, LOD: ${lod:,.2f}")
-        return hod, lod
-        
-    except Exception as e:
-        logger.error(f"Error getting current day HOD/LOD: {e}")
-        return HOD, LOD  # Use default values
-
-def check_new_structure_formation(cb_service, current_ts, previous_hod, previous_lod):
-    """Check if a new 1h structure has formed (new HOD or LOD)"""
-    try:
-        current_hod, current_lod = get_current_day_hod_lod(cb_service, current_ts)
-        
-        # Check if we have new highs or lows
-        new_hod = current_hod > previous_hod
-        new_lod = current_lod < previous_lod
-        
-        if new_hod or new_lod:
-            logger.info(f"🔄 New 1h structure detected: {'HOD' if new_hod else ''}{' and ' if new_hod and new_lod else ''}{'LOD' if new_lod else ''}")
-            logger.info(f"Previous HOD: ${previous_hod:,.2f} -> Current HOD: ${current_hod:,.2f}")
-            logger.info(f"Previous LOD: ${previous_lod:,.2f} -> Current LOD: ${current_lod:,.2f}")
-            return True, current_hod, current_lod
-        
-        return False, current_hod, current_lod
-        
-    except Exception as e:
-        logger.error(f"Error checking new structure formation: {e}")
-        return False, previous_hod, previous_lod
-
-
-
-# --- ETH Trading Strategy Alert Logic ---
-def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH'):
+def calculate_volume_sma(candles, period=20):
     """
-    ETH-USD Trading Strategy Alert - Implements clean two-sided ETH plan with current levels
-    Based on the trading plan: "Spiros — here's a clean, two-sided plan for today based on live levels"
+    Calculate Simple Moving Average of volume
+    
+    Args:
+        candles: List of candle data
+        period: Period for SMA calculation
+    
+    Returns:
+        Volume SMA value
+    """
+    if len(candles) < period:
+        return 0
+    
+    volumes = []
+    for candle in candles[1:period+1]:  # Use most recent period candles (skip current incomplete candle)
+        if isinstance(candle, dict):
+            volume = float(candle.get('volume', 0))
+        else:
+            volume = float(getattr(candle, 'volume', 0))
+        volumes.append(volume)
+    
+    return sum(volumes) / len(volumes) if volumes else 0
+
+def candles_to_df(candles):
+    """Convert candles (dicts or objects) to a pandas DataFrame sorted ascending by start time."""
+    if not candles:
+        return pd.DataFrame(columns=["start", "open", "high", "low", "close", "volume"])
+    records = []
+    for c in candles:
+        try:
+            start = int(get_candle_value(c, 'start'))
+            records.append({
+                'start': start,
+                'open': float(get_candle_value(c, 'open')),
+                'high': float(get_candle_value(c, 'high')),
+                'low': float(get_candle_value(c, 'low')),
+                'close': float(get_candle_value(c, 'close')),
+                'volume': float(get_candle_value(c, 'volume'))
+            })
+        except Exception:
+            continue
+    df = pd.DataFrame(records)
+    if df.empty:
+        return df
+    return df.sort_values('start').reset_index(drop=True)
+
+def compute_session_vwap(df_5m_session):
+    """Compute session VWAP series from 5m candles using pandas_ta."""
+    if df_5m_session is None or df_5m_session.empty:
+        return None
+    try:
+        vwap_series = ta.vwap(df_5m_session['high'], df_5m_session['low'], df_5m_session['close'], df_5m_session['volume'])
+        return vwap_series
+    except Exception as e:
+        logger.warning(f"VWAP calculation failed: {e}")
+        return None
+
+def get_candle_value(candle, key):
+    """Extract value from candle object (handles both dict and object formats)"""
+    if isinstance(candle, dict):
+        return candle.get(key)
+    else:
+        return getattr(candle, key, None)
+
+
+
+def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
+    """
+    Spiros — clean two-sided BTC plan for 07 Aug 2025 (live on Coinbase: ≈ $114,540, HOD $115,220, LOD $114,270)
     
     Rules (both directions):
-    - Time-frame: 1h trigger, execute on 5–15m
-    - Volume confirm: ≥ 1.25× 20-period vol on 1h OR ≥ 2× 20-SMA vol on 5m at trigger
-    - Risk: size for 1R = 0.8–1.2% of price; take 30-50% off at +1.0–1.5R; trail remainder
-    - Position Size: Always margin x leverage = 250 x 20 = $5,000 USD
+    - Trigger: 1h; execute on 5–15m.
+    - Volume confirm: ≥ 1.25 × 20-period vol (1h) or ≥ 2 × 20-SMA vol (5m).
+    - Risk: size so 1 R ≈ 0.8–1.2 % of price; scale out ≥ +1.0–1.5 R.
+    - Position Size: Always margin × leverage = 250 × 20 = $5,000 USD
     
-    LONG SETUPS:
-    - Breakout: Buy-stop $3,723–3,730 (HOD + ~0.2%), SL $3,698, TP1 $3,780, TP2 $3,820–3,850
-    - Retest: $3,660–3,670 (prior 1h pivot/VWAP), SL $3,630, TP1 $3,710, TP2 $3,750
+    LONGS:
+    - Breakout: Buy-stop 115,400–115,600 (above HOD + ~0.15%)
+    - Retest: Limit 114,300–114,450 (prior LOD / demand shelf)
     
-    SHORT SETUPS:
-    - Breakdown: Sell-stop $3,570–3,560 (LOD – ~0.2%), SL $3,598, TP1 $3,500, TP2 $3,450–3,420
-    - Retest: $3,620–3,635 (retest broken 1h support), SL $3,660, TP1 $3,585, TP2 $3,520
+    SHORTS:
+    - Breakdown: Sell-stop 113,950–113,750 (sub-LOD)
+    - Lower-high retest: Limit 115,000–115,150 (failed push, bearish 1h close)
     
     Args:
         cb_service: Coinbase service instance
@@ -336,177 +441,62 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         direction: Trading direction to monitor ('LONG', 'SHORT', or 'BOTH')
     """
     if direction == 'BOTH':
-        logger.info("=== ETH-USD Trading Strategy Alert (Clean Two-Sided ETH Plan - LONG & SHORT) ===")
+        logger.info("=== BTC Setups: Breakout, VWAP Reclaim, Failed Breakout, Breakdown-Retest ===")
     else:
-        logger.info(f"=== ETH-USD Trading Strategy Alert ({direction} Strategy Only) ===")
+        logger.info(f"=== BTC Setups ({direction} only): Breakout, VWAP Reclaim, Failed Breakout, Breakdown-Retest ===")
     
-    # Load trigger states for all strategies
-    breakout_state = load_trigger_state(BREAKOUT_TRIGGER_FILE)
-    retest_state = load_trigger_state(RETEST_TRIGGER_FILE)
-    breakdown_state = load_trigger_state(BREAKDOWN_TRIGGER_FILE)
-    fade_state = load_trigger_state(FADE_TRIGGER_FILE)
+    # Load trigger state
+    trigger_state = load_trigger_state()
     
     try:
-        now = datetime.now(UTC)
+        # Time ranges
+        current_time = datetime.now(UTC)
+        start_of_day = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        now_hour = current_time.replace(minute=0, second=0, microsecond=0)
+
+        # Fetch 5m candles for entire session (for VWAP) and last ~2 hours implicitly included
+        start_ts_5m_session = int(start_of_day.timestamp())
+        end_ts_5m_session = int(current_time.timestamp())
+
+        # Fetch 15m candles for at least 20 bars history (≥5 hours). Use 12 hours for safety
+        start_15m = current_time - timedelta(hours=12)
+        end_15m = current_time
+        start_ts_15m = int(start_15m.timestamp())
+        end_ts_15m = int(end_15m.timestamp())
+
+        logger.info(f"Fetching 5-minute candles (session) from {start_of_day} to {current_time}")
+        candles_5m_session = safe_get_5m_candles(cb_service, PRODUCT_ID, start_ts_5m_session, end_ts_5m_session)
+
+        logger.info(f"Fetching 15-minute candles from {start_15m} to {end_15m}")
+        candles_15m = safe_get_15m_candles(cb_service, PRODUCT_ID, start_ts_15m, end_ts_15m)
         
-        # Get 1-hour candles for analysis
-        end = now
-        start = now - timedelta(hours=VOLUME_PERIOD + 24)  # Enough data for volume analysis
-        start_ts = int(start.timestamp())
-        end_ts = int(end.timestamp())
-        
-        logger.info(f"Fetching 1-hour candles for {VOLUME_PERIOD + 24} hours...")
-        candles_1h = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_1H)
-        
-        if not candles_1h or len(candles_1h) < VOLUME_PERIOD + 1:
-            logger.warning("Not enough 1-hour candle data for trading strategy alert.")
+        if not candles_5m_session or len(candles_5m_session) < 30:
+            logger.warning("Not enough 5-minute session data for VWAP/volume analysis")
             return last_alert_ts
-            
-        # Sort by timestamp ascending
-        candles_1h = sorted(candles_1h, key=lambda x: int(x['start']))
+
+        if not candles_15m or len(candles_15m) < 22:  # Need at least 20+ bars
+            logger.warning("Not enough 15-minute candle data for 20-period volume analysis")
+            return last_alert_ts
         
-        # Get current 1-hour candle data
-        current_candle_1h = candles_1h[-1]
-        current_close_1h = float(current_candle_1h['close'])
-        current_high_1h = float(current_candle_1h['high'])
-        current_low_1h = float(current_candle_1h['low'])
-        current_volume_1h = float(current_candle_1h['volume'])
-        current_ts_1h = datetime.fromtimestamp(int(current_candle_1h['start']), UTC)
-        
-        # Get current day's HOD and LOD
-        current_hod, current_lod = get_current_day_hod_lod(cb_service, current_ts_1h)
-        
-        # Calculate current range context
-        current_range_width = current_hod - current_lod
-        current_mid_range = (current_hod + current_lod) / 2
-        
-        logger.info(f"📊 Current range context: ${current_lod:,.2f}-${current_hod:,.2f} (width ≈ {current_range_width:.0f})")
-        logger.info(f"📊 Current mid-range pivot: ${current_mid_range:,.2f}")
-        logger.info(f"📊 Current HOD: ${current_hod:,.2f}, LOD: ${current_lod:,.2f}")
-        
-        # Check for new structure formation and reset stopped_out flags if needed
-        # Get previous HOD/LOD from state files or use current values
-        previous_hod = max(
-            breakout_state.get("last_hod", current_hod),
-            retest_state.get("last_hod", current_hod),
-            breakdown_state.get("last_hod", current_hod),
-            fade_state.get("last_hod", current_hod)
-        )
-        previous_lod = min(
-            breakout_state.get("last_lod", current_lod),
-            retest_state.get("last_lod", current_lod),
-            breakdown_state.get("last_lod", current_lod),
-            fade_state.get("last_lod", current_lod)
-        )
-        
-        new_structure_formed, updated_hod, updated_lod = check_new_structure_formation(
-            cb_service, current_ts_1h, previous_hod, previous_lod
-        )
-        
-        if new_structure_formed:
-            logger.info("🔄 New 1h structure formed - resetting stopped_out flags for all strategies")
-            # Reset stopped_out flags for all strategies
-            for strategy_name, state, state_file in [
-                ("Breakout", breakout_state, BREAKOUT_TRIGGER_FILE),
-                ("Retest", retest_state, RETEST_TRIGGER_FILE),
-                ("Breakdown", breakdown_state, BREAKDOWN_TRIGGER_FILE),
-                ("Fade", fade_state, FADE_TRIGGER_FILE)
-            ]:
-                if state.get("stopped_out", False):
-                    state["stopped_out"] = False
-                    state["last_hod"] = updated_hod
-                    state["last_lod"] = updated_lod
-                    save_trigger_state(state, state_file)
-                    logger.info(f"✅ Reset stopped_out flag for {strategy_name} strategy")
+        # DataFrames
+        df_5m = candles_to_df(candles_5m_session)
+        df_15m = candles_to_df(candles_15m)
+
+        # Current price from latest 5m candle
+        last_5m = candles_5m_session[0]
+        current_price = float(get_candle_value(last_5m, 'close'))
+
+        # Compute session VWAP
+        vwap_series = compute_session_vwap(df_5m)
+
+        # 5m volume SMA(20) excluding the latest in-progress bar
+        if len(df_5m) >= 22:
+            df_5m['vol_sma20'] = df_5m['volume'].rolling(window=20).mean()
         else:
-            # Update last HOD/LOD in all states
-            for state, state_file in [(breakout_state, BREAKOUT_TRIGGER_FILE), 
-                                     (retest_state, RETEST_TRIGGER_FILE), 
-                                     (breakdown_state, BREAKDOWN_TRIGGER_FILE), 
-                                     (fade_state, FADE_TRIGGER_FILE)]:
-                state["last_hod"] = current_hod
-                state["last_lod"] = current_lod
-                save_trigger_state(state, state_file)
-        
-        # Calculate 20-period average volume for 1h (excluding current candle)
-        volume_candles_1h = candles_1h[-(VOLUME_PERIOD+1):-1]
-        avg_volume_1h = sum(float(c['volume']) for c in volume_candles_1h) / len(volume_candles_1h)
-        
-        # Get 5-minute candles for volume confirmation and retest analysis
-        start_5m = now - timedelta(hours=2)
-        start_ts_5m = int(start_5m.timestamp())
-        end_ts_5m = int(now.timestamp())
-        
-        candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts_5m, end_ts_5m, GRANULARITY_5M)
-        
-        if candles_5m and len(candles_5m) >= VOLUME_PERIOD + 1:
-            candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
-            current_candle_5m = candles_5m[-1]
-            current_volume_5m = float(current_candle_5m['volume'])
-            
-            # Calculate 20-period average volume for 5m (excluding current candle)
-            volume_candles_5m = candles_5m[-(VOLUME_PERIOD+1):-1]
-            avg_volume_5m = sum(float(c['volume']) for c in volume_candles_5m) / len(volume_candles_5m)
-        else:
-            current_volume_5m = 0
-            avg_volume_5m = 0
-        
-        # Check volume confirmation
-        volume_confirmed = check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, avg_volume_1h, avg_volume_5m)
-        # === Additional signals per Aug 8, 2025 plan ===
-        volume_1h_confirmed = current_volume_1h >= (VOLUME_SURGE_FACTOR_1H * avg_volume_1h) if avg_volume_1h > 0 else False
+            df_5m['vol_sma20'] = None
 
-        # 15m candles for confirmation / acceptance
-        start_15m = now - timedelta(hours=12)
-        candles_15m = safe_get_candles(cb_service, PRODUCT_ID, int(start_15m.timestamp()), int(now.timestamp()), "FIFTEEN_MINUTE")
-        if candles_15m and len(candles_15m) >= 3:
-            candles_15m = sorted(candles_15m, key=lambda x: int(x['start']))
-            last_15m_close = float(candles_15m[-1]['close'])
-            prev_15m_close = float(candles_15m[-2]['close'])
-        else:
-            last_15m_close = current_close_1h
-            prev_15m_close = current_close_1h
-
-        # 5m latest and previous
-        if candles_5m and len(candles_5m) >= 3:
-            prev_candle_5m = candles_5m[-2]
-            last_5m_close = float(current_candle_5m['close'])
-            last_5m_open = float(current_candle_5m['open'])
-            prev_5m_low = float(prev_candle_5m['low'])
-            last_5m_low = float(current_candle_5m['low'])
-            last_5m_vol = float(current_candle_5m['volume'])
-        else:
-            last_5m_close = float(current_close_1h)
-            last_5m_open = last_5m_close
-            prev_5m_low = last_5m_close
-            last_5m_low = last_5m_close
-            last_5m_vol = 0.0
-
-        # Derived conditions
-        bo_breakout_confirmed = last_15m_close > 3955.0
-        wick_guard = last_5m_close > 3955.0
-        hl_ok = (last_5m_low > prev_5m_low) and (last_5m_close > last_5m_open)
-
-        # Spike into 3955-3970 in recent 5m bars
-        had_spike = False
-        if candles_5m:
-            for c in candles_5m[-18:]:
-                try:
-                    h = float(c['high'])
-                except Exception:
-                    continue
-                if 3955.0 <= h <= 3970.0:
-                    had_spike = True
-                    break
-        reject_close_ok = (last_5m_close < 3950.0) or (last_15m_close < 3950.0)
-
-        # Selling pressure approx: red 5m candle + volume >= 1.3x 5m SMA20 (approx using avg_volume_5m)
-        sma20_prev_5m = avg_volume_5m if avg_volume_5m > 0 else None
-        sell_pressure = (last_5m_close < last_5m_open) and (sma20_prev_5m is not None and last_5m_vol >= 1.3 * sma20_prev_5m)
-
-        # Acceptance below 3900: two consecutive 15m closes below 3900
-        last_two_15m_below = (last_15m_close < 3900.0) and (prev_15m_close < 3900.0)
-
+        # 15m volume SMA(20) excluding the latest completed bar when comparing
+        df_15m['vol_sma20'] = df_15m['volume'].rolling(window=20).mean()
         
         # Filter strategies based on direction parameter
         long_strategies_enabled = direction in ['LONG', 'BOTH']
@@ -514,163 +504,35 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Spiros — Clean Two-Sided ETH Plan for Today (Live Levels) Alert")
+        logger.info("🚀 BTC actionable setups for today")
+        logger.info(f"Live on Coinbase: ≈ ${current_price:,.0f}, Intraday High ${INTRADAY_HIGH:,.0f}, Low ${INTRADAY_LOW:,.0f}")
         logger.info("")
-        logger.info("📊 Today's Levels:")
-        logger.info(f"   • ETH ≈ ${current_close_1h:,.0f}")
-        logger.info(f"   • HOD: ${current_hod:,.0f}")
-        logger.info(f"   • LOD: ${current_lod:,.0f}")
-        logger.info(f"   • MID: ${current_mid_range:,.0f}")
+        logger.info("Set alerts: 117,700; 117,200; 114,300")
+        logger.info(f"Position Size: ${MARGIN * LEVERAGE:,.0f} USD ({MARGIN} x {LEVERAGE}x)")
         logger.info("")
-        logger.info("📊 Global Rules:")
-        logger.info("   • Time-frame: 1h trigger, execute on 5–15m")
-        logger.info(f"   • Volume confirm: ≥{VOLUME_SURGE_FACTOR_1H}x 20-period vol on 1h OR ≥{VOLUME_SURGE_FACTOR_5M}x 20-SMA vol on 5m")
-        logger.info(f"   • Risk: size for 1R = {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price")
-        logger.info(f"   • Take 30-50% off at +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R; trail remainder")
-        logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
-        logger.info("")
-        
-        # Show only relevant strategies based on direction
-        if long_strategies_enabled:
-            logger.info("📊 LONG SETUPS:")
-            logger.info("")
-            logger.info("Type: Breakout")
-            logger.info(f"   • Entry: Buy-stop ${BREAKOUT_ENTRY_LOW:,.0f}–${BREAKOUT_ENTRY_HIGH:,.0f} (HOD + ~0.2%)")
-            logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,.0f} (back inside range)")
-            logger.info(f"   • TP1: ${BREAKOUT_TP1:,.0f}")
-            logger.info(f"   • TP2: ${BREAKOUT_TP2_LOW:,.0f}–${BREAKOUT_TP2_HIGH:,.0f}")
-            logger.info("   • Rationale: Fresh expansion beyond HOD with momentum & confirmation")
-            logger.info("")
-            logger.info("Type: Retest")
-            logger.info(f"   • Entry: ${RETEST_ENTRY_LOW:,.0f}–${RETEST_ENTRY_HIGH:,.0f} (prior 1h pivot / VWAP)")
-            logger.info(f"   • SL: ${RETEST_STOP_LOSS:,.0f}")
-            logger.info(f"   • TP1: ${RETEST_TP1:,.0f}")
-            logger.info(f"   • TP2: ${RETEST_TP2_LOW:,.0f}")
-            logger.info("   • Rationale: Pullback to intraday support; hold > 20 EMA keeps bullish structure")
-            logger.info("")
-        
-        if short_strategies_enabled:
-            logger.info("📊 SHORT SETUPS:")
-            logger.info("")
-            logger.info("Type: Breakdown")
-            logger.info(f"   • Entry: Sell-stop ${BREAKDOWN_ENTRY_LOW:,.0f}–${BREAKDOWN_ENTRY_HIGH:,.0f} (LOD – ~0.2%)")
-            logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,.0f}")
-            logger.info(f"   • TP1: ${BREAKDOWN_TP1:,.0f}")
-            logger.info(f"   • TP2: ${BREAKDOWN_TP2_LOW:,.0f}–${BREAKDOWN_TP2_HIGH:,.0f}")
-            logger.info("   • Rationale: Range failure + fresh low; room to prior 4h demand")
-            logger.info("")
-            logger.info("Type: Retest")
-            logger.info(f"   • Entry: ${FADE_ENTRY_LOW:,.0f}–${FADE_ENTRY_HIGH:,.0f} (retest broken 1h support)")
-            logger.info(f"   • SL: ${FADE_STOP_LOSS:,.0f}")
-            logger.info(f"   • TP1: ${FADE_TP1:,.0f}")
-            logger.info(f"   • TP2: ${FADE_TP2_LOW:,.0f}")
-            logger.info("   • Rationale: Acceptance below VWAP; weak bids on rebound signal continuation")
-            logger.info("")
-        logger.info("")
-        logger.info(f"Current Price: ${current_close_1h:,.2f}")
-        logger.info(f"Last 1H Close: ${current_close_1h:,.2f}, High: ${current_high_1h:,.2f}, Low: ${current_low_1h:,.2f}")
-        logger.info(f"1H Volume: {current_volume_1h:,.0f}, 1H SMA: {avg_volume_1h:,.0f}, Rel_Vol: {current_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}")
-        logger.info(f"5M Volume: {current_volume_5m:,.0f}, 5M SMA: {avg_volume_5m:,.0f}, Rel_Vol: {current_volume_5m/avg_volume_5m if avg_volume_5m > 0 else 0:.2f}")
-        logger.info(f"Volume Confirmed: {'✅' if volume_confirmed else '❌'}")
-        logger.info("")
-        
-        # Execution guardrails: Pick one path (breakout or breakdown)
-        # Don't run both. If trigger fires without volume confirmation, pass or halve size.
-        # If first entry stops, don't re-enter until a fresh 1h structure forms.
-        price_position_in_range = (current_close_1h - current_lod) / current_range_width if current_range_width > 0 else 0.5
-        logger.info(f"Price position in range: {price_position_in_range:.2%} (0% = LOD, 100% = HOD)")
-        
-        # Determine which path to prioritize based on direction filter and one-side management
-        if direction == 'LONG':
-            logger.info("🎯 Direction filter: LONG only - prioritizing breakout strategies")
-            breakdown_priority = False
-            breakout_priority = True
-        elif direction == 'SHORT':
-            logger.info("🎯 Direction filter: SHORT only - prioritizing breakdown strategies")
-            breakdown_priority = True
-            breakout_priority = False
-        else:  # BOTH - use one-side management rule
-            # Check if any long strategy is already triggered
-            long_triggered = breakout_state.get("triggered", False) or retest_state.get("triggered", False)
-            short_triggered = breakdown_state.get("triggered", False) or fade_state.get("triggered", False)
-            
-            if long_triggered:
-                logger.info("🎯 One-side management: LONG strategy already triggered - prioritizing LONG")
-                breakdown_priority = False
-                breakout_priority = True
-            elif short_triggered:
-                logger.info("🎯 One-side management: SHORT strategy already triggered - prioritizing SHORT")
-                breakdown_priority = True
-                breakout_priority = False
-            else:
-                # No strategy triggered yet - use price position relative to day mid
-                below_day_mid = current_close_1h < current_mid_range
-                if below_day_mid:
-                    logger.info(f"🎯 One-side management: Price (${current_close_1h:,.2f}) below day mid (${current_mid_range:,.2f}) = SHORT priority")
-                    breakdown_priority = True
-                    breakout_priority = False
-                else:
-                    logger.info(f"🎯 One-side management: Price (${current_close_1h:,.2f}) above day mid (${current_mid_range:,.2f}) = LONG priority")
-                    breakdown_priority = False
-                    breakout_priority = True
-        
-        # LONG (breakout) Strategy Conditions
-        breakout_condition = (
-            breakout_priority and
-            current_close_1h >= BREAKOUT_ENTRY_LOW and 
-            current_close_1h <= BREAKOUT_ENTRY_HIGH and 
-            volume_confirmed and 
-            not breakout_state.get("triggered", False) and
-            not breakout_state.get("stopped_out", False)  # Don't re-enter if stopped out
-        )
-        
-        # LONG (retest) Strategy Conditions
-        retest_condition = (
-            breakout_priority and
-            current_close_1h >= RETEST_ENTRY_LOW and 
-            current_close_1h <= RETEST_ENTRY_HIGH and 
-            volume_confirmed and 
-            not retest_state.get("triggered", False) and
-            not retest_state.get("stopped_out", False)  # Don't re-enter if stopped out
-        )
-        
-        # SHORT (breakdown) Strategy Conditions
-        breakdown_condition = (
-            breakdown_priority and
-            current_close_1h <= BREAKDOWN_ENTRY_HIGH and 
-            current_close_1h >= BREAKDOWN_ENTRY_LOW and 
-            volume_confirmed and 
-            not breakdown_state.get("triggered", False) and
-            not breakdown_state.get("stopped_out", False)  # Don't re-enter if stopped out
-        )
-        
-        # SHORT (retest) Strategy Conditions
-        fade_condition = (
-            breakdown_priority and
-            current_close_1h <= FADE_ENTRY_HIGH and 
-            current_close_1h >= FADE_ENTRY_LOW and 
-            volume_confirmed and 
-            not fade_state.get("triggered", False) and
-            not fade_state.get("stopped_out", False)  # Don't re-enter if stopped out
-        )
         
         # --- Strategy Analysis ---
         trade_executed = False
         
-        # 1. LONG - Breakout Strategy
-        if long_strategies_enabled and not breakout_state.get("triggered", False) and not breakout_state.get("stopped_out", False):
-            in_breakout_zone = BREAKOUT_ENTRY_LOW <= current_close_1h <= BREAKOUT_ENTRY_HIGH
-            breakout_ready = in_breakout_zone and breakout_priority and bo_breakout_confirmed and wick_guard and volume_1h_confirmed
-            
-            logger.info("🔍 LONG - Breakout Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${BREAKOUT_ENTRY_LOW:,.0f}-${BREAKOUT_ENTRY_HIGH:,.0f}): {'✅' if in_breakout_zone else '❌'}")
-            logger.info(f"   • Volume confirmed (1H: {current_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}x, 5M: {current_volume_5m/avg_volume_5m if avg_volume_5m > 0 else 0:.2f}x): {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
-            logger.info(f"   • Breakout Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
-            
-            if breakout_ready:
+        # 1) Breakout-continuation (15m close above 117,600; buy 117,700–118,000; vol: 15m ≥ 1.25x 20 SMA)
+        if long_strategies_enabled and not trigger_state.get("breakout_continuation_triggered", False):
+            # Last completed 15m candle
+            last_15m_close = df_15m['close'].iloc[-1]
+            last_15m_vol = df_15m['volume'].iloc[-1]
+            # 20 SMA of previous 20 completed bars (exclude the last by shifting)
+            sma20_prev = df_15m['vol_sma20'].iloc[-2] if len(df_15m) >= 22 else None
+            vol_ok = (sma20_prev is not None) and (last_15m_vol >= VOLUME_FACTOR_15M_BREAKOUT * sma20_prev)
+            price_close_ok = last_15m_close > BREAKOUT_CONFIRM_LEVEL_15M
+            in_buy_zone = BREAKOUT_BUY_ZONE_LOW <= current_price <= BREAKOUT_BUY_ZONE_HIGH
+
+            logger.info("🔍 LONG - Breakout-continuation:")
+            logger.info(f"   • 15m close > {BREAKOUT_CONFIRM_LEVEL_15M:,.0f}: {'✅' if price_close_ok else '❌'} (close={last_15m_close:,.0f})")
+            logger.info(f"   • 15m volume ≥ {VOLUME_FACTOR_15M_BREAKOUT:.2f}x 20-SMA: {'✅' if vol_ok else '❌'}")
+            logger.info(f"   • Price in buy zone {BREAKOUT_BUY_ZONE_LOW:,.0f}-{BREAKOUT_BUY_ZONE_HIGH:,.0f}: {'✅' if in_buy_zone else '❌'}")
+
+            if price_close_ok and vol_ok and in_buy_zone:
                 logger.info("")
-                logger.info("🎯 LONG - Breakout Strategy conditions met - executing trade...")
+                logger.info("🎯 Breakout-continuation conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -682,48 +544,71 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 # Execute Breakout trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD LONG Breakout",
-                    entry_price=current_close_1h,
-                    stop_loss=BREAKOUT_STOP_LOSS,
+                    trade_type="BTC Setup - Breakout-continuation Long",
+                    entry_price=current_price,
+                    stop_loss=BREAKOUT_SL,
                     take_profit=BREAKOUT_TP1,
+                    margin=MARGIN,
+                    leverage=LEVERAGE,
                     side="BUY",
-                    product=PRODUCT_ID,
-                    volume_confirmed=volume_confirmed
+                    product=PRODUCT_ID
                 )
                 
                 if trade_success:
-                    logger.info("🎉 LONG - Breakout trade executed successfully!")
-                    logger.info(f"Entry: ${current_close_1h:,.2f}")
-                    logger.info(f"Stop-loss: ${BREAKOUT_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${BREAKOUT_TP1:,.2f}")
-                    logger.info(f"TP2: ${BREAKOUT_TP2_LOW:,.2f}-${BREAKOUT_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: Fresh expansion beyond HOD with momentum & confirmation")
-                    
-                    # Save trigger state
-                    breakout_state = {
-                        "triggered": True, 
-                        "trigger_ts": int(current_candle_1h['start']),
-                        "entry_price": current_close_1h
-                    }
-                    save_trigger_state(breakout_state, BREAKOUT_TRIGGER_FILE)
+                    logger.info(f"🎉 Breakout-continuation trade executed successfully!")
+                    logger.info(f"Trade output: {trade_result}")
+                    trigger_state["breakout_continuation_triggered"] = True
+                    trigger_state["active_trade_direction"] = "LONG"
+                    trigger_state["last_trigger_ts"] = int(df_15m['start'].iloc[-1])
+                    save_trigger_state(trigger_state)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Breakout trade failed: {trade_result}")
+                    logger.error(f"❌ Breakout-continuation trade failed: {trade_result}")
         
-        # 2. LONG - Retest Strategy
-        if not trade_executed and long_strategies_enabled and not retest_state.get("triggered", False) and not retest_state.get("stopped_out", False):
-            in_retest_zone = RETEST_ENTRY_LOW <= current_close_1h <= RETEST_ENTRY_HIGH
-            retest_ready = in_retest_zone and breakout_priority and hl_ok
-            
-            logger.info("🔍 LONG - Retest Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${RETEST_ENTRY_LOW:,.0f}-${RETEST_ENTRY_HIGH:,.0f}): {'✅' if in_retest_zone else '❌'}")
-            logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
-            logger.info(f"   • Retest Ready: {'🎯 YES' if retest_ready else '⏳ NO'}")
-            
-            if retest_ready:
+        # 2) VWAP reclaim after sweep (5m): wick into 114,4xx-114,3xx, reclaim VWAP, then 5m higher-low above VWAP; vol ≥ 1.3x 20-SMA
+        if long_strategies_enabled and not trade_executed and not trigger_state.get("vwap_reclaim_triggered", False):
+            logger.info("")
+            logger.info("🔍 LONG - VWAP reclaim after sweep:")
+
+            vwap_ok = False
+            hl_ok = False
+            vol_ok = False
+            sweep_low = None
+
+            if vwap_series is not None and not vwap_series.empty and len(df_5m) >= 25:
+                # Identify recent sweep (in last ~12 bars)
+                recent_window = df_5m.tail(12).copy()
+                sweeps = recent_window[(recent_window['low'] <= SWEEP_ZONE_HIGH) & (recent_window['low'] >= SWEEP_ZONE_LOW)]
+                if sweeps.shape[0] == 0:
+                    # allow slightly deeper sweep below zone
+                    sweeps = recent_window[recent_window['low'] < SWEEP_ZONE_LOW]
+                if sweeps.shape[0] > 0:
+                    last_sweep_idx = sweeps.index.max()
+                    sweep_low = float(df_5m.loc[last_sweep_idx, 'low'])
+                    # Last two completed bars
+                    last_idx = df_5m.index.max()
+                    # Ensure we use completed bars (exclude very last row if still forming). We'll use last two rows.
+                    if last_idx - last_sweep_idx >= 2:
+                        c1 = df_5m.iloc[-1]  # last completed
+                        c0 = df_5m.iloc[-2]  # prior completed
+                        # VWAP at those bars
+                        vwap_c1 = float(vwap_series.iloc[-1]) if not pd.isna(vwap_series.iloc[-1]) else None
+                        vwap_c0 = float(vwap_series.iloc[-2]) if not pd.isna(vwap_series.iloc[-2]) else None
+                        if vwap_c1 is not None and vwap_c0 is not None:
+                            vwap_ok = (c1['close'] > vwap_c1)
+                            hl_ok = (c1['low'] > c0['low']) and (c0['close'] > vwap_c0)
+                            # Volume check on the reclaim bar (c1) vs SMA20 up to previous bar
+                            sma20_prev = df_5m['vol_sma20'].iloc[-2]
+                            vol_ok = (sma20_prev is not None) and (c1['volume'] >= VOLUME_FACTOR_5M_RECLAIM * sma20_prev)
+
+            logger.info(f"   • Recent sweep into {SWEEP_ZONE_LOW:,.0f}-{SWEEP_ZONE_HIGH:,.0f}: {'✅' if sweep_low is not None else '❌'}")
+            logger.info(f"   • Reclaim above VWAP: {'✅' if vwap_ok else '❌'}")
+            logger.info(f"   • 5m higher-low above VWAP: {'✅' if hl_ok else '❌'}")
+            logger.info(f"   • 5m volume ≥ {VOLUME_FACTOR_5M_RECLAIM:.2f}x 20-SMA: {'✅' if vol_ok else '❌'}")
+
+            if sweep_low is not None and vwap_ok and hl_ok and vol_ok:
                 logger.info("")
-                logger.info("🎯 LONG - Retest Strategy conditions met - executing trade...")
+                logger.info("🎯 VWAP reclaim after sweep - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -732,51 +617,57 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute Retest trade
+                # Execute Reclaim trade
+                reclaim_sl = round(sweep_low * (1 - VWAP_SL_BUFFER_PCT), 2)
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD LONG Retest",
-                    entry_price=current_close_1h,
-                    stop_loss=RETEST_STOP_LOSS,
-                    take_profit=RETEST_TP1,
+                    trade_type="BTC Setup - VWAP reclaim Long",
+                    entry_price=current_price,
+                    stop_loss=reclaim_sl,
+                    take_profit=RECLAIM_TP1,
+                    margin=MARGIN,
+                    leverage=LEVERAGE,
                     side="BUY",
-                    product=PRODUCT_ID,
-                    volume_confirmed=volume_confirmed
+                    product=PRODUCT_ID
                 )
                 
                 if trade_success:
-                    logger.info("🎉 LONG - Retest trade executed successfully!")
-                    logger.info(f"Entry: ${current_close_1h:,.2f}")
-                    logger.info(f"Stop-loss: ${RETEST_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${RETEST_TP1:,.2f}")
-                    logger.info(f"TP2: ${RETEST_TP2_LOW:,.2f}")
-                    logger.info("Strategy: Pullback to intraday support; hold > 20 EMA keeps bullish structure")
-                    
-                    # Save trigger state
-                    retest_state = {
-                        "triggered": True, 
-                        "trigger_ts": int(current_candle_1h['start']),
-                        "entry_price": current_close_1h
-                    }
-                    save_trigger_state(retest_state, RETEST_TRIGGER_FILE)
+                    logger.info(f"🎉 VWAP reclaim trade executed successfully!")
+                    logger.info(f"Trade output: {trade_result}")
+                    trigger_state["vwap_reclaim_triggered"] = True
+                    trigger_state["active_trade_direction"] = "LONG"
+                    trigger_state["last_trigger_ts"] = int(df_5m['start'].iloc[-1])
+                    save_trigger_state(trigger_state)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Retest trade failed: {trade_result}")
+                    logger.error(f"❌ VWAP reclaim trade failed: {trade_result}")
         
-        # 3. SHORT - Breakdown Strategy
-        if not trade_executed and short_strategies_enabled and not breakdown_state.get("triggered", False) and not breakdown_state.get("stopped_out", False):
-            in_breakdown_zone = BREAKDOWN_ENTRY_LOW <= current_close_1h <= BREAKDOWN_ENTRY_HIGH
-            breakdown_ready = in_breakdown_zone and breakdown_priority and last_two_15m_below and volume_1h_confirmed
-            
-            logger.info("🔍 SHORT - Breakdown Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${BREAKDOWN_ENTRY_LOW:,.0f}-${BREAKDOWN_ENTRY_HIGH:,.0f}): {'✅' if in_breakdown_zone else '❌'}")
-            logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
-            logger.info(f"   • Breakdown Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
-            
-            if breakdown_ready:
+        # 3) Failed-breakout short: push above 117,600 then 5m close < 117,200; sell 117,100–116,900; vol ≥ 1.4x 20-SMA
+        if short_strategies_enabled and not trade_executed and not trigger_state.get("failed_breakout_triggered", False):
+            logger.info("")
+            logger.info("🔍 SHORT - Failed-breakout:")
+
+            # Check that a recent 5m candle pushed above 117,600
+            recent_5m = df_5m.tail(24)
+            had_push_above = (recent_5m['high'] > FAILED_BO_PUSH_LEVEL).any()
+            # Last completed 5m close below 117,200
+            last_close_5m = df_5m['close'].iloc[-1]
+            reject_close_ok = last_close_5m < FAILED_BO_REJECT_CLOSE_5M
+            # Volume check on that last bar vs SMA20 up to previous bar
+            sma20_prev_5m = df_5m['vol_sma20'].iloc[-2] if len(df_5m) >= 22 else None
+            last_vol_5m = df_5m['volume'].iloc[-1]
+            vol_ok = (sma20_prev_5m is not None) and (last_vol_5m >= VOLUME_FACTOR_5M_FAILED_BO * sma20_prev_5m)
+            # Entry zone
+            in_sell_zone = FAILED_BO_SELL_ZONE_LOW <= current_price <= FAILED_BO_SELL_ZONE_HIGH
+
+            logger.info(f"   • Recent push above {FAILED_BO_PUSH_LEVEL:,.0f}: {'✅' if had_push_above else '❌'}")
+            logger.info(f"   • 5m close < {FAILED_BO_REJECT_CLOSE_5M:,.0f}: {'✅' if reject_close_ok else '❌'} (close={last_close_5m:,.0f})")
+            logger.info(f"   • 5m volume ≥ {VOLUME_FACTOR_5M_FAILED_BO:.2f}x 20-SMA: {'✅' if vol_ok else '❌'}")
+            logger.info(f"   • Price in sell zone {FAILED_BO_SELL_ZONE_HIGH:,.0f}-{FAILED_BO_SELL_ZONE_LOW:,.0f}: {'✅' if in_sell_zone else '❌'}")
+
+            if had_push_above and reject_close_ok and vol_ok and in_sell_zone:
                 logger.info("")
-                logger.info("🎯 SHORT - Breakdown Strategy conditions met - executing trade...")
+                logger.info("🎯 Failed-breakout conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -785,480 +676,127 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute Breakdown trade
+                # Execute Failed-breakout short
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD SHORT Breakdown",
-                    entry_price=current_close_1h,
-                    stop_loss=BREAKDOWN_STOP_LOSS,
+                    trade_type="BTC Setup - Failed-breakout Short",
+                    entry_price=current_price,
+                    stop_loss=FAILED_BO_SL,
+                    take_profit=FAILED_BO_TP1,
+                    margin=MARGIN,
+                    leverage=LEVERAGE,
+                    side="SELL",
+                    product=PRODUCT_ID
+                )
+                
+                if trade_success:
+                    logger.info(f"🎉 Failed-breakout short executed successfully!")
+                    logger.info(f"Trade output: {trade_result}")
+                    trigger_state["failed_breakout_triggered"] = True
+                    trigger_state["active_trade_direction"] = "SHORT"
+                    trigger_state["last_trigger_ts"] = int(df_5m['start'].iloc[-1])
+                    save_trigger_state(trigger_state)
+                    trade_executed = True
+                else:
+                    logger.error(f"❌ Failed-breakout short failed: {trade_result}")
+        
+        # 4) Breakdown-retest (15m close < 114,300, then retest 114,200–114,400; vol ≥ 1.3x 20-SMA)
+        if short_strategies_enabled and not trade_executed and not trigger_state.get("breakdown_retest_triggered", False):
+            logger.info("")
+            logger.info("🔍 SHORT - Breakdown-retest:")
+
+            # Last completed 15m candle close and volume
+            last_15m_close = df_15m['close'].iloc[-1]
+            last_15m_vol = df_15m['volume'].iloc[-1]
+            sma20_prev_15m = df_15m['vol_sma20'].iloc[-2] if len(df_15m) >= 22 else None
+            confirm_breakdown = last_15m_close < BREAKDOWN_CONFIRM_LEVEL_15M
+            vol_ok = (sma20_prev_15m is not None) and (last_15m_vol >= VOLUME_FACTOR_15M_BREAKDOWN * sma20_prev_15m)
+            in_retest_zone = BREAKDOWN_RETEST_ZONE_LOW <= current_price <= BREAKDOWN_RETEST_ZONE_HIGH
+
+            logger.info(f"   • 15m close < {BREAKDOWN_CONFIRM_LEVEL_15M:,.0f}: {'✅' if confirm_breakdown else '❌'} (close={last_15m_close:,.0f})")
+            logger.info(f"   • 15m volume ≥ {VOLUME_FACTOR_15M_BREAKDOWN:.2f}x 20-SMA: {'✅' if vol_ok else '❌'}")
+            logger.info(f"   • Retest zone {BREAKDOWN_RETEST_ZONE_LOW:,.0f}-{BREAKDOWN_RETEST_ZONE_HIGH:,.0f}: {'✅' if in_retest_zone else '❌'}")
+
+            if confirm_breakdown and vol_ok and in_retest_zone:
+                logger.info("")
+                logger.info("🎯 Breakdown-retest conditions met - executing trade...")
+                
+                # Play alert sound
+                try:
+                    play_alert_sound()
+                    logger.info("Alert sound played successfully")
+                except Exception as e:
+                    logger.error(f"Failed to play alert sound: {e}")
+                
+                # Execute Breakdown-retest short
+                trade_success, trade_result = execute_crypto_trade(
+                    cb_service=cb_service,
+                    trade_type="BTC Setup - Breakdown-retest Short",
+                    entry_price=current_price,
+                    stop_loss=BREAKDOWN_SL,
                     take_profit=BREAKDOWN_TP1,
+                    margin=MARGIN,
+                    leverage=LEVERAGE,
                     side="SELL",
-                    product=PRODUCT_ID,
-                    volume_confirmed=volume_confirmed
+                    product=PRODUCT_ID
                 )
                 
                 if trade_success:
-                    logger.info("🎉 SHORT - Breakdown trade executed successfully!")
-                    logger.info(f"Entry: ${current_close_1h:,.2f}")
-                    logger.info(f"Stop-loss: ${BREAKDOWN_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${BREAKDOWN_TP1:,.2f}")
-                    logger.info(f"TP2: ${BREAKDOWN_TP2_LOW:,.2f}-${BREAKDOWN_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: Range failure + fresh low; room to prior 4h demand")
-                    
-                    # Save trigger state
-                    breakdown_state = {
-                        "triggered": True, 
-                        "trigger_ts": int(current_candle_1h['start']),
-                        "entry_price": current_close_1h
-                    }
-                    save_trigger_state(breakdown_state, BREAKDOWN_TRIGGER_FILE)
+                    logger.info(f"🎉 Breakdown-retest short executed successfully!")
+                    logger.info(f"Trade output: {trade_result}")
+                    trigger_state["breakdown_retest_triggered"] = True
+                    trigger_state["active_trade_direction"] = "SHORT"
+                    trigger_state["last_trigger_ts"] = int(df_15m['start'].iloc[-1])
+                    save_trigger_state(trigger_state)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Breakdown trade failed: {trade_result}")
+                    logger.error(f"❌ Breakdown-retest short failed: {trade_result}")
         
-        # 4. SHORT - Retest Strategy
-        if not trade_executed and short_strategies_enabled and not fade_state.get("triggered", False) and not fade_state.get("stopped_out", False):
-            in_fade_zone = FADE_ENTRY_LOW <= current_close_1h <= FADE_ENTRY_HIGH
-            fade_ready = in_fade_zone and breakdown_priority and had_spike and reject_close_ok and sell_pressure
-            
-            logger.info("🔍 SHORT - Retest Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${FADE_ENTRY_LOW:,.0f}-${FADE_ENTRY_HIGH:,.0f}): {'✅' if in_fade_zone else '❌'}")
-            logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
-            logger.info(f"   • Retest Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
-            
-            if fade_ready:
-                logger.info("")
-                logger.info("🎯 SHORT - Retest Strategy conditions met - executing trade...")
-                
-                # Play alert sound
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-                
-                # Execute Retest trade
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="ETH-USD SHORT Retest",
-                    entry_price=current_close_1h,
-                    stop_loss=FADE_STOP_LOSS,
-                    take_profit=FADE_TP1,
-                    side="SELL",
-                    product=PRODUCT_ID,
-                    volume_confirmed=volume_confirmed
-                )
-                
-                if trade_success:
-                    logger.info("🎉 SHORT - Retest trade executed successfully!")
-                    logger.info(f"Entry: ${current_close_1h:,.2f}")
-                    logger.info(f"Stop-loss: ${FADE_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${FADE_TP1:,.2f}")
-                    logger.info(f"TP2: ${FADE_TP2_LOW:,.2f}")
-                    logger.info("Strategy: Acceptance below VWAP; weak bids on rebound signal continuation")
-                    
-                    # Save trigger state
-                    fade_state = {
-                        "triggered": True, 
-                        "trigger_ts": int(current_candle_1h['start']),
-                        "entry_price": current_close_1h
-                    }
-                    save_trigger_state(fade_state, FADE_TRIGGER_FILE)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ Retest trade failed: {trade_result}")
-        
-        # Check if any strategy was triggered
         if not trade_executed:
-            logger.info("⏳ Waiting for strategy conditions...")
-            if direction != 'BOTH':
-                logger.info(f"   Direction filter: {direction} only")
-            if not volume_confirmed:
-                logger.info("   Volume confirmation not met")
-            
-            if long_strategies_enabled:
-                if breakout_state.get("triggered", False):
-                    logger.info("   Breakout strategy already triggered")
-                if retest_state.get("triggered", False):
-                    logger.info("   Retest strategy already triggered")
-            
-            if short_strategies_enabled:
-                if breakdown_state.get("triggered", False):
-                    logger.info("   Breakdown strategy already triggered")
-                if fade_state.get("triggered", False):
-                    logger.info("   Retest strategy already triggered")
-        
-        # Reset triggers if price moves significantly away from entry zones
-        # Execution guardrails: If first entry stops, stand down until new 1h structure forms
-        if breakout_state.get("triggered", False):
-            if current_close_1h < BREAKOUT_STOP_LOSS:
-                logger.info("🔄 Resetting Breakout trigger state - price fell below stop loss")
-                logger.warning("⚠️ Execution guardrail: Standing down until new 1h structure forms")
-                breakout_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
-                save_trigger_state(breakout_state, BREAKOUT_TRIGGER_FILE)
-                logger.info("Breakout trigger state reset - standing down")
-        
-        if retest_state.get("triggered", False):
-            if current_close_1h < RETEST_STOP_LOSS:
-                logger.info("🔄 Resetting Retest trigger state - price fell below stop loss")
-                logger.warning("⚠️ Execution guardrail: Standing down until new 1h structure forms")
-                retest_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
-                save_trigger_state(retest_state, RETEST_TRIGGER_FILE)
-                logger.info("Retest trigger state reset - standing down")
-        
-        if breakdown_state.get("triggered", False):
-            if current_close_1h > BREAKDOWN_STOP_LOSS:
-                logger.info("🔄 Resetting Breakdown trigger state - price rose above stop loss")
-                logger.warning("⚠️ Execution guardrail: Standing down until new 1h structure forms")
-                breakdown_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
-                save_trigger_state(breakdown_state, BREAKDOWN_TRIGGER_FILE)
-                logger.info("Breakdown trigger state reset - standing down")
-        
-        if fade_state.get("triggered", False):
-            if current_close_1h > FADE_STOP_LOSS:
-                logger.info("🔄 Resetting Retest trigger state - price rose above stop loss")
-                logger.warning("⚠️ Execution guardrail: Standing down until new 1h structure forms")
-                fade_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
-                save_trigger_state(fade_state, FADE_TRIGGER_FILE)
-                logger.info("Retest trigger state reset - standing down")
-        
-        logger.info("=== ETH-USD Trading Strategy Alert completed ===")
-        return current_ts_1h
+            logger.info("")
+            logger.info("⏳ No trade conditions met for any setup")
+            logger.info(f"Breakout-continuation triggered: {trigger_state.get('breakout_continuation_triggered', False)}")
+            logger.info(f"VWAP reclaim triggered: {trigger_state.get('vwap_reclaim_triggered', False)}")
+            logger.info(f"Failed-breakout triggered: {trigger_state.get('failed_breakout_triggered', False)}")
+            logger.info(f"Breakdown-retest triggered: {trigger_state.get('breakdown_retest_triggered', False)}")
+            logger.info(f"Active trade direction: {trigger_state.get('active_trade_direction', 'None')}")
+
+        logger.info("=== BTC setups check completed ===")
+        return last_alert_ts
         
     except Exception as e:
-        logger.error(f"Error in ETH-USD Trading Strategy Alert logic: {e}")
+        logger.error(f"Error in BTC setups logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH-USD Trading Strategy Alert completed (with error) ===")
+        logger.info("=== BTC setups check completed (with error) ===")
     return last_alert_ts
 
-
-
-# --- ETH Intraday Plan (Aug 9, 2025) ---
-def eth_intraday_plan_alert(cb_service, last_alert_ts=None, max_trades_per_day: int = 1):
-    """
-    ETH intraday plan per Aug 9, 2025:
-    - Trigger/Acceptance on 15m with 1h VWAP filter
-    - Volume: 15m volume >= 1.25x SMA20
-    - Entry: limit on retest of level ±$3; else market on new 15m HH/LL within 30m
-    - SL: trigger bar extreme ± 0.5× ATR(14, 15m) with floor/ceiling 0.8%
-    - TP: 1.2R (primary bracket). Log 2.2R and 21-EMA trailing plan
-    - Guards: max trades/day, chop filter, news-gap safety, 45m no-fill timeout
-    - Position size: $5,000 notional (250 × 20)
-    """
-
-    def candles_to_df(candles_list):
-        if not candles_list:
-            return pd.DataFrame(columns=["start", "open", "high", "low", "close", "volume"])
-        rows = []
-        for c in candles_list:
-            try:
-                rows.append({
-                    'start': int(c['start']),
-                    'open': float(c['open']),
-                    'high': float(c['high']),
-                    'low': float(c['low']),
-                    'close': float(c['close']),
-                    'volume': float(c['volume'])
-                })
-            except Exception:
-                continue
-        return pd.DataFrame(rows).sort_values('start').reset_index(drop=True)
-
-    def compute_atr(df: pd.DataFrame, period: int = 14) -> float:
-        if df is None or df.empty or len(df) < period + 1:
-            return 0.0
-        highs = df['high']
-        lows = df['low']
-        closes = df['close']
-        tr1 = highs - lows
-        tr2 = (highs - closes.shift(1)).abs()
-        tr3 = (lows - closes.shift(1)).abs()
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        atr_series = tr.rolling(window=period).mean()
-        return float(atr_series.iloc[-1]) if not pd.isna(atr_series.iloc[-1]) else 0.0
-
-    def ema(series: pd.Series, length: int) -> float:
-        if series is None or len(series) < length:
-            return 0.0
-        return float(series.ewm(span=length, adjust=False).mean().iloc[-1])
-
-    def compute_vwap(df: pd.DataFrame) -> float:
-        if df is None or df.empty:
-            return 0.0
-        tp = (df['high'] + df['low'] + df['close']) / 3.0
-        pv = tp * df['volume']
-        total_vol = df['volume'].sum()
-        return float(pv.sum() / total_vol) if total_vol > 0 else 0.0
-
-    def get_min_base_size(product_id: str) -> float:
-        return {'ETH-PERP-INTX': 0.001}.get(product_id, 0.001)
-
-    def calc_base_size(product_id: str, notional_usd: float, px: float) -> float:
-        min_sz = get_min_base_size(product_id)
-        raw = notional_usd / max(px, 1e-9)
-        decimals = len(str(min_sz).split('.')[-1])
-        size = round(raw, decimals)
-        return max(size, min_sz)
-
-    # --- State ---
-    state_file = "eth_intraday_trigger_state.json"
-    state = load_trigger_state(state_file)
-    now = datetime.now(UTC)
-
-    # Reset daily counter
-    today_str = now.strftime('%Y-%m-%d')
-    if state.get('last_trade_date') != today_str:
-        state['trades_today'] = 0
-        state['last_trade_date'] = today_str
-        state['active_side'] = None
-        state['awaiting_acceptance'] = False
-        state['trigger_info'] = None
-        state['accepted_info'] = None
-        state['entry_done'] = False
-        save_trigger_state(state, state_file)
-
-    if int(state.get('trades_today', 0)) >= max_trades_per_day:
-        logger.info(f"⏹ Max trades for the day reached ({max_trades_per_day}).")
-        return last_alert_ts
-
-    try:
-        # 15m for trigger/volume/ATR
-        start_15m = now - timedelta(hours=48)
-        candles_15m = safe_get_candles(cb_service, PRODUCT_ID, int(start_15m.timestamp()), int(now.timestamp()), GRANULARITY_15M)
-        if not candles_15m or len(candles_15m) < 40:
-            logger.warning("Not enough 15m data")
-            return last_alert_ts
-        df15 = candles_to_df(candles_15m)
-
-        # 5m for 1h VWAP (12 bars)
-        start_5m = now - timedelta(hours=1, minutes=5)
-        candles_5m = safe_get_candles(cb_service, PRODUCT_ID, int(start_5m.timestamp()), int(now.timestamp()), GRANULARITY_5M)
-        df5 = candles_to_df(candles_5m)
-
-        current_price = float(df15['close'].iloc[-1])
-
-        # Volume SMA20 on 15m (use last completed bar for SMA)
-        df15['vol_sma20'] = df15['volume'].rolling(window=20).mean()
-        last_vol_15m = float(df15['volume'].iloc[-1])
-        vol_sma20_prev = float(df15['vol_sma20'].iloc[-2]) if len(df15) >= 22 else 0.0
-        vol_ok = (last_vol_15m >= 1.25 * vol_sma20_prev) if vol_sma20_prev > 0 else False
-
-        # ATR and ATR%
-        atr_val = compute_atr(df15)
-        atr_pct = (atr_val / current_price) * 100 if current_price > 0 else 0.0
-
-        # 1h VWAP from last 12×5m
-        vwap_1h = compute_vwap(df5.tail(12))
-
-        # 21-EMA(15m) for trailing plan (logged only)
-        ema21_15m = ema(df15['close'], 21)
-
-        # Last completed and current 15m bars
-        cprev = df15.iloc[-2]
-        clast = df15.iloc[-1]
-
-        LONG_LEVEL = 4095.0
-        SHORT_LEVEL = 3881.0
-        BAND = 3.0
-
-        long_trigger = clast['close'] > LONG_LEVEL
-        short_trigger = clast['close'] < SHORT_LEVEL
-
-        # Chop filter at trigger
-        chop = (atr_pct < 0.25) and (abs(clast['close'] - vwap_1h) / clast['close'] < 0.001)
-
-        trg = state.get('trigger_info')
-        acc = state.get('accepted_info')
-
-        # Record trigger
-        if state.get('active_side') is None and not state.get('awaiting_acceptance', False):
-            if long_trigger and vol_ok and not chop:
-                state['active_side'] = 'LONG'
-                state['awaiting_acceptance'] = True
-                state['trigger_info'] = {
-                    'level': LONG_LEVEL,
-                    'bar_close': float(clast['close']),
-                    'bar_low': float(clast['low']),
-                    'bar_high': float(clast['high']),
-                    'bar_start': int(clast['start'])
-                }
-                save_trigger_state(state, state_file)
-                logger.info("🔔 LONG trigger fired (15m close > 4095). Waiting for acceptance…")
-                play_alert_sound()
-            elif short_trigger and vol_ok and not chop:
-                state['active_side'] = 'SHORT'
-                state['awaiting_acceptance'] = True
-                state['trigger_info'] = {
-                    'level': SHORT_LEVEL,
-                    'bar_close': float(clast['close']),
-                    'bar_low': float(clast['low']),
-                    'bar_high': float(clast['high']),
-                    'bar_start': int(clast['start'])
-                }
-                save_trigger_state(state, state_file)
-                logger.info("🔔 SHORT trigger fired (15m close < 3881). Waiting for acceptance…")
-                play_alert_sound()
-
-        # Acceptance check on next bar
-        if state.get('awaiting_acceptance', False) and trg is None:
-            trg = state.get('trigger_info')
-
-        if state.get('awaiting_acceptance', False) and trg is not None and acc is None:
-            side = state.get('active_side')
-            accept_ok = False
-            trigger_start = trg['bar_start']
-            idx_list = df15.index[df15['start'] == trigger_start].tolist()
-            if idx_list:
-                i = idx_list[0]
-                if i + 1 < len(df15):
-                    acc_bar = df15.iloc[i + 1]
-                    gap = abs(float(acc_bar['open']) - float(trg['bar_close'])) / float(trg['bar_close']) if trg['bar_close'] > 0 else 0.0
-                    if gap > 0.007:
-                        logger.info("⛔ News-gap safety tripped (>0.7%). Standing down.")
-                        state['active_side'] = None
-                        state['awaiting_acceptance'] = False
-                        state['trigger_info'] = None
-                        save_trigger_state(state, state_file)
-                        return last_alert_ts
-                    if side == 'LONG':
-                        accept_ok = (float(acc_bar['close']) > LONG_LEVEL) and (current_price > vwap_1h)
-                    else:
-                        accept_ok = (float(acc_bar['close']) < SHORT_LEVEL) and (current_price < vwap_1h)
-                    if accept_ok:
-                        state['accepted_info'] = {
-                            'bar_start': int(acc_bar['start']),
-                            'bar_high': float(acc_bar['high']),
-                            'bar_low': float(acc_bar['low']),
-                            'accepted_at': int(now.timestamp())
-                        }
-                        state['awaiting_acceptance'] = False
-                        save_trigger_state(state, state_file)
-                        logger.info(f"✅ {side} acceptance confirmed; 1h VWAP filter passed. Watching for retest or HH/LL…")
-                        play_alert_sound()
-
-        # Entry logic after acceptance
-        acc = state.get('accepted_info')
-        if acc is not None and state.get('active_side') in ['LONG', 'SHORT'] and not state.get('entry_done', False):
-            side = state['active_side']
-            level = LONG_LEVEL if side == 'LONG' else SHORT_LEVEL
-            lower = level - BAND
-            upper = level + BAND
-            in_band = (lower <= float(clast['low']) <= upper) or (lower <= float(clast['high']) <= upper)
-            accept_time = datetime.fromtimestamp(int(acc['accepted_at']), UTC)
-            timeout_30m = now >= (accept_time + timedelta(minutes=30))
-            hh_ll = (side == 'LONG' and float(clast['high']) > float(acc['bar_high'])) or \
-                    (side == 'SHORT' and float(clast['low']) < float(acc['bar_low']))
-
-            # Compute SL/TP using trigger extremes and ATR
-            trigger_low = float(state['trigger_info']['bar_low']) if state.get('trigger_info') else float(cprev['low'])
-            trigger_high = float(state['trigger_info']['bar_high']) if state.get('trigger_info') else float(cprev['high'])
-            entry_ref = level if in_band and not timeout_30m else current_price
-            if side == 'LONG':
-                sl_raw = trigger_low - 0.5 * atr_val
-                sl_floor = entry_ref * (1 - 0.008)
-                sl = min(sl_raw, sl_floor)
-                r = entry_ref - sl
-                tp1 = round(entry_ref + 1.2 * r, 2)
-            else:
-                sl_raw = trigger_high + 0.5 * atr_val
-                sl_ceiling = entry_ref * (1 + 0.008)
-                sl = max(sl_raw, sl_ceiling)
-                r = sl - entry_ref
-                tp1 = round(entry_ref - 1.2 * r, 2)
-            sl = round(sl, 2)
-
-            # Entry preference: limit on retest; else market on HH/LL within 30m
-            if in_band and not timeout_30m:
-                limit_price = round(level, 2)
-                base_sz = calc_base_size(PRODUCT_ID, POSITION_SIZE_USD, limit_price)
-                logger.info(f"🎯 {side} retest entry via limit: level=${limit_price:.2f} | SL=${sl:.2f} | TP1=${tp1:.2f} | ATR%={atr_pct:.2f}% | VWAP1h=${vwap_1h:.2f}")
-                try:
-                    play_alert_sound()
-                except Exception:
-                    pass
-                try:
-                    res = cb_service.place_limit_order_with_targets(
-                        product_id=PRODUCT_ID,
-                        side='BUY' if side == 'LONG' else 'SELL',
-                        size=base_sz,
-                        entry_price=limit_price,
-                        take_profit_price=tp1,
-                        stop_loss_price=sl,
-                        leverage=str(LEVERAGE)
-                    )
-                    if 'error' in res:
-                        logger.error(f"❌ Limit order error: {res['error']}")
-                    else:
-                        logger.info("⏳ Monitoring limit for fill up to 45m and placing brackets if needed…")
-                        mon = cb_service.monitor_limit_order_and_place_bracket(
-                            product_id=PRODUCT_ID,
-                            order_id=res.get('order_id'),
-                            size=base_sz,
-                            take_profit_price=tp1,
-                            stop_loss_price=sl,
-                            leverage=str(LEVERAGE),
-                            max_wait_time=2700
-                        )
-                        if mon.get('status') == 'success':
-                            state['entry_done'] = True
-                            state['trades_today'] = int(state.get('trades_today', 0)) + 1
-                            save_trigger_state(state, state_file)
-                            logger.info("✅ Limit filled and bracket placed")
-                except Exception as e:
-                    logger.error(f"Limit entry failed: {e}")
-            elif timeout_30m and hh_ll:
-                entry_price = current_price
-                base_sz = calc_base_size(PRODUCT_ID, POSITION_SIZE_USD, entry_price)
-                logger.info(f"🎯 {side} market entry on HH/LL: entry≈${entry_price:.2f} | SL=${sl:.2f} | TP1=${tp1:.2f}")
-                try:
-                    play_alert_sound()
-                except Exception:
-                    pass
-                try:
-                    result = cb_service.place_market_order_with_targets(
-                        product_id=PRODUCT_ID,
-                        side='BUY' if side == 'LONG' else 'SELL',
-                        size=base_sz,
-                        take_profit_price=tp1,
-                        stop_loss_price=sl,
-                        leverage=str(LEVERAGE)
-                    )
-                    if 'error' in result:
-                        logger.error(f"❌ Order error: {result['error']}")
-                    else:
-                        logger.info("✅ Order placed with TP1/SL bracket")
-                        state['entry_done'] = True
-                        state['trades_today'] = int(state.get('trades_today', 0)) + 1
-                        save_trigger_state(state, state_file)
-                except Exception as e:
-                    logger.error(f"Market entry failed: {e}")
-
-            # No-fill timeout after acceptance
-            if now >= (datetime.fromtimestamp(int(acc['accepted_at']), UTC) + timedelta(minutes=45)) and not state.get('entry_done'):
-                logger.info("⏹ No-fill timeout (45m) after acceptance — standing down.")
-                state['active_side'] = None
-                state['trigger_info'] = None
-                state['accepted_info'] = None
-                state['awaiting_acceptance'] = False
-                save_trigger_state(state, state_file)
-
-        logger.info("=== ETH intraday plan check completed ===")
-        return now
-    except Exception as e:
-        logger.error(f"Error in ETH intraday plan: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return last_alert_ts
-# Replace main loop to use new alert
 def main():
-    parser = argparse.ArgumentParser(description='ETH Intraday Plan Monitor')
-    parser.add_argument('--max-trades', type=int, default=1, help='Max trades per day (default: 1)')
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='BTC Actionable Setups Monitor with optional direction filter')
+    parser.add_argument('--direction', choices=['LONG', 'SHORT', 'BOTH'], default='BOTH',
+                       help='Trading direction to monitor: LONG, SHORT, or BOTH (default: BOTH)')
     args = parser.parse_args()
-
-    logger.info("Starting ETH Intraday Plan Monitor (15m triggers, 1h VWAP acceptance, retest-or-market entries)")
-    logger.info(f"Max trades today: {args.max_trades}")
+    
+    # Print usage examples
+    logger.info("Usage examples:")
+    logger.info("  python crypto_alert_monitor.py                    # Monitor both LONG and SHORT strategies")
+    logger.info("  python crypto_alert_monitor.py --direction LONG   # Monitor only LONG strategies")
+    logger.info("  python crypto_alert_monitor.py --direction SHORT  # Monitor only SHORT strategies")
+    logger.info("")
+    logger.info("Strategy Overview:")
+    logger.info(f"  • Breakout-continuation: 15m close > {BREAKOUT_CONFIRM_LEVEL_15M:,.0f}; buy {BREAKOUT_BUY_ZONE_LOW:,.0f}–{BREAKOUT_BUY_ZONE_HIGH:,.0f}; SL {BREAKOUT_SL:,.0f}; TP1 {BREAKOUT_TP1:,.0f}")
+    logger.info(f"  • VWAP reclaim: Sweep {SWEEP_ZONE_LOW:,.0f}–{SWEEP_ZONE_HIGH:,.0f}; reclaim VWAP + 5m HL; SL sweep_low-0.3%; TP1 {RECLAIM_TP1:,.0f}")
+    logger.info(f"  • Failed-breakout short: push > {FAILED_BO_PUSH_LEVEL:,.0f} then 5m close < {FAILED_BO_REJECT_CLOSE_5M:,.0f}; sell {FAILED_BO_SELL_ZONE_LOW:,.0f}–{FAILED_BO_SELL_ZONE_HIGH:,.0f}; SL {FAILED_BO_SL:,.0f}; TP1 {FAILED_BO_TP1:,.0f}")
+    logger.info(f"  • Breakdown-retest: 15m close < {BREAKDOWN_CONFIRM_LEVEL_15M:,.0f}; retest {BREAKDOWN_RETEST_ZONE_LOW:,.0f}–{BREAKDOWN_RETEST_ZONE_HIGH:,.0f}; SL {BREAKDOWN_SL:,.0f}; TP1 {BREAKDOWN_TP1:,.0f}")
+    logger.info("  • Position Size: $5,000 USD (250 margin × 20x)")
+    logger.info("")
+    
+    direction = args.direction.upper()
+    
+    logger.info("Starting BTC actionable setups monitor")
+    logger.info(f"Strategy: {direction} only" if direction != 'BOTH' else "Strategy: LONG & SHORT")
+    logger.info("")
     
     alert_sound_file = "alert_sound.wav"
     if not os.path.exists(alert_sound_file):
@@ -1268,18 +806,18 @@ def main():
         return
     else:
         logger.info(f"✅ Alert sound file '{alert_sound_file}' found and ready")
-    
+    logger.info("")
     cb_service = setup_coinbase()
     last_alert_ts = None
     consecutive_failures = 0
     max_consecutive_failures = 5
-
+    
     def poll_iteration():
         nonlocal last_alert_ts, consecutive_failures
         iteration_start_time = time.time()
-        last_alert_ts = eth_intraday_plan_alert(cb_service, last_alert_ts, max_trades_per_day=args.max_trades)
+        last_alert_ts = btc_intraday_alert(cb_service, last_alert_ts, direction)
         consecutive_failures = 0
-        logger.info(f"✅ ETH alert cycle completed in {time.time() - iteration_start_time:.1f} seconds")
+        logger.info(f"✅ Intraday alert cycle completed successfully in {time.time() - iteration_start_time:.1f} seconds")
     
     while True:
         try:
@@ -1300,7 +838,7 @@ def main():
             consecutive_failures += 1
             logger.error(f"🔗 Connection error (failure {consecutive_failures}/{max_consecutive_failures}): {e}")
             if consecutive_failures >= max_consecutive_failures:
-                logger.error("❌ Too many consecutive connection failures. Attempting to reconnect...")
+                logger.error(f"❌ Too many consecutive connection failures. Attempting to reconnect...")
                 try:
                     cb_service = setup_coinbase()
                     consecutive_failures = 0
@@ -1323,4 +861,4 @@ def main():
             time.sleep(delay)
 
 if __name__ == "__main__":
-    main() 
+    main()
