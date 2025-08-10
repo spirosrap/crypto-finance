@@ -556,15 +556,15 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # Get previous HOD/LOD from state files or use current values
         previous_hod = max(
             breakout_state.get("last_hod", current_hod),
-            retest_state.get("last_hod", current_hod),
+            reclaim_state.get("last_hod", current_hod),
             breakdown_state.get("last_hod", current_hod),
-            fade_state.get("last_hod", current_hod)
+            retest_state.get("last_hod", current_hod)
         )
         previous_lod = min(
             breakout_state.get("last_lod", current_lod),
-            retest_state.get("last_lod", current_lod),
+            reclaim_state.get("last_lod", current_lod),
             breakdown_state.get("last_lod", current_lod),
-            fade_state.get("last_lod", current_lod)
+            retest_state.get("last_lod", current_lod)
         )
         
         new_structure_formed, updated_hod, updated_lod = check_new_structure_formation(
