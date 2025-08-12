@@ -82,52 +82,52 @@ GRANULARITY_5M = "FIVE_MINUTE"  # 5-minute chart for execution
 GRANULARITY_15M = "FIFTEEN_MINUTE"  # 15-minute chart for execution
 VOLUME_PERIOD = 20  # For volume confirmation
 
-# Current market context (ETH ≈ $4,300, HOD $4,337, LOD $4,172)
+# Current market context (ETH ≈ $4,300; HOD $4,351; LOD $4,174)
 CURRENT_ETH_PRICE = 4300.00
-HOD_24H = 4337.00  # 24h High of day
-LOD_24H = 4172.00  # 24h Low of day
-RANGE_WIDTH_24H = HOD_24H - LOD_24H  # 165 points
-MID_RANGE_PIVOT = (HOD_24H + LOD_24H) / 2  # 4254.50
+HOD_24H = 4351.00  # 24h High of day
+LOD_24H = 4174.00  # 24h Low of day
+RANGE_WIDTH_24H = HOD_24H - LOD_24H  # 177 points
+MID_RANGE_PIVOT = (HOD_24H + LOD_24H) / 2  # 4262.50
 
-# LONG (breakout) Strategy Parameters - Entry: buy-stop $4,346–$4,355 (HOD +0.2–0.4%)
-BREAKOUT_ENTRY_LOW = 4346  # HOD + 9
-BREAKOUT_ENTRY_HIGH = 4355  # HOD + 18
-BREAKOUT_STOP_LOSS = 4294  # ≈ HOD −1.0%
-BREAKOUT_TP1 = 4407  # TP1
-BREAKOUT_TP2_LOW = 4463  # TP2
-BREAKOUT_TP2_HIGH = 4463
+# LONG (breakout) Strategy Parameters - Entry: 1h/5–15m close above 4,365–4,372 (HOD + ~0.3%)
+BREAKOUT_ENTRY_LOW = 4365  # HOD + 14
+BREAKOUT_ENTRY_HIGH = 4372  # HOD + 21
+BREAKOUT_STOP_LOSS = 4322  # ≈1R below ~4,366
+BREAKOUT_TP1 = 4410  # TP1: 4,410–4,431
+BREAKOUT_TP2_LOW = 4431  # TP2: 4,462–4,475
+BREAKOUT_TP2_HIGH = 4475
 
-# LONG (retest) Strategy Parameters - Entry: $4,245–$4,265 after sweep of $4,225–$4,240
-RECLAIM_ENTRY_LOW = 4245  # Entry after sweep and reclaim
-RECLAIM_ENTRY_HIGH = 4265
-RECLAIM_STOP_LOSS = 4160  # ≈ 0.3% below LOD
-RECLAIM_TP1 = 4315  # TP1
-RECLAIM_TP2_LOW = 4380  # TP2
-RECLAIM_TP2_HIGH = 4400
+# LONG (retest) Strategy Parameters - After confirmed break/close >4,365, buy reclaim of 4,350–4,359
+RECLAIM_ENTRY_LOW = 4350  # Reclaim zone after confirmed break
+RECLAIM_ENTRY_HIGH = 4359
+RECLAIM_STOP_LOSS = 4325  # Below reclaimed zone
+RECLAIM_TP1 = 4410  # TP1
+RECLAIM_TP2_LOW = 4460  # TP2: 4,460–4,480
+RECLAIM_TP2_HIGH = 4480
 
-# SHORT (breakdown) Strategy Parameters - Entry: sell-stop $4,160–$4,170 (through LOD)
-BREAKDOWN_ENTRY_LOW = 4160  # Through LOD
-BREAKDOWN_ENTRY_HIGH = 4170
-BREAKDOWN_STOP_LOSS = 4205  # Back above breakdown
-BREAKDOWN_TP1 = 4124  # TP1
-BREAKDOWN_TP2_LOW = 4084  # TP2
-BREAKDOWN_TP2_HIGH = 4084
+# SHORT (breakdown) Strategy Parameters - Entry: 1h/5–15m close below 4,158–4,163 (LOD − ~0.3%)
+BREAKDOWN_ENTRY_LOW = 4158  # LOD - 16
+BREAKDOWN_ENTRY_HIGH = 4163  # LOD - 11
+BREAKDOWN_STOP_LOSS = 4203  # ≈1R above ~4,161
+BREAKDOWN_TP1 = 4119  # TP1: 4,119–4,099
+BREAKDOWN_TP2_LOW = 4099  # TP2: 4,069–4,057
+BREAKDOWN_TP2_HIGH = 4057
 
-# SHORT (fade into resistance) Strategy Parameters - Entry: $4,410–$4,425 on spike + rejection
-RETEST_ENTRY_LOW = 4410  # Fade into resistance
-RETEST_ENTRY_HIGH = 4425
-RETEST_STOP_LOSS = 4450  # SL above resistance
-RETEST_TP1 = 4340  # TP1
-RETEST_TP2_LOW = 4285  # TP2
-RETEST_TP2_HIGH = 4305
+# SHORT (failed-retest) Strategy Parameters - After confirmed break <4,163, sell rejection at 4,168–4,175
+RETEST_ENTRY_LOW = 4168  # Prior low rejection
+RETEST_ENTRY_HIGH = 4175
+RETEST_STOP_LOSS = 4205  # SL
+RETEST_TP1 = 4120  # TP1
+RETEST_TP2_LOW = 4070  # TP2: 4,070–4,050
+RETEST_TP2_HIGH = 4050
 
 # Volume confirmation requirements
-VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25× 20-SMA volume on 1h
-VOLUME_SURGE_FACTOR_5M = 2.0   # ≥2× 20-SMA volume on 5m at trigger
+VOLUME_SURGE_FACTOR_1H = 1.25  # ≥1.25× 20-period vol on 1h
+VOLUME_SURGE_FACTOR_5M = 2.0   # ≥2× 20-SMA vol on 5m at trigger
 
 # Risk management
-RISK_PERCENTAGE_LOW = 0.8  # 1R ≈ 0.8–1.2% of price
-RISK_PERCENTAGE_HIGH = 1.2
+RISK_PERCENTAGE_LOW = 1.0  # 1R ≈ 1.0% of entry
+RISK_PERCENTAGE_HIGH = 1.0
 PARTIAL_PROFIT_RANGE_LOW = 1.0  # Partial at +1.0R
 PARTIAL_PROFIT_RANGE_HIGH = 1.5  # Partial at +1.5R
 
@@ -141,6 +141,10 @@ MAX_TRADES_PER_DAY = 2  # Max 2 trades/day
 COOLDOWN_MINUTES = 30  # 30 min after a stop
 MODE = "FAST"  # FAST = 5–15m close beyond trigger; CONSERVATIVE = 1h close
 VCONF = True  # enforce volume rule
+
+# Chop filter parameters
+ATR_PERCENTAGE_THRESHOLD = 0.4  # Skip if 1h ATR% < 0.4
+VOLUME_CHOP_FACTOR = 0.8  # and 5m vol < 0.8× average (chop filter)
 
 # State files for each strategy
 BREAKOUT_TRIGGER_FILE = "eth_breakout_trigger_state.json"
@@ -317,147 +321,142 @@ def check_new_structure_formation(cb_service, current_ts, previous_hod, previous
         logger.error(f"Error checking new structure formation: {e}")
         return False, previous_hod, previous_lod
 
-def check_sweep_and_reclaim(cb_service, current_ts):
+def check_confirmed_break_and_reclaim(cb_service, current_ts):
     """
-    Check for sweep of $4,225–$4,240 then reclaims $4,245–$4,265 on 5–15m with volume confirm
+    Check for confirmed break/close >4,365 then reclaim of 4,350–4,359 on 5–15m with volume confirm
     Required for LONG retest strategy
     """
     try:
-        # Get recent 5-minute and 15-minute candles to check for sweep and reclaim
+        # Get recent 1-hour, 5-minute and 15-minute candles
         end = current_ts
-        start = current_ts - timedelta(hours=2)  # Check last 2 hours
+        start = current_ts - timedelta(hours=4)  # Check last 4 hours
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         
+        candles_1h = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_1H)
         candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_5M)
         candles_15m = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_15M)
         
-        if not candles_5m or len(candles_5m) < 10:
-            return False, "Not enough 5m data"
+        if not candles_1h or len(candles_1h) < 2:
+            return False, "Not enough 1h data"
         
+        candles_1h = sorted(candles_1h, key=lambda x: int(x['start']))
         candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
         candles_15m = sorted(candles_15m, key=lambda x: int(x['start']))
         
-        # Check for sweep of $4,225–$4,240 (price went below 4240)
-        sweep_zone_low = 4225
-        sweep_zone_high = 4240
-        reclaim_level_low = 4245
-        reclaim_level_high = 4265
+        # Check for confirmed break/close >4,365 on 1h
+        break_level = 4365
+        reclaim_level_low = 4350
+        reclaim_level_high = 4359
         
-        sweep_detected = False
+        break_confirmed = False
         reclaim_detected = False
         
-        for candle in candles_5m[-20:]:  # Check last 20 5m candles
-            high = float(candle['high'])
-            low = float(candle['low'])
+        # Check 1h timeframe for confirmed break
+        for candle in candles_1h[-3:]:  # Check last 3 1h candles
             close = float(candle['close'])
-            
-            # Check for sweep (price went below 4240)
-            if low <= sweep_zone_high and not sweep_detected:
-                sweep_detected = True
-                logger.info(f"Sweep detected: 5m low ${low:,.2f} <= ${sweep_zone_high:,.2f}")
-            
-            # Check for reclaim (close back above 4245-4265) after sweep
-            if sweep_detected and close >= reclaim_level_low and close <= reclaim_level_high and not reclaim_detected:
-                reclaim_detected = True
-                logger.info(f"Reclaim detected: 5m close ${close:,.2f} in range ${reclaim_level_low:,.2f}-${reclaim_level_high:,.2f}")
+            if close > break_level and not break_confirmed:
+                break_confirmed = True
+                logger.info(f"Break confirmed: 1h close ${close:,.2f} > ${break_level:,.2f}")
         
-        # Also check 15m timeframe
-        for candle in candles_15m[-8:]:  # Check last 8 15m candles
-            high = float(candle['high'])
-            low = float(candle['low'])
-            close = float(candle['close'])
+        # Check for reclaim of 4,350–4,359 after confirmed break
+        if break_confirmed:
+            for candle in candles_5m[-20:]:  # Check last 20 5m candles
+                close = float(candle['close'])
+                
+                # Check for reclaim (close in 4350-4359 range) after break
+                if close >= reclaim_level_low and close <= reclaim_level_high and not reclaim_detected:
+                    reclaim_detected = True
+                    logger.info(f"Reclaim detected: 5m close ${close:,.2f} in range ${reclaim_level_low:,.2f}-${reclaim_level_high:,.2f}")
             
-            # Check for sweep (price went below 4240)
-            if low <= sweep_zone_high and not sweep_detected:
-                sweep_detected = True
-                logger.info(f"Sweep detected: 15m low ${low:,.2f} <= ${sweep_zone_high:,.2f}")
-            
-            # Check for reclaim (close back above 4245-4265) after sweep
-            if sweep_detected and close >= reclaim_level_low and close <= reclaim_level_high and not reclaim_detected:
-                reclaim_detected = True
-                logger.info(f"Reclaim detected: 15m close ${close:,.2f} in range ${reclaim_level_low:,.2f}-${reclaim_level_high:,.2f}")
+            # Also check 15m timeframe
+            for candle in candles_15m[-8:]:  # Check last 8 15m candles
+                close = float(candle['close'])
+                
+                # Check for reclaim (close in 4350-4359 range) after break
+                if close >= reclaim_level_low and close <= reclaim_level_high and not reclaim_detected:
+                    reclaim_detected = True
+                    logger.info(f"Reclaim detected: 15m close ${close:,.2f} in range ${reclaim_level_low:,.2f}-${reclaim_level_high:,.2f}")
         
-        sweep_and_reclaim = sweep_detected and reclaim_detected
+        break_and_reclaim = break_confirmed and reclaim_detected
         
-        logger.info(f"Sweep and reclaim check: Sweep={'✅' if sweep_detected else '❌'}, Reclaim={'✅' if reclaim_detected else '❌'}")
-        logger.info(f"Overall: {'✅' if sweep_and_reclaim else '❌'}")
+        logger.info(f"Break and reclaim check: Break={'✅' if break_confirmed else '❌'}, Reclaim={'✅' if reclaim_detected else '❌'}")
+        logger.info(f"Overall: {'✅' if break_and_reclaim else '❌'}")
         
-        return sweep_and_reclaim, f"Sweep: {sweep_detected}, Reclaim: {reclaim_detected}"
+        return break_and_reclaim, f"Break: {break_confirmed}, Reclaim: {reclaim_detected}"
         
     except Exception as e:
-        logger.error(f"Error checking sweep and reclaim: {e}")
+        logger.error(f"Error checking break and reclaim: {e}")
         return False, str(e)
 
-def check_fade_into_resistance(cb_service, current_ts):
+def check_confirmed_break_and_failed_retest(cb_service, current_ts):
     """
-    Check for fade into resistance: spike + rejection at $4,410–$4,425 (upper wick on 5–15m)
-    Required for SHORT fade into resistance strategy
+    Check for confirmed break <4,163 then rejection at 4,168–4,175 (prior low)
+    Required for SHORT failed-retest strategy
     """
     try:
-        # Get recent 5-minute and 15-minute candles to check for spike and rejection
+        # Get recent 1-hour, 5-minute and 15-minute candles
         end = current_ts
-        start = current_ts - timedelta(hours=2)  # Check last 2 hours
+        start = current_ts - timedelta(hours=4)  # Check last 4 hours
         start_ts = int(start.timestamp())
         end_ts = int(end.timestamp())
         
+        candles_1h = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_1H)
         candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_5M)
         candles_15m = safe_get_candles(cb_service, PRODUCT_ID, start_ts, end_ts, GRANULARITY_15M)
         
-        if not candles_5m or len(candles_5m) < 10:
-            return False, "Not enough 5m data"
+        if not candles_1h or len(candles_1h) < 2:
+            return False, "Not enough 1h data"
         
+        candles_1h = sorted(candles_1h, key=lambda x: int(x['start']))
         candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
         candles_15m = sorted(candles_15m, key=lambda x: int(x['start']))
         
-        # Check for spike + rejection at $4,410–$4,425 (upper wick on 5–15m)
-        resistance_zone_low = 4410
-        resistance_zone_high = 4425
+        # Check for confirmed break <4,163 on 1h
+        break_level = 4163
+        rejection_level_low = 4168
+        rejection_level_high = 4175
         
-        spike_detected = False
+        break_confirmed = False
         rejection_detected = False
         
-        # Check 5m timeframe
-        for candle in candles_5m[-20:]:  # Check last 20 5m candles
-            high = float(candle['high'])
-            low = float(candle['low'])
+        # Check 1h timeframe for confirmed break
+        for candle in candles_1h[-3:]:  # Check last 3 1h candles
             close = float(candle['close'])
-            
-            # Check for spike (high reaches 4410-4425)
-            if high >= resistance_zone_low and high <= resistance_zone_high and not spike_detected:
-                spike_detected = True
-                logger.info(f"Spike detected: 5m high ${high:,.2f} in range ${resistance_zone_low:,.2f}-${resistance_zone_high:,.2f}")
-            
-            # Check for rejection (close below resistance zone) after spike
-            if spike_detected and close < resistance_zone_low and not rejection_detected:
-                rejection_detected = True
-                logger.info(f"Rejection detected: 5m close ${close:,.2f} < ${resistance_zone_low:,.2f}")
+            if close < break_level and not break_confirmed:
+                break_confirmed = True
+                logger.info(f"Break confirmed: 1h close ${close:,.2f} < ${break_level:,.2f}")
         
-        # Also check 15m timeframe
-        for candle in candles_15m[-8:]:  # Check last 8 15m candles
-            high = float(candle['high'])
-            low = float(candle['low'])
-            close = float(candle['close'])
+        # Check for rejection at 4,168–4,175 after confirmed break
+        if break_confirmed:
+            for candle in candles_5m[-20:]:  # Check last 20 5m candles
+                high = float(candle['high'])
+                close = float(candle['close'])
+                
+                # Check for rejection (high reaches 4168-4175 but close below rejection zone)
+                if high >= rejection_level_low and high <= rejection_level_high and close < rejection_level_low and not rejection_detected:
+                    rejection_detected = True
+                    logger.info(f"Rejection detected: 5m high ${high:,.2f} in range ${rejection_level_low:,.2f}-${rejection_level_high:,.2f}, close ${close:,.2f} < ${rejection_level_low:,.2f}")
             
-            # Check for spike (high reaches 4410-4425)
-            if high >= resistance_zone_low and high <= resistance_zone_high and not spike_detected:
-                spike_detected = True
-                logger.info(f"Spike detected: 15m high ${high:,.2f} in range ${resistance_zone_low:,.2f}-${resistance_zone_high:,.2f}")
-            
-            # Check for rejection (close below resistance zone) after spike
-            if spike_detected and close < resistance_zone_low and not rejection_detected:
-                rejection_detected = True
-                logger.info(f"Rejection detected: 15m close ${close:,.2f} < ${resistance_zone_low:,.2f}")
+            # Also check 15m timeframe
+            for candle in candles_15m[-8:]:  # Check last 8 15m candles
+                high = float(candle['high'])
+                close = float(candle['close'])
+                
+                # Check for rejection (high reaches 4168-4175 but close below rejection zone)
+                if high >= rejection_level_low and high <= rejection_level_high and close < rejection_level_low and not rejection_detected:
+                    rejection_detected = True
+                    logger.info(f"Rejection detected: 15m high ${high:,.2f} in range ${rejection_level_low:,.2f}-${rejection_level_high:,.2f}, close ${close:,.2f} < ${rejection_level_low:,.2f}")
         
-        fade_into_resistance = spike_detected and rejection_detected
+        break_and_failed_retest = break_confirmed and rejection_detected
         
-        logger.info(f"Fade into resistance check: Spike={'✅' if spike_detected else '❌'}, Rejection={'✅' if rejection_detected else '❌'}")
-        logger.info(f"Overall: {'✅' if fade_into_resistance else '❌'}")
+        logger.info(f"Break and failed retest check: Break={'✅' if break_confirmed else '❌'}, Rejection={'✅' if rejection_detected else '❌'}")
+        logger.info(f"Overall: {'✅' if break_and_failed_retest else '❌'}")
         
-        return fade_into_resistance, f"Spike: {spike_detected}, Rejection: {rejection_detected}"
+        return break_and_failed_retest, f"Break: {break_confirmed}, Rejection: {rejection_detected}"
         
     except Exception as e:
-        logger.error(f"Error checking fade into resistance: {e}")
+        logger.error(f"Error checking break and failed retest: {e}")
         return False, str(e)
 
 
@@ -466,22 +465,23 @@ def check_fade_into_resistance(cb_service, current_ts):
 def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
     ETH-USD Trading Strategy Alert - Implements clean two-sided ETH plan based on live levels
-    Based on the trading plan: "Spiros — here's a clean, two-sided plan for today based on live levels"
+    Based on the trading plan: "Spiros — here's a clean, two-sided ETH plan for today based on live levels"
     
     Rules (both directions):
-    - Timeframe: 1h structure; execute on 5–15m
+    - Timeframe: trigger on 1h; execute on 5–15m close
     - Volume confirm: ≥1.25× 20-period vol on 1h or ≥2× 20-SMA vol on 5m at trigger
-    - Risk: size so 1R ≈ 0.8–1.2% of price; take partial at +1.0–1.5R
+    - Orders: market-only brackets; size so 1R ≈ 1.0% of entry; partial at +1.0–1.5R; trail if momentum persists
     - Position Size: Always margin x leverage = 250 x 20 = $5,000 USD
-    - Max 2 trades today. If first entry stops, stand down until a fresh 1h structure forms
+    - Skip if 1h ATR% < 0.4 and 5m vol < 0.8× average (chop filter)
+    - If trigger whipsaws and closes back inside the level within 15m, stand down for 30–60m
     
     LONG SETUPS:
-    - Breakout: buy-stop $4,346–$4,355 (HOD +0.2–0.4%), SL $4,294, TP1 $4,407, TP2 $4,463
-    - Retest: $4,245–$4,265 after sweep of $4,225–$4,240, SL $4,160, TP1 $4,315, TP2 $4,380–$4,400
+    - Breakout: 1h/5–15m close above 4,365–4,372 (HOD + ~0.3%), SL 4,322, TP1 4,410–4,431, TP2 4,462–4,475
+    - Retest: After confirmed break/close >4,365, buy reclaim of 4,350–4,359, SL 4,325, TP1 4,410, TP2 4,460–4,480
     
     SHORT SETUPS:
-    - Breakdown: sell-stop $4,160–$4,170 (through LOD), SL $4,205, TP1 $4,124, TP2 $4,084
-    - Fade into resistance: $4,410–$4,425 on spike + rejection, SL $4,450, TP1 $4,340, TP2 $4,285–$4,305
+    - Breakdown: 1h/5–15m close below 4,158–4,163 (LOD − ~0.3%), SL 4,203, TP1 4,119–4,099, TP2 4,069–4,057
+    - Failed-retest: After confirmed break <4,163, sell rejection at 4,168–4,175, SL 4,205, TP1 4,120, TP2 4,070–4,050
     
     Args:
         cb_service: Coinbase service instance
@@ -607,28 +607,118 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # Check volume confirmation
         volume_confirmed = check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, avg_volume_1h, avg_volume_5m)
         
+        # Check chop filter conditions
+        def check_chop_filter(candles_1h, current_volume_5m, avg_volume_5m):
+            """Check if market is choppy and should be skipped"""
+            try:
+                # Calculate 1h ATR percentage
+                if len(candles_1h) >= 20:
+                    # Calculate ATR for last 20 candles
+                    atr_values = []
+                    for i in range(1, len(candles_1h)):
+                        high = float(candles_1h[i]['high'])
+                        low = float(candles_1h[i]['low'])
+                        prev_close = float(candles_1h[i-1]['close'])
+                        
+                        tr1 = high - low
+                        tr2 = abs(high - prev_close)
+                        tr3 = abs(low - prev_close)
+                        tr = max(tr1, tr2, tr3)
+                        atr_values.append(tr)
+                    
+                    avg_atr = sum(atr_values) / len(atr_values)
+                    current_price = float(candles_1h[-1]['close'])
+                    atr_percentage = (avg_atr / current_price) * 100
+                    
+                    # Check volume condition
+                    volume_chop = current_volume_5m < (VOLUME_CHOP_FACTOR * avg_volume_5m) if avg_volume_5m > 0 else False
+                    
+                    # Chop filter: skip if 1h ATR% < 0.4 and 5m vol < 0.8× average
+                    is_chop = atr_percentage < ATR_PERCENTAGE_THRESHOLD and volume_chop
+                    
+                    logger.info(f"Chop filter check: 1h ATR% = {atr_percentage:.2f}% (threshold: {ATR_PERCENTAGE_THRESHOLD}%)")
+                    logger.info(f"Volume chop: 5m vol = {current_volume_5m:,.0f} vs {VOLUME_CHOP_FACTOR}x avg = {VOLUME_CHOP_FACTOR * avg_volume_5m:,.0f}")
+                    logger.info(f"Chop filter: {'✅ SKIP' if is_chop else '❌ CONTINUE'}")
+                    
+                    return is_chop
+                else:
+                    logger.warning("Not enough data for chop filter calculation")
+                    return False
+            except Exception as e:
+                logger.error(f"Error in chop filter calculation: {e}")
+                return False
+        
+        # Apply chop filter
+        chop_filter_active = check_chop_filter(candles_1h, current_volume_5m, avg_volume_5m)
+        
+        # Check for whipsaw conditions
+        def check_whipsaw_condition(candles_5m, candles_15m, entry_level, is_long):
+            """Check if trigger whipsaws and closes back inside the level within 15m"""
+            try:
+                # Check last 3 5m candles and 1 15m candle for whipsaw
+                whipsaw_detected = False
+                
+                # Check 5m timeframe
+                for candle in candles_5m[-3:]:
+                    close = float(candle['close'])
+                    if is_long:
+                        # For long trades, check if price went above entry but closed back below
+                        if close < entry_level:
+                            whipsaw_detected = True
+                            logger.info(f"Whipsaw detected: 5m close ${close:,.2f} < ${entry_level:,.2f} after trigger")
+                    else:
+                        # For short trades, check if price went below entry but closed back above
+                        if close > entry_level:
+                            whipsaw_detected = True
+                            logger.info(f"Whipsaw detected: 5m close ${close:,.2f} > ${entry_level:,.2f} after trigger")
+                
+                # Check 15m timeframe
+                if candles_15m:
+                    candle = candles_15m[-1]
+                    close = float(candle['close'])
+                    if is_long:
+                        if close < entry_level:
+                            whipsaw_detected = True
+                            logger.info(f"Whipsaw detected: 15m close ${close:,.2f} < ${entry_level:,.2f} after trigger")
+                    else:
+                        if close > entry_level:
+                            whipsaw_detected = True
+                            logger.info(f"Whipsaw detected: 15m close ${close:,.2f} > ${entry_level:,.2f} after trigger")
+                
+                logger.info(f"Whipsaw check: {'❌ WHIPSAW - STAND DOWN' if whipsaw_detected else '✅ NO WHIPSAW'}")
+                return whipsaw_detected
+                
+            except Exception as e:
+                logger.error(f"Error checking whipsaw condition: {e}")
+                return False
+        
+        # Check whipsaw for each strategy
+        breakout_whipsaw = check_whipsaw_condition(candles_5m, candles_15m, BREAKOUT_ENTRY_LOW, True)
+        reclaim_whipsaw = check_whipsaw_condition(candles_5m, candles_15m, RECLAIM_ENTRY_LOW, True)
+        breakdown_whipsaw = check_whipsaw_condition(candles_5m, candles_15m, BREAKDOWN_ENTRY_HIGH, False)
+        retest_whipsaw = check_whipsaw_condition(candles_5m, candles_15m, RETEST_ENTRY_HIGH, False)
+        
         # Filter strategies based on direction parameter
         long_strategies_enabled = direction in ['LONG', 'BOTH']
         short_strategies_enabled = direction in ['SHORT', 'BOTH']
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Spiros — Clean Two-Sided ETH Plan for Today (Rolling 24h Levels) Alert")
+        logger.info("🚀 Spiros — Clean Two-Sided ETH Plan for Today (Live Levels) Alert")
         logger.info("")
-        logger.info("📊 Rolling 24h Levels:")
+        logger.info("📊 Live Levels (ETH ≈ $4,300; HOD $4,351; LOD $4,174):")
         logger.info(f"   • ETH ≈ ${current_close_1h:,.0f}")
         logger.info(f"   • 24h HOD: ${current_hod:,.0f}")
         logger.info(f"   • 24h LOD: ${current_lod:,.0f}")
         logger.info(f"   • MID: ${current_mid_range:,.0f}")
         logger.info("")
         logger.info("📊 Global Rules:")
-        logger.info(f"   • Venue: Coinbase PERP (use venue's own H/L; refresh before arming)")
-        logger.info(f"   • Timeframe: 1h context, 5–15m execution")
-        logger.info(f"   • Volume confirm: ≥{VOLUME_SURGE_FACTOR_1H}x 20-SMA volume on 1h OR ≥{VOLUME_SURGE_FACTOR_5M}x 20-SMA volume on 5m")
-        logger.info(f"   • Order type: Market only with bracket SL/TP (bot-compatible)")
-        logger.info(f"   • Risk: size so 1R ≈ {RISK_PERCENTAGE_LOW}-{RISK_PERCENTAGE_HIGH}% of price")
-        logger.info(f"   • Partial at +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R")
-        logger.info(f"   • Cooldown: {COOLDOWN_MINUTES} min after a stop. Max {MAX_TRADES_PER_DAY} trades/day")
+        logger.info(f"   • Timeframe: trigger on 1h; execute on 5–15m close")
+        logger.info(f"   • Volume confirm: ≥{VOLUME_SURGE_FACTOR_1H}x 20-period vol on 1h OR ≥{VOLUME_SURGE_FACTOR_5M}x 20-SMA vol on 5m")
+        logger.info(f"   • Orders: market-only brackets; size so 1R ≈ {RISK_PERCENTAGE_LOW}% of entry")
+        logger.info(f"   • Partial at +{PARTIAL_PROFIT_RANGE_LOW}-{PARTIAL_PROFIT_RANGE_HIGH}R; trail if momentum persists")
+        logger.info(f"   • Skip if 1h ATR% < {ATR_PERCENTAGE_THRESHOLD} and 5m vol < {VOLUME_CHOP_FACTOR}× average (chop filter)")
+        logger.info(f"   • If trigger whipsaws and closes back inside level within 15m, stand down for 30–60m")
         logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} margin x {LEVERAGE}x leverage)")
         logger.info("")
         
@@ -637,38 +727,36 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info("📊 LONG SETUPS:")
             logger.info("")
             logger.info("Type: Breakout")
-            logger.info(f"   • Entry: buy-stop ${BREAKOUT_ENTRY_LOW:,.0f}–${BREAKOUT_ENTRY_HIGH:,.0f} (HOD +0.2–0.4%)")
-            logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,.0f} (≈ HOD −1.0%)")
-            logger.info(f"   • TP1: ${BREAKOUT_TP1:,.0f}")
+            logger.info(f"   • Entry: 1h/5–15m close above ${BREAKOUT_ENTRY_LOW:,.0f}–${BREAKOUT_ENTRY_HIGH:,.0f} (HOD + ~0.3%)")
+            logger.info(f"   • SL: ${BREAKOUT_STOP_LOSS:,.0f} (≈1R below ~4,366)")
+            logger.info(f"   • TP1: ${BREAKOUT_TP1:,.0f}–${BREAKOUT_TP2_LOW:,.0f}")
             logger.info(f"   • TP2: ${BREAKOUT_TP2_LOW:,.0f}–${BREAKOUT_TP2_HIGH:,.0f}")
-            logger.info(f"   • Rationale: 1h expansion above today's high with confirmation, avoids wick prints through HOD")
+            logger.info(f"   • Why: range expansion above HOD with fresh participation; invalidation puts price back inside prior high")
             logger.info("")
             logger.info("Type: Retest")
-            logger.info(f"   • Setup: Quick sweep of $4,225–$4,240 and 5–15m close back above $4,245")
-            logger.info(f"   • Entry: ${RECLAIM_ENTRY_LOW:,.0f}–${RECLAIM_ENTRY_HIGH:,.0f}")
-            logger.info(f"   • SL: ${RECLAIM_STOP_LOSS:,.0f} (≈ 0.3% below LOD)")
+            logger.info(f"   • Setup: After confirmed break/close >4,365, buy reclaim of ${RECLAIM_ENTRY_LOW:,.0f}–${RECLAIM_ENTRY_HIGH:,.0f}")
+            logger.info(f"   • SL: ${RECLAIM_STOP_LOSS:,.0f} (below reclaimed zone)")
             logger.info(f"   • TP1: ${RECLAIM_TP1:,.0f}")
             logger.info(f"   • TP2: ${RECLAIM_TP2_LOW:,.0f}–${RECLAIM_TP2_HIGH:,.0f}")
-            logger.info(f"   • Rationale: higher-low near session mid (~$4,255) without chasing")
+            logger.info(f"   • Why: classic break-and-retest; keeps risk tight to the reclaimed level")
             logger.info("")
         
         if short_strategies_enabled:
             logger.info("📊 SHORT SETUPS:")
             logger.info("")
             logger.info("Type: Breakdown")
-            logger.info(f"   • Entry: sell-stop ${BREAKDOWN_ENTRY_LOW:,.0f}–${BREAKDOWN_ENTRY_HIGH:,.0f} (through LOD)")
-            logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,.0f} (back above breakdown)")
-            logger.info(f"   • TP1: ${BREAKDOWN_TP1:,.0f}")
+            logger.info(f"   • Entry: 1h/5–15m close below ${BREAKDOWN_ENTRY_LOW:,.0f}–${BREAKDOWN_ENTRY_HIGH:,.0f} (LOD − ~0.3%)")
+            logger.info(f"   • SL: ${BREAKDOWN_STOP_LOSS:,.0f} (≈1R above ~4,161)")
+            logger.info(f"   • TP1: ${BREAKDOWN_TP1:,.0f}–${BREAKDOWN_TP2_LOW:,.0f}")
             logger.info(f"   • TP2: ${BREAKDOWN_TP2_LOW:,.0f}–${BREAKDOWN_TP2_HIGH:,.0f}")
-            logger.info(f"   • Rationale: range failure + continuation if 1h closes below LOD on volume")
+            logger.info(f"   • Why: continuation lower after clearing day's liquidity; back-inside = exit")
             logger.info("")
-            logger.info("Type: Fade into resistance")
-            logger.info(f"   • Setup: Spike + rejection (upper wick on 5–15m) at $4,410–$4,425")
-            logger.info(f"   • Entry: ${RETEST_ENTRY_LOW:,.0f}–${RETEST_ENTRY_HIGH:,.0f}")
+            logger.info("Type: Failed-retest")
+            logger.info(f"   • Setup: After confirmed break <4,163, sell rejection at ${RETEST_ENTRY_LOW:,.0f}–${RETEST_ENTRY_HIGH:,.0f}")
             logger.info(f"   • SL: ${RETEST_STOP_LOSS:,.0f}")
             logger.info(f"   • TP1: ${RETEST_TP1:,.0f}")
             logger.info(f"   • TP2: ${RETEST_TP2_LOW:,.0f}–${RETEST_TP2_HIGH:,.0f}")
-            logger.info(f"   • Rationale: first test into overhead supply/round-number often mean-reverts intraday")
+            logger.info(f"   • Why: underside test of broken support with clean structure")
             logger.info("")
         logger.info("")
         logger.info(f"Current Price: ${current_close_1h:,.2f}")
@@ -722,20 +810,24 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             current_close_1h >= BREAKOUT_ENTRY_LOW and 
             current_close_1h <= BREAKOUT_ENTRY_HIGH and 
             volume_confirmed and 
+            not chop_filter_active and  # Skip if chop filter is active
+            not breakout_whipsaw and  # Skip if whipsaw detected
             not breakout_state.get("triggered", False) and
             not breakout_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
         
-        # Check for sweep and reclaim (required for reclaim strategy)
-        sweep_and_reclaim_confirmed, sweep_reclaim_status = check_sweep_and_reclaim(cb_service, current_ts_1h)
+        # Check for confirmed break and reclaim (required for retest strategy)
+        break_and_reclaim_confirmed, break_reclaim_status = check_confirmed_break_and_reclaim(cb_service, current_ts_1h)
         
-        # LONG (reclaim after sweep) Strategy Conditions
+        # LONG (retest after confirmed break) Strategy Conditions
         reclaim_condition = (
             breakout_priority and
             current_close_1h >= RECLAIM_ENTRY_LOW and 
             current_close_1h <= RECLAIM_ENTRY_HIGH and 
             volume_confirmed and 
-            sweep_and_reclaim_confirmed and  # Must have sweep and reclaim
+            break_and_reclaim_confirmed and  # Must have confirmed break and reclaim
+            not chop_filter_active and  # Skip if chop filter is active
+            not reclaim_whipsaw and  # Skip if whipsaw detected
             not reclaim_state.get("triggered", False) and
             not reclaim_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
@@ -746,20 +838,24 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             current_close_1h <= BREAKDOWN_ENTRY_HIGH and 
             current_close_1h >= BREAKDOWN_ENTRY_LOW and 
             volume_confirmed and 
+            not chop_filter_active and  # Skip if chop filter is active
+            not breakdown_whipsaw and  # Skip if whipsaw detected
             not breakdown_state.get("triggered", False) and
             not breakdown_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
         
-        # Check for fade into resistance (required for fade strategy)
-        fade_into_resistance_confirmed, fade_into_resistance_status = check_fade_into_resistance(cb_service, current_ts_1h)
+        # Check for confirmed break and failed retest (required for failed-retest strategy)
+        break_and_failed_retest_confirmed, break_failed_retest_status = check_confirmed_break_and_failed_retest(cb_service, current_ts_1h)
         
-        # SHORT (fade into resistance) Strategy Conditions
+        # SHORT (failed-retest after confirmed break) Strategy Conditions
         retest_condition = (
             breakdown_priority and
             current_close_1h <= RETEST_ENTRY_HIGH and 
             current_close_1h >= RETEST_ENTRY_LOW and 
             volume_confirmed and 
-            fade_into_resistance_confirmed and  # Must have fade into resistance
+            break_and_failed_retest_confirmed and  # Must have confirmed break and failed retest
+            not chop_filter_active and  # Skip if chop filter is active
+            not retest_whipsaw and  # Skip if whipsaw detected
             not retest_state.get("triggered", False) and
             not retest_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
@@ -770,11 +866,13 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # 1. LONG - Breakout Strategy
         if long_strategies_enabled:
             in_breakout_zone = BREAKOUT_ENTRY_LOW <= current_close_1h <= BREAKOUT_ENTRY_HIGH
-            breakout_ready = in_breakout_zone and volume_confirmed and breakout_priority and not breakout_state.get("triggered", False) and not breakout_state.get("stopped_out", False)
+            breakout_ready = in_breakout_zone and volume_confirmed and not chop_filter_active and not breakout_whipsaw and breakout_priority and not breakout_state.get("triggered", False) and not breakout_state.get("stopped_out", False)
             
             logger.info("🔍 LONG - Breakout Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${BREAKOUT_ENTRY_LOW:,.0f}-${BREAKOUT_ENTRY_HIGH:,.0f}): {'✅' if in_breakout_zone else '❌'}")
             logger.info(f"   • Volume confirmed (1H: {current_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}x, 5M: {current_volume_5m/avg_volume_5m if avg_volume_5m > 0 else 0:.2f}x): {'✅' if volume_confirmed else '❌'}")
+            logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
+            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if breakout_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
             logger.info(f"   • Already triggered: {'✅' if breakout_state.get('triggered', False) else '❌'}")
             logger.info(f"   • Stopped out: {'✅' if breakout_state.get('stopped_out', False) else '❌'}")
@@ -825,12 +923,14 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # 2. LONG - Retest Strategy
         if not trade_executed and long_strategies_enabled:
             in_reclaim_zone = RECLAIM_ENTRY_LOW <= current_close_1h <= RECLAIM_ENTRY_HIGH
-            reclaim_ready = in_reclaim_zone and volume_confirmed and sweep_and_reclaim_confirmed and breakout_priority and not reclaim_state.get("triggered", False) and not reclaim_state.get("stopped_out", False)
+            reclaim_ready = in_reclaim_zone and volume_confirmed and break_and_reclaim_confirmed and not chop_filter_active and not reclaim_whipsaw and breakout_priority and not reclaim_state.get("triggered", False) and not reclaim_state.get("stopped_out", False)
             
             logger.info("🔍 LONG - Retest Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${RECLAIM_ENTRY_LOW:,.0f}-${RECLAIM_ENTRY_HIGH:,.0f}): {'✅' if in_reclaim_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Sweep and reclaim confirmed: {'✅' if sweep_and_reclaim_confirmed else '❌'} ({sweep_reclaim_status})")
+            logger.info(f"   • Break and reclaim confirmed: {'✅' if break_and_reclaim_confirmed else '❌'} ({break_reclaim_status})")
+            logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
+            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if reclaim_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
             logger.info(f"   • Already triggered: {'✅' if reclaim_state.get('triggered', False) else '❌'}")
             logger.info(f"   • Stopped out: {'✅' if reclaim_state.get('stopped_out', False) else '❌'}")
@@ -850,7 +950,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 # Execute Retest trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD LONG Retest (Sweep & Reclaim)",
+                    trade_type="ETH-USD LONG Retest (Break & Reclaim)",
                     entry_price=current_close_1h,
                     stop_loss=RECLAIM_STOP_LOSS,
                     take_profit=RECLAIM_TP1,
@@ -865,7 +965,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Stop-loss: ${RECLAIM_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${RECLAIM_TP1:,.2f}")
                     logger.info(f"TP2: ${RECLAIM_TP2_LOW:,.2f}-${RECLAIM_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: higher-low near session mid (~$4,255) without chasing")
+                    logger.info("Strategy: classic break-and-retest; keeps risk tight to the reclaimed level")
                     
                     # Save trigger state
                     reclaim_state = {
@@ -881,11 +981,13 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # 3. SHORT - Breakdown Strategy
         if not trade_executed and short_strategies_enabled:
             in_breakdown_zone = BREAKDOWN_ENTRY_LOW <= current_close_1h <= BREAKDOWN_ENTRY_HIGH
-            breakdown_ready = in_breakdown_zone and volume_confirmed and breakdown_priority and not breakdown_state.get("triggered", False) and not breakdown_state.get("stopped_out", False)
+            breakdown_ready = in_breakdown_zone and volume_confirmed and not chop_filter_active and not breakdown_whipsaw and breakdown_priority and not breakdown_state.get("triggered", False) and not breakdown_state.get("stopped_out", False)
             
             logger.info("🔍 SHORT - Breakdown Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${BREAKDOWN_ENTRY_LOW:,.0f}-${BREAKDOWN_ENTRY_HIGH:,.0f}): {'✅' if in_breakdown_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
+            logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
+            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if breakdown_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
             logger.info(f"   • Already triggered: {'✅' if breakdown_state.get('triggered', False) else '❌'}")
             logger.info(f"   • Stopped out: {'✅' if breakdown_state.get('stopped_out', False) else '❌'}")
@@ -933,19 +1035,21 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 else:
                     logger.error(f"❌ Breakdown trade failed: {trade_result}")
         
-        # 4. SHORT - Fade into resistance Strategy
+        # 4. SHORT - Failed-retest Strategy
         if not trade_executed and short_strategies_enabled:
             in_retest_zone = RETEST_ENTRY_LOW <= current_close_1h <= RETEST_ENTRY_HIGH
-            retest_ready = in_retest_zone and volume_confirmed and fade_into_resistance_confirmed and breakdown_priority and not retest_state.get("triggered", False) and not retest_state.get("stopped_out", False)
+            retest_ready = in_retest_zone and volume_confirmed and break_and_failed_retest_confirmed and not chop_filter_active and not retest_whipsaw and breakdown_priority and not retest_state.get("triggered", False) and not retest_state.get("stopped_out", False)
             
-            logger.info("🔍 SHORT - Fade into resistance Strategy Analysis:")
+            logger.info("🔍 SHORT - Failed-retest Strategy Analysis:")
             logger.info(f"   • Price in entry zone (${RETEST_ENTRY_LOW:,.0f}-${RETEST_ENTRY_HIGH:,.0f}): {'✅' if in_retest_zone else '❌'}")
             logger.info(f"   • Volume confirmed: {'✅' if volume_confirmed else '❌'}")
-            logger.info(f"   • Fade into resistance confirmed: {'✅' if fade_into_resistance_confirmed else '❌'} ({fade_into_resistance_status})")
+            logger.info(f"   • Break and failed retest confirmed: {'✅' if break_and_failed_retest_confirmed else '❌'} ({break_failed_retest_status})")
+            logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
+            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if retest_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
             logger.info(f"   • Already triggered: {'✅' if retest_state.get('triggered', False) else '❌'}")
             logger.info(f"   • Stopped out: {'✅' if retest_state.get('stopped_out', False) else '❌'}")
-            logger.info(f"   • Fade Ready: {'🎯 YES' if retest_ready else '⏳ NO'}")
+            logger.info(f"   • Failed-retest Ready: {'🎯 YES' if retest_ready else '⏳ NO'}")
             
             if retest_ready:
                 logger.info("")
@@ -958,10 +1062,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute Fade into resistance trade
+                # Execute Failed-retest trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD SHORT Fade (Fade into resistance)",
+                    trade_type="ETH-USD SHORT Failed-retest (Break & Rejection)",
                     entry_price=current_close_1h,
                     stop_loss=RETEST_STOP_LOSS,
                     take_profit=RETEST_TP1,
@@ -971,12 +1075,12 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 )
                 
                 if trade_success:
-                    logger.info("🎉 SHORT - Fade into resistance trade executed successfully!")
+                    logger.info("🎉 SHORT - Failed-retest trade executed successfully!")
                     logger.info(f"Entry: ${current_close_1h:,.2f}")
                     logger.info(f"Stop-loss: ${RETEST_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${RETEST_TP1:,.2f}")
                     logger.info(f"TP2: ${RETEST_TP2_LOW:,.2f}-${RETEST_TP2_HIGH:,.2f}")
-                    logger.info("Strategy: first test into overhead supply/round-number often mean-reverts intraday")
+                    logger.info("Strategy: underside test of broken support with clean structure")
                     
                     # Save trigger state
                     retest_state = {
@@ -1002,16 +1106,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info("   Breakout strategy already triggered")
                 if reclaim_state.get("triggered", False):
                     logger.info("   Retest strategy already triggered")
-                elif not sweep_and_reclaim_confirmed:
-                    logger.info("   Retest: Sweep and reclaim not confirmed")
+                elif not break_and_reclaim_confirmed:
+                    logger.info("   Retest: Break and reclaim not confirmed")
             
             if short_strategies_enabled:
                 if breakdown_state.get("triggered", False):
                     logger.info("   Breakdown strategy already triggered")
                 if retest_state.get("triggered", False):
-                    logger.info("   Fade into resistance strategy already triggered")
-                elif not fade_into_resistance_confirmed:
-                    logger.info("   Fade: Fade into resistance not confirmed")
+                    logger.info("   Failed-retest strategy already triggered")
+                elif not break_and_failed_retest_confirmed:
+                    logger.info("   Failed-retest: Break and failed retest not confirmed")
         
         # Reset triggers if price moves significantly away from entry zones
         # Execution guardrails: If first entry stops, stand down until new 24h structure forms
@@ -1078,7 +1182,7 @@ def main():
     
     logger.info("Starting ETH-USD Trading Strategy Monitor")
     if direction == 'BOTH':
-        logger.info("Strategy: Clean Two-Sided ETH Plan based on Live Levels - LONG & SHORT with Execution Guardrails")
+        logger.info("Strategy: Clean Two-Sided ETH Plan for Today based on Live Levels - LONG & SHORT with Execution Guardrails")
     else:
         logger.info(f"Strategy: {direction} only")
     logger.info("")
