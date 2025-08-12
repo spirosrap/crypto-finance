@@ -585,12 +585,13 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         volume_candles_1h = candles_1h[-(VOLUME_PERIOD+1):-1]
         avg_volume_1h = sum(float(c['volume']) for c in volume_candles_1h) / len(volume_candles_1h)
         
-        # Get 5-minute candles for volume confirmation and retest analysis
+        # Get 5-minute and 15-minute candles for volume confirmation and retest analysis
         start_5m = now - timedelta(hours=2)
         start_ts_5m = int(start_5m.timestamp())
         end_ts_5m = int(now.timestamp())
         
         candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts_5m, end_ts_5m, GRANULARITY_5M)
+        candles_15m = safe_get_candles(cb_service, PRODUCT_ID, start_ts_5m, end_ts_5m, GRANULARITY_15M)
         
         if candles_5m and len(candles_5m) >= VOLUME_PERIOD + 1:
             candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
@@ -603,6 +604,12 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         else:
             current_volume_5m = 0
             avg_volume_5m = 0
+        
+        # Sort 15m candles if available
+        if candles_15m:
+            candles_15m = sorted(candles_15m, key=lambda x: int(x['start']))
+        else:
+            candles_15m = []
         
         # Check volume confirmation
         volume_confirmed = check_volume_confirmation(cb_service, current_volume_1h, current_volume_5m, avg_volume_1h, avg_volume_5m)
