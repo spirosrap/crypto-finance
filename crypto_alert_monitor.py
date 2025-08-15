@@ -565,17 +565,17 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         logger.info("   4. Place stop at the level stated, not 'mental.'")
         logger.info("   5. Scale: 50% at TP1, trail to BE; run remainder to TP2 or a 5m swing.")
         logger.info("")
-        logger.info(f"Current Price: ${current_price:,.2f}")
-        logger.info(f"Last 1H Close: ${last_close:,.2f}, High: ${last_high:,.2f}, Low: ${last_low:,.2f}")
-        logger.info(f"1H Volume: {last_volume:,.0f}, 1H SMA: {volume_sma_1h:,.0f}, Rel_Vol: {relative_volume_1h:.2f}")
-        logger.info(f"15M Volume: {current_15m_volume:,.0f}, 15M SMA: {volume_sma_15m:,.0f}, Rel_Vol: {relative_volume_15m:.2f}")
-        logger.info("")
-        
         # --- Volume Confirmation Check ---
         # Calculate 15m volume SMA for more accurate volume confirmation
         volume_sma_15m = calculate_volume_sma(candles_15m, 20)
         current_15m_volume = float(get_candle_value(candles_15m[0], 'volume'))
         relative_volume_15m = current_15m_volume / volume_sma_15m if volume_sma_15m > 0 else 0
+        
+        logger.info(f"Current Price: ${current_price:,.2f}")
+        logger.info(f"Last 1H Close: ${last_close:,.2f}, High: ${last_high:,.2f}, Low: ${last_low:,.2f}")
+        logger.info(f"1H Volume: {last_volume:,.0f}, 1H SMA: {volume_sma_1h:,.0f}, Rel_Vol: {relative_volume_1h:.2f}")
+        logger.info(f"15M Volume: {current_15m_volume:,.0f}, 15M SMA: {volume_sma_15m:,.0f}, Rel_Vol: {relative_volume_15m:.2f}")
+        logger.info("")
         
         # Volume confirmation for different strategies
         volume_confirmed_long = relative_volume_15m >= VOLUME_THRESHOLD_LONG  # ≥1.25× for long trades
