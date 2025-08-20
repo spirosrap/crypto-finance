@@ -78,47 +78,49 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
 # ETH Trading Strategy Parameters (based on new ETH plan for today)
 PRODUCT_ID = "ETH-PERP-INTX"
 GRANULARITY_1H = "ONE_HOUR"  # 1-hour chart for context
-GRANULARITY_15M = "FIFTEEN_MINUTE"  # 15-minute chart for execution
+GRANULARITY_30M = "THIRTY_MINUTE"  # 30-minute chart for execution
+GRANULARITY_15M = "FIFTEEN_MINUTE"  # 15-minute chart for volume analysis
 VOLUME_PERIOD = 20  # For volume confirmation
 
 # Current market context (from plan)
-CURRENT_ETH_PRICE = 4251.00
-HOD_24H = 4385.73  # Updated from plan
-LOD_24H = 4205.73  # Updated from plan
+CURRENT_ETH_PRICE = 4160.00  # Updated from plan
+HOD_24H = 4302.60  # Updated from plan - 24h high ≈ $4,302.6
+LOD_24H = 4000.00  # Updated from plan - Today's lower bound sits near $4.0–4.1k
 RANGE_WIDTH_24H = HOD_24H - LOD_24H
 MID_RANGE_PIVOT = (HOD_24H + LOD_24H) / 2
 
 # LONG SETUPS
 
-# 1) Long — HOD breakout
-HOD_BREAKOUT_ENTRY_LOW = 4390  # Entry: 4,390–4,400 on 15m close above 4,390
-HOD_BREAKOUT_ENTRY_HIGH = 4400
-HOD_BREAKOUT_STOP_LOSS = 4338
-HOD_BREAKOUT_TP1 = 4480
+# 1) Long — Breakout
+LONG_BREAKOUT_ENTRY_LOW = 4305  # Entry: $4,305–4,320 after a 1h close > $4,302
+LONG_BREAKOUT_ENTRY_HIGH = 4320
+LONG_BREAKOUT_STOP_LOSS = 4260
+LONG_BREAKOUT_TP1 = 4380
 
-# 3) Long — Mid-range reclaim
-MID_RANGE_ENTRY_LOW = 4288  # Entry: 4,288–4,300 after reclaim of mid (~4,295.7)
-MID_RANGE_ENTRY_HIGH = 4300
-MID_RANGE_STOP_LOSS = 4248
-MID_RANGE_TP1 = 4360
+# 2) Long — Pullback
+LONG_PULLBACK_ENTRY_LOW = 4060  # Entry: $4,090–4,060
+LONG_PULLBACK_ENTRY_HIGH = 4090
+LONG_PULLBACK_STOP_LOSS = 4015
+LONG_PULLBACK_TP1 = 4200
 
 # SHORT SETUPS
 
-# 2) Short — LOD breakdown
-LOD_BREAKDOWN_ENTRY_LOW = 4190  # Entry: 4,200–4,190 on 15m close below 4,205
-LOD_BREAKDOWN_ENTRY_HIGH = 4200
-LOD_BREAKDOWN_STOP_LOSS = 4245
-LOD_BREAKDOWN_TP1 = 4115
+# 3) Short — Breakdown
+SHORT_BREAKDOWN_ENTRY_LOW = 4040  # Entry: $4,060–4,040 after a 30m close < $4,070
+SHORT_BREAKDOWN_ENTRY_HIGH = 4060
+SHORT_BREAKDOWN_STOP_LOSS = 4100
+SHORT_BREAKDOWN_TP1 = 3980
 
-# 4) Short — HOD rejection
-HOD_REJECTION_ENTRY_LOW = 4380  # Entry: 4,380–4,388 only if 5–15m prints rejection wick near HOD
-HOD_REJECTION_ENTRY_HIGH = 4388
-HOD_REJECTION_STOP_LOSS = 4406
-HOD_REJECTION_TP1 = 4325
+# 4) Short — Fade into resistance
+SHORT_FADE_ENTRY_LOW = 4290  # Entry: $4,290–4,320 on rejection (wick + RSI divergence helps)
+SHORT_FADE_ENTRY_HIGH = 4320
+SHORT_FADE_STOP_LOSS = 4360
+SHORT_FADE_TP1 = 4205
 
 # Volume confirmation requirements (global helpers)
-VOLUME_SURGE_FACTOR_15M = 1.3  # 15m volume ≥ 1.3× 20-MA
-VOLUME_SURGE_FACTOR_5M = 1.2   # For HOD rejection: ≥ 1.2× 20-MA
+VOLUME_SURGE_FACTOR_1H = 1.3  # 1h volume ≥ 1.3× 20-MA for breakout
+VOLUME_SURGE_FACTOR_30M = 1.2  # 30m volume ≥ 1.2× 20-MA for breakdown
+VOLUME_NORMAL_FACTOR = 1.0  # Match average or higher for pullback/fade
 
 # Risk management
 RISK_PERCENTAGE_LOW = 0.8  # 1R ≈ 0.8% of entry
@@ -142,10 +144,10 @@ ATR_PERCENTAGE_THRESHOLD = 0.4  # Skip if 1h ATR% < 0.4
 VOLUME_CHOP_FACTOR = 0.8  # and 5m vol < 0.8× average (chop filter)
 
 # State files for each strategy
-HOD_BREAKOUT_TRIGGER_FILE = "eth_hod_breakout_trigger_state.json"
-LOD_BREAKDOWN_TRIGGER_FILE = "eth_lod_breakdown_trigger_state.json"
-MID_RANGE_TRIGGER_FILE = "eth_mid_range_trigger_state.json"
-HOD_REJECTION_TRIGGER_FILE = "eth_hod_rejection_trigger_state.json"
+LONG_BREAKOUT_TRIGGER_FILE = "eth_long_breakout_trigger_state.json"
+LONG_PULLBACK_TRIGGER_FILE = "eth_long_pullback_trigger_state.json"
+SHORT_BREAKDOWN_TRIGGER_FILE = "eth_short_breakdown_trigger_state.json"
+SHORT_FADE_TRIGGER_FILE = "eth_short_fade_trigger_state.json"
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -251,20 +253,32 @@ def save_trigger_state(state, strategy_file):
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-def check_volume_confirmation(cb_service, current_volume_1h, current_volume_15m, current_volume_5m, avg_volume_1h, avg_volume_15m, avg_volume_5m, strategy_type="default"):
+def check_volume_confirmation(cb_service, current_volume_1h, current_volume_30m, current_volume_15m, avg_volume_1h, avg_volume_30m, avg_volume_15m, strategy_type="default"):
     """Check volume confirmation based on strategy type"""
-    if strategy_type == "hod_rejection":
-        # For HOD rejection: 5–15m bullish reclaim candle with rising volume
-        volume_5m_confirmed = current_volume_5m >= (VOLUME_SURGE_FACTOR_5M * avg_volume_5m)
-        volume_confirmed = volume_5m_confirmed
-        logger.info(f"Volume confirmation check (HOD Rejection):")
-        logger.info(f"  5M: {current_volume_5m:,.0f} vs ≥{VOLUME_SURGE_FACTOR_5M}x avg ({avg_volume_5m:,.0f}) -> {'✅' if volume_5m_confirmed else '❌'}")
-    else:
-        # For other strategies: 15m volume ≥ 1.3× 20-MA
-        volume_15m_confirmed = current_volume_15m >= (VOLUME_SURGE_FACTOR_15M * avg_volume_15m)
-        volume_confirmed = volume_15m_confirmed
+    if strategy_type == "long_breakout":
+        # For Long Breakout: 1h volume ≥ 1.3× 20-MA
+        volume_1h_confirmed = current_volume_1h >= (VOLUME_SURGE_FACTOR_1H * avg_volume_1h)
+        volume_confirmed = volume_1h_confirmed
+        logger.info(f"Volume confirmation check (Long Breakout):")
+        logger.info(f"  1H: {current_volume_1h:,.0f} vs ≥{VOLUME_SURGE_FACTOR_1H}x avg ({avg_volume_1h:,.0f}) -> {'✅' if volume_1h_confirmed else '❌'}")
+    elif strategy_type == "short_breakdown":
+        # For Short Breakdown: 30m volume ≥ 1.2× 20-MA
+        volume_30m_confirmed = current_volume_30m >= (VOLUME_SURGE_FACTOR_30M * avg_volume_30m)
+        volume_confirmed = volume_30m_confirmed
+        logger.info(f"Volume confirmation check (Short Breakdown):")
+        logger.info(f"  30M: {current_volume_30m:,.0f} vs ≥{VOLUME_SURGE_FACTOR_30M}x avg ({avg_volume_30m:,.0f}) -> {'✅' if volume_30m_confirmed else '❌'}")
+    elif strategy_type in ["long_pullback", "short_fade"]:
+        # For Pullback/Fade: Match average or higher
+        volume_1h_confirmed = current_volume_1h >= (VOLUME_NORMAL_FACTOR * avg_volume_1h)
+        volume_confirmed = volume_1h_confirmed
         logger.info(f"Volume confirmation check ({strategy_type}):")
-        logger.info(f"  15M: {current_volume_15m:,.0f} vs ≥{VOLUME_SURGE_FACTOR_15M}x avg ({avg_volume_15m:,.0f}) -> {'✅' if volume_15m_confirmed else '❌'}")
+        logger.info(f"  1H: {current_volume_1h:,.0f} vs ≥{VOLUME_NORMAL_FACTOR}x avg ({avg_volume_1h:,.0f}) -> {'✅' if volume_1h_confirmed else '❌'}")
+    else:
+        # Default: 1h volume ≥ 1.3× 20-MA
+        volume_1h_confirmed = current_volume_1h >= (VOLUME_SURGE_FACTOR_1H * avg_volume_1h)
+        volume_confirmed = volume_1h_confirmed
+        logger.info(f"Volume confirmation check ({strategy_type}):")
+        logger.info(f"  1H: {current_volume_1h:,.0f} vs ≥{VOLUME_SURGE_FACTOR_1H}x avg ({avg_volume_1h:,.0f}) -> {'✅' if volume_1h_confirmed else '❌'}")
     
     logger.info(f"  Overall: {'✅' if volume_confirmed else '❌'}")
     
@@ -323,47 +337,51 @@ def check_new_structure_formation(cb_service, current_ts, previous_hod, previous
 # --- ETH Trading Strategy Alert Logic ---
 def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
-    ETH-USD Trading Strategy Alert - Implements ETH Intraday Trading Strategy
-    Based on the trading plan: "Spiros, current ETH intraday H/L: 4,385.73 / 4,205.73. Levels below use those anchors."
+    ETH-USD Trading Strategy Alert - Implements ETH Trading Setups for Today
     
     Global rules (both directions):
     - Position Size: Always margin x leverage = 250 x 20 = $5,000 USD
-    - Volume: 15m volume ≥ 1.3× 20-MA for most strategies
+    - Volume: Strategy-specific volume requirements
     - Cancel signals during low-liquidity chop; prefer confluence with BTC trend
     
     LONG SETUPS:
-    1) Long — HOD breakout
-       - Entry: 4,390–4,400 on 15m close above 4,390
-       - SL: 4,338
-       - TP1: 4,480 | est. R:R ≈ 1.49
-       - Why: Expansion through today's high with range follow-through (+~$85 from mid-entry)
-       - Volume: 15m volume ≥ 1.3× 20-MA
-       - TF: 15m–1h | Type: Breakout | Status: Waiting
+    1) Long — Breakout
+       - Entry: $4,305–4,320 after a 1h close > $4,302
+       - SL: $4,260
+       - TP1: $4,380
+       - Type: 1h breakout + quick retest
+       - Volume: 1h > 1.3× 20-period average
+       - Context: 24h high ≈ $4,302.6
     
-    3) Long — Mid-range reclaim
-       - Entry: 4,288–4,300 after reclaim of mid (~4,295.7)
-       - SL: 4,248
-       - TP1: 4,360 | est. R:R ≈ 1.43
-       - Why: Bounce from day's midpoint toward upper quadrant
-       - Volume: 5–15m bullish reclaim candle with rising volume
-       - TF: 5–15m | Type: Pullback-reclaim | Status: Waiting
+    2) Long — Pullback
+       - Entry: $4,090–4,060
+       - SL: $4,015
+       - TP1: $4,200
+       - Type: 1h pullback to demand near today's lower range
+       - Volume: Match average or higher
+       - Context: Spot ≈ $4.16k
     
     SHORT SETUPS:
-    2) Short — LOD breakdown
-       - Entry: 4,200–4,190 on 15m close below 4,205
-       - SL: 4,245
-       - TP1: 4,115 | est. R:R ≈ 1.60
-       - Why: Continuation under today's low with room to extend one half-range
-       - Volume: 15m volume ≥ 1.3× 20-MA
-       - TF: 15m–1h | Type: Breakdown | Status: Waiting
+    3) Short — Breakdown
+       - Entry: $4,060–4,040 after a 30m close < $4,070
+       - SL: $4,100
+       - TP1: $3,980
+       - Type: 30m range break
+       - Volume: 30m > 1.2× 20-period average
+       - Context: Today's lower bound sits near $4.0–4.1k
     
-    4) Short — HOD rejection
-       - Entry: 4,380–4,388 only if 5–15m prints rejection wick near HOD
-       - SL: 4,406
-       - TP1: 4,325 | est. R:R ≈ 2.68
-       - Why: Fade of sweep above local high back into range
-       - Volume: Bearish follow-through bar with ≥ 1.2× 20-MA
-       - TF: 5–15m | Type: Rejection fade | Status: Conditional
+    4) Short — Fade into resistance
+       - Entry: $4,290–4,320 on rejection (wick + RSI divergence helps)
+       - SL: $4,360
+       - TP1: $4,205
+       - Type: Mean-reversion at prior high
+       - Volume: Normal or fading on the push
+       - Context: Same 24h high anchor
+    
+    Regime note: Funding mildly positive across majors (~+0.01%/8h), so perp flow leans long. 
+    Treat upside breaks as higher-consensus.
+    
+    Risk: Size so a full SL ≤0.5–1.0R of daily risk. No stacking signals inside the same range.
     
     Args:
         cb_service: Coinbase service instance
@@ -376,10 +394,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info(f"=== ETH-USD Trading Strategy Alert ({direction} Strategy Only) ===")
     
     # Load trigger states for all strategies
-    hod_breakout_state = load_trigger_state(HOD_BREAKOUT_TRIGGER_FILE)
-    lod_breakdown_state = load_trigger_state(LOD_BREAKDOWN_TRIGGER_FILE)
-    mid_range_state = load_trigger_state(MID_RANGE_TRIGGER_FILE)
-    hod_rejection_state = load_trigger_state(HOD_REJECTION_TRIGGER_FILE)
+    long_breakout_state = load_trigger_state(LONG_BREAKOUT_TRIGGER_FILE)
+    long_pullback_state = load_trigger_state(LONG_PULLBACK_TRIGGER_FILE)
+    short_breakdown_state = load_trigger_state(SHORT_BREAKDOWN_TRIGGER_FILE)
+    short_fade_state = load_trigger_state(SHORT_FADE_TRIGGER_FILE)
     
     try:
         now = datetime.now(UTC)
@@ -428,16 +446,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # Check for new structure formation and reset stopped_out flags if needed
         # Get previous HOD/LOD from state files or use current values
         previous_hod = max(
-            hod_breakout_state.get("last_hod", current_hod),
-            lod_breakdown_state.get("last_hod", current_hod),
-            mid_range_state.get("last_hod", current_hod),
-            hod_rejection_state.get("last_hod", current_hod)
+            long_breakout_state.get("last_hod", current_hod),
+            long_pullback_state.get("last_hod", current_hod),
+            short_breakdown_state.get("last_hod", current_hod),
+            short_fade_state.get("last_hod", current_hod)
         )
         previous_lod = min(
-            hod_breakout_state.get("last_lod", current_lod),
-            lod_breakdown_state.get("last_lod", current_lod),
-            mid_range_state.get("last_lod", current_lod),
-            hod_rejection_state.get("last_lod", current_lod)
+            long_breakout_state.get("last_lod", current_lod),
+            long_pullback_state.get("last_lod", current_lod),
+            short_breakdown_state.get("last_lod", current_lod),
+            short_fade_state.get("last_lod", current_lod)
         )
         
         new_structure_formed, updated_hod, updated_lod = check_new_structure_formation(
@@ -448,10 +466,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info("🔄 New 24h structure formed - resetting stopped_out flags for all strategies")
             # Reset stopped_out flags for all strategies
             for strategy_name, state, state_file in [
-                ("HOD Breakout", hod_breakout_state, HOD_BREAKOUT_TRIGGER_FILE),
-                ("LOD Breakdown", lod_breakdown_state, LOD_BREAKDOWN_TRIGGER_FILE),
-                ("Mid-Range Reclaim", mid_range_state, MID_RANGE_TRIGGER_FILE),
-                ("HOD Rejection", hod_rejection_state, HOD_REJECTION_TRIGGER_FILE)
+                ("Long Breakout", long_breakout_state, LONG_BREAKOUT_TRIGGER_FILE),
+                ("Long Pullback", long_pullback_state, LONG_PULLBACK_TRIGGER_FILE),
+                ("Short Breakdown", short_breakdown_state, SHORT_BREAKDOWN_TRIGGER_FILE),
+                ("Short Fade", short_fade_state, SHORT_FADE_TRIGGER_FILE)
             ]:
                 if state.get("stopped_out", False):
                     state["stopped_out"] = False
@@ -461,10 +479,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"✅ Reset stopped_out flag for {strategy_name} strategy")
         else:
             # Update last HOD/LOD in all states
-            for state, state_file in [(hod_breakout_state, HOD_BREAKOUT_TRIGGER_FILE), 
-                                     (lod_breakdown_state, LOD_BREAKDOWN_TRIGGER_FILE), 
-                                     (mid_range_state, MID_RANGE_TRIGGER_FILE),
-                                     (hod_rejection_state, HOD_REJECTION_TRIGGER_FILE)]:
+            for state, state_file in [(long_breakout_state, LONG_BREAKOUT_TRIGGER_FILE), 
+                                     (long_pullback_state, LONG_PULLBACK_TRIGGER_FILE), 
+                                     (short_breakdown_state, SHORT_BREAKDOWN_TRIGGER_FILE),
+                                     (short_fade_state, SHORT_FADE_TRIGGER_FILE)]:
                 state["last_hod"] = current_hod
                 state["last_lod"] = current_lod
                 save_trigger_state(state, state_file)
@@ -472,6 +490,25 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # Calculate 20-period average volume prior to last closed candle
         volume_candles_1h = candles_1h[-(VOLUME_PERIOD+2):-2] if len(candles_1h) >= VOLUME_PERIOD + 2 else candles_1h[:-2]
         avg_volume_1h = (sum(float(c['volume']) for c in volume_candles_1h) / len(volume_candles_1h)) if volume_candles_1h else 0
+        
+        # Get 30-minute candles for breakdown strategy
+        start_30m = now - timedelta(hours=2)
+        start_ts_30m = int(start_30m.timestamp())
+        end_ts_30m = int(now.timestamp())
+        
+        candles_30m = safe_get_candles(cb_service, PRODUCT_ID, start_ts_30m, end_ts_30m, GRANULARITY_30M)
+        
+        if candles_30m and len(candles_30m) >= VOLUME_PERIOD + 1:
+            candles_30m = sorted(candles_30m, key=lambda x: int(x['start']))
+            current_candle_30m = candles_30m[-1]
+            current_volume_30m = float(current_candle_30m['volume'])
+            
+            # Calculate 20-period average volume for 30m (excluding current candle)
+            volume_candles_30m = candles_30m[-(VOLUME_PERIOD+1):-1]
+            avg_volume_30m = sum(float(c['volume']) for c in volume_candles_30m) / len(volume_candles_30m)
+        else:
+            current_volume_30m = 0
+            avg_volume_30m = 0
         
         # Get 15-minute candles for volume confirmation and retest analysis
         start_15m = now - timedelta(hours=2)
@@ -492,30 +529,11 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             current_volume_15m = 0
             avg_volume_15m = 0
         
-        # Get 5-minute candles for HOD rejection strategy
-        start_5m = now - timedelta(hours=1)
-        start_ts_5m = int(start_5m.timestamp())
-        end_ts_5m = int(now.timestamp())
-        
-        candles_5m = safe_get_candles(cb_service, PRODUCT_ID, start_ts_5m, end_ts_5m, "FIVE_MINUTE")
-        
-        if candles_5m and len(candles_5m) >= VOLUME_PERIOD + 1:
-            candles_5m = sorted(candles_5m, key=lambda x: int(x['start']))
-            current_candle_5m = candles_5m[-1]
-            current_volume_5m = float(current_candle_5m['volume'])
-            
-            # Calculate 20-period average volume for 5m (excluding current candle)
-            volume_candles_5m = candles_5m[-(VOLUME_PERIOD+1):-1]
-            avg_volume_5m = sum(float(c['volume']) for c in volume_candles_5m) / len(volume_candles_5m)
-        else:
-            current_volume_5m = 0
-            avg_volume_5m = 0
-        
         # Check volume confirmation for different strategies
-        volume_confirmed_hod_breakout = check_volume_confirmation(cb_service, last_volume_1h, current_volume_15m, current_volume_5m, avg_volume_1h, avg_volume_15m, avg_volume_5m, "hod_breakout")
-        volume_confirmed_lod_breakdown = check_volume_confirmation(cb_service, last_volume_1h, current_volume_15m, current_volume_5m, avg_volume_1h, avg_volume_15m, avg_volume_5m, "lod_breakdown")
-        volume_confirmed_mid_range = check_volume_confirmation(cb_service, last_volume_1h, current_volume_15m, current_volume_5m, avg_volume_1h, avg_volume_15m, avg_volume_5m, "mid_range")
-        volume_confirmed_hod_rejection = check_volume_confirmation(cb_service, last_volume_1h, current_volume_15m, current_volume_5m, avg_volume_1h, avg_volume_15m, avg_volume_5m, "hod_rejection")
+        volume_confirmed_long_breakout = check_volume_confirmation(cb_service, last_volume_1h, current_volume_30m, current_volume_15m, avg_volume_1h, avg_volume_30m, avg_volume_15m, "long_breakout")
+        volume_confirmed_long_pullback = check_volume_confirmation(cb_service, last_volume_1h, current_volume_30m, current_volume_15m, avg_volume_1h, avg_volume_30m, avg_volume_15m, "long_pullback")
+        volume_confirmed_short_breakdown = check_volume_confirmation(cb_service, last_volume_1h, current_volume_30m, current_volume_15m, avg_volume_1h, avg_volume_30m, avg_volume_15m, "short_breakdown")
+        volume_confirmed_short_fade = check_volume_confirmation(cb_service, last_volume_1h, current_volume_30m, current_volume_15m, avg_volume_1h, avg_volume_30m, avg_volume_15m, "short_fade")
         
         # Check chop filter conditions
         def check_chop_filter(candles_1h, current_volume_15m, avg_volume_15m):
@@ -559,7 +577,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 return False
         
         # Apply chop filter
-        chop_filter_active = check_chop_filter(candles_1h, current_volume_15m, avg_volume_15m)
+        chop_filter_active = check_chop_filter(candles_1h, current_volume_30m, avg_volume_30m)
         
         # Check for whipsaw conditions
         def check_whipsaw_condition(candles_15m, entry_level, is_long):
@@ -590,10 +608,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 return False
         
         # Check whipsaw for key triggers
-        hod_breakout_whipsaw = check_whipsaw_condition(candles_15m, HOD_BREAKOUT_ENTRY_LOW, True)
-        lod_breakdown_whipsaw = check_whipsaw_condition(candles_15m, LOD_BREAKDOWN_ENTRY_HIGH, False)
-        mid_range_whipsaw = check_whipsaw_condition(candles_15m, MID_RANGE_ENTRY_HIGH, True)
-        hod_rejection_whipsaw = check_whipsaw_condition(candles_15m, HOD_REJECTION_ENTRY_HIGH, False)
+        long_breakout_whipsaw = check_whipsaw_condition(candles_15m, LONG_BREAKOUT_ENTRY_LOW, True)
+        long_pullback_whipsaw = check_whipsaw_condition(candles_15m, LONG_PULLBACK_ENTRY_HIGH, True)
+        short_breakdown_whipsaw = check_whipsaw_condition(candles_15m, SHORT_BREAKDOWN_ENTRY_HIGH, False)
+        short_fade_whipsaw = check_whipsaw_condition(candles_15m, SHORT_FADE_ENTRY_HIGH, False)
         
         # Filter strategies based on direction parameter
         long_strategies_enabled = direction in ['LONG', 'BOTH']
@@ -601,7 +619,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Spiros — ETH Intraday Trading Strategy")
+        logger.info("🚀 Spiros — ETH Trading Setups for Today")
         logger.info("")
         logger.info(f"📊 Live Levels (current ETH intraday H/L: {current_hod:,.2f} / {current_lod:,.2f}):")
         logger.info(f"   • ETH ≈ ${current_close_1h:,.0f}")
@@ -611,7 +629,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info("")
         logger.info("📊 Global Rules:")
         logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} × {LEVERAGE}x) — fixed")
-        logger.info(f"   • Volume: 15m volume ≥ 1.3× 20-MA for most strategies")
+        logger.info(f"   • Volume: Strategy-specific volume requirements")
         logger.info(f"   • Cancel signals during low-liquidity chop; prefer confluence with BTC trend")
         logger.info("")
         
@@ -619,49 +637,50 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         if long_strategies_enabled:
             logger.info("📊 LONG SETUPS:")
             logger.info("")
-            logger.info("1) Long — HOD breakout")
-            logger.info(f"   • Entry: ${HOD_BREAKOUT_ENTRY_LOW:,.0f}–${HOD_BREAKOUT_ENTRY_HIGH:,.0f} on 15m close above ${HOD_BREAKOUT_ENTRY_LOW:,.0f}")
-            logger.info(f"   • SL: ${HOD_BREAKOUT_STOP_LOSS:,.0f}")
-            logger.info(f"   • TP1: ${HOD_BREAKOUT_TP1:,.0f} | est. R:R ≈ 1.49")
-            logger.info(f"   • Why: Expansion through today's high with range follow-through (+~$85 from mid-entry)")
-            logger.info(f"   • Volume: 15m volume ≥ 1.3× 20-MA")
-            logger.info(f"   • TF: 15m–1h | Type: Breakout | Status: Waiting")
+            logger.info("1) Long — Breakout")
+            logger.info(f"   • Entry: ${LONG_BREAKOUT_ENTRY_LOW:,.0f}–${LONG_BREAKOUT_ENTRY_HIGH:,.0f} after a 1h close > $4,302")
+            logger.info(f"   • SL: ${LONG_BREAKOUT_STOP_LOSS:,.0f}")
+            logger.info(f"   • TP1: ${LONG_BREAKOUT_TP1:,.0f}")
+            logger.info(f"   • Type: 1h breakout + quick retest")
+            logger.info(f"   • Volume: 1h > 1.3× 20-period average")
+            logger.info(f"   • Context: 24h high ≈ $4,302.6")
             logger.info("")
-            logger.info("3) Long — Mid-range reclaim")
-            logger.info(f"   • Entry: ${MID_RANGE_ENTRY_LOW:,.0f}–${MID_RANGE_ENTRY_HIGH:,.0f} after reclaim of mid (~${current_mid_range:,.1f})")
-            logger.info(f"   • SL: ${MID_RANGE_STOP_LOSS:,.0f}")
-            logger.info(f"   • TP1: ${MID_RANGE_TP1:,.0f} | est. R:R ≈ 1.43")
-            logger.info(f"   • Why: Bounce from day's midpoint toward upper quadrant")
-            logger.info(f"   • Volume: 5–15m bullish reclaim candle with rising volume")
-            logger.info(f"   • TF: 5–15m | Type: Pullback-reclaim | Status: Waiting")
+            logger.info("2) Long — Pullback")
+            logger.info(f"   • Entry: ${LONG_PULLBACK_ENTRY_LOW:,.0f}–${LONG_PULLBACK_ENTRY_HIGH:,.0f}")
+            logger.info(f"   • SL: ${LONG_PULLBACK_STOP_LOSS:,.0f}")
+            logger.info(f"   • TP1: ${LONG_PULLBACK_TP1:,.0f}")
+            logger.info(f"   • Type: 1h pullback to demand near today's lower range")
+            logger.info(f"   • Volume: Match average or higher")
+            logger.info(f"   • Context: Spot ≈ $4.16k")
             logger.info("")
         if short_strategies_enabled:
             logger.info("📊 SHORT SETUPS:")
             logger.info("")
-            logger.info("2) Short — LOD breakdown")
-            logger.info(f"   • Entry: ${LOD_BREAKDOWN_ENTRY_LOW:,.0f}–${LOD_BREAKDOWN_ENTRY_HIGH:,.0f} on 15m close below ${LOD_BREAKDOWN_ENTRY_HIGH:,.0f}")
-            logger.info(f"   • SL: ${LOD_BREAKDOWN_STOP_LOSS:,.0f}")
-            logger.info(f"   • TP1: ${LOD_BREAKDOWN_TP1:,.0f} | est. R:R ≈ 1.60")
-            logger.info(f"   • Why: Continuation under today's low with room to extend one half-range")
-            logger.info(f"   • Volume: 15m volume ≥ 1.3× 20-MA")
-            logger.info(f"   • TF: 15m–1h | Type: Breakdown | Status: Waiting")
+            logger.info("3) Short — Breakdown")
+            logger.info(f"   • Entry: ${SHORT_BREAKDOWN_ENTRY_LOW:,.0f}–${SHORT_BREAKDOWN_ENTRY_HIGH:,.0f} after a 30m close < $4,070")
+            logger.info(f"   • SL: ${SHORT_BREAKDOWN_STOP_LOSS:,.0f}")
+            logger.info(f"   • TP1: ${SHORT_BREAKDOWN_TP1:,.0f}")
+            logger.info(f"   • Type: 30m range break")
+            logger.info(f"   • Volume: 30m > 1.2× 20-period average")
+            logger.info(f"   • Context: Today's lower bound sits near $4.0–4.1k")
             logger.info("")
-            logger.info("4) Short — HOD rejection")
-            logger.info(f"   • Entry: ${HOD_REJECTION_ENTRY_LOW:,.0f}–${HOD_REJECTION_ENTRY_HIGH:,.0f} only if 5–15m prints rejection wick near HOD")
-            logger.info(f"   • SL: ${HOD_REJECTION_STOP_LOSS:,.0f}")
-            logger.info(f"   • TP1: ${HOD_REJECTION_TP1:,.0f} | est. R:R ≈ 2.68")
-            logger.info(f"   • Why: Fade of sweep above local high back into range")
-            logger.info(f"   • Volume: Bearish follow-through bar with ≥ 1.2× 20-MA")
-            logger.info(f"   • TF: 5–15m | Type: Rejection fade | Status: Conditional")
+            logger.info("4) Short — Fade into resistance")
+            logger.info(f"   • Entry: ${SHORT_FADE_ENTRY_LOW:,.0f}–${SHORT_FADE_ENTRY_HIGH:,.0f} on rejection (wick + RSI divergence helps)")
+            logger.info(f"   • SL: ${SHORT_FADE_STOP_LOSS:,.0f}")
+            logger.info(f"   • TP1: ${SHORT_FADE_TP1:,.0f}")
+            logger.info(f"   • Type: Mean-reversion at prior high")
+            logger.info(f"   • Volume: Normal or fading on the push")
+            logger.info(f"   • Context: Same 24h high anchor")
             logger.info("")
         logger.info("")
         logger.info(f"Current Price: ${current_close_1h:,.2f}")
         logger.info(f"Last 1H (closed): ${last_close_1h:,.2f}, High: ${last_high_1h:,.2f}, Low: ${last_low_1h:,.2f}")
         logger.info(f"1H Volume: {last_volume_1h:,.0f}, 1H SMA(20 prior): {avg_volume_1h:,.0f}, Rel_Vol: {last_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}")
+        logger.info(f"30M Volume: {current_volume_30m:,.0f}, 30M SMA: {avg_volume_30m:,.0f}, Rel_Vol: {current_volume_30m/avg_volume_30m if avg_volume_30m > 0 else 0:.2f}")
         logger.info(f"15M Volume: {current_volume_15m:,.0f}, 15M SMA: {avg_volume_15m:,.0f}, Rel_Vol: {current_volume_15m/avg_volume_15m if avg_volume_15m > 0 else 0:.2f}")
-        logger.info(f"5M Volume: {current_volume_5m:,.0f}, 5M SMA: {avg_volume_5m:,.0f}, Rel_Vol: {current_volume_5m/avg_volume_5m if avg_volume_5m > 0 else 0:.2f}")
         logger.info("")
-        logger.info("Notes: cancel signals during low-liquidity chop; prefer confluence with BTC trend.")
+        logger.info("Regime note: Funding mildly positive across majors (~+0.01%/8h), so perp flow leans long.")
+        logger.info("Risk: Size so a full SL ≤0.5–1.0R of daily risk. No stacking signals inside the same range.")
         logger.info("")
         
         # Execution guardrails
@@ -682,8 +701,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             breakout_priority = False
         else:  # BOTH - use execution guardrails
             # Check if any strategy is already triggered (do not run long + short simultaneously)
-            long_triggered = hod_breakout_state.get("triggered", False) or mid_range_state.get("triggered", False)
-            short_triggered = lod_breakdown_state.get("triggered", False) or hod_rejection_state.get("triggered", False)
+            long_triggered = long_breakout_state.get("triggered", False) or long_pullback_state.get("triggered", False)
+            short_triggered = short_breakdown_state.get("triggered", False) or short_fade_state.get("triggered", False)
             
             if long_triggered:
                 logger.info("🎯 Execution guardrail: LONG strategy already triggered - prioritizing LONG")
@@ -702,75 +721,78 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 breakdown_priority = False
                 breakout_priority = True
         
-        # LONG (HOD breakout) Strategy Conditions
-        hod_breakout_condition = (
+        # LONG (Breakout) Strategy Conditions
+        long_breakout_condition = (
             breakout_priority and
-            current_close_1h >= HOD_BREAKOUT_ENTRY_LOW and 
-            current_close_1h <= HOD_BREAKOUT_ENTRY_HIGH and 
-            volume_confirmed_hod_breakout and 
+            current_close_1h >= LONG_BREAKOUT_ENTRY_LOW and 
+            current_close_1h <= LONG_BREAKOUT_ENTRY_HIGH and 
+            current_close_1h > 4302 and  # 1h close > $4,302
+            volume_confirmed_long_breakout and 
             not chop_filter_active and  # Skip if chop filter is active
-            not hod_breakout_whipsaw and  # Skip if whipsaw detected
-            not hod_breakout_state.get("triggered", False) and
-            not hod_breakout_state.get("stopped_out", False)  # Don't re-enter if stopped out
+            not long_breakout_whipsaw and  # Skip if whipsaw detected
+            not long_breakout_state.get("triggered", False) and
+            not long_breakout_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
         
-        # LONG (Mid-range reclaim) Strategy Conditions
-        mid_range_condition = (
+        # LONG (Pullback) Strategy Conditions
+        long_pullback_condition = (
             breakout_priority and
-            current_close_1h >= MID_RANGE_ENTRY_LOW and 
-            current_close_1h <= MID_RANGE_ENTRY_HIGH and 
-            volume_confirmed_mid_range and 
+            current_close_1h >= LONG_PULLBACK_ENTRY_LOW and 
+            current_close_1h <= LONG_PULLBACK_ENTRY_HIGH and 
+            volume_confirmed_long_pullback and 
             not chop_filter_active and  # Skip if chop filter is active
-            not mid_range_whipsaw and  # Skip if whipsaw detected
-            not mid_range_state.get("triggered", False) and
-            not mid_range_state.get("stopped_out", False)  # Don't re-enter if stopped out
+            not long_pullback_whipsaw and  # Skip if whipsaw detected
+            not long_pullback_state.get("triggered", False) and
+            not long_pullback_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
         
-        # SHORT (LOD breakdown) Strategy Conditions
-        lod_breakdown_condition = (
+        # SHORT (Breakdown) Strategy Conditions
+        short_breakdown_condition = (
             breakdown_priority and
-            current_close_1h <= LOD_BREAKDOWN_ENTRY_HIGH and 
-            current_close_1h >= LOD_BREAKDOWN_ENTRY_LOW and 
-            volume_confirmed_lod_breakdown and 
+            current_close_1h <= SHORT_BREAKDOWN_ENTRY_HIGH and 
+            current_close_1h >= SHORT_BREAKDOWN_ENTRY_LOW and 
+            current_close_1h < 4070 and  # 30m close < $4,070
+            volume_confirmed_short_breakdown and 
             not chop_filter_active and  # Skip if chop filter is active
-            not lod_breakdown_whipsaw and  # Skip if whipsaw detected
-            not lod_breakdown_state.get("triggered", False) and
-            not lod_breakdown_state.get("stopped_out", False)  # Don't re-enter if stopped out
+            not short_breakdown_whipsaw and  # Skip if whipsaw detected
+            not short_breakdown_state.get("triggered", False) and
+            not short_breakdown_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
         
-        # SHORT (HOD rejection) Strategy Conditions
-        hod_rejection_condition = (
+        # SHORT (Fade into resistance) Strategy Conditions
+        short_fade_condition = (
             breakdown_priority and
-            current_close_1h <= HOD_REJECTION_ENTRY_HIGH and 
-            current_close_1h >= HOD_REJECTION_ENTRY_LOW and 
-            volume_confirmed_hod_rejection and 
+            current_close_1h <= SHORT_FADE_ENTRY_HIGH and 
+            current_close_1h >= SHORT_FADE_ENTRY_LOW and 
+            volume_confirmed_short_fade and 
             not chop_filter_active and  # Skip if chop filter is active
-            not hod_rejection_whipsaw and  # Skip if whipsaw detected
-            not hod_rejection_state.get("triggered", False) and
-            not hod_rejection_state.get("stopped_out", False)  # Don't re-enter if stopped out
+            not short_fade_whipsaw and  # Skip if whipsaw detected
+            not short_fade_state.get("triggered", False) and
+            not short_fade_state.get("stopped_out", False)  # Don't re-enter if stopped out
         )
         
         # --- Strategy Analysis ---
         trade_executed = False
         
-        # 1. LONG - HOD Breakout Strategy
+        # 1. LONG - Breakout Strategy
         if long_strategies_enabled:
-            in_hod_breakout_zone = HOD_BREAKOUT_ENTRY_LOW <= current_close_1h <= HOD_BREAKOUT_ENTRY_HIGH
-            hod_breakout_ready = in_hod_breakout_zone and volume_confirmed_hod_breakout and not chop_filter_active and not hod_breakout_whipsaw and breakout_priority and not hod_breakout_state.get("triggered", False) and not hod_breakout_state.get("stopped_out", False)
+            in_long_breakout_zone = LONG_BREAKOUT_ENTRY_LOW <= current_close_1h <= LONG_BREAKOUT_ENTRY_HIGH
+            long_breakout_ready = in_long_breakout_zone and current_close_1h > 4302 and volume_confirmed_long_breakout and not chop_filter_active and not long_breakout_whipsaw and breakout_priority and not long_breakout_state.get("triggered", False) and not long_breakout_state.get("stopped_out", False)
             
-            logger.info("🔍 LONG - HOD Breakout Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${HOD_BREAKOUT_ENTRY_LOW:,.0f}-${HOD_BREAKOUT_ENTRY_HIGH:,.0f}): {'✅' if in_hod_breakout_zone else '❌'}")
-            logger.info(f"   • Volume confirmed (15M: {current_volume_15m/avg_volume_15m if avg_volume_15m > 0 else 0:.2f}x): {'✅' if volume_confirmed_hod_breakout else '❌'}")
+            logger.info("🔍 LONG - Breakout Strategy Analysis:")
+            logger.info(f"   • Price in entry zone (${LONG_BREAKOUT_ENTRY_LOW:,.0f}-${LONG_BREAKOUT_ENTRY_HIGH:,.0f}): {'✅' if in_long_breakout_zone else '❌'}")
+            logger.info(f"   • 1h close > $4,302: {'✅' if current_close_1h > 4302 else '❌'}")
+            logger.info(f"   • Volume confirmed (1H: {last_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}x): {'✅' if volume_confirmed_long_breakout else '❌'}")
             logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
-            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if hod_breakout_whipsaw else '✅ NO WHIPSAW'}")
+            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if long_breakout_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
-            logger.info(f"   • Already triggered: {'✅' if hod_breakout_state.get('triggered', False) else '❌'}")
-            logger.info(f"   • Stopped out: {'✅' if hod_breakout_state.get('stopped_out', False) else '❌'}")
-            logger.info(f"   • HOD Breakout Ready: {'🎯 YES' if hod_breakout_ready else '⏳ NO'}")
+            logger.info(f"   • Already triggered: {'✅' if long_breakout_state.get('triggered', False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if long_breakout_state.get('stopped_out', False) else '❌'}")
+            logger.info(f"   • Long Breakout Ready: {'🎯 YES' if long_breakout_ready else '⏳ NO'}")
             
-            if hod_breakout_ready:
+            if long_breakout_ready:
                 logger.info("")
-                logger.info("🎯 LONG - HOD Breakout Strategy conditions met - executing trade...")
+                logger.info("🎯 LONG - Breakout Strategy conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -779,56 +801,56 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute HOD Breakout trade
+                # Execute Long Breakout trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD LONG HOD Breakout",
+                    trade_type="ETH-USD LONG Breakout",
                     entry_price=current_close_1h,
-                    stop_loss=HOD_BREAKOUT_STOP_LOSS,
-                    take_profit=HOD_BREAKOUT_TP1,
+                    stop_loss=LONG_BREAKOUT_STOP_LOSS,
+                    take_profit=LONG_BREAKOUT_TP1,
                     side="BUY",
                     product=PRODUCT_ID,
-                    volume_confirmed=volume_confirmed_hod_breakout
+                    volume_confirmed=volume_confirmed_long_breakout
                 )
                 
                 if trade_success:
-                    logger.info("🎉 LONG - HOD Breakout trade executed successfully!")
+                    logger.info("🎉 LONG - Breakout trade executed successfully!")
                     logger.info(f"Entry: ${current_close_1h:,.2f}")
-                    logger.info(f"Stop-loss: ${HOD_BREAKOUT_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${HOD_BREAKOUT_TP1:,.2f}")
-                    logger.info("Strategy: Expansion through today's high with range follow-through (+~$85 from mid-entry)")
+                    logger.info(f"Stop-loss: ${LONG_BREAKOUT_STOP_LOSS:,.2f}")
+                    logger.info(f"TP1: ${LONG_BREAKOUT_TP1:,.2f}")
+                    logger.info("Strategy: 1h breakout + quick retest")
                     
                     # Save trigger state
-                    hod_breakout_state = {
+                    long_breakout_state = {
                         "triggered": True, 
                         "trigger_ts": int(current_candle_1h['start']),
                         "entry_price": current_close_1h
                     }
-                    save_trigger_state(hod_breakout_state, HOD_BREAKOUT_TRIGGER_FILE)
+                    save_trigger_state(long_breakout_state, LONG_BREAKOUT_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ HOD Breakout trade failed: {trade_result}")
+                    logger.error(f"❌ Long Breakout trade failed: {trade_result}")
         
 
         
-        # 2. LONG - Mid-Range Reclaim Strategy
+        # 2. LONG - Pullback Strategy
         if not trade_executed and long_strategies_enabled:
-            in_mid_range_zone = MID_RANGE_ENTRY_LOW <= current_close_1h <= MID_RANGE_ENTRY_HIGH
-            mid_range_ready = in_mid_range_zone and volume_confirmed_mid_range and not chop_filter_active and not mid_range_whipsaw and breakout_priority and not mid_range_state.get("triggered", False) and not mid_range_state.get("stopped_out", False)
+            in_long_pullback_zone = LONG_PULLBACK_ENTRY_LOW <= current_close_1h <= LONG_PULLBACK_ENTRY_HIGH
+            long_pullback_ready = in_long_pullback_zone and volume_confirmed_long_pullback and not chop_filter_active and not long_pullback_whipsaw and breakout_priority and not long_pullback_state.get("triggered", False) and not long_pullback_state.get("stopped_out", False)
             
-            logger.info("🔍 LONG - Mid-Range Reclaim Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${MID_RANGE_ENTRY_LOW:,.0f}-${MID_RANGE_ENTRY_HIGH:,.0f}): {'✅' if in_mid_range_zone else '❌'}")
-            logger.info(f"   • Volume confirmed (15M: {current_volume_15m/avg_volume_15m if avg_volume_15m > 0 else 0:.2f}x): {'✅' if volume_confirmed_mid_range else '❌'}")
+            logger.info("🔍 LONG - Pullback Strategy Analysis:")
+            logger.info(f"   • Price in entry zone (${LONG_PULLBACK_ENTRY_LOW:,.0f}-${LONG_PULLBACK_ENTRY_HIGH:,.0f}): {'✅' if in_long_pullback_zone else '❌'}")
+            logger.info(f"   • Volume confirmed (1H: {last_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}x): {'✅' if volume_confirmed_long_pullback else '❌'}")
             logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
-            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if mid_range_whipsaw else '✅ NO WHIPSAW'}")
+            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if long_pullback_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakout_priority else '❌'}")
-            logger.info(f"   • Already triggered: {'✅' if mid_range_state.get('triggered', False) else '❌'}")
-            logger.info(f"   • Stopped out: {'✅' if mid_range_state.get('stopped_out', False) else '❌'}")
-            logger.info(f"   • Mid-Range Reclaim Ready: {'🎯 YES' if mid_range_ready else '⏳ NO'}")
+            logger.info(f"   • Already triggered: {'✅' if long_pullback_state.get('triggered', False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if long_pullback_state.get('stopped_out', False) else '❌'}")
+            logger.info(f"   • Long Pullback Ready: {'🎯 YES' if long_pullback_ready else '⏳ NO'}")
             
-            if mid_range_ready:
+            if long_pullback_ready:
                 logger.info("")
-                logger.info("🎯 LONG - Mid-Range Reclaim Strategy conditions met - executing trade...")
+                logger.info("🎯 LONG - Pullback Strategy conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -837,54 +859,55 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute Mid-Range Reclaim trade
+                # Execute Long Pullback trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD LONG Mid-Range Reclaim",
+                    trade_type="ETH-USD LONG Pullback",
                     entry_price=current_close_1h,
-                    stop_loss=MID_RANGE_STOP_LOSS,
-                    take_profit=MID_RANGE_TP1,
+                    stop_loss=LONG_PULLBACK_STOP_LOSS,
+                    take_profit=LONG_PULLBACK_TP1,
                     side="BUY",
                     product=PRODUCT_ID,
-                    volume_confirmed=volume_confirmed_mid_range
+                    volume_confirmed=volume_confirmed_long_pullback
                 )
                 
                 if trade_success:
-                    logger.info("🎉 LONG - Mid-Range Reclaim trade executed successfully!")
+                    logger.info("🎉 LONG - Pullback trade executed successfully!")
                     logger.info(f"Entry: ${current_close_1h:,.2f}")
-                    logger.info(f"Stop-loss: ${MID_RANGE_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${MID_RANGE_TP1:,.2f}")
-                    logger.info("Strategy: Bounce from day's midpoint toward upper quadrant")
+                    logger.info(f"Stop-loss: ${LONG_PULLBACK_STOP_LOSS:,.2f}")
+                    logger.info(f"TP1: ${LONG_PULLBACK_TP1:,.2f}")
+                    logger.info("Strategy: 1h pullback to demand near today's lower range")
                     
                     # Save trigger state
-                    mid_range_state = {
+                    long_pullback_state = {
                         "triggered": True, 
                         "trigger_ts": int(current_candle_1h['start']),
                         "entry_price": current_close_1h
                     }
-                    save_trigger_state(mid_range_state, MID_RANGE_TRIGGER_FILE)
+                    save_trigger_state(long_pullback_state, LONG_PULLBACK_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Mid-Range Reclaim trade failed: {trade_result}")
+                    logger.error(f"❌ Long Pullback trade failed: {trade_result}")
         
-        # 3. SHORT - LOD Breakdown Strategy
+        # 3. SHORT - Breakdown Strategy
         if not trade_executed and short_strategies_enabled:
-            in_lod_breakdown_zone = LOD_BREAKDOWN_ENTRY_LOW <= current_close_1h <= LOD_BREAKDOWN_ENTRY_HIGH
-            lod_breakdown_ready = in_lod_breakdown_zone and volume_confirmed_lod_breakdown and not chop_filter_active and not lod_breakdown_whipsaw and breakdown_priority and not lod_breakdown_state.get("triggered", False) and not lod_breakdown_state.get("stopped_out", False)
+            in_short_breakdown_zone = SHORT_BREAKDOWN_ENTRY_LOW <= current_close_1h <= SHORT_BREAKDOWN_ENTRY_HIGH
+            short_breakdown_ready = in_short_breakdown_zone and current_close_1h < 4070 and volume_confirmed_short_breakdown and not chop_filter_active and not short_breakdown_whipsaw and breakdown_priority and not short_breakdown_state.get("triggered", False) and not short_breakdown_state.get("stopped_out", False)
             
-            logger.info("🔍 SHORT - LOD Breakdown Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${LOD_BREAKDOWN_ENTRY_LOW:,.0f}-${LOD_BREAKDOWN_ENTRY_HIGH:,.0f}): {'✅' if in_lod_breakdown_zone else '❌'}")
-            logger.info(f"   • Volume confirmed (15M: {current_volume_15m/avg_volume_15m if avg_volume_15m > 0 else 0:.2f}x): {'✅' if volume_confirmed_lod_breakdown else '❌'}")
+            logger.info("🔍 SHORT - Breakdown Strategy Analysis:")
+            logger.info(f"   • Price in entry zone (${SHORT_BREAKDOWN_ENTRY_LOW:,.0f}-${SHORT_BREAKDOWN_ENTRY_HIGH:,.0f}): {'✅' if in_short_breakdown_zone else '❌'}")
+            logger.info(f"   • 30m close < $4,070: {'✅' if current_close_1h < 4070 else '❌'}")
+            logger.info(f"   • Volume confirmed (30M: {current_volume_30m/avg_volume_30m if avg_volume_30m > 0 else 0:.2f}x): {'✅' if volume_confirmed_short_breakdown else '❌'}")
             logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
-            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if lod_breakdown_whipsaw else '✅ NO WHIPSAW'}")
+            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if short_breakdown_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
-            logger.info(f"   • Already triggered: {'✅' if lod_breakdown_state.get('triggered', False) else '❌'}")
-            logger.info(f"   • Stopped out: {'✅' if lod_breakdown_state.get('stopped_out', False) else '❌'}")
-            logger.info(f"   • LOD Breakdown Ready: {'🎯 YES' if lod_breakdown_ready else '⏳ NO'}")
+            logger.info(f"   • Already triggered: {'✅' if short_breakdown_state.get('triggered', False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if short_breakdown_state.get('stopped_out', False) else '❌'}")
+            logger.info(f"   • Short Breakdown Ready: {'🎯 YES' if short_breakdown_ready else '⏳ NO'}")
             
-            if lod_breakdown_ready:
+            if short_breakdown_ready:
                 logger.info("")
-                logger.info("🎯 SHORT - LOD Breakdown Strategy conditions met - executing trade...")
+                logger.info("🎯 SHORT - Breakdown Strategy conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -893,54 +916,54 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute LOD Breakdown trade
+                # Execute Short Breakdown trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD SHORT LOD Breakdown",
+                    trade_type="ETH-USD SHORT Breakdown",
                     entry_price=current_close_1h,
-                    stop_loss=LOD_BREAKDOWN_STOP_LOSS,
-                    take_profit=LOD_BREAKDOWN_TP1,
+                    stop_loss=SHORT_BREAKDOWN_STOP_LOSS,
+                    take_profit=SHORT_BREAKDOWN_TP1,
                     side="SELL",
                     product=PRODUCT_ID,
-                    volume_confirmed=volume_confirmed_lod_breakdown
+                    volume_confirmed=volume_confirmed_short_breakdown
                 )
                 
                 if trade_success:
-                    logger.info("🎉 SHORT - LOD Breakdown trade executed successfully!")
+                    logger.info("🎉 SHORT - Breakdown trade executed successfully!")
                     logger.info(f"Entry: ${current_close_1h:,.2f}")
-                    logger.info(f"Stop-loss: ${LOD_BREAKDOWN_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${LOD_BREAKDOWN_TP1:,.2f}")
-                    logger.info("Strategy: Continuation under today's low with room to extend one half-range")
+                    logger.info(f"Stop-loss: ${SHORT_BREAKDOWN_STOP_LOSS:,.2f}")
+                    logger.info(f"TP1: ${SHORT_BREAKDOWN_TP1:,.2f}")
+                    logger.info("Strategy: 30m range break")
                     
                     # Save trigger state
-                    lod_breakdown_state = {
+                    short_breakdown_state = {
                         "triggered": True, 
                         "trigger_ts": int(current_candle_1h['start']),
                         "entry_price": current_close_1h
                     }
-                    save_trigger_state(lod_breakdown_state, LOD_BREAKDOWN_TRIGGER_FILE)
+                    save_trigger_state(short_breakdown_state, SHORT_BREAKDOWN_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ LOD Breakdown trade failed: {trade_result}")
+                    logger.error(f"❌ Short Breakdown trade failed: {trade_result}")
         
-        # 4. SHORT - HOD Rejection Strategy
+        # 4. SHORT - Fade into resistance Strategy
         if not trade_executed and short_strategies_enabled:
-            in_hod_rejection_zone = HOD_REJECTION_ENTRY_LOW <= current_close_1h <= HOD_REJECTION_ENTRY_HIGH
-            hod_rejection_ready = in_hod_rejection_zone and volume_confirmed_hod_rejection and not chop_filter_active and not hod_rejection_whipsaw and breakdown_priority and not hod_rejection_state.get("triggered", False) and not hod_rejection_state.get("stopped_out", False)
+            in_short_fade_zone = SHORT_FADE_ENTRY_LOW <= current_close_1h <= SHORT_FADE_ENTRY_HIGH
+            short_fade_ready = in_short_fade_zone and volume_confirmed_short_fade and not chop_filter_active and not short_fade_whipsaw and breakdown_priority and not short_fade_state.get("triggered", False) and not short_fade_state.get("stopped_out", False)
             
-            logger.info("🔍 SHORT - HOD Rejection Strategy Analysis:")
-            logger.info(f"   • Price in entry zone (${HOD_REJECTION_ENTRY_LOW:,.0f}-${HOD_REJECTION_ENTRY_HIGH:,.0f}): {'✅' if in_hod_rejection_zone else '❌'}")
-            logger.info(f"   • Volume confirmed (5M: {current_volume_5m/avg_volume_5m if avg_volume_5m > 0 else 0:.2f}x): {'✅' if volume_confirmed_hod_rejection else '❌'}")
+            logger.info("🔍 SHORT - Fade into resistance Strategy Analysis:")
+            logger.info(f"   • Price in entry zone (${SHORT_FADE_ENTRY_LOW:,.0f}-${SHORT_FADE_ENTRY_HIGH:,.0f}): {'✅' if in_short_fade_zone else '❌'}")
+            logger.info(f"   • Volume confirmed (1H: {last_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}x): {'✅' if volume_confirmed_short_fade else '❌'}")
             logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
-            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if hod_rejection_whipsaw else '✅ NO WHIPSAW'}")
+            logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if short_fade_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
-            logger.info(f"   • Already triggered: {'✅' if hod_rejection_state.get('triggered', False) else '❌'}")
-            logger.info(f"   • Stopped out: {'✅' if hod_rejection_state.get('stopped_out', False) else '❌'}")
-            logger.info(f"   • HOD Rejection Ready: {'🎯 YES' if hod_rejection_ready else '⏳ NO'}")
+            logger.info(f"   • Already triggered: {'✅' if short_fade_state.get('triggered', False) else '❌'}")
+            logger.info(f"   • Stopped out: {'✅' if short_fade_state.get('stopped_out', False) else '❌'}")
+            logger.info(f"   • Short Fade Ready: {'🎯 YES' if short_fade_ready else '⏳ NO'}")
             
-            if hod_rejection_ready:
+            if short_fade_ready:
                 logger.info("")
-                logger.info("🎯 SHORT - HOD Rejection Strategy conditions met - executing trade...")
+                logger.info("🎯 SHORT - Fade into resistance Strategy conditions met - executing trade...")
                 
                 # Play alert sound
                 try:
@@ -949,35 +972,35 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
                 
-                # Execute HOD Rejection trade
+                # Execute Short Fade trade
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH-USD SHORT HOD Rejection",
+                    trade_type="ETH-USD SHORT Fade into resistance",
                     entry_price=current_close_1h,
-                    stop_loss=HOD_REJECTION_STOP_LOSS,
-                    take_profit=HOD_REJECTION_TP1,
+                    stop_loss=SHORT_FADE_STOP_LOSS,
+                    take_profit=SHORT_FADE_TP1,
                     side="SELL",
                     product=PRODUCT_ID,
-                    volume_confirmed=volume_confirmed_hod_rejection
+                    volume_confirmed=volume_confirmed_short_fade
                 )
                 
                 if trade_success:
-                    logger.info("🎉 SHORT - HOD Rejection trade executed successfully!")
+                    logger.info("🎉 SHORT - Fade into resistance trade executed successfully!")
                     logger.info(f"Entry: ${current_close_1h:,.2f}")
-                    logger.info(f"Stop-loss: ${HOD_REJECTION_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${HOD_REJECTION_TP1:,.2f}")
-                    logger.info("Strategy: Fade of sweep above local high back into range")
+                    logger.info(f"Stop-loss: ${SHORT_FADE_STOP_LOSS:,.2f}")
+                    logger.info(f"TP1: ${SHORT_FADE_TP1:,.2f}")
+                    logger.info("Strategy: Mean-reversion at prior high")
                     
                     # Save trigger state
-                    hod_rejection_state = {
+                    short_fade_state = {
                         "triggered": True, 
                         "trigger_ts": int(current_candle_1h['start']),
                         "entry_price": current_close_1h
                     }
-                    save_trigger_state(hod_rejection_state, HOD_REJECTION_TRIGGER_FILE)
+                    save_trigger_state(short_fade_state, SHORT_FADE_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ HOD Rejection trade failed: {trade_result}")
+                    logger.error(f"❌ Short Fade trade failed: {trade_result}")
         
 
         
@@ -987,37 +1010,37 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         
         # Reset triggers if price moves significantly away from entry zones
         # Execution guardrails: If first entry stops, stand down until new 24h structure forms
-        if hod_breakout_state.get("triggered", False):
-            if current_close_1h < HOD_BREAKOUT_STOP_LOSS:
-                logger.info("🔄 Resetting HOD Breakout trigger state - price fell below stop loss")
+        if long_breakout_state.get("triggered", False):
+            if current_close_1h < LONG_BREAKOUT_STOP_LOSS:
+                logger.info("🔄 Resetting Long Breakout trigger state - price fell below stop loss")
                 logger.warning("⚠️ Execution guardrail: Standing down until new 24h structure forms")
-                hod_breakout_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
-                save_trigger_state(hod_breakout_state, HOD_BREAKOUT_TRIGGER_FILE)
-                logger.info("HOD Breakout trigger state reset - standing down")
+                long_breakout_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
+                save_trigger_state(long_breakout_state, LONG_BREAKOUT_TRIGGER_FILE)
+                logger.info("Long Breakout trigger state reset - standing down")
         
 
         
-        if lod_breakdown_state.get("triggered", False):
-            if current_close_1h > LOD_BREAKDOWN_STOP_LOSS:
-                logger.info("🔄 Resetting LOD Breakdown trigger state - price rose above stop loss")
+        if long_pullback_state.get("triggered", False):
+            if current_close_1h < LONG_PULLBACK_STOP_LOSS:
+                logger.info("🔄 Resetting Long Pullback trigger state - price fell below stop loss")
                 logger.warning("⚠️ Execution guardrail: Standing down until new 24h structure forms")
-                lod_breakdown_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
-                save_trigger_state(lod_breakdown_state, LOD_BREAKDOWN_TRIGGER_FILE)
-                logger.info("LOD Breakdown trigger state reset - standing down")
+                long_pullback_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
+                save_trigger_state(long_pullback_state, LONG_PULLBACK_TRIGGER_FILE)
+                logger.info("Long Pullback trigger state reset - standing down")
         
-        if mid_range_state.get("triggered", False):
-            if current_close_1h < MID_RANGE_STOP_LOSS:
-                logger.info("🔄 Resetting Mid-Range Reclaim trigger state - price fell below stop loss")
+        if short_breakdown_state.get("triggered", False):
+            if current_close_1h > SHORT_BREAKDOWN_STOP_LOSS:
+                logger.info("🔄 Resetting Short Breakdown trigger state - price rose above stop loss")
                 logger.warning("⚠️ Execution guardrail: Standing down until new 24h structure forms")
-                mid_range_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
-                save_trigger_state(mid_range_state, MID_RANGE_TRIGGER_FILE)
-                logger.info("Mid-Range Reclaim trigger state reset - standing down")
+                short_breakdown_state = {"triggered": False, "trigger_ts": None, "entry_price": None, "stopped_out": True}
+                save_trigger_state(short_breakdown_state, SHORT_BREAKDOWN_TRIGGER_FILE)
+                logger.info("Short Breakdown trigger state reset - standing down")
         
-        if hod_rejection_state.get("triggered", False):
-            if current_close_1h > HOD_REJECTION_STOP_LOSS:
-                logger.info("🔄 Resetting HOD Rejection state - SL hit")
-                hod_rejection_state = {"triggered": False, "trigger_ts": None, "entry_price": None}
-                save_trigger_state(hod_rejection_state, HOD_REJECTION_TRIGGER_FILE)
+        if short_fade_state.get("triggered", False):
+            if current_close_1h > SHORT_FADE_STOP_LOSS:
+                logger.info("🔄 Resetting Short Fade state - SL hit")
+                short_fade_state = {"triggered": False, "trigger_ts": None, "entry_price": None}
+                save_trigger_state(short_fade_state, SHORT_FADE_TRIGGER_FILE)
         
         logger.info("=== ETH-USD Trading Strategy Alert completed ===")
         return current_ts_1h
