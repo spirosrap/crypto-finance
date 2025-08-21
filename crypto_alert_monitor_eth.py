@@ -1012,7 +1012,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • Rejection at .618 level (${SHORT_FADE_TRIGGER:,.0f}): {'✅' if fade_trigger_condition else '❌'} (current high: {current_high_1h:,.0f})")
             logger.info(f"   • Price in entry zone (${SHORT_FADE_ENTRY_LOW:,.0f}-${SHORT_FADE_ENTRY_HIGH:,.0f}): {'✅' if in_short_fade_zone else '❌'}")
             logger.info(f"   • Volume confirmed (fading RVOL: {last_volume_1h/avg_volume_1h if avg_volume_1h > 0 else 0:.2f}x): {'✅' if volume_confirmed_short_fade else '❌'}")
-            logger.info(f"   • RSI fails to hold 50: {'✅' if rsi_condition else '❌'} (current: {current_rsi:.1f if current_rsi is not None else 'N/A'})")
+            rsi_display = f"{current_rsi:.1f}" if current_rsi is not None else "N/A"
+            logger.info(f"   • RSI fails to hold 50: {'✅' if rsi_condition else '❌'} (current: {rsi_display})")
             logger.info(f"   • Chop filter: {'❌ SKIP' if chop_filter_active else '✅ CONTINUE'}")
             logger.info(f"   • Whipsaw check: {'❌ WHIPSAW' if short_fade_whipsaw else '✅ NO WHIPSAW'}")
             logger.info(f"   • Strategy priority: {'✅' if breakdown_priority else '❌'}")
@@ -1048,7 +1049,8 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Entry: ${current_close_1h:,.2f}")
                     logger.info(f"Stop-loss: ${SHORT_FADE_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${SHORT_FADE_TP1:,.2f}")
-                    logger.info(f"RSI: {current_rsi:.1f if current_rsi is not None else 'N/A'}")
+                    rsi_value = f"{current_rsi:.1f}" if current_rsi is not None else "N/A"
+                    logger.info(f"RSI: {rsi_value}")
                     logger.info("Strategy: Counter-trend fade into fib supply")
                     
                     # Save trigger state
