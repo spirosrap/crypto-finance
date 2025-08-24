@@ -75,52 +75,55 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH Trading Strategy Parameters (New Setup)
+# ETH Trading Strategy Parameters (New Intraday Setup)
 PRODUCT_ID = "ETH-PERP-INTX"
 GRANULARITY_5M = "FIVE_MINUTE"  # Primary timeframe for triggers
 VOLUME_PERIOD = 20  # For volume confirmation
 
-# Current market context
+# Current market context - Updated with new 24h levels
 CURRENT_ETH_PRICE = 4739.00  # ETH Spot ~$4,739
-TODAY_HIGH = 4879.00  # Today's high: $4,879
-TODAY_LOW = 4211.00   # Today's low: $4,211
+TODAY_HIGH = 4887.59  # 24h high = 4,887.59
+TODAY_LOW = 4659.70   # 24h low = 4,659.70
 
 # LONG SETUPS
 # Long - Breakout
-LONG_BREAKOUT_TRIGGER_LOW = 4890    # Trigger: 5m close above 4,890-4,900
-LONG_BREAKOUT_TRIGGER_HIGH = 4900
-LONG_BREAKOUT_ENTRY = 4895          # Entry: 4,895
-LONG_BREAKOUT_STOP_LOSS = 4835      # Stop: 4,835
-LONG_BREAKOUT_TP1 = 5020            # TP1: 5,020
-LONG_BREAKOUT_TP2 = 5120            # TP2: 5,120
+LONG_BREAKOUT_TRIGGER = 4888    # Trigger: 5-min close above 4,888
+LONG_BREAKOUT_ENTRY_LOW = 4880  # Entry zone: 4,880–4,900
+LONG_BREAKOUT_ENTRY_HIGH = 4900
+LONG_BREAKOUT_ENTRY = 4890      # Entry: 4,890 (mid of zone)
+LONG_BREAKOUT_STOP_LOSS = 4853.38  # Stop: 4,853.38 (~0.7% below 4,888)
+LONG_BREAKOUT_TP1 = 5001.54     # TP1: 5,001.54 (~½ 24h range)
+LONG_BREAKOUT_TP2 = 5115.48     # TP2: 5,115.48 (~full 24h range)
 
-# Long - Pullback
-LONG_PULLBACK_TRIGGER_LOW = 4620    # Trigger: Hold 4,620-4,650 after dip
-LONG_PULLBACK_TRIGGER_HIGH = 4650
-LONG_PULLBACK_ENTRY = 4635          # Entry: 4,635
-LONG_PULLBACK_STOP_LOSS = 4570      # Stop: 4,570
-LONG_PULLBACK_TP1 = 4780            # TP1: 4,780
-LONG_PULLBACK_TP2 = 4860            # TP2: 4,860
+# Long - Reclaim at range low
+LONG_RECLAIM_TRIGGER = 4660     # Trigger: Flush < 4,660 then fast reclaim
+LONG_RECLAIM_ENTRY_LOW = 4665   # Entry zone: 4,665–4,685
+LONG_RECLAIM_ENTRY_HIGH = 4685
+LONG_RECLAIM_ENTRY = 4675       # Entry: 4,675 (mid of zone)
+LONG_RECLAIM_STOP_LOSS = 4636.40  # Stop: 4,636.40 (~0.5% below 4,660)
+LONG_RECLAIM_TP1 = 4773.65      # TP1: 4,773.65 (mid-range)
+LONG_RECLAIM_TP2 = 4887.59      # TP2: 4,887.59
 
 # SHORT SETUPS
-# Short - Fail @ highs
-SHORT_FAIL_TRIGGER_LOW = 4870       # Trigger: Wick into 4,870-4,890 then close <4,860
-SHORT_FAIL_TRIGGER_HIGH = 4890
-SHORT_FAIL_CLOSE_BELOW = 4860       # Close below 4,860
-SHORT_FAIL_ENTRY = 4860             # Entry: 4,860
-SHORT_FAIL_STOP_LOSS = 4905         # Stop: 4,905
-SHORT_FAIL_TP1 = 4750               # TP1: 4,750
-SHORT_FAIL_TP2 = 4700               # TP2: 4,700
-
 # Short - Breakdown
-SHORT_BREAKDOWN_TRIGGER = 4580      # Trigger: Acceptance <4,580
-SHORT_BREAKDOWN_ENTRY = 4580        # Entry: 4,580
-SHORT_BREAKDOWN_STOP_LOSS = 4630    # Stop: 4,630
-SHORT_BREAKDOWN_TP1 = 4460          # TP1: 4,460
-SHORT_BREAKDOWN_TP2 = 4380          # TP2: 4,380
+SHORT_BREAKDOWN_TRIGGER = 4660  # Trigger: 5-min close below 4,660
+SHORT_BREAKDOWN_ENTRY_LOW = 4648  # Entry zone: 4,648–4,660
+SHORT_BREAKDOWN_ENTRY_HIGH = 4660
+SHORT_BREAKDOWN_ENTRY = 4654    # Entry: 4,654 (mid of zone)
+SHORT_BREAKDOWN_STOP_LOSS = 4692.32  # Stop: 4,692.32 (~0.7% above 4,660)
+SHORT_BREAKDOWN_TP1 = 4545.75   # TP1: 4,545.75
+SHORT_BREAKDOWN_TP2 = 4431.81   # TP2: 4,431.81
+
+# Short - Fade at range high
+SHORT_FADE_TRIGGER_LOW = 4880   # Trigger: Spike to 4,880–4,900 with rejection
+SHORT_FADE_TRIGGER_HIGH = 4900
+SHORT_FADE_ENTRY = 4890         # Entry: 4,890 (mid of trigger zone)
+SHORT_FADE_STOP_LOSS = 4912.03  # Stop: 4,912.03 (~0.5% above 4,888)
+SHORT_FADE_TP1 = 4773.65        # TP1: 4,773.65 (mid-range)
+SHORT_FADE_TP2 = 4659.70        # TP2: 4,659.70
 
 # Volume confirmation requirement
-VOLUME_CONFIRMATION_FACTOR = 1.5  # 5m RVOL ≥ 1.5 vs 20-bar average
+VOLUME_CONFIRMATION_FACTOR = 2.0  # 5m RVOL ≥ 2× vs 20-bar average
 
 # Trade parameters - Position size: margin x leverage = 250 x 20 = 5000 USD
 MARGIN = 250  # USD
@@ -129,9 +132,9 @@ POSITION_SIZE_USD = MARGIN * LEVERAGE  # 5000 USD
 
 # State files for strategy tracking
 LONG_BREAKOUT_TRIGGER_FILE = "eth_breakout_trigger_state.json"
-LONG_PULLBACK_TRIGGER_FILE = "eth_pullback_trigger_state.json"
-SHORT_FAIL_TRIGGER_FILE = "eth_fail_trigger_state.json"
+LONG_RECLAIM_TRIGGER_FILE = "eth_reclaim_trigger_state.json"
 SHORT_BREAKDOWN_TRIGGER_FILE = "eth_breakdown_trigger_state.json"
+SHORT_FADE_TRIGGER_FILE = "eth_fade_trigger_state.json"
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -239,19 +242,19 @@ def save_trigger_state(state, strategy_file):
 # --- ETH Trading Strategy Alert Logic (New Setup) ---
 def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
-    ETH Trading Strategy Alert - New Setup
+    ETH Intraday Trading Strategy Alert - New Setup
     
-    Spiros, here are clean ETH setups for today. Spot ref now ~$4,739, intraday H/L $4,879 / $4,211. 
-    OI up ~+15% 24h and funding mildly positive (~0.015%/8h) → longs somewhat crowded; respect failed-breakout shorts.
+    Spiros, here are intraday ETH setups for today. Anchors: 24h high = 4,887.59, 24h low = 4,659.70 on Binance spot right now.
 
-    Side	Trigger (5-min close + ≥1.5× 20-bar vol)	Entry zone	Invalidation (SL)	TP1	TP2	Est. R:R
-    Long – Breakout	Above 4,890–4,900	4,895	4,835	5,020	5,120	≈2.1
-    Long – Pullback	Hold 4,620–4,650 after dip	4,635	4,570	4,780	4,860	≈2.2
-    Short – Fail @ highs	Wick into 4,870–4,890 then close <4,860	4,860	4,905	4,750	4,700	≈2.4
-    Short – Breakdown	Acceptance <4,580	4,580	4,630	4,460	4,380	≈2.4
+    Setup	Trigger & Entry	Invalidation (SL)	TP1	TP2	Confirmations	TF
+    Long breakout	5-min close above 4,888, buy 4,880–4,900 on retest hold	4,853.38 (~0.7% below 4,888)	5,001.54 (~½ 24h range)	5,115.48 (~full 24h range)	5-min volume ≥2× 20-bar median; no bearish RSI/MACD divergence	5–15m
+    Short breakdown	5-min close below 4,660, sell 4,648–4,660 on failed retest	4,692.32 (~0.7% above 4,660)	4,545.75	4,431.81	5-min volume ≥2× 20-bar median; weak bounce failing at 4,660	5–15m
+    Short fade at range high	Spike to 4,880–4,900 with rejection (upper wick/divergence)	4,912.03 (~0.5% above 4,888)	4,773.65 (mid-range)	4,659.70	Rejection candle + declining buy volume	5–15m
+    Long reclaim at range low	Flush < 4,660 then fast reclaim; buy 4,665–4,685	4,636.40 (~0.5% below 4,660)	4,773.65	4,887.59	Strong buyback; delta/volume spike on reclaim	5–15m
 
-    Use: USD spot levels; map to your perp. Skip signals during low-vol churn; require the volume confirm. 
-    If funding flips negative and OI drops >5% intraday, de-prioritize longs.
+    Notes:
+    •	Targets use today's 24h range height (≈227.89). Levels will shift if a new 24h high/low prints.
+    •	Manage size so a full-stop loss ≤1R of your plan. Avoid chasing if confirmations are absent.
     
     Args:
         cb_service: Coinbase service instance
@@ -265,9 +268,9 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
     
     # Load trigger states
     long_breakout_state = load_trigger_state(LONG_BREAKOUT_TRIGGER_FILE)
-    long_pullback_state = load_trigger_state(LONG_PULLBACK_TRIGGER_FILE)
-    short_fail_state = load_trigger_state(SHORT_FAIL_TRIGGER_FILE)
+    long_reclaim_state = load_trigger_state(LONG_RECLAIM_TRIGGER_FILE)
     short_breakdown_state = load_trigger_state(SHORT_BREAKDOWN_TRIGGER_FILE)
+    short_fade_state = load_trigger_state(SHORT_FADE_TRIGGER_FILE)
     
     try:
         now = datetime.now(UTC)
@@ -319,11 +322,11 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Spiros, here are clean ETH setups for today.")
+        logger.info("🚀 Spiros, here are intraday ETH setups for today.")
         logger.info(f"📊 Live Levels:")
         logger.info(f"   • ETH ≈ ${current_close_5m:,.2f}")
-        logger.info(f"   • Today's H: ${TODAY_HIGH:.2f}")
-        logger.info(f"   • Today's L: ${TODAY_LOW:.2f}")
+        logger.info(f"   • 24h High: ${TODAY_HIGH:.2f}")
+        logger.info(f"   • 24h Low: ${TODAY_LOW:.2f}")
         logger.info("")
         logger.info("📊 Strategy Rules:")
         logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} × {LEVERAGE}x) — fixed")
@@ -334,18 +337,22 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         # Show strategies based on direction
         if long_strategies_enabled:
             logger.info("📊 LONG Setups:")
-            logger.info(f"   • Breakout: 5m close above ${LONG_BREAKOUT_TRIGGER_LOW:,}–${LONG_BREAKOUT_TRIGGER_HIGH:,} → Entry ${LONG_BREAKOUT_ENTRY:,}")
-            logger.info(f"     Stop: ${LONG_BREAKOUT_STOP_LOSS:,}, TP1: ${LONG_BREAKOUT_TP1:,}, TP2: ${LONG_BREAKOUT_TP2:,} (R:R ≈2.1)")
-            logger.info(f"   • Pullback: Hold ${LONG_PULLBACK_TRIGGER_LOW:,}–${LONG_PULLBACK_TRIGGER_HIGH:,} after dip → Entry ${LONG_PULLBACK_ENTRY:,}")
-            logger.info(f"     Stop: ${LONG_PULLBACK_STOP_LOSS:,}, TP1: ${LONG_PULLBACK_TP1:,}, TP2: ${LONG_PULLBACK_TP2:,} (R:R ≈2.2)")
+            logger.info(f"   • Breakout: 5-min close above ${LONG_BREAKOUT_TRIGGER:,}, buy ${LONG_BREAKOUT_ENTRY_LOW:,}–${LONG_BREAKOUT_ENTRY_HIGH:,} on retest hold")
+            logger.info(f"     Stop: ${LONG_BREAKOUT_STOP_LOSS:,} (~0.7% below ${LONG_BREAKOUT_TRIGGER:,})")
+            logger.info(f"     TP1: ${LONG_BREAKOUT_TP1:,} (~½ 24h range), TP2: ${LONG_BREAKOUT_TP2:,} (~full 24h range)")
+            logger.info(f"   • Reclaim: Flush < ${LONG_RECLAIM_TRIGGER:,} then fast reclaim; buy ${LONG_RECLAIM_ENTRY_LOW:,}–${LONG_RECLAIM_ENTRY_HIGH:,}")
+            logger.info(f"     Stop: ${LONG_RECLAIM_STOP_LOSS:,} (~0.5% below ${LONG_RECLAIM_TRIGGER:,})")
+            logger.info(f"     TP1: ${LONG_RECLAIM_TP1:,} (mid-range), TP2: ${LONG_RECLAIM_TP2:,}")
             logger.info("")
         
         if short_strategies_enabled:
             logger.info("📊 SHORT Setups:")
-            logger.info(f"   • Fail @ highs: Wick into ${SHORT_FAIL_TRIGGER_LOW:,}–${SHORT_FAIL_TRIGGER_HIGH:,} then close <${SHORT_FAIL_CLOSE_BELOW:,} → Entry ${SHORT_FAIL_ENTRY:,}")
-            logger.info(f"     Stop: ${SHORT_FAIL_STOP_LOSS:,}, TP1: ${SHORT_FAIL_TP1:,}, TP2: ${SHORT_FAIL_TP2:,} (R:R ≈2.4)")
-            logger.info(f"   • Breakdown: Acceptance <${SHORT_BREAKDOWN_TRIGGER:,} → Entry ${SHORT_BREAKDOWN_ENTRY:,}")
-            logger.info(f"     Stop: ${SHORT_BREAKDOWN_STOP_LOSS:,}, TP1: ${SHORT_BREAKDOWN_TP1:,}, TP2: ${SHORT_BREAKDOWN_TP2:,} (R:R ≈2.4)")
+            logger.info(f"   • Breakdown: 5-min close below ${SHORT_BREAKDOWN_TRIGGER:,}, sell ${SHORT_BREAKDOWN_ENTRY_LOW:,}–${SHORT_BREAKDOWN_ENTRY_HIGH:,} on failed retest")
+            logger.info(f"     Stop: ${SHORT_BREAKDOWN_STOP_LOSS:,} (~0.7% above ${SHORT_BREAKDOWN_TRIGGER:,})")
+            logger.info(f"     TP1: ${SHORT_BREAKDOWN_TP1:,}, TP2: ${SHORT_BREAKDOWN_TP2:,}")
+            logger.info(f"   • Fade: Spike to ${SHORT_FADE_TRIGGER_LOW:,}–${SHORT_FADE_TRIGGER_HIGH:,} with rejection (upper wick/divergence)")
+            logger.info(f"     Stop: ${SHORT_FADE_STOP_LOSS:,} (~0.5% above ${LONG_BREAKOUT_TRIGGER:,})")
+            logger.info(f"     TP1: ${SHORT_FADE_TP1:,} (mid-range), TP2: ${SHORT_FADE_TP2:,}")
             logger.info("")
         
         logger.info(f"Current Price: ${current_close_5m:,.2f}")
@@ -362,15 +369,15 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             not long_breakout_state.get("triggered", False) and not trade_executed):
             
             # Check if 5m close above trigger level
-            breakout_trigger_condition = (LONG_BREAKOUT_TRIGGER_LOW <= last_close_5m <= LONG_BREAKOUT_TRIGGER_HIGH)
-            # Check if current price is at entry level
-            breakout_entry_condition = abs(current_close_5m - LONG_BREAKOUT_ENTRY) <= 5  # Within $5 of entry
+            breakout_trigger_condition = last_close_5m > LONG_BREAKOUT_TRIGGER
+            # Check if current price is in entry zone
+            breakout_entry_condition = (LONG_BREAKOUT_ENTRY_LOW <= current_close_5m <= LONG_BREAKOUT_ENTRY_HIGH)
             
             breakout_ready = breakout_trigger_condition and breakout_entry_condition and volume_confirmed
 
             logger.info("🔍 LONG - Breakout Strategy Analysis:")
-            logger.info(f"   • 5m close in ${LONG_BREAKOUT_TRIGGER_LOW:,}–${LONG_BREAKOUT_TRIGGER_HIGH:,}: {'✅' if breakout_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
-            logger.info(f"   • Entry at ${LONG_BREAKOUT_ENTRY:,}: {'✅' if breakout_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
+            logger.info(f"   • 5m close above ${LONG_BREAKOUT_TRIGGER:,}: {'✅' if breakout_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • Entry in ${LONG_BREAKOUT_ENTRY_LOW:,}–${LONG_BREAKOUT_ENTRY_HIGH:,}: {'✅' if breakout_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
             logger.info(f"   • Volume confirmed (≥{VOLUME_CONFIRMATION_FACTOR}x): {'✅' if volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info(f"   • Breakout Long Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
 
@@ -412,26 +419,26 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 else:
                     logger.error(f"❌ Long Breakout trade failed: {trade_result}")
         
-        # 2. LONG - Pullback Strategy
+        # 2. LONG - Reclaim Strategy
         if (long_strategies_enabled and 
-            not long_pullback_state.get("triggered", False) and not trade_executed):
+            not long_reclaim_state.get("triggered", False) and not trade_executed):
             
-            # Check if price holds in pullback zone after a dip
-            pullback_trigger_condition = (LONG_PULLBACK_TRIGGER_LOW <= current_close_5m <= LONG_PULLBACK_TRIGGER_HIGH)
-            # Check if current price is at entry level
-            pullback_entry_condition = abs(current_close_5m - LONG_PULLBACK_ENTRY) <= 5  # Within $5 of entry
+            # Check if price flushes below reclaim trigger
+            reclaim_trigger_condition = last_close_5m < LONG_RECLAIM_TRIGGER
+            # Check if current price is in entry zone (reclaim after flush)
+            reclaim_entry_condition = (LONG_RECLAIM_ENTRY_LOW <= current_close_5m <= LONG_RECLAIM_ENTRY_HIGH)
             
-            pullback_ready = pullback_trigger_condition and pullback_entry_condition and volume_confirmed
+            reclaim_ready = reclaim_trigger_condition and reclaim_entry_condition and volume_confirmed
 
-            logger.info("🔍 LONG - Pullback Strategy Analysis:")
-            logger.info(f"   • Hold in ${LONG_PULLBACK_TRIGGER_LOW:,}–${LONG_PULLBACK_TRIGGER_HIGH:,}: {'✅' if pullback_trigger_condition else '❌'} (current: {current_close_5m:,.2f})")
-            logger.info(f"   • Entry at ${LONG_PULLBACK_ENTRY:,}: {'✅' if pullback_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
+            logger.info("🔍 LONG - Reclaim Strategy Analysis:")
+            logger.info(f"   • Flush < ${LONG_RECLAIM_TRIGGER:,}: {'✅' if reclaim_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • Entry in ${LONG_RECLAIM_ENTRY_LOW:,}–${LONG_RECLAIM_ENTRY_HIGH:,}: {'✅' if reclaim_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
             logger.info(f"   • Volume confirmed (≥{VOLUME_CONFIRMATION_FACTOR}x): {'✅' if volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
-            logger.info(f"   • Pullback Long Ready: {'🎯 YES' if pullback_ready else '⏳ NO'}")
+            logger.info(f"   • Reclaim Long Ready: {'🎯 YES' if reclaim_ready else '⏳ NO'}")
 
-            if pullback_ready:
+            if reclaim_ready:
                 logger.info("")
-                logger.info("🎯 LONG - Pullback Strategy conditions met - executing trade...")
+                logger.info("🎯 LONG - Reclaim Strategy conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -441,104 +448,46 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH Pullback Long (New Setup)",
-                    entry_price=LONG_PULLBACK_ENTRY,
-                    stop_loss=LONG_PULLBACK_STOP_LOSS,
-                    take_profit=LONG_PULLBACK_TP1,
+                    trade_type="ETH Reclaim Long (New Setup)",
+                    entry_price=LONG_RECLAIM_ENTRY,
+                    stop_loss=LONG_RECLAIM_STOP_LOSS,
+                    take_profit=LONG_RECLAIM_TP1,
                     side="BUY",
                     product=PRODUCT_ID
                 )
 
                 if trade_success:
-                    logger.info("🎉 Pullback Long trade executed successfully!")
-                    logger.info(f"Entry: ${LONG_PULLBACK_ENTRY:,.2f}")
-                    logger.info(f"Stop-loss: ${LONG_PULLBACK_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${LONG_PULLBACK_TP1:,.2f}, TP2: ${LONG_PULLBACK_TP2:,.2f}")
-                    logger.info("Strategy: Hold 4,620-4,650 after dip with volume confirmation")
+                    logger.info("🎉 Reclaim Long trade executed successfully!")
+                    logger.info(f"Entry: ${LONG_RECLAIM_ENTRY:,.2f}")
+                    logger.info(f"Stop-loss: ${LONG_RECLAIM_STOP_LOSS:,.2f}")
+                    logger.info(f"TP1: ${LONG_RECLAIM_TP1:,.2f}, TP2: ${LONG_RECLAIM_TP2:,.2f}")
+                    logger.info("Strategy: Flush < 4,660 then fast reclaim with volume confirmation")
                     
                     # Save trigger state
-                    long_pullback_state = {
+                    long_reclaim_state = {
                         "triggered": True, 
                         "trigger_ts": int(last_closed_5m['start']),
-                        "entry_price": LONG_PULLBACK_ENTRY
+                        "entry_price": LONG_RECLAIM_ENTRY
                     }
-                    save_trigger_state(long_pullback_state, LONG_PULLBACK_TRIGGER_FILE)
+                    save_trigger_state(long_reclaim_state, LONG_RECLAIM_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Long Pullback trade failed: {trade_result}")
+                    logger.error(f"❌ Long Reclaim trade failed: {trade_result}")
         
-        # 3. SHORT - Fail @ highs Strategy
-        if (short_strategies_enabled and 
-            not short_fail_state.get("triggered", False) and not trade_executed):
-            
-            # Check if there was a wick into the trigger zone
-            wick_into_zone = (SHORT_FAIL_TRIGGER_LOW <= last_high_5m <= SHORT_FAIL_TRIGGER_HIGH)
-            # Check if close is below the required level
-            close_below_requirement = last_close_5m < SHORT_FAIL_CLOSE_BELOW
-            # Check if current price is at entry level
-            fail_entry_condition = abs(current_close_5m - SHORT_FAIL_ENTRY) <= 5  # Within $5 of entry
-            
-            fail_ready = wick_into_zone and close_below_requirement and fail_entry_condition and volume_confirmed
-
-            logger.info("🔍 SHORT - Fail @ highs Strategy Analysis:")
-            logger.info(f"   • Wick into ${SHORT_FAIL_TRIGGER_LOW:,}–${SHORT_FAIL_TRIGGER_HIGH:,}: {'✅' if wick_into_zone else '❌'} (last high: {last_high_5m:,.2f})")
-            logger.info(f"   • Close <${SHORT_FAIL_CLOSE_BELOW:,}: {'✅' if close_below_requirement else '❌'} (last close: {last_close_5m:,.2f})")
-            logger.info(f"   • Entry at ${SHORT_FAIL_ENTRY:,}: {'✅' if fail_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
-            logger.info(f"   • Volume confirmed (≥{VOLUME_CONFIRMATION_FACTOR}x): {'✅' if volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
-            logger.info(f"   • Fail @ highs Short Ready: {'🎯 YES' if fail_ready else '⏳ NO'}")
-
-            if fail_ready:
-                logger.info("")
-                logger.info("🎯 SHORT - Fail @ highs Strategy conditions met - executing trade...")
-
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="ETH Fail @ highs Short (New Setup)",
-                    entry_price=SHORT_FAIL_ENTRY,
-                    stop_loss=SHORT_FAIL_STOP_LOSS,
-                    take_profit=SHORT_FAIL_TP1,
-                    side="SELL",
-                    product=PRODUCT_ID
-                )
-
-                if trade_success:
-                    logger.info("🎉 Fail @ highs Short trade executed successfully!")
-                    logger.info(f"Entry: ${SHORT_FAIL_ENTRY:,.2f}")
-                    logger.info(f"Stop-loss: ${SHORT_FAIL_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${SHORT_FAIL_TP1:,.2f}, TP2: ${SHORT_FAIL_TP2:,.2f}")
-                    logger.info("Strategy: Wick into 4,870-4,890 then close <4,860 with volume confirmation")
-                    
-                    # Save trigger state
-                    short_fail_state = {
-                        "triggered": True, 
-                        "trigger_ts": int(last_closed_5m['start']),
-                        "entry_price": SHORT_FAIL_ENTRY
-                    }
-                    save_trigger_state(short_fail_state, SHORT_FAIL_TRIGGER_FILE)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ Short Fail @ highs trade failed: {trade_result}")
-        
-        # 4. SHORT - Breakdown Strategy
+        # 3. SHORT - Breakdown Strategy
         if (short_strategies_enabled and 
             not short_breakdown_state.get("triggered", False) and not trade_executed):
             
-            # Check if price accepts below breakdown level
-            breakdown_trigger_condition = current_close_5m < SHORT_BREAKDOWN_TRIGGER
-            # Check if current price is at entry level
-            breakdown_entry_condition = abs(current_close_5m - SHORT_BREAKDOWN_ENTRY) <= 5  # Within $5 of entry
+            # Check if 5-min close below breakdown level
+            breakdown_trigger_condition = last_close_5m < SHORT_BREAKDOWN_TRIGGER
+            # Check if current price is in entry zone
+            breakdown_entry_condition = (SHORT_BREAKDOWN_ENTRY_LOW <= current_close_5m <= SHORT_BREAKDOWN_ENTRY_HIGH)
             
             breakdown_ready = breakdown_trigger_condition and breakdown_entry_condition and volume_confirmed
 
             logger.info("🔍 SHORT - Breakdown Strategy Analysis:")
-            logger.info(f"   • Acceptance <${SHORT_BREAKDOWN_TRIGGER:,}: {'✅' if breakdown_trigger_condition else '❌'} (current: {current_close_5m:,.2f})")
-            logger.info(f"   • Entry at ${SHORT_BREAKDOWN_ENTRY:,}: {'✅' if breakdown_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
+            logger.info(f"   • 5m close below ${SHORT_BREAKDOWN_TRIGGER:,}: {'✅' if breakdown_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • Entry in ${SHORT_BREAKDOWN_ENTRY_LOW:,}–${SHORT_BREAKDOWN_ENTRY_HIGH:,}: {'✅' if breakdown_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
             logger.info(f"   • Volume confirmed (≥{VOLUME_CONFIRMATION_FACTOR}x): {'✅' if volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info(f"   • Breakdown Short Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
 
@@ -580,22 +529,77 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 else:
                     logger.error(f"❌ Short Breakdown trade failed: {trade_result}")
         
+        # 4. SHORT - Fade Strategy
+        if (short_strategies_enabled and 
+            not short_fade_state.get("triggered", False) and not trade_executed):
+            
+            # Check if price spikes above fade trigger
+            fade_trigger_condition = (SHORT_FADE_TRIGGER_LOW <= last_high_5m <= SHORT_FADE_TRIGGER_HIGH)
+            # Check if current price is at entry level (rejection after spike)
+            fade_entry_condition = abs(current_close_5m - SHORT_FADE_ENTRY) <= 5  # Within $5 of entry
+            
+            fade_ready = fade_trigger_condition and fade_entry_condition and volume_confirmed
+
+            logger.info("🔍 SHORT - Fade Strategy Analysis:")
+            logger.info(f"   • Spike to ${SHORT_FADE_TRIGGER_LOW:,}–${SHORT_FADE_TRIGGER_HIGH:,}: {'✅' if fade_trigger_condition else '❌'} (last high: {last_high_5m:,.2f})")
+            logger.info(f"   • Entry at ${SHORT_FADE_ENTRY:,}: {'✅' if fade_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
+            logger.info(f"   • Volume confirmed (≥{VOLUME_CONFIRMATION_FACTOR}x): {'✅' if volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info(f"   • Fade Short Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
+
+            if fade_ready:
+                logger.info("")
+                logger.info("🎯 SHORT - Fade Strategy conditions met - executing trade...")
+
+                try:
+                    play_alert_sound()
+                    logger.info("Alert sound played successfully")
+                except Exception as e:
+                    logger.error(f"Failed to play alert sound: {e}")
+
+                trade_success, trade_result = execute_crypto_trade(
+                    cb_service=cb_service,
+                    trade_type="ETH Fade Short (New Setup)",
+                    entry_price=SHORT_FADE_ENTRY,
+                    stop_loss=SHORT_FADE_STOP_LOSS,
+                    take_profit=SHORT_FADE_TP1,
+                    side="SELL",
+                    product=PRODUCT_ID
+                )
+
+                if trade_success:
+                    logger.info("🎉 Fade Short trade executed successfully!")
+                    logger.info(f"Entry: ${SHORT_FADE_ENTRY:,.2f}")
+                    logger.info(f"Stop-loss: ${SHORT_FADE_STOP_LOSS:,.2f}")
+                    logger.info(f"TP1: ${SHORT_FADE_TP1:,.2f}, TP2: ${SHORT_FADE_TP2:,.2f}")
+                    logger.info("Strategy: Spike to 4,880-4,900 with rejection with volume confirmation")
+                    
+                    # Save trigger state
+                    short_fade_state = {
+                        "triggered": True, 
+                        "trigger_ts": int(last_closed_5m['start']),
+                        "entry_price": SHORT_FADE_ENTRY
+                    }
+                    save_trigger_state(short_fade_state, SHORT_FADE_TRIGGER_FILE)
+                    trade_executed = True
+                else:
+                    logger.error(f"❌ Short Fade trade failed: {trade_result}")
+        
         # Check if any strategy was triggered
         if not trade_executed:
             logger.info("⏳ Waiting for setup conditions or monitoring active trade...")
             logger.info(f"Long breakout triggered: {long_breakout_state.get('triggered', False)}")
-            logger.info(f"Long pullback triggered: {long_pullback_state.get('triggered', False)}")
-            logger.info(f"Short fail @ highs triggered: {short_fail_state.get('triggered', False)}")
+            logger.info(f"Long reclaim triggered: {long_reclaim_state.get('triggered', False)}")
             logger.info(f"Short breakdown triggered: {short_breakdown_state.get('triggered', False)}")
+            logger.info(f"Short fade triggered: {short_fade_state.get('triggered', False)}")
         
-        logger.info("=== ETH Trading Strategy Alert completed ===")
+        logger.info("=== ETH Intraday Trading Strategy Alert completed ===")
         return current_ts_5m
         
     except Exception as e:
-        logger.error(f"Error in ETH Trading Strategy Alert logic: {e}")
+        logger.error(f"Error in ETH Intraday Trading Strategy Alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH Trading Strategy Alert completed (with error) ===")
+        logger.info("=== ETH Intraday Trading Strategy Alert completed (with error) ===")
     return last_alert_ts
 
 def main():
@@ -614,17 +618,17 @@ def main():
     
     direction = args.direction.upper()
     
-    logger.info("Starting ETH Trading Strategy Monitor (New Setup)")
+    logger.info("Starting ETH Intraday Trading Strategy Monitor (New Setup)")
     if direction == 'BOTH':
-        logger.info("Strategy: ETH New Setup - LONG & SHORT")
+        logger.info("Strategy: ETH Intraday New Setup - LONG & SHORT")
     else:
         logger.info(f"Strategy: {direction} only")
     logger.info("")
     logger.info("Strategy Summary:")
-    logger.info("LONG - Breakout: 5m close above 4,890-4,900 → Entry 4,895")
-    logger.info("LONG - Pullback: Hold 4,620-4,650 after dip → Entry 4,635")
-    logger.info("SHORT - Fail @ highs: Wick into 4,870-4,890 then close <4,860 → Entry 4,860")
-    logger.info("SHORT - Breakdown: Acceptance <4,580 → Entry 4,580")
+    logger.info("LONG - Breakout: 5-min close above 4,888, buy 4,880–4,900 on retest hold")
+    logger.info("LONG - Reclaim: Flush < 4,660 then fast reclaim; buy 4,665–4,685")
+    logger.info("SHORT - Breakdown: 5-min close below 4,660, sell 4,648–4,660 on failed retest")
+    logger.info("SHORT - Fade: Spike to 4,880–4,900 with rejection (upper wick/divergence)")
     logger.info(f"Position Size: ${POSITION_SIZE_USD:,} ({MARGIN} × {LEVERAGE}x)")
     logger.info(f"Volume: 5m RVOL ≥ {VOLUME_CONFIRMATION_FACTOR}x vs 20-bar average")
     logger.info("")
