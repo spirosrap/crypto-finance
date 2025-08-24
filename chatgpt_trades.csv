@@ -1,0 +1,1 @@
+timestamp,strategy,symbol,side,entry_price,stop_loss,take_profit,position_size_usd,margin,leverage,volume_sma,volume_ratio,current_price,market_conditions,trade_status,execution_time,notes

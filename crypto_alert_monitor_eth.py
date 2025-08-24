@@ -173,6 +173,61 @@ def log_trade_to_csv(trade_data):
     except Exception as e:
         logger.error(f"❌ Failed to log trade to CSV: {e}")
 
+def test_csv_logging():
+    """
+    Test function to verify CSV logging is working correctly
+    """
+    logger.info("🧪 Testing CSV logging functionality...")
+    
+    # Test ETH trade data
+    eth_trade_data = {
+        'timestamp': datetime.now(UTC).isoformat(),
+        'strategy': 'TEST-ETH-Long-Breakout',
+        'symbol': 'ETH-PERP-INTX',
+        'side': 'BUY',
+        'entry_price': 4890.0,
+        'stop_loss': 4853.38,
+        'take_profit': 5001.54,
+        'position_size_usd': 5000.0,
+        'margin': 250.0,
+        'leverage': 20.0,
+        'volume_sma': 800.0,
+        'volume_ratio': 2.1,
+        'current_price': 4890.0,
+        'market_conditions': '24h Range: $4,659.70-$4,887.59',
+        'trade_status': 'TEST',
+        'execution_time': datetime.now(UTC).isoformat(),
+        'notes': 'TEST TRADE - ETH Long Breakout'
+    }
+    
+    # Test ETH reclaim trade data
+    eth_reclaim_data = {
+        'timestamp': datetime.now(UTC).isoformat(),
+        'strategy': 'TEST-ETH-Long-Reclaim',
+        'symbol': 'ETH-PERP-INTX',
+        'side': 'BUY',
+        'entry_price': 4675.0,
+        'stop_loss': 4636.40,
+        'take_profit': 4773.65,
+        'position_size_usd': 5000.0,
+        'margin': 250.0,
+        'leverage': 20.0,
+        'volume_sma': 750.0,
+        'volume_ratio': 2.3,
+        'current_price': 4675.0,
+        'market_conditions': '24h Range: $4,659.70-$4,887.59',
+        'trade_status': 'TEST',
+        'execution_time': datetime.now(UTC).isoformat(),
+        'notes': 'TEST TRADE - ETH Long Reclaim'
+    }
+    
+    # Log test trades
+    log_trade_to_csv(eth_trade_data)
+    log_trade_to_csv(eth_reclaim_data)
+    
+    logger.info("✅ CSV logging test completed!")
+    logger.info("📊 Check chatgpt_trades.csv to verify test trades were added correctly")
+
 def play_alert_sound(filename="alert_sound.wav"):
     try:
         system = platform.system()
@@ -732,7 +787,13 @@ def main():
     parser = argparse.ArgumentParser(description='ETH Trading Strategy Monitor (New Setup) with optional direction filter')
     parser.add_argument('--direction', choices=['LONG', 'SHORT', 'BOTH'], default='BOTH',
                        help='Trading direction to monitor: LONG, SHORT, or BOTH (default: BOTH)')
+    parser.add_argument('--test-csv', action='store_true', help='Test CSV logging functionality')
     args = parser.parse_args()
+    
+    # Test CSV logging if requested
+    if args.test_csv:
+        test_csv_logging()
+        return
     
     # Print usage examples
     logger.info("Usage examples:")
