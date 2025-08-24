@@ -12,6 +12,7 @@ import os
 import json
 import concurrent.futures
 import argparse
+import csv
 
 # Set up file logging
 logging.basicConfig(
@@ -238,6 +239,42 @@ def save_trigger_state(state):
             json.dump(state, f)
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
+
+def log_trade_to_csv(trade_data):
+    """
+    Log trade details to CSV file
+    
+    Args:
+        trade_data: Dictionary containing trade information
+    """
+    csv_file = "chatgpt_trades.csv"
+    
+    # Define CSV headers
+    headers = [
+        'timestamp', 'strategy', 'symbol', 'side', 'entry_price', 'stop_loss', 
+        'take_profit', 'position_size_usd', 'margin', 'leverage', 'volume_sma', 
+        'volume_ratio', 'current_price', 'market_conditions', 'trade_status', 
+        'execution_time', 'notes'
+    ]
+    
+    try:
+        # Check if file exists to determine if we need to write headers
+        file_exists = os.path.exists(csv_file)
+        
+        with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            
+            # Write headers if file doesn't exist
+            if not file_exists:
+                writer.writeheader()
+            
+            # Write trade data
+            writer.writerow(trade_data)
+            
+        logger.info(f"✅ Trade logged to {csv_file}")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to log trade to CSV: {e}")
 
 def play_alert_sound(filename="alert_sound.wav"):
     """
@@ -696,6 +733,29 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                 if trade_success:
                     logger.info("🎉 Long Breakout trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
+                    
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'Long-B/O',
+                        'symbol': 'BTC-PERP-INTX',
+                        'side': 'BUY',
+                        'entry_price': current_price,
+                        'stop_loss': LONG_BREAKOUT_STOP_LOSS,
+                        'take_profit': LONG_BREAKOUT_TP1,
+                        'position_size_usd': MARGIN * LEVERAGE,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': volume_sma_5m,
+                        'volume_ratio': rvol_vs_sma,
+                        'current_price': current_price,
+                        'market_conditions': f"24h Range: ${TWENTY_FOUR_HOUR_LOW:,}-${TWENTY_FOUR_HOUR_HIGH:,}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: 5m close > ${LONG_BREAKOUT_TRIGGER_LEVEL:,}, Volume: {rvol_vs_sma:.2f}x SMA"
+                    }
+                    log_trade_to_csv(trade_data)
+                    
                     trigger_state["long_breakout_triggered"] = True
                     trigger_state["active_trade_direction"] = "LONG"
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
@@ -754,6 +814,29 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                 if trade_success:
                     logger.info("🎉 Long Bounce trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
+                    
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'Long-Bounce',
+                        'symbol': 'BTC-PERP-INTX',
+                        'side': 'BUY',
+                        'entry_price': current_price,
+                        'stop_loss': LONG_BOUNCE_STOP_LOSS,
+                        'take_profit': LONG_BOUNCE_TP1,
+                        'position_size_usd': MARGIN * LEVERAGE,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': volume_sma_5m,
+                        'volume_ratio': rvol_vs_sma,
+                        'current_price': current_price,
+                        'market_conditions': f"24h Range: ${TWENTY_FOUR_HOUR_LOW:,}-${TWENTY_FOUR_HOUR_HIGH:,}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: Wick hold at ${LONG_BOUNCE_LOW:,}-${LONG_BOUNCE_HIGH:,}, Volume: {last_5m_volume:,.0f} vs SMA: {volume_sma_5m:,.0f}"
+                    }
+                    log_trade_to_csv(trade_data)
+                    
                     trigger_state["long_bounce_triggered"] = True
                     trigger_state["active_trade_direction"] = "LONG"
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
@@ -809,6 +892,29 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                 if trade_success:
                     logger.info("🎉 Short Breakdown trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
+                    
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'Short-B/D',
+                        'symbol': 'BTC-PERP-INTX',
+                        'side': 'SELL',
+                        'entry_price': current_price,
+                        'stop_loss': SHORT_BREAKDOWN_STOP_LOSS,
+                        'take_profit': SHORT_BREAKDOWN_TP1,
+                        'position_size_usd': MARGIN * LEVERAGE,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': volume_sma_5m,
+                        'volume_ratio': rvol_vs_sma,
+                        'current_price': current_price,
+                        'market_conditions': f"24h Range: ${TWENTY_FOUR_HOUR_LOW:,}-${TWENTY_FOUR_HOUR_HIGH:,}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: 5m close < ${SHORT_BREAKDOWN_TRIGGER_LEVEL:,}, Volume: {rvol_vs_sma:.2f}x SMA"
+                    }
+                    log_trade_to_csv(trade_data)
+                    
                     trigger_state["short_breakdown_triggered"] = True
                     trigger_state["active_trade_direction"] = "SHORT"
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
@@ -867,6 +973,29 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                 if trade_success:
                     logger.info("🎉 Short Rejection trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
+                    
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'Short-Rejection',
+                        'symbol': 'BTC-PERP-INTX',
+                        'side': 'SELL',
+                        'entry_price': current_price,
+                        'stop_loss': SHORT_REJECTION_STOP_LOSS,
+                        'take_profit': SHORT_REJECTION_TP1,
+                        'position_size_usd': MARGIN * LEVERAGE,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': volume_sma_5m,
+                        'volume_ratio': rvol_vs_sma,
+                        'current_price': current_price,
+                        'market_conditions': f"24h Range: ${TWENTY_FOUR_HOUR_LOW:,}-${TWENTY_FOUR_HOUR_HIGH:,}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: Fail at ${SHORT_REJECTION_LOW:,}-${SHORT_REJECTION_HIGH:,}, Volume: {last_5m_volume:,.0f} vs SMA: {volume_sma_5m:,.0f}"
+                    }
+                    log_trade_to_csv(trade_data)
+                    
                     trigger_state["short_rejection_triggered"] = True
                     trigger_state["active_trade_direction"] = "SHORT"
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))

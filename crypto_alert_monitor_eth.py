@@ -12,6 +12,7 @@ import os
 import json
 import concurrent.futures
 import argparse
+import csv
 
 # Set up file logging
 logging.basicConfig(
@@ -135,6 +136,42 @@ LONG_BREAKOUT_TRIGGER_FILE = "eth_breakout_trigger_state.json"
 LONG_RECLAIM_TRIGGER_FILE = "eth_reclaim_trigger_state.json"
 SHORT_BREAKDOWN_TRIGGER_FILE = "eth_breakdown_trigger_state.json"
 SHORT_FADE_TRIGGER_FILE = "eth_fade_trigger_state.json"
+
+def log_trade_to_csv(trade_data):
+    """
+    Log trade details to CSV file
+    
+    Args:
+        trade_data: Dictionary containing trade information
+    """
+    csv_file = "chatgpt_trades.csv"
+    
+    # Define CSV headers
+    headers = [
+        'timestamp', 'strategy', 'symbol', 'side', 'entry_price', 'stop_loss', 
+        'take_profit', 'position_size_usd', 'margin', 'leverage', 'volume_sma', 
+        'volume_ratio', 'current_price', 'market_conditions', 'trade_status', 
+        'execution_time', 'notes'
+    ]
+    
+    try:
+        # Check if file exists to determine if we need to write headers
+        file_exists = os.path.exists(csv_file)
+        
+        with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            
+            # Write headers if file doesn't exist
+            if not file_exists:
+                writer.writeheader()
+            
+            # Write trade data
+            writer.writerow(trade_data)
+            
+        logger.info(f"✅ Trade logged to {csv_file}")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to log trade to CSV: {e}")
 
 def play_alert_sound(filename="alert_sound.wav"):
     try:
@@ -408,6 +445,28 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"TP1: ${LONG_BREAKOUT_TP1:,.2f}, TP2: ${LONG_BREAKOUT_TP2:,.2f}")
                     logger.info("Strategy: Breakout above 4,890-4,900 with volume confirmation")
                     
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'ETH-Long-Breakout',
+                        'symbol': 'ETH-PERP-INTX',
+                        'side': 'BUY',
+                        'entry_price': LONG_BREAKOUT_ENTRY,
+                        'stop_loss': LONG_BREAKOUT_STOP_LOSS,
+                        'take_profit': LONG_BREAKOUT_TP1,
+                        'position_size_usd': POSITION_SIZE_USD,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': volume_sma_5m,
+                        'volume_ratio': relative_volume_5m,
+                        'current_price': current_close_5m,
+                        'market_conditions': f"24h Range: ${TODAY_LOW:,}-${TODAY_HIGH:,}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: 5m close > ${LONG_BREAKOUT_TRIGGER:,}, Volume: {relative_volume_5m:.2f}x SMA"
+                    }
+                    log_trade_to_csv(trade_data)
+                    
                     # Save trigger state
                     long_breakout_state = {
                         "triggered": True, 
@@ -462,6 +521,28 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Stop-loss: ${LONG_RECLAIM_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${LONG_RECLAIM_TP1:,.2f}, TP2: ${LONG_RECLAIM_TP2:,.2f}")
                     logger.info("Strategy: Flush < 4,660 then fast reclaim with volume confirmation")
+                    
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'ETH-Long-Reclaim',
+                        'symbol': 'ETH-PERP-INTX',
+                        'side': 'BUY',
+                        'entry_price': LONG_RECLAIM_ENTRY,
+                        'stop_loss': LONG_RECLAIM_STOP_LOSS,
+                        'take_profit': LONG_RECLAIM_TP1,
+                        'position_size_usd': POSITION_SIZE_USD,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': volume_sma_5m,
+                        'volume_ratio': relative_volume_5m,
+                        'current_price': current_close_5m,
+                        'market_conditions': f"24h Range: ${TODAY_LOW:,}-${TODAY_HIGH:,}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: Flush < ${LONG_RECLAIM_TRIGGER:,} then reclaim, Volume: {relative_volume_5m:.2f}x SMA"
+                    }
+                    log_trade_to_csv(trade_data)
                     
                     # Save trigger state
                     long_reclaim_state = {
@@ -518,6 +599,28 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"TP1: ${SHORT_BREAKDOWN_TP1:,.2f}, TP2: ${SHORT_BREAKDOWN_TP2:,.2f}")
                     logger.info("Strategy: Acceptance <4,580 with volume confirmation")
                     
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'ETH-Short-Breakdown',
+                        'symbol': 'ETH-PERP-INTX',
+                        'side': 'SELL',
+                        'entry_price': SHORT_BREAKDOWN_ENTRY,
+                        'stop_loss': SHORT_BREAKDOWN_STOP_LOSS,
+                        'take_profit': SHORT_BREAKDOWN_TP1,
+                        'position_size_usd': POSITION_SIZE_USD,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': volume_sma_5m,
+                        'volume_ratio': relative_volume_5m,
+                        'current_price': current_close_5m,
+                        'market_conditions': f"24h Range: ${TODAY_LOW:,}-${TODAY_HIGH:,}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: 5m close < ${SHORT_BREAKDOWN_TRIGGER:,}, Volume: {relative_volume_5m:.2f}x SMA"
+                    }
+                    log_trade_to_csv(trade_data)
+                    
                     # Save trigger state
                     short_breakdown_state = {
                         "triggered": True, 
@@ -572,6 +675,28 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Stop-loss: ${SHORT_FADE_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${SHORT_FADE_TP1:,.2f}, TP2: ${SHORT_FADE_TP2:,.2f}")
                     logger.info("Strategy: Spike to 4,880-4,900 with rejection with volume confirmation")
+                    
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'ETH-Short-Fade',
+                        'symbol': 'ETH-PERP-INTX',
+                        'side': 'SELL',
+                        'entry_price': SHORT_FADE_ENTRY,
+                        'stop_loss': SHORT_FADE_STOP_LOSS,
+                        'take_profit': SHORT_FADE_TP1,
+                        'position_size_usd': POSITION_SIZE_USD,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': volume_sma_5m,
+                        'volume_ratio': relative_volume_5m,
+                        'current_price': current_close_5m,
+                        'market_conditions': f"24h Range: ${TODAY_LOW:,}-${TODAY_HIGH:,}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: Spike to ${SHORT_FADE_TRIGGER_LOW:,}-${SHORT_FADE_TRIGGER_HIGH:,} with rejection, Volume: {relative_volume_5m:.2f}x SMA"
+                    }
+                    log_trade_to_csv(trade_data)
                     
                     # Save trigger state
                     short_fade_state = {
