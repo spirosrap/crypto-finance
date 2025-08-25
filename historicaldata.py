@@ -85,6 +85,11 @@ class HistoricalData:
 
     def _convert_candle_to_dict(self, candle) -> dict:
         """Convert a Candle object to a dictionary."""
+        # If it's already a dictionary, return it as is
+        if isinstance(candle, dict):
+            return candle
+        
+        # Otherwise, convert the object to a dictionary
         candle_dict = {
             'start': candle.start,
             'time': candle.start,  # Add time field for compatibility
