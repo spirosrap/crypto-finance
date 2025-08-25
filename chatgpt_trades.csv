@@ -1,2 +1,3 @@
 timestamp,strategy,symbol,side,entry_price,stop_loss,take_profit,position_size_usd,margin,leverage,volume_sma,volume_ratio,current_price,market_conditions,trade_status,execution_time,notes
 2025-08-25T15:58:09.362797+00:00,Range-Fade-Buy,BTC-PERP-INTX,BUY,112160.0,111960,112501,5000,250,20,253.370475,0.7893062520406137,112160.0,"24h Range: $111,000-$113,000",EXECUTED,2025-08-25T15:58:09.362822+00:00,"Range fade at S1 $112,143, Tape slowing (RVOL: 0.79x)"
+2025-08-25T16:43:31.183516+00:00,Range-Fade-Sell,BTC-PERP-INTX,SELL,112696.4,112835,112501,5000,250,20,268.665165,0.6036558554213755,112696.4,"24h Range: $111,000-$113,000",EXECUTED,2025-08-25T16:43:31.183539+00:00,"Range fade at R1 $112,683, Tape slowing (RVOL: 0.60x)"
