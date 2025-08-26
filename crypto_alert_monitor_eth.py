@@ -470,7 +470,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info("📊 Strategy Rules:")
         logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} × {LEVERAGE}x) — fixed")
         logger.info(f"   • Primary timeframe: 15-minute candles")
-        logger.info(f"   • Volume requirements: 15m RVOL ≥ {LONG_VOLUME_FACTOR}x for long, {SHORT_VOLUME_FACTOR}x for short, 5m RVOL ≥ {DIP_BUY_VOLUME_FACTOR}x for dip buy")
+        logger.info(f"   • Volume requirements: 15m RVOL ≥ {LONG_VOLUME_FACTOR}x for long, {SHORT_VOLUME_FACTOR}x for short, 5m RVOL ≥ {SUPPORT_VOLUME_FACTOR}x for support, 5m RVOL ≥ {MOMENTUM_VOLUME_FACTOR}x for momentum")
         logger.info("")
         
         # Show strategies based on direction
