@@ -663,6 +663,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         
         # Extract values from last completed 5m candle (primary for triggers)
         last_5m_ts = datetime.fromtimestamp(int(get_candle_value(last_5m, 'start')), UTC)
+        last_5m_open = float(get_candle_value(last_5m, 'open'))
         last_5m_close = float(get_candle_value(last_5m, 'close'))
         last_5m_high = float(get_candle_value(last_5m, 'high'))
         last_5m_low = float(get_candle_value(last_5m, 'low'))
