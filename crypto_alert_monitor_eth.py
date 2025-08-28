@@ -82,50 +82,58 @@ GRANULARITY_15M = "FIFTEEN_MINUTE"  # Primary timeframe for triggers
 GRANULARITY_5M = "FIVE_MINUTE"      # Secondary timeframe
 VOLUME_PERIOD = 20  # For volume confirmation
 
-# Current market context - Updated with new levels
-CURRENT_ETH_PRICE = 4644.00  # ETH Spot ~$4,644
-TODAY_HIGH = 4644.00         # 24h high = $4,644
-TODAY_LOW = 4396.00          # 24h low = $4,396
+# Current market context - Updated with new levels from Aug 28 setup
+CURRENT_ETH_PRICE = 4650.00  # ETH Spot ~$4,650
+TODAY_HIGH = 4650.00         # 24h high = $4,650
+TODAY_LOW = 4530.00          # 24h low = $4,530
+
+# Key S/R levels from Barchart pivots
+R1 = 4656  # Resistance 1
+R2 = 4721  # Resistance 2  
+R3 = 4782  # Resistance 3
+S1 = 4531  # Support 1
+S2 = 4470  # Support 2
+S3 = 4405  # Support 3
 
 # LONG SETUPS
 # Long - Breakout long
-LONG_BREAKOUT_TRIGGER = 4644.0     # Trigger: 15m close above the 24h high (~$4,644)
-LONG_BREAKOUT_ENTRY_LOW = 4640     # Entry zone: 4,640–4,650 on retest/hold
-LONG_BREAKOUT_ENTRY_HIGH = 4650
-LONG_BREAKOUT_ENTRY = 4645         # Entry: 4,645 (mid of zone)
-LONG_BREAKOUT_STOP_LOSS = 4608     # Invalidation: 0.8% below trigger bar (~$4,608)
-LONG_BREAKOUT_TP1 = 4725           # TP1: 2R target
-LONG_BREAKOUT_TP2 = 4805           # TP2: Trail target
+LONG_BREAKOUT_TRIGGER = 4660.0     # Trigger: 5-min close > 4,660
+LONG_BREAKOUT_ENTRY_LOW = 4660     # Entry zone: 4,660–4,675 on retest
+LONG_BREAKOUT_ENTRY_HIGH = 4675
+LONG_BREAKOUT_ENTRY = 4668         # Entry: 4,668 (mid of zone)
+LONG_BREAKOUT_STOP_LOSS = 4628     # Invalidation: < 4,628
+LONG_BREAKOUT_TP1 = 4721           # TP1: 4,721
+LONG_BREAKOUT_TP2 = 4782           # TP2: 4,782
 
-# Long - Sweep-and-reclaim
-LONG_SWEEP_TRIGGER_LOW = 4396      # Trigger: Wick below the 24h low (~$4,396)
-LONG_SWEEP_TRIGGER_HIGH = 4400     # Then 15m close back inside range and above VWAP
-LONG_SWEEP_ENTRY_LOW = 4405        # Entry zone: 4,405–4,415
-LONG_SWEEP_ENTRY_HIGH = 4415
-LONG_SWEEP_ENTRY = 4410            # Entry: 4,410 (mid of zone)
-LONG_SWEEP_STOP_LOSS = 4396        # Invalidation: low of sweep
-LONG_SWEEP_TP1 = 4485              # TP1: 1.5R target
-LONG_SWEEP_TP2 = 4560              # TP2: 2.5R target
+# Long - Pullback
+LONG_PULLBACK_TRIGGER_LOW = 4531   # Trigger: Bid 4,535–4,545 (S1 zone) with wick rejection
+LONG_PULLBACK_TRIGGER_HIGH = 4545
+LONG_PULLBACK_ENTRY_LOW = 4535     # Entry zone: 4,535–4,545
+LONG_PULLBACK_ENTRY_HIGH = 4545
+LONG_PULLBACK_ENTRY = 4540         # Entry: 4,540 (mid of zone)
+LONG_PULLBACK_STOP_LOSS = 4505     # Invalidation: < 4,505
+LONG_PULLBACK_TP1 = 4656           # TP1: 4,656
+LONG_PULLBACK_TP2 = 4721           # TP2: 4,721
 
 # SHORT SETUPS
 # Short - Breakdown
-SHORT_BREAKDOWN_TRIGGER = 4396     # Trigger: 15m close below the 24h low (~$4,396) with rising OI
-SHORT_BREAKDOWN_ENTRY_LOW = 4390   # Entry zone: 4,390–4,400 on failed reclaim
-SHORT_BREAKDOWN_ENTRY_HIGH = 4400
-SHORT_BREAKDOWN_ENTRY = 4395       # Entry: 4,395 (mid of zone)
-SHORT_BREAKDOWN_STOP_LOSS = 4432   # Invalidation: 0.8% above trigger bar (~$4,432)
-SHORT_BREAKDOWN_TP1 = 4310         # TP1: 2R target
-SHORT_BREAKDOWN_TP2 = 4225         # TP2: Prior liquidity pockets
+SHORT_BREAKDOWN_TRIGGER = 4530     # Trigger: 5-min close < 4,530
+SHORT_BREAKDOWN_ENTRY_LOW = 4520   # Entry zone: 4,520–4,528 on retest
+SHORT_BREAKDOWN_ENTRY_HIGH = 4528
+SHORT_BREAKDOWN_ENTRY = 4524       # Entry: 4,524 (mid of zone)
+SHORT_BREAKDOWN_STOP_LOSS = 4548   # Invalidation: > 4,548
+SHORT_BREAKDOWN_TP1 = 4470         # TP1: 4,470
+SHORT_BREAKDOWN_TP2 = 4405         # TP2: 4,405
 
-# Short - Exhaustion fade
-SHORT_EXHAUSTION_TRIGGER_LOW = 4644  # Trigger: 1–2% spike above the 24h high that immediately fails
-SHORT_EXHAUSTION_TRIGGER_HIGH = 4737  # ~2% above 4,644 = 4,737
-SHORT_EXHAUSTION_ENTRY_LOW = 4630     # Entry zone: 4,630–4,640 on 5m lower high
-SHORT_EXHAUSTION_ENTRY_HIGH = 4640
-SHORT_EXHAUSTION_ENTRY = 4635         # Entry: 4,635 (mid of zone)
-SHORT_EXHAUSTION_STOP_LOSS = 4737     # Invalidation: wick high
-SHORT_EXHAUSTION_TP1 = 4550           # TP1: VWAP
-SHORT_EXHAUSTION_TP2 = 4450           # TP2: 1.8–2.5R target
+# Short - Fade
+SHORT_FADE_TRIGGER_LOW = 4650      # Trigger: Rejection at 4,650–4,660 (failed break of R1)
+SHORT_FADE_TRIGGER_HIGH = 4660
+SHORT_FADE_ENTRY_LOW = 4650        # Entry zone: 4,650–4,660
+SHORT_FADE_ENTRY_HIGH = 4660
+SHORT_FADE_ENTRY = 4655            # Entry: 4,655 (mid of zone)
+SHORT_FADE_STOP_LOSS = 4678        # Invalidation: > 4,678
+SHORT_FADE_TP1 = 4600              # TP1: 4,600
+SHORT_FADE_TP2 = 4531              # TP2: 4,531
 
 # Volume confirmation requirements
 LONG_VOLUME_FACTOR = 1.5   # Volume confirmation ≥1.5× 20-SMA on the trigger candle
@@ -138,9 +146,9 @@ POSITION_SIZE_USD = MARGIN * LEVERAGE  # 5000 USD
 
 # State files for strategy tracking
 LONG_BREAKOUT_TRIGGER_FILE = "eth_breakout_trigger_state.json"
-LONG_SWEEP_TRIGGER_FILE = "eth_sweep_trigger_state.json"
+LONG_PULLBACK_TRIGGER_FILE = "eth_pullback_trigger_state.json"
 SHORT_BREAKDOWN_TRIGGER_FILE = "eth_breakdown_trigger_state.json"
-SHORT_EXHAUSTION_TRIGGER_FILE = "eth_exhaustion_trigger_state.json"
+SHORT_FADE_TRIGGER_FILE = "eth_fade_trigger_state.json"
 
 def log_trade_to_csv(trade_data):
     """
@@ -190,45 +198,45 @@ def test_csv_logging():
         'strategy': 'TEST-ETH-Breakout',
         'symbol': 'ETH-PERP-INTX',
         'side': 'BUY',
-        'entry_price': 4645.0,
-        'stop_loss': 4608.0,
-        'take_profit': 4725.0,
+        'entry_price': 4668.0,
+        'stop_loss': 4628.0,
+        'take_profit': 4721.0,
         'position_size_usd': 5000.0,
         'margin': 250.0,
         'leverage': 20.0,
         'volume_sma': 800.0,
         'volume_ratio': 1.8,
-        'current_price': 4645.0,
-        'market_conditions': '24h Range: $4,396-$4,644',
+        'current_price': 4668.0,
+        'market_conditions': 'Key S/R: R1=$4,656, S1=$4,531',
         'trade_status': 'TEST',
         'execution_time': datetime.now(UTC).isoformat(),
-        'notes': 'TEST TRADE - ETH Breakout Long'
+        'notes': 'TEST TRADE - ETH Breakout Long (Aug 28 Setup)'
     }
     
-    # Test ETH Sweep-and-reclaim trade data
-    eth_sweep_data = {
+    # Test ETH Pullback trade data
+    eth_pullback_data = {
         'timestamp': datetime.now(UTC).isoformat(),
-        'strategy': 'TEST-ETH-Sweep',
+        'strategy': 'TEST-ETH-Pullback',
         'symbol': 'ETH-PERP-INTX',
         'side': 'BUY',
-        'entry_price': 4410.0,
-        'stop_loss': 4396.0,
-        'take_profit': 4485.0,
+        'entry_price': 4540.0,
+        'stop_loss': 4505.0,
+        'take_profit': 4656.0,
         'position_size_usd': 5000.0,
         'margin': 250.0,
         'leverage': 20.0,
         'volume_sma': 750.0,
         'volume_ratio': 1.6,
-        'current_price': 4410.0,
-        'market_conditions': '24h Range: $4,396-$4,644',
+        'current_price': 4540.0,
+        'market_conditions': 'Key S/R: R1=$4,656, S1=$4,531',
         'trade_status': 'TEST',
         'execution_time': datetime.now(UTC).isoformat(),
-        'notes': 'TEST TRADE - ETH Sweep-and-reclaim'
+        'notes': 'TEST TRADE - ETH Pullback (Aug 28 Setup)'
     }
     
     # Log test trades
     log_trade_to_csv(eth_breakout_data)
-    log_trade_to_csv(eth_sweep_data)
+    log_trade_to_csv(eth_pullback_data)
     
     logger.info("✅ CSV logging test completed!")
     logger.info("📊 Check chatgpt_trades.csv to verify test trades were added correctly")
@@ -341,20 +349,26 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
     """
     ETH Two-Sided Intraday Trading Strategy Alert
     
-    Spiros, here's a two-sided ETH intraday plan for today.
+    Spiros, here are ETH intraday setups for Thu, Aug 28 (America/Chicago).
 
-    Longs
-    •	Breakout: 15m close above the 24h high (~$4,644). Enter on a quick retest/hold above. Invalidation: 0.8% below trigger bar or last swing. Targets: 2R then trail.
-    •	Sweep-and-reclaim: Wick below the 24h low (~$4,396), then 15m close back inside the range and above VWAP. Invalidation: low of sweep. Targets: 1.5–2.5R. Note: funding is slightly negative across majors, so failed breaks down can squeeze up.
+    Context:
+    •	Funding is near flat to mildly positive across majors. Avoid chasing longs if funding spikes.
+    •	Key S/R today from Barchart pivots: R1 ≈ 4,656, R2 ≈ 4,721, R3 ≈ 4,782. S1 ≈ 4,531, S2 ≈ 4,470, S3 ≈ 4,405.
 
-    Shorts
-    •	Breakdown: 15m close below the 24h low (~$4,396) with rising OI. Enter on failed reclaim. Invalidation: 0.8% above trigger bar. Targets: 2R then prior liquidity pockets. Monitor OI/funding to confirm.
-    •	Exhaustion fade: 1–2% spike above the 24h high that immediately fails, with funding flipping positive across majors and OI jumping. Entry on 5m lower high. Invalidation: wick high. Targets: VWAP, then 1.8–2.5R.
+    Bias	Trigger & Entry	Invalidation (SL)	Targets	Confirmations
+    Long BO	5-min close > 4,660, buy 4,660–4,675 on retest	< 4,628	4,721 → 4,782	5-min vol > 1.5× 20-SMA; OI rising ≥1% vs last hour; funding ≤ +0.01% 8h.
+    Long PB	Bid 4,535–4,545 (S1 zone) with wick rejection	< 4,505	4,656 → 4,721	Delta flips positive; heatmap shows clustered shorts above entry.
+    Short BD	5-min close < 4,530, sell 4,520–4,528 on retest	> 4,548	4,470 → 4,405	OI expanding; long liquidations printing.
+    Short Fade	Rejection at 4,650–4,660 (failed break of R1)	> 4,678	4,600 → 4,531	Negative delta at highs; funding tilts positive into the push.
 
-    Context checks before entry
-    •	Funding tilt: slight negative now → don't chase late shorts into lows. Recheck during NY hours.
-    •	Use volume confirmation ≥1.5× 20-SMA on the trigger candle.
-    •	Size by 15m ATR; keep R≥2.
+    Notes:
+    •	Live price ref: Coingecko/CMC if you need exact prints.
+    •	Derivatives dashboard for OI/liqs/funding if you want a single pane.
+
+    Risk rules:
+    •	0.5R per attempt. Max two attempts per side. Hard stop = market.
+    •	Skip entries 3 minutes before and after scheduled data prints.
+    •	If OI contracts while price moves in your favor, take TP1 faster.
     
     Args:
         cb_service: Coinbase service instance
@@ -368,9 +382,9 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
     
     # Load trigger states
     long_breakout_state = load_trigger_state(LONG_BREAKOUT_TRIGGER_FILE)
-    long_sweep_state = load_trigger_state(LONG_SWEEP_TRIGGER_FILE)
+    long_pullback_state = load_trigger_state(LONG_PULLBACK_TRIGGER_FILE)
     short_breakdown_state = load_trigger_state(SHORT_BREAKDOWN_TRIGGER_FILE)
-    short_exhaustion_state = load_trigger_state(SHORT_EXHAUSTION_TRIGGER_FILE)
+    short_fade_state = load_trigger_state(SHORT_FADE_TRIGGER_FILE)
     
     try:
         now = datetime.now(UTC)
@@ -427,6 +441,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         current_high_5m = float(current_candle_5m['high'])
         current_low_5m = float(current_candle_5m['low'])
         current_volume_5m = float(current_candle_5m['volume'])
+        current_ts_5m = datetime.fromtimestamp(int(current_candle_5m['start']), UTC)
         
         last_close_5m = float(last_closed_5m['close'])
         last_high_5m = float(last_closed_5m['high'])
@@ -453,37 +468,36 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Spiros, here are intraday ETH setups for today.")
+        logger.info("🚀 Spiros, here are ETH intraday setups for Thu, Aug 28 (America/Chicago).")
         logger.info(f"📊 Live Levels:")
         logger.info(f"   • ETH ≈ ${current_close_5m:,.2f}")
-        logger.info(f"   • 24h High: ${TODAY_HIGH:.2f}")
-        logger.info(f"   • 24h Low: ${TODAY_LOW:.2f}")
+        logger.info(f"   • Key S/R: R1=${R1:,}, R2=${R2:,}, R3=${R3:,} | S1=${S1:,}, S2=${S2:,}, S3=${S3:,}")
         logger.info("")
         logger.info("📊 Strategy Rules:")
         logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} × {LEVERAGE}x) — fixed")
-        logger.info(f"   • Primary timeframe: 15-minute candles")
-        logger.info(f"   • Volume requirements: 15m RVOL ≥ {LONG_VOLUME_FACTOR}x for long, {SHORT_VOLUME_FACTOR}x for short")
+        logger.info(f"   • Primary timeframe: 5-minute candles")
+        logger.info(f"   • Volume requirements: 5m RVOL ≥ {LONG_VOLUME_FACTOR}x for all strategies")
         logger.info("")
         
         # Show strategies based on direction
         if long_strategies_enabled:
             logger.info("📊 LONG Setups:")
-            logger.info(f"   • Breakout: 15m close above ${LONG_BREAKOUT_TRIGGER:,}, buy ${LONG_BREAKOUT_ENTRY_LOW:,}–${LONG_BREAKOUT_ENTRY_HIGH:,} on retest hold")
-            logger.info(f"     Invalidation: 0.8% below trigger bar (${LONG_BREAKOUT_STOP_LOSS:,})")
-            logger.info(f"     TP1: ${LONG_BREAKOUT_TP1:,} (2R), TP2: ${LONG_BREAKOUT_TP2:,} (trail)")
-            logger.info(f"   • Sweep-and-reclaim: Wick below ${LONG_SWEEP_TRIGGER_LOW:,}, then 15m close back inside range")
-            logger.info(f"     Entry: ${LONG_SWEEP_ENTRY_LOW:,}–${LONG_SWEEP_ENTRY_HIGH:,}, Invalidation: low of sweep (${LONG_SWEEP_STOP_LOSS:,})")
-            logger.info(f"     TP1: ${LONG_SWEEP_TP1:,} (1.5R), TP2: ${LONG_SWEEP_TP2:,} (2.5R)")
+            logger.info(f"   • Breakout: 5-min close > ${LONG_BREAKOUT_TRIGGER:,}, buy ${LONG_BREAKOUT_ENTRY_LOW:,}–${LONG_BREAKOUT_ENTRY_HIGH:,} on retest")
+            logger.info(f"     Invalidation: < ${LONG_BREAKOUT_STOP_LOSS:,}")
+            logger.info(f"     TP1: ${LONG_BREAKOUT_TP1:,}, TP2: ${LONG_BREAKOUT_TP2:,}")
+            logger.info(f"   • Pullback: Bid ${LONG_PULLBACK_ENTRY_LOW:,}–${LONG_PULLBACK_ENTRY_HIGH:,} (S1 zone) with wick rejection")
+            logger.info(f"     Entry: ${LONG_PULLBACK_ENTRY_LOW:,}–${LONG_PULLBACK_ENTRY_HIGH:,}, Invalidation: < ${LONG_PULLBACK_STOP_LOSS:,}")
+            logger.info(f"     TP1: ${LONG_PULLBACK_TP1:,}, TP2: ${LONG_PULLBACK_TP2:,}")
             logger.info("")
         
         if short_strategies_enabled:
             logger.info("📊 SHORT Setups:")
-            logger.info(f"   • Breakdown: 15m close below ${SHORT_BREAKDOWN_TRIGGER:,}, sell ${SHORT_BREAKDOWN_ENTRY_LOW:,}–${SHORT_BREAKDOWN_ENTRY_HIGH:,} on failed reclaim")
-            logger.info(f"     Invalidation: 0.8% above trigger bar (${SHORT_BREAKDOWN_STOP_LOSS:,})")
-            logger.info(f"     TP1: ${SHORT_BREAKDOWN_TP1:,} (2R), TP2: ${SHORT_BREAKDOWN_TP2:,} (prior liquidity pockets)")
-            logger.info(f"   • Exhaustion fade: 1–2% spike above ${SHORT_EXHAUSTION_TRIGGER_HIGH:,}, sell ${SHORT_EXHAUSTION_ENTRY_LOW:,}–${SHORT_EXHAUSTION_ENTRY_HIGH:,} on 5m lower high")
-            logger.info(f"     Invalidation: wick high (${SHORT_EXHAUSTION_STOP_LOSS:,})")
-            logger.info(f"     TP1: ${SHORT_EXHAUSTION_TP1:,} (VWAP), TP2: ${SHORT_EXHAUSTION_TP2:,} (1.8–2.5R)")
+            logger.info(f"   • Breakdown: 5-min close < ${SHORT_BREAKDOWN_TRIGGER:,}, sell ${SHORT_BREAKDOWN_ENTRY_LOW:,}–${SHORT_BREAKDOWN_ENTRY_HIGH:,} on retest")
+            logger.info(f"     Invalidation: > ${SHORT_BREAKDOWN_STOP_LOSS:,}")
+            logger.info(f"     TP1: ${SHORT_BREAKDOWN_TP1:,}, TP2: ${SHORT_BREAKDOWN_TP2:,}")
+            logger.info(f"   • Fade: Rejection at ${SHORT_FADE_TRIGGER_LOW:,}–${SHORT_FADE_TRIGGER_HIGH:,} (failed break of R1)")
+            logger.info(f"     Entry: ${SHORT_FADE_ENTRY_LOW:,}–${SHORT_FADE_ENTRY_HIGH:,}, Invalidation: > ${SHORT_FADE_STOP_LOSS:,}")
+            logger.info(f"     TP1: ${SHORT_FADE_TP1:,}, TP2: ${SHORT_FADE_TP2:,}")
             logger.info("")
         
         logger.info(f"Current Price: ${current_close_15m:,.2f}")
@@ -501,17 +515,17 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         if (long_strategies_enabled and 
             not long_breakout_state.get("triggered", False) and not trade_executed):
             
-            # Check if 15m close above breakout trigger level
-            breakout_trigger_condition = last_close_15m > LONG_BREAKOUT_TRIGGER
+            # Check if 5-min close above breakout trigger level
+            breakout_trigger_condition = last_close_5m > LONG_BREAKOUT_TRIGGER
             # Check if current price is in entry zone
-            breakout_entry_condition = (LONG_BREAKOUT_ENTRY_LOW <= current_close_15m <= LONG_BREAKOUT_ENTRY_HIGH)
+            breakout_entry_condition = (LONG_BREAKOUT_ENTRY_LOW <= current_close_5m <= LONG_BREAKOUT_ENTRY_HIGH)
             
-            breakout_ready = breakout_trigger_condition and breakout_entry_condition and (relative_volume_15m >= LONG_VOLUME_FACTOR)
+            breakout_ready = breakout_trigger_condition and breakout_entry_condition and (relative_volume_5m >= LONG_VOLUME_FACTOR)
 
             logger.info("🔍 LONG - Breakout Long Strategy Analysis:")
-            logger.info(f"   • 15m close above ${LONG_BREAKOUT_TRIGGER:,}: {'✅' if breakout_trigger_condition else '❌'} (last close: {last_close_15m:,.2f})")
-            logger.info(f"   • Entry in ${LONG_BREAKOUT_ENTRY_LOW:,}–${LONG_BREAKOUT_ENTRY_HIGH:,}: {'✅' if breakout_entry_condition else '❌'} (current: {current_close_15m:,.2f})")
-            logger.info(f"   • Volume confirmed (≥{LONG_VOLUME_FACTOR}x): {'✅' if long_volume_confirmed else '❌'} (current: {relative_volume_15m:.2f}x)")
+            logger.info(f"   • 5-min close > ${LONG_BREAKOUT_TRIGGER:,}: {'✅' if breakout_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • Entry in ${LONG_BREAKOUT_ENTRY_LOW:,}–${LONG_BREAKOUT_ENTRY_HIGH:,}: {'✅' if breakout_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
+            logger.info(f"   • Volume confirmed (≥{LONG_VOLUME_FACTOR}x): {'✅' if (relative_volume_5m >= LONG_VOLUME_FACTOR) else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info(f"   • Breakout Long Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
 
             if breakout_ready:
@@ -526,7 +540,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH Breakout Long (New Setup)",
+                    trade_type="ETH Breakout Long (Aug 28 Setup)",
                     entry_price=LONG_BREAKOUT_ENTRY,
                     stop_loss=LONG_BREAKOUT_STOP_LOSS,
                     take_profit=LONG_BREAKOUT_TP1,
@@ -539,7 +553,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Entry: ${LONG_BREAKOUT_ENTRY:,.2f}")
                     logger.info(f"Stop-loss: ${LONG_BREAKOUT_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${LONG_BREAKOUT_TP1:,.2f}, TP2: ${LONG_BREAKOUT_TP2:,.2f}")
-                    logger.info("Strategy: 15m close above 4,644 with volume confirmation")
+                    logger.info("Strategy: 5-min close > 4,660, buy 4,660–4,675 on retest")
                     
                     # Log trade to CSV
                     trade_data = {
@@ -553,20 +567,20 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                         'position_size_usd': POSITION_SIZE_USD,
                         'margin': MARGIN,
                         'leverage': LEVERAGE,
-                        'volume_sma': avg_volume_15m,
-                        'volume_ratio': relative_volume_15m,
-                        'current_price': current_close_15m,
-                        'market_conditions': f"24h Range: ${TODAY_LOW:,}-${TODAY_HIGH:,}",
+                        'volume_sma': avg_volume_5m,
+                        'volume_ratio': relative_volume_5m,
+                        'current_price': current_close_5m,
+                        'market_conditions': f"Key S/R: R1=${R1:,}, S1=${S1:,}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Trigger: 15m close > ${LONG_BREAKOUT_TRIGGER:,}, Volume: {relative_volume_15m:.2f}x SMA"
+                        'notes': f"Trigger: 5-min close > ${LONG_BREAKOUT_TRIGGER:,}, Volume: {relative_volume_5m:.2f}x SMA"
                     }
                     log_trade_to_csv(trade_data)
                     
                     # Save trigger state
                     long_breakout_state = {
                         "triggered": True, 
-                        "trigger_ts": int(last_closed_15m['start']),
+                        "trigger_ts": int(last_closed_5m['start']),
                         "entry_price": LONG_BREAKOUT_ENTRY
                     }
                     save_trigger_state(long_breakout_state, LONG_BREAKOUT_TRIGGER_FILE)
@@ -574,27 +588,26 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 else:
                     logger.error(f"❌ Breakout Long trade failed: {trade_result}")
         
-        # 2. LONG - Sweep-and-reclaim Strategy
+        # 2. LONG - Pullback Strategy
         if (long_strategies_enabled and 
-            not long_sweep_state.get("triggered", False) and not trade_executed):
+            not long_pullback_state.get("triggered", False) and not trade_executed):
             
-            # Check if Wick below 24h low and then 15m close back inside range
-            sweep_trigger_condition = (last_low_15m < LONG_SWEEP_TRIGGER_LOW and 
-                                     last_close_15m > LONG_SWEEP_TRIGGER_HIGH)
-            # Check if current price is in entry zone (after reclaim)
-            sweep_entry_condition = (LONG_SWEEP_ENTRY_LOW <= current_close_15m <= LONG_SWEEP_ENTRY_HIGH)
+            # Check if price is in S1 zone with wick rejection (pullback to support)
+            pullback_trigger_condition = (LONG_PULLBACK_TRIGGER_LOW <= current_low_5m <= LONG_PULLBACK_TRIGGER_HIGH)
+            # Check if current price is in entry zone
+            pullback_entry_condition = (LONG_PULLBACK_ENTRY_LOW <= current_close_5m <= LONG_PULLBACK_ENTRY_HIGH)
             
-            sweep_ready = sweep_trigger_condition and sweep_entry_condition and (relative_volume_15m >= LONG_VOLUME_FACTOR)
+            pullback_ready = pullback_trigger_condition and pullback_entry_condition and (relative_volume_5m >= LONG_VOLUME_FACTOR)
 
-            logger.info("🔍 LONG - Sweep-and-reclaim Strategy Analysis:")
-            logger.info(f"   • Wick below ${LONG_SWEEP_TRIGGER_LOW:,} and close back above ${LONG_SWEEP_TRIGGER_HIGH:,}: {'✅' if sweep_trigger_condition else '❌'} (last low: {last_low_15m:,.2f}, last close: {last_close_15m:,.2f})")
-            logger.info(f"   • Entry in ${LONG_SWEEP_ENTRY_LOW:,}–${LONG_SWEEP_ENTRY_HIGH:,}: {'✅' if sweep_entry_condition else '❌'} (current: {current_close_15m:,.2f})")
-            logger.info(f"   • Volume confirmed (≥{LONG_VOLUME_FACTOR}x): {'✅' if (relative_volume_15m >= LONG_VOLUME_FACTOR) else '❌'} (current: {relative_volume_15m:.2f}x)")
-            logger.info(f"   • Sweep-and-reclaim Ready: {'🎯 YES' if sweep_ready else '⏳ NO'}")
+            logger.info("🔍 LONG - Pullback Strategy Analysis:")
+            logger.info(f"   • Bid ${LONG_PULLBACK_TRIGGER_LOW:,}–${LONG_PULLBACK_TRIGGER_HIGH:,} (S1 zone) with wick rejection: {'✅' if pullback_trigger_condition else '❌'} (current low: {current_low_5m:,.2f})")
+            logger.info(f"   • Entry in ${LONG_PULLBACK_ENTRY_LOW:,}–${LONG_PULLBACK_ENTRY_HIGH:,}: {'✅' if pullback_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
+            logger.info(f"   • Volume confirmed (≥{LONG_VOLUME_FACTOR}x): {'✅' if (relative_volume_5m >= LONG_VOLUME_FACTOR) else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info(f"   • Pullback Ready: {'🎯 YES' if pullback_ready else '⏳ NO'}")
 
-            if sweep_ready:
+            if pullback_ready:
                 logger.info("")
-                logger.info("🎯 LONG - Sweep-and-reclaim Strategy conditions met - executing trade...")
+                logger.info("🎯 LONG - Pullback Strategy conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -604,69 +617,69 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH Sweep-and-reclaim (New Setup)",
-                    entry_price=LONG_SWEEP_ENTRY,
-                    stop_loss=LONG_SWEEP_STOP_LOSS,
-                    take_profit=LONG_SWEEP_TP1,
+                    trade_type="ETH Pullback (Aug 28 Setup)",
+                    entry_price=LONG_PULLBACK_ENTRY,
+                    stop_loss=LONG_PULLBACK_STOP_LOSS,
+                    take_profit=LONG_PULLBACK_TP1,
                     side="BUY",
                     product=PRODUCT_ID
                 )
 
                 if trade_success:
-                    logger.info("🎉 Sweep-and-reclaim trade executed successfully!")
-                    logger.info(f"Entry: ${LONG_SWEEP_ENTRY:,.2f}")
-                    logger.info(f"Stop-loss: ${LONG_SWEEP_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${LONG_SWEEP_TP1:,.2f}, TP2: ${LONG_SWEEP_TP2:,.2f}")
-                    logger.info("Strategy: Wick below 4,396, then 15m close back inside range")
+                    logger.info("🎉 Pullback trade executed successfully!")
+                    logger.info(f"Entry: ${LONG_PULLBACK_ENTRY:,.2f}")
+                    logger.info(f"Stop-loss: ${LONG_PULLBACK_STOP_LOSS:,.2f}")
+                    logger.info(f"TP1: ${LONG_PULLBACK_TP1:,.2f}, TP2: ${LONG_PULLBACK_TP2:,.2f}")
+                    logger.info("Strategy: Bid 4,535–4,545 (S1 zone) with wick rejection")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'ETH-Sweep',
+                        'strategy': 'ETH-Pullback',
                         'symbol': 'ETH-PERP-INTX',
                         'side': 'BUY',
-                        'entry_price': LONG_SWEEP_ENTRY,
-                        'stop_loss': LONG_SWEEP_STOP_LOSS,
-                        'take_profit': LONG_SWEEP_TP1,
+                        'entry_price': LONG_PULLBACK_ENTRY,
+                        'stop_loss': LONG_PULLBACK_STOP_LOSS,
+                        'take_profit': LONG_PULLBACK_TP1,
                         'position_size_usd': POSITION_SIZE_USD,
                         'margin': MARGIN,
                         'leverage': LEVERAGE,
-                        'volume_sma': avg_volume_15m,
-                        'volume_ratio': relative_volume_15m,
-                        'current_price': current_close_15m,
-                        'market_conditions': f"24h Range: ${TODAY_LOW:,}-${TODAY_HIGH:,}",
+                        'volume_sma': avg_volume_5m,
+                        'volume_ratio': relative_volume_5m,
+                        'current_price': current_close_5m,
+                        'market_conditions': f"Key S/R: R1=${R1:,}, S1=${S1:,}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Trigger: Wick below ${LONG_SWEEP_TRIGGER_LOW:,}, Volume: {relative_volume_15m:.2f}x SMA"
+                        'notes': f"Trigger: Bid ${LONG_PULLBACK_TRIGGER_LOW:,}–${LONG_PULLBACK_TRIGGER_HIGH:,} (S1 zone), Volume: {relative_volume_5m:.2f}x SMA"
                     }
                     log_trade_to_csv(trade_data)
                     
                     # Save trigger state
-                    long_sweep_state = {
+                    long_pullback_state = {
                         "triggered": True, 
-                        "trigger_ts": int(last_closed_15m['start']),
-                        "entry_price": LONG_SWEEP_ENTRY
+                        "trigger_ts": int(last_closed_5m['start']),
+                        "entry_price": LONG_PULLBACK_ENTRY
                     }
-                    save_trigger_state(long_sweep_state, LONG_SWEEP_TRIGGER_FILE)
+                    save_trigger_state(long_pullback_state, LONG_PULLBACK_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Sweep-and-reclaim trade failed: {trade_result}")
+                    logger.error(f"❌ Pullback trade failed: {trade_result}")
         
         # 3. SHORT - Breakdown Strategy
         if (short_strategies_enabled and 
             not short_breakdown_state.get("triggered", False) and not trade_executed):
             
-            # Check if 15m close below breakdown trigger level
-            breakdown_trigger_condition = last_close_15m < SHORT_BREAKDOWN_TRIGGER
+            # Check if 5-min close below breakdown trigger level
+            breakdown_trigger_condition = last_close_5m < SHORT_BREAKDOWN_TRIGGER
             # Check if current price is in entry zone
-            breakdown_entry_condition = (SHORT_BREAKDOWN_ENTRY_LOW <= current_close_15m <= SHORT_BREAKDOWN_ENTRY_HIGH)
+            breakdown_entry_condition = (SHORT_BREAKDOWN_ENTRY_LOW <= current_close_5m <= SHORT_BREAKDOWN_ENTRY_HIGH)
             
-            breakdown_ready = breakdown_trigger_condition and breakdown_entry_condition and (relative_volume_15m >= SHORT_VOLUME_FACTOR)
+            breakdown_ready = breakdown_trigger_condition and breakdown_entry_condition and (relative_volume_5m >= SHORT_VOLUME_FACTOR)
 
             logger.info("🔍 SHORT - Breakdown Strategy Analysis:")
-            logger.info(f"   • 15m close below ${SHORT_BREAKDOWN_TRIGGER:,}: {'✅' if breakdown_trigger_condition else '❌'} (last close: {last_close_15m:,.2f})")
-            logger.info(f"   • Entry in ${SHORT_BREAKDOWN_ENTRY_LOW:,}–${SHORT_BREAKDOWN_ENTRY_HIGH:,}: {'✅' if breakdown_entry_condition else '❌'} (current: {current_close_15m:,.2f})")
-            logger.info(f"   • Volume confirmed (≥{SHORT_VOLUME_FACTOR}x): {'✅' if (relative_volume_15m >= SHORT_VOLUME_FACTOR) else '❌'} (current: {relative_volume_15m:.2f}x)")
+            logger.info(f"   • 5-min close < ${SHORT_BREAKDOWN_TRIGGER:,}: {'✅' if breakdown_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • Entry in ${SHORT_BREAKDOWN_ENTRY_LOW:,}–${SHORT_BREAKDOWN_ENTRY_HIGH:,}: {'✅' if breakdown_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
+            logger.info(f"   • Volume confirmed (≥{SHORT_VOLUME_FACTOR}x): {'✅' if (relative_volume_5m >= SHORT_VOLUME_FACTOR) else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info(f"   • Breakdown Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
 
             if breakdown_ready:
@@ -681,7 +694,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH Breakdown (New Setup)",
+                    trade_type="ETH Breakdown (Aug 28 Setup)",
                     entry_price=SHORT_BREAKDOWN_ENTRY,
                     stop_loss=SHORT_BREAKDOWN_STOP_LOSS,
                     take_profit=SHORT_BREAKDOWN_TP1,
@@ -694,7 +707,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     logger.info(f"Entry: ${SHORT_BREAKDOWN_ENTRY:,.2f}")
                     logger.info(f"Stop-loss: ${SHORT_BREAKDOWN_STOP_LOSS:,.2f}")
                     logger.info(f"TP1: ${SHORT_BREAKDOWN_TP1:,.2f}, TP2: ${SHORT_BREAKDOWN_TP2:,.2f}")
-                    logger.info("Strategy: 15m close below 4,396 with volume confirmation")
+                    logger.info("Strategy: 5-min close < 4,530, sell 4,520–4,528 on retest")
                     
                     # Log trade to CSV
                     trade_data = {
@@ -708,20 +721,20 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                         'position_size_usd': POSITION_SIZE_USD,
                         'margin': MARGIN,
                         'leverage': LEVERAGE,
-                        'volume_sma': avg_volume_15m,
-                        'volume_ratio': relative_volume_15m,
-                        'current_price': current_close_15m,
-                        'market_conditions': f"24h Range: ${TODAY_LOW:,}-${TODAY_HIGH:,}",
+                        'volume_sma': avg_volume_5m,
+                        'volume_ratio': relative_volume_5m,
+                        'current_price': current_close_5m,
+                        'market_conditions': f"Key S/R: R1=${R1:,}, S1=${S1:,}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Trigger: 15m close < ${SHORT_BREAKDOWN_TRIGGER:,}, Volume: {relative_volume_15m:.2f}x SMA"
+                        'notes': f"Trigger: 5-min close < ${SHORT_BREAKDOWN_TRIGGER:,}, Volume: {relative_volume_5m:.2f}x SMA"
                     }
                     log_trade_to_csv(trade_data)
                     
                     # Save trigger state
                     short_breakdown_state = {
                         "triggered": True, 
-                        "trigger_ts": int(last_closed_15m['start']),
+                        "trigger_ts": int(last_closed_5m['start']),
                         "entry_price": SHORT_BREAKDOWN_ENTRY
                     }
                     save_trigger_state(short_breakdown_state, SHORT_BREAKDOWN_TRIGGER_FILE)
@@ -729,26 +742,26 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 else:
                     logger.error(f"❌ Breakdown trade failed: {trade_result}")
         
-        # 4. SHORT - Exhaustion fade Strategy
+        # 4. SHORT - Fade Strategy
         if (short_strategies_enabled and 
-            not short_exhaustion_state.get("triggered", False) and not trade_executed):
+            not short_fade_state.get("triggered", False) and not trade_executed):
             
-            # Check if 1–2% spike above 24h high (using 5m timeframe as specified)
-            exhaustion_trigger_condition = last_high_5m > SHORT_EXHAUSTION_TRIGGER_HIGH
-            # Check if current price is in entry zone (after spike)
-            exhaustion_entry_condition = (SHORT_EXHAUSTION_ENTRY_LOW <= current_close_5m <= SHORT_EXHAUSTION_ENTRY_HIGH)
+            # Check if rejection at 4,650–4,660 (failed break of R1)
+            fade_trigger_condition = (SHORT_FADE_TRIGGER_LOW <= last_high_5m <= SHORT_FADE_TRIGGER_HIGH)
+            # Check if current price is in entry zone (after rejection)
+            fade_entry_condition = (SHORT_FADE_ENTRY_LOW <= current_close_5m <= SHORT_FADE_ENTRY_HIGH)
             
-            exhaustion_ready = exhaustion_trigger_condition and exhaustion_entry_condition and (relative_volume_5m >= SHORT_VOLUME_FACTOR)
+            fade_ready = fade_trigger_condition and fade_entry_condition and (relative_volume_5m >= SHORT_VOLUME_FACTOR)
 
-            logger.info("🔍 SHORT - Exhaustion fade Strategy Analysis:")
-            logger.info(f"   • 1–2% spike above ${SHORT_EXHAUSTION_TRIGGER_HIGH:,}: {'✅' if exhaustion_trigger_condition else '❌'} (last high: {last_high_5m:,.2f})")
-            logger.info(f"   • Entry in ${SHORT_EXHAUSTION_ENTRY_LOW:,}–${SHORT_EXHAUSTION_ENTRY_HIGH:,}: {'✅' if exhaustion_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
+            logger.info("🔍 SHORT - Fade Strategy Analysis:")
+            logger.info(f"   • Rejection at ${SHORT_FADE_TRIGGER_LOW:,}–${SHORT_FADE_TRIGGER_HIGH:,} (failed break of R1): {'✅' if fade_trigger_condition else '❌'} (last high: {last_high_5m:,.2f})")
+            logger.info(f"   • Entry in ${SHORT_FADE_ENTRY_LOW:,}–${SHORT_FADE_ENTRY_HIGH:,}: {'✅' if fade_entry_condition else '❌'} (current: {current_close_5m:,.2f})")
             logger.info(f"   • Volume confirmed (≥{SHORT_VOLUME_FACTOR}x): {'✅' if (relative_volume_5m >= SHORT_VOLUME_FACTOR) else '❌'} (current: {relative_volume_5m:.2f}x)")
-            logger.info(f"   • Exhaustion fade Ready: {'🎯 YES' if exhaustion_ready else '⏳ NO'}")
+            logger.info(f"   • Fade Ready: {'🎯 YES' if fade_ready else '⏳ NO'}")
 
-            if exhaustion_ready:
+            if fade_ready:
                 logger.info("")
-                logger.info("🎯 SHORT - Exhaustion fade Strategy conditions met - executing trade...")
+                logger.info("🎯 SHORT - Fade Strategy conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -758,75 +771,75 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH Exhaustion fade (New Setup)",
-                    entry_price=SHORT_EXHAUSTION_ENTRY,
-                    stop_loss=SHORT_EXHAUSTION_STOP_LOSS,
-                    take_profit=SHORT_EXHAUSTION_TP1,
+                    trade_type="ETH Fade (Aug 28 Setup)",
+                    entry_price=SHORT_FADE_ENTRY,
+                    stop_loss=SHORT_FADE_STOP_LOSS,
+                    take_profit=SHORT_FADE_TP1,
                     side="SELL",
                     product=PRODUCT_ID
                 )
 
                 if trade_success:
-                    logger.info("🎉 Exhaustion fade trade executed successfully!")
-                    logger.info(f"Entry: ${SHORT_EXHAUSTION_ENTRY:,.2f}")
-                    logger.info(f"Stop-loss: ${SHORT_EXHAUSTION_STOP_LOSS:,.2f}")
-                    logger.info(f"TP1: ${SHORT_EXHAUSTION_TP1:,.2f}, TP2: ${SHORT_EXHAUSTION_TP2:,.2f}")
-                    logger.info("Strategy: 1–2% spike above 4,644, sell 4,630-4,640 on 5m lower high")
+                    logger.info("🎉 Fade trade executed successfully!")
+                    logger.info(f"Entry: ${SHORT_FADE_ENTRY:,.2f}")
+                    logger.info(f"Stop-loss: ${SHORT_FADE_STOP_LOSS:,.2f}")
+                    logger.info(f"TP1: ${SHORT_FADE_TP1:,.2f}, TP2: ${SHORT_FADE_TP2:,.2f}")
+                    logger.info("Strategy: Rejection at 4,650–4,660 (failed break of R1)")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'ETH-Exhaustion',
+                        'strategy': 'ETH-Fade',
                         'symbol': 'ETH-PERP-INTX',
                         'side': 'SELL',
-                        'entry_price': SHORT_EXHAUSTION_ENTRY,
-                        'stop_loss': SHORT_EXHAUSTION_STOP_LOSS,
-                        'take_profit': SHORT_EXHAUSTION_TP1,
+                        'entry_price': SHORT_FADE_ENTRY,
+                        'stop_loss': SHORT_FADE_STOP_LOSS,
+                        'take_profit': SHORT_FADE_TP1,
                         'position_size_usd': POSITION_SIZE_USD,
                         'margin': MARGIN,
                         'leverage': LEVERAGE,
                         'volume_sma': avg_volume_5m,
                         'volume_ratio': relative_volume_5m,
                         'current_price': current_close_5m,
-                        'market_conditions': f"24h Range: ${TODAY_LOW:,}-${TODAY_HIGH:,}",
+                        'market_conditions': f"Key S/R: R1=${R1:,}, S1=${S1:,}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Trigger: 1–2% spike above ${SHORT_EXHAUSTION_TRIGGER_HIGH:,}, Volume: {relative_volume_5m:.2f}x SMA"
+                        'notes': f"Trigger: Rejection at ${SHORT_FADE_TRIGGER_LOW:,}–${SHORT_FADE_TRIGGER_HIGH:,} (failed break of R1), Volume: {relative_volume_5m:.2f}x SMA"
                     }
                     log_trade_to_csv(trade_data)
                     
                     # Save trigger state
-                    short_exhaustion_state = {
+                    short_fade_state = {
                         "triggered": True, 
                         "trigger_ts": int(last_closed_5m['start']),
-                        "entry_price": SHORT_EXHAUSTION_ENTRY
+                        "entry_price": SHORT_FADE_ENTRY
                     }
-                    save_trigger_state(short_exhaustion_state, SHORT_EXHAUSTION_TRIGGER_FILE)
+                    save_trigger_state(short_fade_state, SHORT_FADE_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Exhaustion fade trade failed: {trade_result}")
+                    logger.error(f"❌ Fade trade failed: {trade_result}")
         
         # Check if any strategy was triggered
         if not trade_executed:
             logger.info("⏳ Waiting for setup conditions or monitoring active trade...")
             logger.info(f"Breakout Long triggered: {long_breakout_state.get('triggered', False)}")
-            logger.info(f"Sweep-and-reclaim triggered: {long_sweep_state.get('triggered', False)}")
+            logger.info(f"Pullback triggered: {long_pullback_state.get('triggered', False)}")
             logger.info(f"Breakdown triggered: {short_breakdown_state.get('triggered', False)}")
-            logger.info(f"Exhaustion fade triggered: {short_exhaustion_state.get('triggered', False)}")
+            logger.info(f"Fade triggered: {short_fade_state.get('triggered', False)}")
         
-        logger.info("=== ETH ATH Trading Strategy Alert completed ===")
-        return current_ts_15m
+        logger.info("=== ETH Aug 28 Trading Strategy Alert completed ===")
+        return current_ts_5m
         
     except Exception as e:
-        logger.error(f"Error in ETH Intraday Trading Strategy Alert logic: {e}")
+        logger.error(f"Error in ETH Aug 28 Trading Strategy Alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH ATH Trading Strategy Alert completed (with error) ===")
+        logger.info("=== ETH Aug 28 Trading Strategy Alert completed (with error) ===")
     return last_alert_ts
 
 def main():
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='ETH Two-Sided Intraday Trading Strategy Monitor with optional direction filter')
+    parser = argparse.ArgumentParser(description='ETH Aug 28 Intraday Trading Strategy Monitor with optional direction filter')
     parser.add_argument('--direction', choices=['LONG', 'SHORT', 'BOTH'], default='BOTH',
                        help='Trading direction to monitor: LONG, SHORT, or BOTH (default: BOTH)')
     parser.add_argument('--test-csv', action='store_true', help='Test CSV logging functionality')
@@ -846,19 +859,19 @@ def main():
     
     direction = args.direction.upper()
     
-    logger.info("Starting ETH Two-Sided Intraday Trading Strategy Monitor")
+    logger.info("Starting ETH Aug 28 Intraday Trading Strategy Monitor")
     if direction == 'BOTH':
-        logger.info("Strategy: ETH Two-Sided Intraday - LONG & SHORT")
+        logger.info("Strategy: ETH Aug 28 Intraday - LONG & SHORT")
     else:
         logger.info(f"Strategy: {direction} only")
     logger.info("")
     logger.info("Strategy Summary:")
-    logger.info("LONG - Breakout: 15m close above 4,644, buy 4,640–4,650 on retest hold")
-    logger.info("LONG - Sweep-and-reclaim: Wick below 4,396, then 15m close back inside range")
-    logger.info("SHORT - Breakdown: 15m close below 4,396, sell 4,390–4,400 on failed reclaim")
-    logger.info("SHORT - Exhaustion fade: 1–2% spike above 4,644, sell 4,630–4,640 on 5m lower high")
+    logger.info("LONG - Breakout: 5-min close > 4,660, buy 4,660–4,675 on retest")
+    logger.info("LONG - Pullback: Bid 4,535–4,545 (S1 zone) with wick rejection")
+    logger.info("SHORT - Breakdown: 5-min close < 4,530, sell 4,520–4,528 on retest")
+    logger.info("SHORT - Fade: Rejection at 4,650–4,660 (failed break of R1)")
     logger.info(f"Position Size: ${POSITION_SIZE_USD:,} ({MARGIN} × {LEVERAGE}x)")
-    logger.info(f"Volume: 15m RVOL ≥ {LONG_VOLUME_FACTOR}x for all strategies")
+    logger.info(f"Volume: 5m RVOL ≥ {LONG_VOLUME_FACTOR}x for all strategies")
     logger.info("")
     
     alert_sound_file = "alert_sound.wav"
