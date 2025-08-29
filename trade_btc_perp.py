@@ -17,6 +17,27 @@ file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
 logger.addHandler(file_handler)
 
+def get_price_precision(product_id: str) -> float:
+    """Return tick size (price precision) for supported perpetual products."""
+    price_precision_map = {
+        'BTC-PERP-INTX': 1.0,     # $1.0 tick
+        'ETH-PERP-INTX': 0.1,     # $0.1 tick
+        'DOGE-PERP-INTX': 0.0001, # $0.0001 tick
+        'SOL-PERP-INTX': 0.01,    # $0.01 tick
+        'XRP-PERP-INTX': 0.001,   # $0.001 tick (typical)
+        '1000SHIB-PERP-INTX': 0.000001, # micro tick
+        'NEAR-PERP-INTX': 0.001,
+        'SUI-PERP-INTX': 0.0001,
+        'ATOM-PERP-INTX': 0.001,
+    }
+    return price_precision_map.get(product_id, 0.01)
+
+def round_to_precision(value: float, precision: float) -> float:
+    """Round value to nearest exchange tick size."""
+    if precision <= 0:
+        return value
+    return round(value / precision) * precision
+
 def setup_coinbase():
     """Initialize CoinbaseService with API credentials."""
     api_key = API_KEY_PERPS
@@ -249,8 +270,16 @@ def main():
         if not all([args.side, args.size, args.leverage, args.tp, args.sl]):
             raise ValueError("For new orders, --side, --size, --leverage, --tp, and --sl are required")
         
-        # Validate parameters
-        validate_params(args.product, args.side, args.size, args.leverage, args.tp, args.sl, args.limit, cb_service)
+        # Apply exchange tick-size rounding to TP/SL (and limit if provided)
+        price_precision = get_price_precision(args.product)
+        rounded_tp = round_to_precision(args.tp, price_precision)
+        rounded_sl = round_to_precision(args.sl, price_precision)
+        rounded_limit = round_to_precision(args.limit, price_precision) if args.limit else None
+        if rounded_tp != args.tp or rounded_sl != args.sl or (args.limit and rounded_limit != args.limit):
+            logger.info(f"Rounded prices to tick size {price_precision}: TP {args.tp}→{rounded_tp}, SL {args.sl}→{rounded_sl}" + (f", LIMIT {args.limit}→{rounded_limit}" if args.limit else ""))
+
+        # Validate parameters (using rounded prices)
+        validate_params(args.product, args.side, args.size, args.leverage, rounded_tp, rounded_sl, rounded_limit, cb_service)
         
         # Check for sufficient funds
         if not check_sufficient_funds(cb_service, args.size, args.leverage):
@@ -268,8 +297,8 @@ def main():
             side=args.side,
             size=size,
             leverage=str(args.leverage),
-            is_limit=args.limit is not None,
-            limit_price=args.limit
+            is_limit=rounded_limit is not None,
+            limit_price=rounded_limit
         )
         
         if not is_valid:
@@ -283,8 +312,8 @@ def main():
         print(f"Leverage: {args.leverage}x")
         print(f"Required Margin: ${args.size / args.leverage}")
         print(f"Current Price: ${current_price}")
-        print(f"Take Profit Price: ${args.tp}")
-        print(f"Stop Loss Price: ${args.sl}")
+        print(f"Take Profit Price: ${rounded_tp}")
+        print(f"Stop Loss Price: ${rounded_sl}")
         
         # Calculate and display potential profit/loss in dollars
         if args.side == 'BUY':
@@ -298,15 +327,15 @@ def main():
         print(f"Potential Loss: ${potential_loss:.2f}")
         print(f"Risk/Reward Ratio: 1:{(potential_profit/potential_loss):.2f}")
         
-        if args.limit:
-            print(f"Limit Price: ${args.limit}")
+        if rounded_limit:
+            print(f"Limit Price: ${rounded_limit}")
             # Recalculate potential profit/loss based on limit price
             if args.side == 'BUY':
-                limit_potential_profit = (args.tp - args.limit) / args.limit * args.size
-                limit_potential_loss = (args.limit - args.sl) / args.limit * args.size
+                limit_potential_profit = (rounded_tp - rounded_limit) / rounded_limit * args.size
+                limit_potential_loss = (rounded_limit - rounded_sl) / rounded_limit * args.size
             else:  # SELL
-                limit_potential_profit = (args.limit - args.tp) / args.limit * args.size
-                limit_potential_loss = (args.sl - args.limit) / args.limit * args.size
+                limit_potential_profit = (rounded_limit - rounded_tp) / rounded_limit * args.size
+                limit_potential_loss = (rounded_sl - rounded_limit) / rounded_limit * args.size
                 
             print(f"Potential Profit (from limit): ${limit_potential_profit:.2f}")
             print(f"Potential Loss (from limit): ${limit_potential_loss:.2f}")
@@ -315,14 +344,14 @@ def main():
             print("Order Type: Market")
         
         # Place the order based on order type
-        if args.limit:
+        if rounded_limit:
             result = cb_service.place_limit_order_with_targets(
                 product_id=args.product,
                 side=args.side,
                 size=size,
-                entry_price=args.limit,
-                take_profit_price=args.tp,
-                stop_loss_price=args.sl,
+                entry_price=rounded_limit,
+                take_profit_price=rounded_tp,
+                stop_loss_price=rounded_sl,
                 leverage=str(args.leverage)
             )
             
@@ -341,7 +370,7 @@ def main():
                 if monitor != 'yes':
                     print(f"\n{result['message']}")
                     print("\nTo place take profit and stop loss orders after fill, run:")
-                    print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {args.tp} --sl {args.sl} --leverage {args.leverage}")
+                    print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {rounded_tp} --sl {rounded_sl} --leverage {args.leverage}")
                     return
             
             print("\nMonitoring limit order for fill...")
@@ -349,8 +378,8 @@ def main():
                 product_id=args.product,
                 order_id=result['order_id'],
                 size=size,
-                take_profit_price=args.tp,
-                stop_loss_price=args.sl,
+                take_profit_price=rounded_tp,
+                stop_loss_price=rounded_sl,
                 leverage=str(args.leverage)
             )
             
@@ -362,7 +391,7 @@ def main():
                 print(f"\n{monitor_result['message']}")
                 if monitor_result['status'] == 'timeout':
                     print("\nTo place take profit and stop loss orders after fill, run:")
-                    print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {args.tp} --sl {args.sl} --leverage {args.leverage}")
+                    print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {rounded_tp} --sl {rounded_sl} --leverage {args.leverage}")
                 elif monitor_result['status'] == 'error':
                     print(f"Error: {monitor_result.get('error', 'Unknown error')}")
             
@@ -371,8 +400,8 @@ def main():
                 product_id=args.product,
                 side=args.side,
                 size=size,
-                take_profit_price=args.tp,
-                stop_loss_price=args.sl,
+                take_profit_price=rounded_tp,
+                stop_loss_price=rounded_sl,
                 leverage=str(args.leverage)
             )
             
