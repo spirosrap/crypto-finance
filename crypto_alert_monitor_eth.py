@@ -76,55 +76,54 @@ def safe_get_candles(cb_service, product_id, start_ts, end_ts, granularity):
             return response.get('candles', [])
     return retry_with_backoff(_get_candles)
 
-# ETH Trading Strategy Parameters (New August 30th Setup)
+# ETH Trading Strategy Parameters (New Athens Setup)
 PRODUCT_ID = "ETH-PERP-INTX"
 GRANULARITY_5M = "FIVE_MINUTE"      # Primary timeframe for triggers
-GRANULARITY_1M = "ONE_MINUTE"       # For 1-minute volume spikes
+GRANULARITY_1M = "ONE_MINUTE"       # For 1-minute triggers
 VOLUME_PERIOD = 20  # For volume confirmation
 
-# Current market context - Updated with new levels from Aug 30 setup
-CURRENT_ETH_PRICE = 4382.51  # ETH Spot ~$4,382.51
-TODAY_HIGH = 4482.49         # HOD = $4,482.49
-TODAY_LOW = 4267.43          # LOD = $4,267.43
-CURRENT_PRICE = 4382.51      # Last ≈ $4,382.51
-MID_RANGE = 4374.96          # Mid-range = (H+L)/2
+# Current market context - Updated with new Athens levels
+CURRENT_ETH_PRICE = 4412.93  # ETH Spot ~$4,412.93
+TODAY_HIGH = 4486.63         # 24h High = $4,486.63
+TODAY_LOW = 4339.23          # 24h Low = $4,339.23
+CURRENT_PRICE = 4412.93      # Last ≈ $4,412.93
+MID_RANGE = 4412.93          # Mid-range = (H+L)/2
 
-# Key levels from Aug 30 setup
-HOD_LEVEL = 4482.49          # High of Day
-LOD_LEVEL = 4267.43          # Low of Day
-MID_LEVEL = 4374.96          # Mid-range level
-BUFFER_BPS = 10              # 10 basis points buffer
+# Key levels from Athens setup
+HOD_LEVEL = 4486.63          # 24h High
+LOD_LEVEL = 4339.23          # 24h Low
+MID_LEVEL = 4412.93          # Mid-range level
 
-# Setup 1: Breakout-Retest (LONG)
-BREAKOUT_RETEST_TRIGGER = 4486.97  # H + 10 bps = 4482.49 + 4.48
-BREAKOUT_RETEST_ENTRY_LOW = 4486.97
-BREAKOUT_RETEST_ENTRY_HIGH = 4492.00
-BREAKOUT_RETEST_SL_BUFFER_BPS = 35
-BREAKOUT_RETEST_VOLUME_FACTOR = 1.25
-BREAKOUT_RETEST_CONSECUTIVE_CLOSES = 2
+# Setup 1: Breakout LONG
+BREAKOUT_LONG_TRIGGER = 4490.00  # 1-min close > 4,490
+BREAKOUT_LONG_ENTRY_LOW = 4491.00
+BREAKOUT_LONG_ENTRY_HIGH = 4498.00
+BREAKOUT_LONG_VOLUME_FACTOR = 1.5
+BREAKOUT_LONG_VWAP_DISTANCE_MAX = 0.5  # VWAP distance ≤0.5%
 
-# Setup 2: Liquidity-Sweep Reclaim (LONG)
-LIQUIDITY_SWEEP_LEVEL = 4267.43
-LIQUIDITY_SWEEP_ENTRY_OFFSET_BPS = 5
-LIQUIDITY_SWEEP_SL_BUFFER_BPS = 15
-LIQUIDITY_SWEEP_DELTA_SIGMA_MIN = 1
+# Setup 2: Range-fade SHORT
+RANGE_FADE_SHORT_REJECTION_LOW = 4480.00
+RANGE_FADE_SHORT_REJECTION_HIGH = 4487.00
+RANGE_FADE_SHORT_ENTRY_LOW = 4478.00
+RANGE_FADE_SHORT_ENTRY_HIGH = 4485.00
+RANGE_FADE_SHORT_VOLUME_FACTOR_MAX = 0.9
+RANGE_FADE_SHORT_INVALIDATION = 4493.00  # Close > 4,493
+RANGE_FADE_SHORT_HIGH_BUFFER = 0.05  # No close > high +0.05%
 
-# Setup 3: Range-Fade (SHORT)
-RANGE_FADE_REJECTION_LOW = 4482.00
-RANGE_FADE_REJECTION_HIGH = 4500.00
-RANGE_FADE_ENTRY_PRICE = 4492.00
-RANGE_FADE_ENTRY_TOLERANCE_BPS = 5
-RANGE_FADE_SL_BUFFER_BPS = 25
-RANGE_FADE_VOLUME_FACTOR_MAX = 0.80
-RANGE_FADE_VOLUME_FACTOR_MIN = 1.20  # Do not take if RVOL_5m >= 1.2x
+# Setup 3: Breakdown SHORT
+BREAKDOWN_SHORT_TRIGGER = 4337.00  # 1-min close < 4,337
+BREAKDOWN_SHORT_ENTRY_LOW = 4329.00
+BREAKDOWN_SHORT_ENTRY_HIGH = 4334.00
+BREAKDOWN_SHORT_VOLUME_FACTOR = 1.5
+BREAKDOWN_SHORT_INVALIDATION = 4347.90  # Close > 4,347.9 or VWAP reclaimed
 
-# Setup 4: Breakdown-Retest (SHORT)
-BREAKDOWN_RETEST_TRIGGER = 4263.16  # L - 10 bps = 4267.43 - 4.27
-BREAKDOWN_RETEST_ENTRY_LOW = 4263.00
-BREAKDOWN_RETEST_ENTRY_HIGH = 4268.00
-BREAKDOWN_RETEST_SL_BUFFER_BPS = 35
-BREAKDOWN_RETEST_VOLUME_FACTOR = 1.50
-BREAKDOWN_RETEST_CONSECUTIVE_CLOSES = 2
+# Setup 4: Range-fade LONG
+RANGE_FADE_LONG_REJECTION_LOW = 4339.00
+RANGE_FADE_LONG_REJECTION_HIGH = 4345.00
+RANGE_FADE_LONG_ENTRY_LOW = 4342.00
+RANGE_FADE_LONG_ENTRY_HIGH = 4346.00
+RANGE_FADE_LONG_VOLUME_FACTOR_MAX = 0.9
+RANGE_FADE_LONG_INVALIDATION = 4332.00  # Close < 4,332
 
 # Trade parameters - Position size: margin x leverage = 250 x 20 = 5000 USD
 MARGIN = 250  # USD
@@ -136,11 +135,15 @@ MAX_CONCURRENT_TRADES = 1
 PER_TRADE_RISK_PCT = 0.5
 SKIP_IF_SPREAD_BPS_GT = 3
 
+# Additional filters
+RANGE_FADE_VOLUME_FACTOR_MIN = 1.2  # Skip fades if RVOL>1.2
+VWAP_DISTANCE_MAX = 1.0  # Skip fades if distance from VWAP>1.0%
+
 # State files for strategy tracking
-BREAKOUT_RETEST_TRIGGER_FILE = "eth_breakout_retest_trigger_state.json"
-LIQUIDITY_SWEEP_TRIGGER_FILE = "eth_liquidity_sweep_trigger_state.json"
-RANGE_FADE_TRIGGER_FILE = "eth_range_fade_trigger_state.json"
-BREAKDOWN_RETEST_TRIGGER_FILE = "eth_breakdown_retest_trigger_state.json"
+BREAKOUT_LONG_TRIGGER_FILE = "eth_breakout_long_trigger_state.json"
+RANGE_FADE_SHORT_TRIGGER_FILE = "eth_range_fade_short_trigger_state.json"
+BREAKDOWN_SHORT_TRIGGER_FILE = "eth_breakdown_short_trigger_state.json"
+RANGE_FADE_LONG_TRIGGER_FILE = "eth_range_fade_long_trigger_state.json"
 
 def log_trade_to_csv(trade_data):
     """
@@ -184,51 +187,51 @@ def test_csv_logging():
     """
     logger.info("🧪 Testing CSV logging functionality...")
     
-    # Test ETH Breakout-Retest trade data
-    eth_breakout_retest_data = {
+    # Test ETH Breakout LONG trade data
+    eth_breakout_long_data = {
         'timestamp': datetime.now(UTC).isoformat(),
-        'strategy': 'TEST-ETH-Breakout-Retest',
+        'strategy': 'TEST-ETH-Breakout-Long',
         'symbol': 'ETH-PERP-INTX',
         'side': 'BUY',
-        'entry_price': 4490.0,
-        'stop_loss': 4455.0,
-        'take_profit': 4535.0,
+        'entry_price': 4495.0,
+        'stop_loss': 4470.0,
+        'take_profit': 4520.0,
         'position_size_usd': 5000.0,
         'margin': 250.0,
         'leverage': 20.0,
         'volume_sma': 800.0,
-        'volume_ratio': 1.3,
-        'current_price': 4490.0,
-        'market_conditions': 'HOD=$4,482.49, LOD=$4,267.43',
+        'volume_ratio': 1.6,
+        'current_price': 4495.0,
+        'market_conditions': 'HOD=$4,486.63, LOD=$4,339.23',
         'trade_status': 'TEST',
         'execution_time': datetime.now(UTC).isoformat(),
-        'notes': 'TEST TRADE - ETH Breakout-Retest (Aug 30 Setup)'
+        'notes': 'TEST TRADE - ETH Breakout LONG (Athens Setup)'
     }
     
-    # Test ETH Liquidity-Sweep Reclaim trade data
-    eth_liquidity_sweep_data = {
+    # Test ETH Range-fade SHORT trade data
+    eth_range_fade_short_data = {
         'timestamp': datetime.now(UTC).isoformat(),
-        'strategy': 'TEST-ETH-Liquidity-Sweep-Reclaim',
+        'strategy': 'TEST-ETH-Range-Fade-Short',
         'symbol': 'ETH-PERP-INTX',
-        'side': 'BUY',
-        'entry_price': 4270.0,
-        'stop_loss': 4255.0,
-        'take_profit': 4482.5,
+        'side': 'SELL',
+        'entry_price': 4480.0,
+        'stop_loss': 4493.0,
+        'take_profit': 4413.0,
         'position_size_usd': 5000.0,
         'margin': 250.0,
         'leverage': 20.0,
         'volume_sma': 750.0,
-        'volume_ratio': 1.1,
-        'current_price': 4270.0,
-        'market_conditions': 'HOD=$4,482.49, LOD=$4,267.43',
+        'volume_ratio': 0.8,
+        'current_price': 4480.0,
+        'market_conditions': 'HOD=$4,486.63, LOD=$4,339.23',
         'trade_status': 'TEST',
         'execution_time': datetime.now(UTC).isoformat(),
-        'notes': 'TEST TRADE - ETH Liquidity-Sweep Reclaim (Aug 30 Setup)'
+        'notes': 'TEST TRADE - ETH Range-fade SHORT (Athens Setup)'
     }
     
     # Log test trades
-    log_trade_to_csv(eth_breakout_retest_data)
-    log_trade_to_csv(eth_liquidity_sweep_data)
+    log_trade_to_csv(eth_breakout_long_data)
+    log_trade_to_csv(eth_range_fade_short_data)
     
     logger.info("✅ CSV logging test completed!")
     logger.info("📊 Check chatgpt_trades.csv to verify test trades were added correctly")
@@ -336,25 +339,24 @@ def save_trigger_state(state, strategy_file):
     except Exception as e:
         logger.error(f"Failed to save trigger state: {e}")
 
-# --- ETH Trading Strategy Alert Logic (New August 30th Setup) ---
+# --- ETH Trading Strategy Alert Logic (New Athens Setup) ---
 def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
-    ETH Intraday Trading Strategy Alert - August 30th
+    ETH Intraday Trading Strategy Alert - Athens Setup
     
-    Spiros, here are 4 executable ETH setups for today (Sat, Aug 30, 2025). 
-    Spot ref: $4,382.51. Intraday H/L: $4,482.49 / $4,267.43.
+    Spiros, here are 4 executable ETH setups for today (Athens).
+    Key levels now: 24h high 4,486.63, low 4,339.23, mid 4,412.93. Funding ~neutral across majors.
 
-    Setup	Bias	Trigger (numbers today)	Entry	Invalidation / SL	Targets	Confirmation	Filters
-    Breakout-Retest	Long	5-min close > 4,486.97 (H +10 bps)	Bid on retest of 4,486.97–4,492	SL = retest low − 35 bps	TP1 = 1R, TP2 = 2R, runner = 3R	≥2 closes above trigger	RVOL_5m ≥ 1.25× 20-SMA vol
-    Liquidity-Sweep Reclaim	Long	Wick below 4,267.43 then 5-min close back above low	Market on close reclaim or limit at low+5–10 bps	SL = sweep low − 15 bps	TP1 = VWAP, TP2 = Mid-range 4,374.96, TP3 = 2R	1 reclaim close	CVD absorption or delta ≥ +1σ; RVOL_1m spike
-    Range-Fade	Short	Rejection at 4,482–4,500 with bearish wick	Limit at 4,492 ± 5	SL = wick high + 25 bps	TP1 = Mid 4,374.96, TP2 = 2R	1 rejection candle	RVOL_5m ≤ 0.80×; do not take if RVOL_5m ≥ 1.2×
-    Breakdown-Retest	Short	5-min close < 4,263.16 (L −10 bps)	Offer on retest of 4,263–4,268	SL = retest high + 35 bps	TP1 = 1R, TP2 = 2R, runner = 3R	≥2 closes below trigger	RVOL_5m ≥ 1.50× 20-SMA vol
+    Setup	Trigger (5–1m)	Entry	Invalidation	Targets
+    Breakout LONG	1-min close > 4,490 and RVOL≥1.5× 5m SMA(20) and	VWAP distance	≤0.5%	4,491–4,498 on retest hold above prior high
+    Range-fade SHORT	Rejection at 4,480–4,487 with RVOL≤0.9 and no close > high +0.05%	4,478–4,485	Close > 4,493	TP1 VWAP • TP2 4,413 • TP3 4,370
+    Breakdown SHORT	1-min close < 4,337 and RVOL≥1.5× 5m SMA(20)	4,334–4,329 on retest hold below low	Close > 4,347.9 or VWAP reclaimed	TP1 4,291 • TP2 4,242 • TP3 4,192
+    Range-fade LONG	Rejection failure at 4,339–4,345 with RVOL≤0.9 and tape slowdown	4,342–4,346	Close < 4,332	TP1 VWAP • TP2 4,413 • TP3 4,455
 
     Notes for your bot:
-    •	RVOL_5m uses volume / 20-bar SMA volume on 5-min.
-    •	"R" = entry→SL distance.
-    •	Skip signals during news spikes or abnormal spread.
-    •	Update H/L if new extremes print; recompute trigger = H±10 bps, mid = (H+L)/2.
+    •	RVOL = current 5-min volume ÷ 5-min SMA(20). VWAP = session VWAP starting 00:00 Athens.
+    •	Move to breakeven after TP1 hit. Trail by last 5-min swing or 0.35%—whichever is tighter.
+    •	Skip fades if RVOL>1.2 or if distance from VWAP>1.0%.
     •	Position size: margin × leverage = 250 × 20 = 5000 USD (fixed).
     
     Args:
@@ -368,10 +370,10 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         logger.info(f"=== ETH Trading Strategy Alert (New Setup - {direction} Strategy Only) ===")
     
     # Load trigger states
-    breakout_retest_state = load_trigger_state(BREAKOUT_RETEST_TRIGGER_FILE)
-    liquidity_sweep_state = load_trigger_state(LIQUIDITY_SWEEP_TRIGGER_FILE)
-    range_fade_state = load_trigger_state(RANGE_FADE_TRIGGER_FILE)
-    breakdown_retest_state = load_trigger_state(BREAKDOWN_RETEST_TRIGGER_FILE)
+    breakout_long_state = load_trigger_state(BREAKOUT_LONG_TRIGGER_FILE)
+    range_fade_short_state = load_trigger_state(RANGE_FADE_SHORT_TRIGGER_FILE)
+    breakdown_short_state = load_trigger_state(BREAKDOWN_SHORT_TRIGGER_FILE)
+    range_fade_long_state = load_trigger_state(RANGE_FADE_LONG_TRIGGER_FILE)
     
     try:
         now = datetime.now(UTC)
@@ -446,77 +448,76 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         relative_volume_5m = last_volume_5m / avg_volume_5m if avg_volume_5m > 0 else 0
         
         # Check volume confirmation for different strategies
-        breakout_retest_volume_confirmed = relative_volume_5m >= BREAKOUT_RETEST_VOLUME_FACTOR
-        liquidity_sweep_volume_confirmed = relative_volume_5m >= LIQUIDITY_SWEEP_DELTA_SIGMA_MIN
-        range_fade_volume_confirmed = relative_volume_5m <= RANGE_FADE_VOLUME_FACTOR_MAX
-        breakdown_retest_volume_confirmed = relative_volume_5m >= BREAKDOWN_RETEST_VOLUME_FACTOR
+        breakout_long_volume_confirmed = relative_volume_5m >= BREAKOUT_LONG_VOLUME_FACTOR
+        range_fade_short_volume_confirmed = relative_volume_5m <= RANGE_FADE_SHORT_VOLUME_FACTOR_MAX
+        breakdown_short_volume_confirmed = relative_volume_5m >= BREAKDOWN_SHORT_VOLUME_FACTOR
+        range_fade_long_volume_confirmed = relative_volume_5m <= RANGE_FADE_LONG_VOLUME_FACTOR_MAX
         
         # Filter strategies based on direction parameter
-        breakout_retest_enabled = direction in ['LONG', 'BOTH']
-        liquidity_sweep_enabled = direction in ['LONG', 'BOTH']
-        range_fade_enabled = direction in ['SHORT', 'BOTH']
-        breakdown_retest_enabled = direction in ['SHORT', 'BOTH']
+        breakout_long_enabled = direction in ['LONG', 'BOTH']
+        range_fade_short_enabled = direction in ['SHORT', 'BOTH']
+        breakdown_short_enabled = direction in ['SHORT', 'BOTH']
+        range_fade_long_enabled = direction in ['LONG', 'BOTH']
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Spiros, here are 4 executable ETH setups for today (Sat, Aug 30, 2025).")
+        logger.info("🚀 Spiros, here are 4 executable ETH setups for today (Athens).")
         logger.info(f"📊 Live Levels:")
         logger.info(f"   • ETH ≈ ${current_close_5m:,.2f}")
-        logger.info(f"   • HOD ≈ ${HOD_LEVEL:,.2f}, LOD ≈ ${LOD_LEVEL:,.2f}")
+        logger.info(f"   • 24h High ≈ ${HOD_LEVEL:,.2f}, 24h Low ≈ ${LOD_LEVEL:,.2f}")
         logger.info(f"   • Mid-range: ${MID_LEVEL:,.2f}")
         logger.info("")
         logger.info("📊 Strategy Rules:")
         logger.info(f"   • Position Size: ${POSITION_SIZE_USD:,.0f} USD (${MARGIN} × {LEVERAGE}x) — fixed")
-        logger.info(f"   • Primary timeframe: 5-minute candles")
+        logger.info(f"   • Primary timeframe: 1-minute and 5-minute candles")
         logger.info(f"   • Volume requirements: RVOL = vol(5m)/SMA20(5m)")
         logger.info(f"   • Risk: {PER_TRADE_RISK_PCT}% per trade, max {MAX_CONCURRENT_TRADES} concurrent trade")
         logger.info("")
         
         # Show strategies based on direction
-        if breakout_retest_enabled:
-            logger.info("📊 Setup 1: Breakout-Retest (LONG):")
-            logger.info(f"   • Trigger: 5m close > ${BREAKOUT_RETEST_TRIGGER:,.2f} (H + {BUFFER_BPS}bps)")
-            logger.info(f"   • Entry: Retest of ${BREAKOUT_RETEST_ENTRY_LOW:,.2f}–${BREAKOUT_RETEST_ENTRY_HIGH:,.2f}")
-            logger.info(f"   • Stop: Retest low − {BREAKOUT_RETEST_SL_BUFFER_BPS}bps")
-            logger.info(f"   • Targets: TP1 = 1R, TP2 = 2R, runner = 3R")
-            logger.info(f"   • Volume: RVOL ≥ {BREAKOUT_RETEST_VOLUME_FACTOR}x 20-SMA vol")
+        if breakout_long_enabled:
+            logger.info("📊 Setup 1: Breakout LONG:")
+            logger.info(f"   • Trigger: 1m close > ${BREAKOUT_LONG_TRIGGER:,.2f} and RVOL≥{BREAKOUT_LONG_VOLUME_FACTOR}× 5m SMA(20)")
+            logger.info(f"   • Entry: ${BREAKOUT_LONG_ENTRY_LOW:,.2f}–${BREAKOUT_LONG_ENTRY_HIGH:,.2f} on retest hold above prior high")
+            logger.info(f"   • VWAP distance: ≤{BREAKOUT_LONG_VWAP_DISTANCE_MAX}%")
+            logger.info(f"   • Volume confirmed (≥{BREAKOUT_LONG_VOLUME_FACTOR}x): {'✅' if breakout_long_volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info("")
         
-        if liquidity_sweep_enabled:
-            logger.info("📊 Setup 2: Liquidity-Sweep Reclaim (LONG):")
-            logger.info(f"   • Trigger: Wick below ${LIQUIDITY_SWEEP_LEVEL:,.2f} then 5m close back above low")
-            logger.info(f"   • Entry: Market on close reclaim or limit at low+{LIQUIDITY_SWEEP_ENTRY_OFFSET_BPS}bps")
-            logger.info(f"   • Stop: Sweep low − {LIQUIDITY_SWEEP_SL_BUFFER_BPS}bps")
-            logger.info(f"   • Targets: TP1 = VWAP, TP2 = Mid-range ${MID_LEVEL:,.2f}, TP3 = 2R")
-            logger.info(f"   • Volume: RVOL spike with delta ≥ +{LIQUIDITY_SWEEP_DELTA_SIGMA_MIN}σ")
+        if range_fade_short_enabled:
+            logger.info("📊 Setup 2: Range-fade SHORT:")
+            logger.info(f"   • Trigger: Rejection at ${RANGE_FADE_SHORT_REJECTION_LOW:,.2f}–${RANGE_FADE_SHORT_REJECTION_HIGH:,.2f} with RVOL≤{RANGE_FADE_SHORT_VOLUME_FACTOR_MAX}")
+            logger.info(f"   • Entry: ${RANGE_FADE_SHORT_ENTRY_LOW:,.2f}–${RANGE_FADE_SHORT_ENTRY_HIGH:,.2f}")
+            logger.info(f"   • Invalidation: Close > ${RANGE_FADE_SHORT_INVALIDATION:,.2f}")
+            logger.info(f"   • Targets: TP1 VWAP • TP2 ${MID_LEVEL:,.2f} • TP3 4,370")
+            logger.info(f"   • Volume confirmed (≤{RANGE_FADE_SHORT_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_short_volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info("")
         
-        if range_fade_enabled:
-            logger.info("📊 Setup 3: Range-Fade (SHORT):")
-            logger.info(f"   • Trigger: Rejection at ${RANGE_FADE_REJECTION_LOW:,.2f}–${RANGE_FADE_REJECTION_HIGH:,.2f} with bearish wick")
-            logger.info(f"   • Entry: Limit at ${RANGE_FADE_ENTRY_PRICE:,.2f} ± {RANGE_FADE_ENTRY_TOLERANCE_BPS}bps")
-            logger.info(f"   • Stop: Wick high + {RANGE_FADE_SL_BUFFER_BPS}bps")
-            logger.info(f"   • Targets: TP1 = Mid ${MID_LEVEL:,.2f}, TP2 = 2R")
-            logger.info(f"   • Volume: RVOL ≤ {RANGE_FADE_VOLUME_FACTOR_MAX}x (do not take if ≥ {RANGE_FADE_VOLUME_FACTOR_MIN}x)")
+        if breakdown_short_enabled:
+            logger.info("📊 Setup 3: Breakdown SHORT:")
+            logger.info(f"   • Trigger: 1m close < ${BREAKDOWN_SHORT_TRIGGER:,.2f} and RVOL≥{BREAKDOWN_SHORT_VOLUME_FACTOR}× 5m SMA(20)")
+            logger.info(f"   • Entry: ${BREAKDOWN_SHORT_ENTRY_LOW:,.2f}–${BREAKDOWN_SHORT_ENTRY_HIGH:,.2f} on retest hold below low")
+            logger.info(f"   • Invalidation: Close > ${BREAKDOWN_SHORT_INVALIDATION:,.2f} or VWAP reclaimed")
+            logger.info(f"   • Targets: TP1 4,291 • TP2 4,242 • TP3 4,192")
+            logger.info(f"   • Volume confirmed (≥{BREAKDOWN_SHORT_VOLUME_FACTOR}x): {'✅' if breakdown_short_volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info("")
         
-        if breakdown_retest_enabled:
-            logger.info("📊 Setup 4: Breakdown-Retest (SHORT):")
-            logger.info(f"   • Trigger: 5m close < ${BREAKDOWN_RETEST_TRIGGER:,.2f} (L − {BUFFER_BPS}bps)")
-            logger.info(f"   • Entry: Retest of ${BREAKDOWN_RETEST_ENTRY_LOW:,.2f}–${BREAKDOWN_RETEST_ENTRY_HIGH:,.2f}")
-            logger.info(f"   • Stop: Retest high + {BREAKDOWN_RETEST_SL_BUFFER_BPS}bps")
-            logger.info(f"   • Targets: TP1 = 1R, TP2 = 2R, runner = 3R")
-            logger.info(f"   • Volume: RVOL ≥ {BREAKDOWN_RETEST_VOLUME_FACTOR}x 20-SMA vol")
+        if range_fade_long_enabled:
+            logger.info("📊 Setup 4: Range-fade LONG:")
+            logger.info(f"   • Trigger: Rejection failure at ${RANGE_FADE_LONG_REJECTION_LOW:,.2f}–${RANGE_FADE_LONG_REJECTION_HIGH:,.2f} with RVOL≤{RANGE_FADE_LONG_VOLUME_FACTOR_MAX}")
+            logger.info(f"   • Entry: ${RANGE_FADE_LONG_ENTRY_LOW:,.2f}–${RANGE_FADE_LONG_ENTRY_HIGH:,.2f}")
+            logger.info(f"   • Invalidation: Close < ${RANGE_FADE_LONG_INVALIDATION:,.2f}")
+            logger.info(f"   • Targets: TP1 VWAP • TP2 ${MID_LEVEL:,.2f} • TP3 4,455")
+            logger.info(f"   • Volume confirmed (≤{RANGE_FADE_LONG_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_long_volume_confirmed else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info("")
         
         logger.info(f"Current Price: ${current_close_15m:,.2f}")
         logger.info(f"Last 15M Close: ${last_close_15m:,.2f}, High: ${last_high_15m:,.2f}, Low: ${last_low_15m:,.2f}")
         logger.info(f"15M Volume: {last_volume_15m:,.0f}, 15M SMA(20): {avg_volume_15m:,.0f}, Rel_Vol: {relative_volume_15m:.2f}x")
         logger.info(f"Last 5M Close: ${last_close_5m:,.2f}, 5M Volume: {last_volume_5m:,.0f}, 5M SMA(20): {avg_volume_5m:,.0f}, Rel_Vol: {relative_volume_5m:.2f}x")
-        logger.info(f"Setup 1 Volume confirmed (≥{BREAKOUT_RETEST_VOLUME_FACTOR}x): {'✅' if breakout_retest_volume_confirmed else '❌'}")
-        logger.info(f"Setup 2 Volume confirmed (≥{LIQUIDITY_SWEEP_DELTA_SIGMA_MIN}x): {'✅' if liquidity_sweep_volume_confirmed else '❌'}")
-        logger.info(f"Setup 3 Volume confirmed (≤{RANGE_FADE_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_volume_confirmed else '❌'}")
-        logger.info(f"Setup 4 Volume confirmed (≥{BREAKDOWN_RETEST_VOLUME_FACTOR}x): {'✅' if breakdown_retest_volume_confirmed else '❌'}")
+        logger.info(f"Setup 1 Volume confirmed (≥{BREAKOUT_LONG_VOLUME_FACTOR}x): {'✅' if breakout_long_volume_confirmed else '❌'}")
+        logger.info(f"Setup 2 Volume confirmed (≤{RANGE_FADE_SHORT_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_short_volume_confirmed else '❌'}")
+        logger.info(f"Setup 3 Volume confirmed (≥{BREAKDOWN_SHORT_VOLUME_FACTOR}x): {'✅' if breakdown_short_volume_confirmed else '❌'}")
+        logger.info(f"Setup 4 Volume confirmed (≤{RANGE_FADE_LONG_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_long_volume_confirmed else '❌'}")
         logger.info("")
         
         # --- Strategy Analysis ---
@@ -530,25 +531,29 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
         else:
             vwap = current_close_5m  # Fallback to current price
         
-        # 1. Setup 1: Breakout-Retest Strategy
-        if (breakout_retest_enabled and 
-            not breakout_retest_state.get("triggered", False) and not trade_executed):
+        # 1. Setup 1: Breakout LONG Strategy
+        if (breakout_long_enabled and 
+            not breakout_long_state.get("triggered", False) and not trade_executed):
             
-            # Check if 5m close above breakout trigger level (clean break of HOD)
-            breakout_trigger_condition = last_close_5m > BREAKOUT_RETEST_ENTRY_HIGH
+            # Check if 1m close above breakout trigger level
+            breakout_trigger_condition = last_close_5m > BREAKOUT_LONG_TRIGGER
             # Volume confirmation
-            breakout_volume_condition = relative_volume_5m >= BREAKOUT_RETEST_VOLUME_FACTOR
+            breakout_volume_condition = relative_volume_5m >= BREAKOUT_LONG_VOLUME_FACTOR
+            # VWAP distance check
+            vwap_distance = abs(current_close_5m - vwap) / vwap * 100
+            vwap_distance_condition = vwap_distance <= BREAKOUT_LONG_VWAP_DISTANCE_MAX
             
-            breakout_ready = breakout_trigger_condition and breakout_volume_condition
+            breakout_ready = breakout_trigger_condition and breakout_volume_condition and vwap_distance_condition
 
-            logger.info("🔍 Setup 1 - Breakout-Retest Analysis:")
-            logger.info(f"   • 5m close > ${BREAKOUT_RETEST_ENTRY_HIGH:,} (H + {BUFFER_BPS}bps): {'✅' if breakout_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
-            logger.info(f"   • Volume confirmed (≥{BREAKOUT_RETEST_VOLUME_FACTOR}x): {'✅' if breakout_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info("🔍 Setup 1 - Breakout LONG Analysis:")
+            logger.info(f"   • 1m close > ${BREAKOUT_LONG_TRIGGER:,.2f}: {'✅' if breakout_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • Volume confirmed (≥{BREAKOUT_LONG_VOLUME_FACTOR}x): {'✅' if breakout_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info(f"   • VWAP distance ≤{BREAKOUT_LONG_VWAP_DISTANCE_MAX}%: {'✅' if vwap_distance_condition else '❌'} (distance: {vwap_distance:.2f}%)")
             logger.info(f"   • Breakout Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
 
             if breakout_ready:
                 logger.info("")
-                logger.info("🎯 Setup 1 - Breakout-Retest conditions met - executing trade...")
+                logger.info("�� Setup 1 - Breakout LONG conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -558,13 +563,13 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
                 # Calculate entry, stop, and targets
                 entry_price = current_close_5m
-                stop_loss = min(last_low_5m, entry_price * (1 - BREAKOUT_RETEST_SL_BUFFER_BPS / 10000))
+                stop_loss = min(last_low_5m, entry_price * (1 - VWAP_DISTANCE_MAX)) # VWAP distance as SL
                 tp1 = entry_price * (1 + PER_TRADE_RISK_PCT / 100)
                 tp2 = entry_price * (1 + PER_TRADE_RISK_PCT * 2 / 100)
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH Breakout-Retest (Aug 30 Setup)",
+                    trade_type="ETH Breakout LONG (Athens Setup)",
                     entry_price=entry_price,
                     stop_loss=stop_loss,
                     take_profit=tp1,
@@ -573,16 +578,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 )
 
                 if trade_success:
-                    logger.info("🎉 Breakout-Retest trade executed successfully!")
+                    logger.info("🎉 Breakout LONG trade executed successfully!")
                     logger.info(f"Entry: ${entry_price:,.2f}")
                     logger.info(f"Stop-loss: ${stop_loss:,.2f}")
                     logger.info(f"TP1: ${tp1:,.2f}, TP2: ${tp2:,.2f}")
-                    logger.info("Strategy: 5m close > 4,635 (clean break of HOD) and RVOL ≥ 1.5")
+                    logger.info("Strategy: 1m close > 4,490 (clean break of HOD) and RVOL ≥ 1.5")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'ETH-Breakout-Retest',
+                        'strategy': 'ETH-Breakout-Long',
                         'symbol': 'ETH-PERP-INTX',
                         'side': 'BUY',
                         'entry_price': entry_price,
@@ -597,42 +602,47 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                         'market_conditions': f"HOD=${HOD_LEVEL:,.1f}, LOD=${LOD_LEVEL:,.2f}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Trigger: 5m close > ${BREAKOUT_RETEST_ENTRY_HIGH:,}, Volume: {relative_volume_5m:.2f}x SMA"
+                        'notes': f"Trigger: 1m close > ${BREAKOUT_LONG_ENTRY_HIGH:,}, Volume: {relative_volume_5m:.2f}x SMA"
                     }
                     log_trade_to_csv(trade_data)
                     
                     # Save trigger state
-                    breakout_retest_state = {
+                    breakout_long_state = {
                         "triggered": True, 
                         "trigger_ts": int(last_closed_5m['start']),
                         "entry_price": entry_price,
-                        "consecutive_closes": breakout_retest_state.get('consecutive_closes', 0) + 1
+                        "consecutive_closes": breakout_long_state.get('consecutive_closes', 0) + 1
                     }
-                    save_trigger_state(breakout_retest_state, BREAKOUT_RETEST_TRIGGER_FILE)
+                    save_trigger_state(breakout_long_state, BREAKOUT_LONG_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Breakout-Retest trade failed: {trade_result}")
+                    logger.error(f"❌ Breakout LONG trade failed: {trade_result}")
         
-        # 2. Setup 2: Liquidity-Sweep Reclaim Strategy
-        if (liquidity_sweep_enabled and 
-            not liquidity_sweep_state.get("triggered", False) and not trade_executed):
+        # 2. Setup 2: Range-fade SHORT Strategy
+        if (range_fade_short_enabled and 
+            not range_fade_short_state.get("triggered", False) and not trade_executed):
             
-            # Check if wick below 4,267.43 then 5-min close back above low
-            sweep_condition = last_low_5m < LIQUIDITY_SWEEP_LEVEL  # Wick below the level
-            reclaim_condition = last_close_5m > LIQUIDITY_SWEEP_LEVEL  # Close back above the level
-            liquidity_sweep_volume_condition = relative_volume_5m >= LIQUIDITY_SWEEP_DELTA_SIGMA_MIN
+            # Check if rejection at 4,480–4,487 with RVOL≤0.9
+            rejection_zone_condition = RANGE_FADE_SHORT_REJECTION_LOW <= last_high_5m <= RANGE_FADE_SHORT_REJECTION_HIGH
+            range_fade_short_volume_condition = relative_volume_5m <= RANGE_FADE_SHORT_VOLUME_FACTOR_MAX
+            range_fade_short_volume_not_high = relative_volume_5m < RANGE_FADE_VOLUME_FACTOR_MIN  # Do not take if RVOL_5m >= 1.2x
+            invalidation_condition = last_close_5m <= RANGE_FADE_SHORT_INVALIDATION  # Close > 4,493
+            vwap_distance = abs(current_close_5m - vwap) / vwap * 100
+            vwap_distance_condition = vwap_distance <= VWAP_DISTANCE_MAX  # Skip if distance from VWAP>1.0%
             
-            liquidity_sweep_ready = sweep_condition and reclaim_condition and liquidity_sweep_volume_condition
+            range_fade_short_ready = rejection_zone_condition and range_fade_short_volume_condition and range_fade_short_volume_not_high and invalidation_condition and vwap_distance_condition
 
-            logger.info("🔍 Setup 2 - Liquidity-Sweep Reclaim Analysis:")
-            logger.info(f"   • Wick below ${LIQUIDITY_SWEEP_LEVEL:,.2f}: {'✅' if sweep_condition else '❌'} (last low: {last_low_5m:,.2f})")
-            logger.info(f"   • Close back above ${LIQUIDITY_SWEEP_LEVEL:,.2f}: {'✅' if reclaim_condition else '❌'} (last close: {last_close_5m:,.2f})")
-            logger.info(f"   • Volume confirmed (≥{LIQUIDITY_SWEEP_DELTA_SIGMA_MIN}x): {'✅' if liquidity_sweep_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
-            logger.info(f"   • Liquidity Sweep Ready: {'🎯 YES' if liquidity_sweep_ready else '⏳ NO'}")
+            logger.info("🔍 Setup 2 - Range-fade SHORT Analysis:")
+            logger.info(f"   • Rejection at ${RANGE_FADE_SHORT_REJECTION_LOW:,.2f}–${RANGE_FADE_SHORT_REJECTION_HIGH:,.2f}: {'✅' if rejection_zone_condition else '❌'} (last high: {last_high_5m:,.2f})")
+            logger.info(f"   • Volume exhausted (≤{RANGE_FADE_SHORT_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_short_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info(f"   • Volume not high (<{RANGE_FADE_VOLUME_FACTOR_MIN}x): {'✅' if range_fade_short_volume_not_high else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info(f"   • Invalidation: Close ≤ ${RANGE_FADE_SHORT_INVALIDATION:,.2f}: {'✅' if invalidation_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • VWAP distance ≤{VWAP_DISTANCE_MAX}%: {'✅' if vwap_distance_condition else '❌'} (distance: {vwap_distance:.2f}%)")
+            logger.info(f"   • Range-fade Ready: {'🎯 YES' if range_fade_short_ready else '⏳ NO'}")
 
-            if liquidity_sweep_ready:
+            if range_fade_short_ready:
                 logger.info("")
-                logger.info("🎯 Setup 2 - Liquidity-Sweep Reclaim conditions met - executing trade...")
+                logger.info("🎯 Setup 2 - Range-fade SHORT conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -642,98 +652,13 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
                 # Calculate entry, stop, and targets
                 entry_price = current_close_5m
-                stop_loss = LIQUIDITY_SWEEP_LEVEL * (1 - LIQUIDITY_SWEEP_SL_BUFFER_BPS / 10000)
-                tp1 = vwap  # VWAP target
-                tp2 = MID_LEVEL  # Mid-range target
-
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="ETH Liquidity-Sweep Reclaim (Aug 30 Setup)",
-                    entry_price=entry_price,
-                    stop_loss=stop_loss,
-                    take_profit=tp1,
-                    side="BUY",
-                    product=PRODUCT_ID
-                )
-
-                if trade_success:
-                    logger.info("�� Liquidity-Sweep Reclaim trade executed successfully!")
-                    logger.info(f"Entry: ${entry_price:,.2f}")
-                    logger.info(f"Stop-loss: ${stop_loss:,.2f}")
-                    logger.info(f"TP1: ${tp1:,.2f}, TP2: ${tp2:,.2f}")
-                    logger.info("Strategy: Wick below 4,267.43 then 5-min close back above low")
-                    
-                    # Log trade to CSV
-                    trade_data = {
-                        'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'ETH-Liquidity-Sweep-Reclaim',
-                        'symbol': 'ETH-PERP-INTX',
-                        'side': 'BUY',
-                        'entry_price': entry_price,
-                        'stop_loss': stop_loss,
-                        'take_profit': tp1,
-                        'position_size_usd': POSITION_SIZE_USD,
-                        'margin': MARGIN,
-                        'leverage': LEVERAGE,
-                        'volume_sma': avg_volume_5m,
-                        'volume_ratio': relative_volume_5m,
-                        'current_price': current_close_5m,
-                        'market_conditions': f"HOD=${HOD_LEVEL:,.2f}, LOD=${LOD_LEVEL:,.2f}, VWAP=${vwap:,.2f}",
-                        'trade_status': 'EXECUTED',
-                        'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Trigger: Liquidity sweep reclaim, Volume: {relative_volume_5m:.2f}x SMA"
-                    }
-                    log_trade_to_csv(trade_data)
-                    
-                    # Save trigger state
-                    liquidity_sweep_state = {
-                        "triggered": True, 
-                        "trigger_ts": int(last_closed_5m['start']),
-                        "entry_price": entry_price
-                    }
-                    save_trigger_state(liquidity_sweep_state, LIQUIDITY_SWEEP_TRIGGER_FILE)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ Liquidity-Sweep Reclaim trade failed: {trade_result}")
-        
-        # 3. Setup 3: Range-Fade Strategy
-        if (range_fade_enabled and 
-            not range_fade_state.get("triggered", False) and not trade_executed):
-            
-            # Check if rejection at 4,482–4,500 with bearish wick
-            rejection_zone_condition = RANGE_FADE_REJECTION_LOW <= last_high_5m <= RANGE_FADE_REJECTION_HIGH
-            bearish_wick_condition = (last_high_5m - last_close_5m) > (last_close_5m - last_low_5m)  # Upper wick longer than lower wick
-            range_fade_volume_condition = relative_volume_5m <= RANGE_FADE_VOLUME_FACTOR_MAX
-            range_fade_volume_not_high = relative_volume_5m < RANGE_FADE_VOLUME_FACTOR_MIN  # Do not take if RVOL_5m >= 1.2x
-            
-            range_fade_ready = rejection_zone_condition and bearish_wick_condition and range_fade_volume_condition and range_fade_volume_not_high
-
-            logger.info("🔍 Setup 3 - Range-Fade Analysis:")
-            logger.info(f"   • Rejection at ${RANGE_FADE_REJECTION_LOW:,}–${RANGE_FADE_REJECTION_HIGH:,}: {'✅' if rejection_zone_condition else '❌'} (last high: {last_high_5m:,.2f})")
-            logger.info(f"   • Bearish wick: {'✅' if bearish_wick_condition else '❌'} (upper wick longer than lower)")
-            logger.info(f"   • Volume exhausted (≤{RANGE_FADE_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
-            logger.info(f"   • Volume not high (<{RANGE_FADE_VOLUME_FACTOR_MIN}x): {'✅' if range_fade_volume_not_high else '❌'} (current: {relative_volume_5m:.2f}x)")
-            logger.info(f"   • Range-fade Ready: {'🎯 YES' if range_fade_ready else '⏳ NO'}")
-
-            if range_fade_ready:
-                logger.info("")
-                logger.info("🎯 Setup 3 - Range-Fade conditions met - executing trade...")
-
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-
-                # Calculate entry, stop, and targets
-                entry_price = current_close_5m
-                stop_loss = last_high_5m * (1 + RANGE_FADE_SL_BUFFER_BPS / 10000)  # Above wick high + 25 bps
+                stop_loss = last_high_5m * (1 + RANGE_FADE_SHORT_HIGH_BUFFER) # Above wick high + 0.05%
                 tp1 = MID_LEVEL  # Mid-range target
                 tp2 = entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100)  # 2R target
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH Range-Fade (Aug 30 Setup)",
+                    trade_type="ETH Range-fade SHORT (Athens Setup)",
                     entry_price=entry_price,
                     stop_loss=stop_loss,
                     take_profit=tp1,
@@ -742,16 +667,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 )
 
                 if trade_success:
-                    logger.info("🎉 Range-Fade trade executed successfully!")
+                    logger.info("🎉 Range-fade SHORT trade executed successfully!")
                     logger.info(f"Entry: ${entry_price:,.2f}")
                     logger.info(f"Stop-loss: ${stop_loss:,.2f}")
                     logger.info(f"TP1: ${tp1:,.2f}, TP2: ${tp2:,.2f}")
-                    logger.info("Strategy: Rejection at 4,482–4,500 with bearish wick")
+                    logger.info("Strategy: Rejection at 4,480–4,487 with RVOL≤0.9")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'ETH-Range-Fade',
+                        'strategy': 'ETH-Range-Fade-Short',
                         'symbol': 'ETH-PERP-INTX',
                         'side': 'SELL',
                         'entry_price': entry_price,
@@ -771,34 +696,36 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                     log_trade_to_csv(trade_data)
                     
                     # Save trigger state
-                    range_fade_state = {
+                    range_fade_short_state = {
                         "triggered": True, 
                         "trigger_ts": int(last_closed_5m['start']),
                         "entry_price": entry_price
                     }
-                    save_trigger_state(range_fade_state, RANGE_FADE_TRIGGER_FILE)
+                    save_trigger_state(range_fade_short_state, RANGE_FADE_SHORT_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Range-Fade trade failed: {trade_result}")
+                    logger.error(f"❌ Range-fade SHORT trade failed: {trade_result}")
         
-        # 4. Setup 4: Breakdown-Retest Strategy
-        if (breakdown_retest_enabled and 
-            not breakdown_retest_state.get("triggered", False) and not trade_executed):
+        # 3. Setup 3: Breakdown SHORT Strategy
+        if (breakdown_short_enabled and 
+            not breakdown_short_state.get("triggered", False) and not trade_executed):
             
-            # Check if 5m close below breakdown trigger level (LOD breach)
-            breakdown_trigger_condition = last_close_5m < BREAKDOWN_RETEST_ENTRY_HIGH
-            breakdown_volume_condition = relative_volume_5m >= BREAKDOWN_RETEST_VOLUME_FACTOR
+            # Check if 1m close below breakdown trigger level (LOD breach)
+            breakdown_trigger_condition = last_close_5m < BREAKDOWN_SHORT_TRIGGER
+            breakdown_volume_condition = relative_volume_5m >= BREAKDOWN_SHORT_VOLUME_FACTOR
+            invalidation_condition = last_close_5m <= BREAKDOWN_SHORT_INVALIDATION  # Close > 4,347.9 or VWAP reclaimed
             
-            breakdown_ready = breakdown_trigger_condition and breakdown_volume_condition
+            breakdown_ready = breakdown_trigger_condition and breakdown_volume_condition and invalidation_condition
 
-            logger.info("🔍 Setup 4 - Breakdown-Retest Analysis:")
-            logger.info(f"   • 5m close < ${BREAKDOWN_RETEST_ENTRY_HIGH:,} (L - {BUFFER_BPS}bps): {'✅' if breakdown_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
-            logger.info(f"   • Volume confirmed (≥{BREAKDOWN_RETEST_VOLUME_FACTOR}x): {'✅' if breakdown_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
-            logger.info(f"   • Breakdown Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
+            logger.info("🔍 Setup 3 - Breakdown SHORT Analysis:")
+            logger.info(f"   • 1m close < ${BREAKDOWN_SHORT_TRIGGER:,.2f}: {'✅' if breakdown_trigger_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • Volume confirmed (≥{BREAKDOWN_SHORT_VOLUME_FACTOR}x): {'✅' if breakdown_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info(f"   • Invalidation: Close ≤ ${BREAKDOWN_SHORT_INVALIDATION:,.2f}: {'✅' if invalidation_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • Breakdown Ready: {'�� YES' if breakdown_ready else '⏳ NO'}")
 
             if breakdown_ready:
                 logger.info("")
-                logger.info("🎯 Setup 4 - Breakdown-Retest conditions met - executing trade...")
+                logger.info("🎯 Setup 3 - Breakdown SHORT conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -808,13 +735,13 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
 
                 # Calculate entry, stop, and targets
                 entry_price = current_close_5m
-                stop_loss = entry_price * (1 + BREAKDOWN_RETEST_SL_BUFFER_BPS / 10000)
+                stop_loss = entry_price * (1 + VWAP_DISTANCE_MAX) # VWAP distance as SL
                 tp1 = entry_price * (1 - PER_TRADE_RISK_PCT / 100)
                 tp2 = entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100)
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="ETH Breakdown-Retest (Aug 30 Setup)",
+                    trade_type="ETH Breakdown SHORT (Athens Setup)",
                     entry_price=entry_price,
                     stop_loss=stop_loss,
                     take_profit=tp1,
@@ -823,16 +750,16 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 )
 
                 if trade_success:
-                    logger.info("🎉 Breakdown-Retest trade executed successfully!")
+                    logger.info("🎉 Breakdown SHORT trade executed successfully!")
                     logger.info(f"Entry: ${entry_price:,.2f}")
                     logger.info(f"Stop-loss: ${stop_loss:,.2f}")
                     logger.info(f"TP1: ${tp1:,.2f}, TP2: ${tp2:,.2f}")
-                    logger.info("Strategy: 5m close < 4,440 (LOD breach) and RVOL ≥ 1.5")
+                    logger.info("Strategy: 1m close < 4,337 (LOD breach) and RVOL ≥ 1.5")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'ETH-Breakdown-Retest',
+                        'strategy': 'ETH-Breakdown-Short',
                         'symbol': 'ETH-PERP-INTX',
                         'side': 'SELL',
                         'entry_price': entry_price,
@@ -847,43 +774,131 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                         'market_conditions': f"HOD=${HOD_LEVEL:,.1f}, LOD=${LOD_LEVEL:,.2f}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Trigger: 5m close < ${BREAKDOWN_RETEST_ENTRY_HIGH:,}, Volume: {relative_volume_5m:.2f}x SMA"
+                        'notes': f"Trigger: 1m close < ${BREAKDOWN_SHORT_ENTRY_HIGH:,}, Volume: {relative_volume_5m:.2f}x SMA"
                     }
                     log_trade_to_csv(trade_data)
                     
                     # Save trigger state
-                    breakdown_retest_state = {
+                    breakdown_short_state = {
                         "triggered": True, 
                         "trigger_ts": int(last_closed_5m['start']),
                         "entry_price": entry_price,
-                        "consecutive_closes": breakdown_retest_state.get('consecutive_closes', 0) + 1
+                        "consecutive_closes": breakdown_short_state.get('consecutive_closes', 0) + 1
                     }
-                    save_trigger_state(breakdown_retest_state, BREAKDOWN_RETEST_TRIGGER_FILE)
+                    save_trigger_state(breakdown_short_state, BREAKDOWN_SHORT_TRIGGER_FILE)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Breakdown-Retest trade failed: {trade_result}")
+                    logger.error(f"❌ Breakdown SHORT trade failed: {trade_result}")
+        
+        # 4. Setup 4: Range-fade LONG Strategy
+        if (range_fade_long_enabled and 
+            not range_fade_long_state.get("triggered", False) and not trade_executed):
+            
+            # Check if rejection failure at 4,339–4,345 with RVOL≤0.9
+            rejection_zone_condition = RANGE_FADE_LONG_REJECTION_LOW <= last_high_5m <= RANGE_FADE_LONG_REJECTION_HIGH
+            range_fade_long_volume_condition = relative_volume_5m <= RANGE_FADE_LONG_VOLUME_FACTOR_MAX
+            range_fade_long_volume_not_high = relative_volume_5m < RANGE_FADE_VOLUME_FACTOR_MIN  # Do not take if RVOL_5m >= 1.2x
+            invalidation_condition = last_close_5m >= RANGE_FADE_LONG_INVALIDATION  # Close < 4,332
+            vwap_distance = abs(current_close_5m - vwap) / vwap * 100
+            vwap_distance_condition = vwap_distance <= VWAP_DISTANCE_MAX  # Skip if distance from VWAP>1.0%
+            
+            range_fade_long_ready = rejection_zone_condition and range_fade_long_volume_condition and range_fade_long_volume_not_high and invalidation_condition and vwap_distance_condition
+
+            logger.info("🔍 Setup 4 - Range-fade LONG Analysis:")
+            logger.info(f"   • Rejection failure at ${RANGE_FADE_LONG_REJECTION_LOW:,.2f}–${RANGE_FADE_LONG_REJECTION_HIGH:,.2f}: {'✅' if rejection_zone_condition else '❌'} (last high: {last_high_5m:,.2f})")
+            logger.info(f"   • Volume exhausted (≤{RANGE_FADE_LONG_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_long_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info(f"   • Volume not high (<{RANGE_FADE_VOLUME_FACTOR_MIN}x): {'✅' if range_fade_long_volume_not_high else '❌'} (current: {relative_volume_5m:.2f}x)")
+            logger.info(f"   • Invalidation: Close ≥ ${RANGE_FADE_LONG_INVALIDATION:,.2f}: {'✅' if invalidation_condition else '❌'} (last close: {last_close_5m:,.2f})")
+            logger.info(f"   • VWAP distance ≤{VWAP_DISTANCE_MAX}%: {'✅' if vwap_distance_condition else '❌'} (distance: {vwap_distance:.2f}%)")
+            logger.info(f"   • Range-fade Ready: {'🎯 YES' if range_fade_long_ready else '⏳ NO'}")
+
+            if range_fade_long_ready:
+                logger.info("")
+                logger.info("🎯 Setup 4 - Range-fade LONG conditions met - executing trade...")
+
+                try:
+                    play_alert_sound()
+                    logger.info("Alert sound played successfully")
+                except Exception as e:
+                    logger.error(f"Failed to play alert sound: {e}")
+
+                # Calculate entry, stop, and targets
+                entry_price = current_close_5m
+                stop_loss = last_high_5m * (1 + VWAP_DISTANCE_MAX) # VWAP distance as SL
+                tp1 = MID_LEVEL  # Mid-range target
+                tp2 = entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100)  # 2R target
+
+                trade_success, trade_result = execute_crypto_trade(
+                    cb_service=cb_service,
+                    trade_type="ETH Range-fade LONG (Athens Setup)",
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    take_profit=tp1,
+                    side="BUY",
+                    product=PRODUCT_ID
+                )
+
+                if trade_success:
+                    logger.info("🎉 Range-fade LONG trade executed successfully!")
+                    logger.info(f"Entry: ${entry_price:,.2f}")
+                    logger.info(f"Stop-loss: ${stop_loss:,.2f}")
+                    logger.info(f"TP1: ${tp1:,.2f}, TP2: ${tp2:,.2f}")
+                    logger.info("Strategy: Rejection failure at 4,339–4,345 with RVOL≤0.9")
+                    
+                    # Log trade to CSV
+                    trade_data = {
+                        'timestamp': datetime.now(UTC).isoformat(),
+                        'strategy': 'ETH-Range-Fade-Long',
+                        'symbol': 'ETH-PERP-INTX',
+                        'side': 'BUY',
+                        'entry_price': entry_price,
+                        'stop_loss': stop_loss,
+                        'take_profit': tp1,
+                        'position_size_usd': POSITION_SIZE_USD,
+                        'margin': MARGIN,
+                        'leverage': LEVERAGE,
+                        'volume_sma': avg_volume_5m,
+                        'volume_ratio': relative_volume_5m,
+                        'current_price': current_close_5m,
+                        'market_conditions': f"HOD=${HOD_LEVEL:,.1f}, LOD=${LOD_LEVEL:,.2f}",
+                        'trade_status': 'EXECUTED',
+                        'execution_time': datetime.now(UTC).isoformat(),
+                        'notes': f"Trigger: Range fade rejection, Volume: {relative_volume_5m:.2f}x SMA"
+                    }
+                    log_trade_to_csv(trade_data)
+                    
+                    # Save trigger state
+                    range_fade_long_state = {
+                        "triggered": True, 
+                        "trigger_ts": int(last_closed_5m['start']),
+                        "entry_price": entry_price
+                    }
+                    save_trigger_state(range_fade_long_state, RANGE_FADE_LONG_TRIGGER_FILE)
+                    trade_executed = True
+                else:
+                    logger.error(f"❌ Range-fade LONG trade failed: {trade_result}")
         
         # Check if any strategy was triggered
         if not trade_executed:
             logger.info("⏳ Waiting for setup conditions or monitoring active trade...")
-            logger.info(f"Setup 1 triggered: {breakout_retest_state.get('triggered', False)}")
-            logger.info(f"Setup 2 triggered: {liquidity_sweep_state.get('triggered', False)}")
-            logger.info(f"Setup 3 triggered: {range_fade_state.get('triggered', False)}")
-            logger.info(f"Setup 4 triggered: {breakdown_retest_state.get('triggered', False)}")
+            logger.info(f"Setup 1 triggered: {breakout_long_state.get('triggered', False)}")
+            logger.info(f"Setup 2 triggered: {range_fade_short_state.get('triggered', False)}")
+            logger.info(f"Setup 3 triggered: {breakdown_short_state.get('triggered', False)}")
+            logger.info(f"Setup 4 triggered: {range_fade_long_state.get('triggered', False)}")
         
-        logger.info("=== ETH Aug 30 Trading Strategy Alert completed ===")
+        logger.info("=== ETH Athens Trading Strategy Alert completed ===")
         return current_ts_5m
         
     except Exception as e:
-        logger.error(f"Error in ETH Aug 30 Trading Strategy Alert logic: {e}")
+        logger.error(f"Error in ETH Athens Trading Strategy Alert logic: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        logger.info("=== ETH Aug 30 Trading Strategy Alert completed (with error) ===")
+        logger.info("=== ETH Athens Trading Strategy Alert completed (with error) ===")
     return last_alert_ts
 
 def main():
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='ETH Aug 30 Intraday Trading Strategy Monitor with optional direction filter')
+    parser = argparse.ArgumentParser(description='ETH Athens Intraday Trading Strategy Monitor with optional direction filter')
     parser.add_argument('--direction', choices=['LONG', 'SHORT', 'BOTH'], default='BOTH',
                        help='Trading direction to monitor: LONG, SHORT, or BOTH (default: BOTH)')
     parser.add_argument('--test-csv', action='store_true', help='Test CSV logging functionality')
@@ -903,17 +918,17 @@ def main():
     
     direction = args.direction.upper()
     
-    logger.info("Starting ETH Aug 30 Intraday Trading Strategy Monitor")
+    logger.info("Starting ETH Athens Intraday Trading Strategy Monitor")
     if direction == 'BOTH':
-        logger.info("Strategy: ETH Aug 30 Intraday - 4 Executable Setups")
+        logger.info("Strategy: ETH Athens Intraday - 4 Executable Setups")
     else:
         logger.info(f"Strategy: {direction} only")
     logger.info("")
     logger.info("Strategy Summary:")
-    logger.info("Setup 1 - Breakout-Retest (LONG): 5m close > 4,486.97 (H +10 bps) with RVOL ≥ 1.25x")
-    logger.info("Setup 2 - Liquidity-Sweep Reclaim (LONG): Wick below 4,267.43 then 5m close back above low")
-    logger.info("Setup 3 - Range-Fade (SHORT): Rejection at 4,482–4,500 with RVOL ≤ 0.80x")
-    logger.info("Setup 4 - Breakdown-Retest (SHORT): 5m close < 4,263.16 (L -10 bps) with RVOL ≥ 1.50x")
+    logger.info("Setup 1 - Breakout LONG: 1m close > 4,490 and RVOL≥1.5× 5m SMA(20)")
+    logger.info("Setup 2 - Range-fade SHORT: Rejection at 4,480–4,487 with RVOL≤0.9")
+    logger.info("Setup 3 - Breakdown SHORT: 1m close < 4,337 and RVOL≥1.5× 5m SMA(20)")
+    logger.info("Setup 4 - Range-fade LONG: Rejection failure at 4,339–4,345 with RVOL≤0.9")
     logger.info(f"Position Size: ${POSITION_SIZE_USD:,} ({MARGIN} × {LEVERAGE}x)")
     logger.info("Volume: RVOL = vol(5m)/SMA20(5m)")
     logger.info("Risk: 0.5% per trade, max 1 concurrent trade")
