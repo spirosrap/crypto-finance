@@ -282,14 +282,22 @@ def setup_coinbase():
         raise ConnectionError("Failed to establish Coinbase connection after retries")
     return service
 
+def format_eth_price(price: float) -> str:
+    """Format ETH price to 1 decimal place for ETH-PERP-INTX"""
+    return f"{round(price, 1):.1f}"
+
 def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_loss: float, take_profit: float, 
                      margin: float = 250, leverage: int = 20, side: str = "BUY", product: str = PRODUCT_ID):
     def _execute_trade():
-        logger.info(f"Executing crypto trade: {trade_type} at ${entry_price:,.2f}")
+        logger.info(f"Executing crypto trade: {trade_type} at ${entry_price:,.1f}")
         logger.info(f"Trade params: Margin=${margin}, Leverage={leverage}x, Side={side}, Product={product}")
         
         # Fixed position size per requirement
         position_size_usd = POSITION_SIZE_USD
+        
+        # Format prices to correct precision for ETH-PERP-INTX
+        formatted_tp = format_eth_price(take_profit)
+        formatted_sl = format_eth_price(stop_loss)
         
         cmd = [
             sys.executable, 'trade_btc_perp.py',
@@ -297,8 +305,8 @@ def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_l
             '--side', side,
             '--size', str(position_size_usd),
             '--leverage', str(leverage),
-            '--tp', str(take_profit),
-            '--sl', str(stop_loss),
+            '--tp', formatted_tp,
+            '--sl', formatted_sl,
             '--no-confirm'
         ]
         logger.info(f"Executing command: {' '.join(cmd)}")
@@ -561,11 +569,11 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
 
-                # Calculate entry, stop, and targets
-                entry_price = current_close_5m
-                stop_loss = min(last_low_5m, entry_price * (1 - VWAP_DISTANCE_MAX)) # VWAP distance as SL
-                tp1 = entry_price * (1 + PER_TRADE_RISK_PCT / 100)
-                tp2 = entry_price * (1 + PER_TRADE_RISK_PCT * 2 / 100)
+                # Calculate entry, stop, and targets (rounded to 1 decimal place for ETH-PERP-INTX)
+                entry_price = round(current_close_5m, 1)
+                stop_loss = round(min(last_low_5m, entry_price * (1 - VWAP_DISTANCE_MAX)), 1) # VWAP distance as SL
+                tp1 = round(entry_price * (1 + PER_TRADE_RISK_PCT / 100), 1)
+                tp2 = round(entry_price * (1 + PER_TRADE_RISK_PCT * 2 / 100), 1)
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
@@ -650,11 +658,11 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
 
-                # Calculate entry, stop, and targets
-                entry_price = current_close_5m
-                stop_loss = last_high_5m * (1 + RANGE_FADE_SHORT_HIGH_BUFFER) # Above wick high + 0.05%
-                tp1 = MID_LEVEL  # Mid-range target
-                tp2 = entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100)  # 2R target
+                # Calculate entry, stop, and targets (rounded to 1 decimal place for ETH-PERP-INTX)
+                entry_price = round(current_close_5m, 1)
+                stop_loss = round(last_high_5m * (1 + RANGE_FADE_SHORT_HIGH_BUFFER), 1) # Above wick high + 0.05%
+                tp1 = round(MID_LEVEL, 1)  # Mid-range target
+                tp2 = round(entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100), 1)  # 2R target
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
@@ -733,11 +741,11 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
 
-                # Calculate entry, stop, and targets
-                entry_price = current_close_5m
-                stop_loss = entry_price * (1 + VWAP_DISTANCE_MAX) # VWAP distance as SL
-                tp1 = entry_price * (1 - PER_TRADE_RISK_PCT / 100)
-                tp2 = entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100)
+                # Calculate entry, stop, and targets (rounded to 1 decimal place for ETH-PERP-INTX)
+                entry_price = round(current_close_5m, 1)
+                stop_loss = round(entry_price * (1 + VWAP_DISTANCE_MAX), 1) # VWAP distance as SL
+                tp1 = round(entry_price * (1 - PER_TRADE_RISK_PCT / 100), 1)
+                tp2 = round(entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100), 1)
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
@@ -822,11 +830,11 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
 
-                # Calculate entry, stop, and targets
-                entry_price = current_close_5m
-                stop_loss = last_high_5m * (1 + VWAP_DISTANCE_MAX) # VWAP distance as SL
-                tp1 = MID_LEVEL  # Mid-range target
-                tp2 = entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100)  # 2R target
+                # Calculate entry, stop, and targets (rounded to 1 decimal place for ETH-PERP-INTX)
+                entry_price = round(current_close_5m, 1)
+                stop_loss = round(last_high_5m * (1 + VWAP_DISTANCE_MAX), 1) # VWAP distance as SL
+                tp1 = round(MID_LEVEL, 1)  # Mid-range target
+                tp2 = round(entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100), 1)  # 2R target
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
