@@ -172,10 +172,10 @@ LEVERAGE = 20  # Always margin x leverage = 250 x 20 = $5,000 position size
 RISK_PERCENTAGE = 0.5
 
 # Session snapshot (for reporting only) - New intraday context
-# Updated for Aug 30, 2025 BTC setup from Spiros
-TWENTY_FOUR_HOUR_LOW = 107492  # Day low: $107,492
-TWENTY_FOUR_HOUR_HIGH = 111334  # Day high: $111,334
-CURRENT_SPOT = 108339  # Current spot ≈ $108,339
+# Updated for Aug 31, 2025 BTC setup from Spiros
+TWENTY_FOUR_HOUR_LOW = 108100  # Day low: $108,100
+TWENTY_FOUR_HOUR_HIGH = 109500  # Day high: $109,500
+CURRENT_SPOT = 108800  # Current spot ≈ $108,800
 
 # Reference levels from 24h range
 ID_MID = (TWENTY_FOUR_HOUR_HIGH + TWENTY_FOUR_HOUR_LOW) / 2  # ID mid = (IDH+IDL)/2
@@ -183,10 +183,9 @@ ID_MID = (TWENTY_FOUR_HOUR_HIGH + TWENTY_FOUR_HOUR_LOW) / 2  # ID mid = (IDH+IDL
 # Strategy thresholds and filters
 ATR_PERCENT_MIN = 0.002  # ATR% < 0.2% minimum for trading
 RVOL_BREAKOUT_THRESHOLD = 1.5  # RVOL5 ≥ 1.5 for breakout
-RVOL_SWEEP_REJECT_THRESHOLD = 1.2  # RVOL5 ≥ 1.2 for sweep-reject
-RVOL_RANGE_FADE_THRESHOLD = 1.0  # RVOL5 ≥ 1.0 for range fade
-RVOL_VWAP_THRESHOLD = 1.2  # RVOL5 ≥ 1.2 for VWAP strategies
-RVOL_TREND_PULLBACK_THRESHOLD = 0.9  # RVOL5 ≤ 0.9 for trend pullback
+RVOL_REJECTION_THRESHOLD = 1.0  # RVOL5 falling for rejection
+RVOL_DIP_BUY_THRESHOLD = 1.2  # RVOL5 ≥ 1.2 for dip buy
+RVOL_BREAKDOWN_THRESHOLD = 1.7  # RVOL5 ≥ 1.7 for breakdown
 
 # Risk rules
 MAX_RISK_PER_PROBE = 0.5                 # ≤0.5R per probe
@@ -208,46 +207,35 @@ def load_trigger_state():
                 return json.load(f)
         except Exception:
             return {
-                "breakout_long_triggered": False,
-                "sweep_reject_short_triggered": False,
-                "range_fade_long_triggered": False,
-                "vwap_rejection_short_triggered": False,
-                "vwap_reclaim_long_triggered": False,
-                "trend_pullback_long_triggered": False,
+                "breakout_above_h_triggered": False,
+                "rejection_at_1095k_triggered": False,
+                "dip_buy_1083k_triggered": False,
+                "breakdown_below_l_triggered": False,
                 "last_trigger_ts": None,
                 "active_trade_direction": None,
                 "attempts_per_side": {"LONG": 0, "SHORT": 0},
-                "last_trigger_ts": None,
-                "active_trade_direction": None,
-                "attempts_per_side": {"LONG": 0, "SHORT": 0},
-                "sweep_reject_wick_high": None,
-                "range_fade_wick_low": None,
-                "vwap_reclaim_consecutive_closes": 0,
-                "trend_pullback_signal_bar_high": None,
-                "trend_pullback_signal_bar_low": None,
+                "breakout_high": None,
+                "rejection_lower_high": None,
+                "dip_buy_low": None,
+                "breakdown_low": None,
                 "idh": None,
                 "idl": None,
-                "vwap": None,
                 "atr5": None
             }
     return {
-        "breakout_long_triggered": False,
-        "sweep_reject_short_triggered": False,
-        "range_fade_long_triggered": False,
-        "vwap_rejection_short_triggered": False,
-        "vwap_reclaim_long_triggered": False,
-        "trend_pullback_long_triggered": False,
+        "breakout_above_h_triggered": False,
+        "rejection_at_1095k_triggered": False,
+        "dip_buy_1083k_triggered": False,
+        "breakdown_below_l_triggered": False,
         "last_trigger_ts": None,
         "active_trade_direction": None,
         "attempts_per_side": {"LONG": 0, "SHORT": 0},
-        "sweep_reject_wick_high": None,
-        "range_fade_wick_low": None,
-        "vwap_reclaim_consecutive_closes": 0,
-        "trend_pullback_signal_bar_high": None,
-        "trend_pullback_signal_bar_low": None,
+        "breakout_high": None,
+        "rejection_lower_high": None,
+        "dip_buy_low": None,
+        "breakdown_low": None,
         "idh": None,
         "idl": None,
-        "vwap": None,
         "atr5": None
     }
 
@@ -764,30 +752,7 @@ def check_bull_reversal(candles):
     
     return is_bull_reversal
 
-def check_vwap_reclaim_consecutive(candles_1m, vwap):
-    """
-    Check for 3 consecutive 1-minute closes above VWAP
-    
-    Args:
-        candles_1m: List of 1-minute candle data
-        vwap: VWAP value
-    
-    Returns:
-        True if 3 consecutive closes above VWAP
-    """
-    if len(candles_1m) < 4:  # Need at least 4 candles (current + 3 completed)
-        return False
-    
-    consecutive_count = 0
-    for i in range(1, 4):  # Check last 3 completed candles
-        candle = candles_1m[i]
-        close = float(get_candle_value(candle, 'close'))
-        if close > vwap:
-            consecutive_count += 1
-        else:
-            break
-    
-    return consecutive_count >= 3
+
 
 
 
@@ -795,20 +760,18 @@ def check_vwap_reclaim_consecutive(candles_1m, vwap):
 
 def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
     """
-    BTC Trading Setup for Aug 30, 2025 with automated execution and fixed position size (margin 250 × leverage 20 = $5,000):
+    BTC Trading Setup for Aug 31, 2025 with automated execution and fixed position size (margin 250 × leverage 20 = $5,000):
     
-    Setup	Bias	Trigger (5m close)	Entry	Invalidation (SL)	Targets
-    Breakout > IDH	Long	close > IDH and RVOL5 ≥ 1.5	Next pullback to IDH ± 0.25·ATR5	below IDH − 0.75·ATR5	TP1 = +1R, TP2 = +2R or PDH extension
-    Sweep-Reject @ IDH	Short	high wicks above IDH then close back < IDH and RVOL5 ≥ 1.2	on first 5m LH below IDH	above sweep high + 0.5·ATR5	TP1 = VWAP, TP2 = ID mid = (IDH+IDL)/2
-    Range Fade @ IDL	Long	low wicks below IDL then close back > IDL and RVOL5 ≥ 1.0	on first 5m HL above IDL	below sweep low − 0.5·ATR5	TP1 = VWAP, TP2 = ID mid
-    VWAP Rejection	Short	price retests VWAP from below and prints bear engulfing; RVOL5 ≥ 1.2	on break of pattern low	above VWAP + 0.5·ATR5	TP1 = ID mid, TP2 = IDL
-    VWAP Reclaim	Long	reclaim and hold > VWAP for 3 consecutive 1m closes; RVOL5 ≥ 1.2	first 5m HL above VWAP	below VWAP − 0.5·ATR5	TP1 = ID mid, TP2 = IDH
-    Trend Pullback	Long	15m EMA20 > EMA50 and pullback tags EMA20 with RVOL5 ≤ 0.9 then bull reversal	on break of signal bar high	below signal bar low − 0.5·ATR5	TP1 = recent swing high, TP2 = IDH
+    Setup	Side	Trigger (M5)	Entry	Stop	TP1	TP2	Confirm
+    Breakout > today's H	Long	Close > 109,500	109,520–109,650	109,150	110,800	112,000	RVOL ≥1.5× 20-SMA; no immediate sell delta spike
+    Rejection at 109.5k	Short	Wick + lower high under 109,500	109,450–109,520	109,800	108,700	108,100	RVOL↓ on the LH; tape slows
+    Dip buy near low	Long	Seller exhaust at 108,300 zone	108,250–108,350	107,950	109,000	109,450	Delta flips +; RVOL ≥1.2×
+    Breakdown < today's L	Short	Close < 108,100	108,050–107,950	108,350	107,200	106,400	RVOL ≥1.7×; momentum holds 3 bars
     
-    Filters:
-    • No trade if ATR5/close < 0.002 (ATR% < 0.2%).
-    • Skip longs if 15m structure is making LLs and below VWAP; skip shorts if making HHs and above VWAP.
-    • Prefer entries when spread ≤ 2 ticks and slippage stable.
+    Execution rules:
+    • Timeframes: trigger on M5, manage on M1–M5.
+    • Invalidate any long if M5 closes back below 109,500 after breakout; invalidate any short if M5 closes back above 109,500 after rejection.
+    • Skip longs if funding spikes > +0.02% across top venues; skip shorts if funding < −0.02%.
     
     Args:
         cb_service: Coinbase service instance
@@ -839,20 +802,11 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         start_ts_15m = int(start_15m.timestamp())
         end_ts_15m = int(end_15m.timestamp())
         
-        # Get 1-minute candles for VWAP reclaim strategy
-        start_1m = current_time - timedelta(hours=2)  # Get 2 hours of 1m data
-        end_1m = current_time
-        start_ts_1m = int(start_1m.timestamp())
-        end_ts_1m = int(end_1m.timestamp())
-        
         logger.info(f"Fetching 5-minute candles from {start_5m} to {end_5m}")
         candles_5m = safe_get_5m_candles(cb_service, PRODUCT_ID, start_ts_5m, end_ts_5m)
         
         logger.info(f"Fetching 15-minute candles from {start_15m} to {end_15m}")
         candles_15m = safe_get_15m_candles(cb_service, PRODUCT_ID, start_ts_15m, end_ts_15m)
-        
-        logger.info(f"Fetching 1-minute candles from {start_1m} to {end_1m}")
-        candles_1m = safe_get_1m_candles(cb_service, PRODUCT_ID, start_ts_1m, end_ts_1m)
         
         if not candles_5m or len(candles_5m) < 20:  # Need at least 20 5m candles for volume SMA
             logger.warning("Not enough 5-minute candle data for analysis")
@@ -891,9 +845,6 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         # Calculate technical indicators
         volume_sma_5m = calculate_volume_sma(candles_5m, 20)  # 20-period SMA for 5m
         atr5 = calculate_atr(candles_5m, 14)  # 14-period ATR on 5m
-        vwap = calculate_vwap(candles_5m)  # VWAP
-        ema20_15m = calculate_ema(candles_15m, 20)  # 20-period EMA on 15m
-        ema50_15m = calculate_ema(candles_15m, 50)  # 50-period EMA on 15m
         
         # Get intraday high and low
         idh, idl = get_intraday_high_low(candles_5m)
@@ -905,7 +856,6 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         # Update trigger state with current levels
         trigger_state["idh"] = idh
         trigger_state["idl"] = idl
-        trigger_state["vwap"] = vwap
         trigger_state["atr5"] = atr5
         
         # Check ATR filter (no trade if ATR5/close < 0.002)
@@ -918,7 +868,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         
         # --- Reporting ---
         logger.info("")
-        logger.info("🚀 Spiros—here are actionable BTC plays for Aug 30, 2025.")
+        logger.info("🚀 Spiros—here are actionable BTC plays for Aug 31, 2025.")
         logger.info(f"Current ~${current_price:,.0f}. Day range ${idl:,.0f}–${idh:,.0f}.")
         logger.info("")
         logger.info("📊 Rules:")
@@ -930,9 +880,7 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         # Show market state
         logger.info("📊 Market State:")
         logger.info(f"   • IDH: ${idh:,.0f}, IDL: ${idl:,.0f}, ID Mid: ${id_mid:,.0f}")
-        logger.info(f"   • VWAP: ${vwap:,.0f}")
         logger.info(f"   • ATR5: ${atr5:,.0f} ({atr_percent*100:.2f}%)")
-        logger.info(f"   • 15m EMA20: ${ema20_15m:,.0f}, EMA50: ${ema50_15m:,.0f}")
         logger.info(f"   • RVOL5: {rvol_vs_sma:.2f}× vs 5m SMA")
         logger.info("")
         
@@ -940,52 +888,40 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
         if long_strategies_enabled:
             logger.info("📊 LONG SETUPS:")
             logger.info("")
-            logger.info("1. Breakout > IDH")
-            logger.info(f"   • Trigger: 5m close > ${idh:,.0f} and RVOL5 ≥ {RVOL_BREAKOUT_THRESHOLD}")
-            logger.info(f"   • Entry: Next pullback to IDH ± {0.25*atr5:.0f}")
-            logger.info(f"   • Stop: Below IDH - {0.75*atr5:.0f}")
-            logger.info(f"   • Targets: TP1 = +1R, TP2 = +2R")
+            logger.info("1. Breakout > today's H")
+            logger.info(f"   • Trigger: M5 close > ${idh:,.0f} and RVOL5 ≥ {RVOL_BREAKOUT_THRESHOLD}")
+            logger.info(f"   • Entry: ${idh+20:,.0f}–${idh+150:,.0f}")
+            logger.info(f"   • Stop: ${idh-350:,.0f}")
+            logger.info(f"   • Targets: TP1 = ${idh+1300:,.0f}, TP2 = ${idh+2500:,.0f}")
             logger.info("")
-            logger.info("2. Range Fade @ IDL")
-            logger.info(f"   • Trigger: Low wicks below ${idl:,.0f} then close back > IDL and RVOL5 ≥ {RVOL_RANGE_FADE_THRESHOLD}")
-            logger.info(f"   • Entry: First 5m HL above IDL")
-            logger.info(f"   • Stop: Below sweep low - {0.5*atr5:.0f}")
-            logger.info(f"   • Targets: TP1 = VWAP, TP2 = ID mid")
-            logger.info("")
-            logger.info("3. VWAP Reclaim")
-            logger.info(f"   • Trigger: Reclaim and hold > VWAP for 3 consecutive 1m closes; RVOL5 ≥ {RVOL_VWAP_THRESHOLD}")
-            logger.info(f"   • Entry: First 5m HL above VWAP")
-            logger.info(f"   • Stop: Below VWAP - {0.5*atr5:.0f}")
-            logger.info(f"   • Targets: TP1 = ID mid, TP2 = IDH")
-            logger.info("")
-            logger.info("4. Trend Pullback")
-            logger.info(f"   • Trigger: 15m EMA20 > EMA50 and pullback tags EMA20 with RVOL5 ≤ {RVOL_TREND_PULLBACK_THRESHOLD} then bull reversal")
-            logger.info(f"   • Entry: Break of signal bar high")
-            logger.info(f"   • Stop: Below signal bar low - {0.5*atr5:.0f}")
-            logger.info(f"   • Targets: TP1 = recent swing high, TP2 = IDH")
+            logger.info("2. Dip buy near low")
+            logger.info(f"   • Trigger: Seller exhaust at ${idl+200:,.0f} zone")
+            logger.info(f"   • Entry: ${idl+150:,.0f}–${idl+250:,.0f}")
+            logger.info(f"   • Stop: ${idl-150:,.0f}")
+            logger.info(f"   • Targets: TP1 = ${idl+900:,.0f}, TP2 = ${idl+1350:,.0f}")
             logger.info("")
         
         if short_strategies_enabled:
             logger.info("📊 SHORT SETUPS:")
             logger.info("")
-            logger.info("1. Sweep-Reject @ IDH")
-            logger.info(f"   • Trigger: High wicks above ${idh:,.0f} then close back < IDH and RVOL5 ≥ {RVOL_SWEEP_REJECT_THRESHOLD}")
-            logger.info(f"   • Entry: First 5m LH below IDH")
-            logger.info(f"   • Stop: Above sweep high + {0.5*atr5:.0f}")
-            logger.info(f"   • Targets: TP1 = VWAP, TP2 = ID mid")
+            logger.info("1. Rejection at 109.5k")
+            logger.info(f"   • Trigger: Wick + lower high under ${idh:,.0f}")
+            logger.info(f"   • Entry: ${idh-50:,.0f}–${idh+20:,.0f}")
+            logger.info(f"   • Stop: ${idh+300:,.0f}")
+            logger.info(f"   • Targets: TP1 = ${idh-800:,.0f}, TP2 = ${idh-1400:,.0f}")
             logger.info("")
-            logger.info("2. VWAP Rejection")
-            logger.info(f"   • Trigger: Price retests VWAP from below and prints bear engulfing; RVOL5 ≥ {RVOL_VWAP_THRESHOLD}")
-            logger.info(f"   • Entry: Break of pattern low")
-            logger.info(f"   • Stop: Above VWAP + {0.5*atr5:.0f}")
-            logger.info(f"   • Targets: TP1 = ID mid, TP2 = IDL")
+            logger.info("2. Breakdown < today's L")
+            logger.info(f"   • Trigger: M5 close < ${idl:,.0f}")
+            logger.info(f"   • Entry: ${idl-50:,.0f}–${idl-150:,.0f}")
+            logger.info(f"   • Stop: ${idl+250:,.0f}")
+            logger.info(f"   • Targets: TP1 = ${idl-900:,.0f}, TP2 = ${idl-1700:,.0f}")
             logger.info("")
         
         logger.info(f"Current Price: ${current_price:,.2f}")
         logger.info(f"Last 5M Close: ${last_5m_close:,.2f}, High: ${last_5m_high:,.2f}, Low: ${last_5m_low:,.2f}")
         logger.info(f"5M Volume: {last_5m_volume:,.0f}, 5M SMA: {volume_sma_5m:,.0f}")
         logger.info("")
-        logger.info("Filters: No trade if ATR% < 0.2%. Skip longs if 15m structure making LLs below VWAP; skip shorts if making HHs above VWAP.")
+        logger.info("Filters: No trade if ATR% < 0.2%. Invalidate longs if M5 closes back below 109,500 after breakout; invalidate shorts if M5 closes back above 109,500 after rejection.")
         logger.info("")
         
         # --- Strategy Analysis ---
@@ -1006,30 +942,30 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
             logger.info(f"   • ATR%: {atr_percent*100:.3f}% (minimum: {ATR_PERCENT_MIN*100:.1f}%)")
             return last_alert_ts
         
-        # 1) Breakout > IDH - Long Strategy
+        # 1) Breakout > today's H - Long Strategy
         if (long_strategies_enabled and 
-            not trigger_state.get("breakout_long_triggered", False) and long_attempts < MAX_PROBES_PER_SIDE):
+            not trigger_state.get("breakout_above_h_triggered", False) and long_attempts < MAX_PROBES_PER_SIDE):
             
-            # Check if 5m close > IDH and RVOL5 ≥ 1.5
-            breakout_trigger_condition = last_5m_close > idh
+            # Check if M5 close > 109,500 and RVOL5 ≥ 1.5
+            breakout_trigger_condition = last_5m_close > 109500
             breakout_volume_condition = rvol_vs_sma >= RVOL_BREAKOUT_THRESHOLD
             
-            # Check if current price is in entry zone (IDH ± 0.25·ATR5)
-            entry_zone_low = idh - 0.25 * atr5
-            entry_zone_high = idh + 0.25 * atr5
+            # Check if current price is in entry zone (109,520–109,650)
+            entry_zone_low = 109520
+            entry_zone_high = 109650
             breakout_entry_condition = entry_zone_low <= current_price <= entry_zone_high
             
             breakout_ready = breakout_trigger_condition and breakout_entry_condition and breakout_volume_condition
 
-            logger.info("🔍 LONG - Breakout > IDH Analysis:")
-            logger.info(f"   • 5m close > ${idh:,.0f}: {'✅' if breakout_trigger_condition else '❌'} (last 5m close: ${last_5m_close:,.0f})")
+            logger.info("🔍 LONG - Breakout > today's H Analysis:")
+            logger.info(f"   • M5 close > $109,500: {'✅' if breakout_trigger_condition else '❌'} (last 5m close: ${last_5m_close:,.0f})")
             logger.info(f"   • RVOL5 ≥ {RVOL_BREAKOUT_THRESHOLD}: {'✅' if breakout_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
             logger.info(f"   • Entry in zone ${entry_zone_low:,.0f}–${entry_zone_high:,.0f}: {'✅' if breakout_entry_condition else '❌'} (current: ${current_price:,.0f})")
-            logger.info(f"   • Breakout > IDH Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
+            logger.info(f"   • Breakout > today's H Ready: {'🎯 YES' if breakout_ready else '⏳ NO'}")
 
             if breakout_ready:
                 logger.info("")
-                logger.info("🎯 LONG - Breakout > IDH conditions met - executing trade...")
+                logger.info("🎯 LONG - Breakout > today's H conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -1038,14 +974,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                     logger.error(f"Failed to play alert sound: {e}")
 
                 # Calculate stop loss and take profits
-                stop_loss = idh - 0.75 * atr5
-                risk_per_share = current_price - stop_loss
-                tp1 = current_price + risk_per_share  # +1R
-                tp2 = current_price + 2 * risk_per_share  # +2R
+                stop_loss = 109150
+                tp1 = 110800
+                tp2 = 112000
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="BTC Intraday - Breakout > IDH",
+                    trade_type="BTC Intraday - Breakout > today's H",
                     entry_price=current_price,
                     stop_loss=stop_loss,
                     take_profit=tp1,
@@ -1056,13 +991,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                 )
 
                 if trade_success:
-                    logger.info("🎉 Breakout > IDH trade executed successfully!")
+                    logger.info("🎉 Breakout > today's H trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'Breakout-IDH-LONG',
+                        'strategy': 'Breakout-AboveH',
                         'symbol': 'BTC-PERP-INTX',
                         'side': 'BUY',
                         'entry_price': current_price,
@@ -1074,48 +1009,49 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                         'volume_sma': volume_sma_5m,
                         'volume_ratio': rvol_vs_sma,
                         'current_price': current_price,
-                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}, VWAP: ${vwap:,.0f}",
+                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Trigger: 5m close > ${idh:,.0f}, RVOL: {rvol_vs_sma:.2f}x, ATR: ${atr5:.0f}"
+                        'notes': f"M5 close >109500; avoid if sell delta spike, RVOL: {rvol_vs_sma:.2f}x"
                     }
                     log_trade_to_csv(trade_data)
                     
-                    trigger_state["breakout_long_triggered"] = True
+                    trigger_state["breakout_above_h_triggered"] = True
                     trigger_state["active_trade_direction"] = "LONG"
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
                     trigger_state["attempts_per_side"]["LONG"] = long_attempts + 1
                     save_trigger_state(trigger_state)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Breakout > IDH trade failed: {trade_result}")
+                    logger.error(f"❌ Breakout > today's H trade failed: {trade_result}")
         
-        # 2) Sweep-Reject @ IDH - Short Strategy
+        # 2) Rejection at 109.5k - Short Strategy
         if (short_strategies_enabled and not trade_executed and
-            not trigger_state.get("sweep_reject_short_triggered", False) and short_attempts < MAX_PROBES_PER_SIDE):
+            not trigger_state.get("rejection_at_1095k_triggered", False) and short_attempts < MAX_PROBES_PER_SIDE):
             
-            # Check for high wicks above IDH then close back < IDH and RVOL5 ≥ 1.2
-            sweep_reject_wick_condition = last_5m_high > idh
-            sweep_reject_close_condition = last_5m_close < idh
-            sweep_reject_volume_condition = rvol_vs_sma >= RVOL_SWEEP_REJECT_THRESHOLD
+            # Check for wick + lower high under 109,500
+            rejection_wick_condition = last_5m_high > 109500  # Wick above 109.5k
+            rejection_lower_high_condition = last_5m_close < 109500  # Lower high under 109.5k
+            rejection_volume_condition = rvol_vs_sma < RVOL_REJECTION_THRESHOLD  # RVOL falling
             
-            # Check if current price is in entry zone (first 5m LH below IDH)
-            # For simplicity, we'll check if current price is below IDH
-            sweep_reject_entry_condition = current_price < idh
+            # Check if current price is in entry zone (109,450–109,520)
+            entry_zone_low = 109450
+            entry_zone_high = 109520
+            rejection_entry_condition = entry_zone_low <= current_price <= entry_zone_high
             
-            sweep_reject_ready = sweep_reject_wick_condition and sweep_reject_close_condition and sweep_reject_entry_condition and sweep_reject_volume_condition
+            rejection_ready = rejection_wick_condition and rejection_lower_high_condition and rejection_entry_condition and rejection_volume_condition
 
             logger.info("")
-            logger.info("🔍 SHORT - Sweep-Reject @ IDH Analysis:")
-            logger.info(f"   • High wicks above ${idh:,.0f}: {'✅' if sweep_reject_wick_condition else '❌'} (last 5m high: ${last_5m_high:,.0f})")
-            logger.info(f"   • Close back < IDH: {'✅' if sweep_reject_close_condition else '❌'} (last 5m close: ${last_5m_close:,.0f})")
-            logger.info(f"   • RVOL5 ≥ {RVOL_SWEEP_REJECT_THRESHOLD}: {'✅' if sweep_reject_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
-            logger.info(f"   • Entry below IDH: {'✅' if sweep_reject_entry_condition else '❌'} (current: ${current_price:,.0f})")
-            logger.info(f"   • Sweep-Reject @ IDH Ready: {'🎯 YES' if sweep_reject_ready else '⏳ NO'}")
+            logger.info("🔍 SHORT - Rejection at 109.5k Analysis:")
+            logger.info(f"   • Wick above $109,500: {'✅' if rejection_wick_condition else '❌'} (last 5m high: ${last_5m_high:,.0f})")
+            logger.info(f"   • Lower high under 109.5k: {'✅' if rejection_lower_high_condition else '❌'} (last 5m close: ${last_5m_close:,.0f})")
+            logger.info(f"   • RVOL falling: {'✅' if rejection_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
+            logger.info(f"   • Entry in zone ${entry_zone_low:,.0f}–${entry_zone_high:,.0f}: {'✅' if rejection_entry_condition else '❌'} (current: ${current_price:,.0f})")
+            logger.info(f"   • Rejection at 109.5k Ready: {'🎯 YES' if rejection_ready else '⏳ NO'}")
 
-            if sweep_reject_ready:
+            if rejection_ready:
                 logger.info("")
-                logger.info("🎯 SHORT - Sweep-Reject @ IDH conditions met - executing trade...")
+                logger.info("🎯 SHORT - Rejection at 109.5k conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -1124,13 +1060,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                     logger.error(f"Failed to play alert sound: {e}")
 
                 # Calculate stop loss and take profits
-                stop_loss = last_5m_high + 0.5 * atr5  # Above sweep high + 0.5·ATR5
-                tp1 = vwap  # TP1 = VWAP
-                tp2 = id_mid  # TP2 = ID mid
+                stop_loss = 109800
+                tp1 = 108700
+                tp2 = 108100
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="BTC Intraday - Sweep-Reject @ IDH",
+                    trade_type="BTC Intraday - Rejection at 109.5k",
                     entry_price=current_price,
                     stop_loss=stop_loss,
                     take_profit=tp1,
@@ -1141,13 +1077,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                 )
 
                 if trade_success:
-                    logger.info("🎉 Sweep-Reject @ IDH trade executed successfully!")
+                    logger.info("🎉 Rejection at 109.5k trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'Sweep-Reject-IDH-SHORT',
+                        'strategy': 'Range-Reject-1095',
                         'symbol': 'BTC-PERP-INTX',
                         'side': 'SELL',
                         'entry_price': current_price,
@@ -1159,49 +1095,48 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                         'volume_sma': volume_sma_5m,
                         'volume_ratio': rvol_vs_sma,
                         'current_price': current_price,
-                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}, VWAP: ${vwap:,.0f}",
+                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Wick > ${idh:,.0f}, close < IDH, RVOL: {rvol_vs_sma:.2f}x, ATR: ${atr5:.0f}"
+                        'notes': f"Lower high under 109500, RVOL: {rvol_vs_sma:.2f}x"
                     }
                     log_trade_to_csv(trade_data)
                     
-                    trigger_state["sweep_reject_short_triggered"] = True
+                    trigger_state["rejection_at_1095k_triggered"] = True
                     trigger_state["active_trade_direction"] = "SHORT"
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
                     trigger_state["attempts_per_side"]["SHORT"] = short_attempts + 1
-                    trigger_state["sweep_reject_wick_high"] = last_5m_high
+                    trigger_state["rejection_lower_high"] = last_5m_high
                     save_trigger_state(trigger_state)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Sweep-Reject @ IDH trade failed: {trade_result}")
+                    logger.error(f"❌ Rejection at 109.5k trade failed: {trade_result}")
         
-        # 3) Range Fade @ IDL - Long Strategy
+        # 3) Dip buy near low - Long Strategy
         if (long_strategies_enabled and not trade_executed and
-            not trigger_state.get("range_fade_long_triggered", False) and long_attempts < MAX_PROBES_PER_SIDE):
+            not trigger_state.get("dip_buy_1083k_triggered", False) and long_attempts < MAX_PROBES_PER_SIDE):
             
-            # Check for low wicks below IDL then close back > IDL and RVOL5 ≥ 1.0
-            range_fade_wick_condition = last_5m_low < idl
-            range_fade_close_condition = last_5m_close > idl
-            range_fade_volume_condition = rvol_vs_sma >= RVOL_RANGE_FADE_THRESHOLD
+            # Check for seller exhaust at 108,300 zone
+            dip_buy_exhaust_condition = last_5m_low <= 108300  # Seller exhaust at 108.3k zone
+            dip_buy_volume_condition = rvol_vs_sma >= RVOL_DIP_BUY_THRESHOLD  # RVOL ≥ 1.2×
             
-            # Check if current price is in entry zone (first 5m HL above IDL)
-            # For simplicity, we'll check if current price is above IDL
-            range_fade_entry_condition = current_price > idl
+            # Check if current price is in entry zone (108,250–108,350)
+            entry_zone_low = 108250
+            entry_zone_high = 108350
+            dip_buy_entry_condition = entry_zone_low <= current_price <= entry_zone_high
             
-            range_fade_ready = range_fade_wick_condition and range_fade_close_condition and range_fade_entry_condition and range_fade_volume_condition
+            dip_buy_ready = dip_buy_exhaust_condition and dip_buy_entry_condition and dip_buy_volume_condition
 
             logger.info("")
-            logger.info("🔍 LONG - Range Fade @ IDL Analysis:")
-            logger.info(f"   • Low wicks below ${idl:,.0f}: {'✅' if range_fade_wick_condition else '❌'} (last 5m low: ${last_5m_low:,.0f})")
-            logger.info(f"   • Close back > IDL: {'✅' if range_fade_close_condition else '❌'} (last 5m close: ${last_5m_close:,.0f})")
-            logger.info(f"   • RVOL5 ≥ {RVOL_RANGE_FADE_THRESHOLD}: {'✅' if range_fade_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
-            logger.info(f"   • Entry above IDL: {'✅' if range_fade_entry_condition else '❌'} (current: ${current_price:,.0f})")
-            logger.info(f"   • Range Fade @ IDL Ready: {'🎯 YES' if range_fade_ready else '⏳ NO'}")
+            logger.info("🔍 LONG - Dip buy near low Analysis:")
+            logger.info(f"   • Seller exhaust at 108.3k zone: {'✅' if dip_buy_exhaust_condition else '❌'} (last 5m low: ${last_5m_low:,.0f})")
+            logger.info(f"   • RVOL5 ≥ {RVOL_DIP_BUY_THRESHOLD}: {'✅' if dip_buy_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
+            logger.info(f"   • Entry in zone ${entry_zone_low:,.0f}–${entry_zone_high:,.0f}: {'✅' if dip_buy_entry_condition else '❌'} (current: ${current_price:,.0f})")
+            logger.info(f"   • Dip buy near low Ready: {'🎯 YES' if dip_buy_ready else '⏳ NO'}")
 
-            if range_fade_ready:
+            if dip_buy_ready:
                 logger.info("")
-                logger.info("🎯 LONG - Range Fade @ IDL conditions met - executing trade...")
+                logger.info("🎯 LONG - Dip buy near low conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -1210,13 +1145,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                     logger.error(f"Failed to play alert sound: {e}")
 
                 # Calculate stop loss and take profits
-                stop_loss = last_5m_low - 0.5 * atr5  # Below sweep low - 0.5·ATR5
-                tp1 = vwap  # TP1 = VWAP
-                tp2 = id_mid  # TP2 = ID mid
+                stop_loss = 107950
+                tp1 = 109000
+                tp2 = 109450
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="BTC Intraday - Range Fade @ IDL",
+                    trade_type="BTC Intraday - Dip buy near low",
                     entry_price=current_price,
                     stop_loss=stop_loss,
                     take_profit=tp1,
@@ -1227,13 +1162,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                 )
 
                 if trade_success:
-                    logger.info("🎉 Range Fade @ IDL trade executed successfully!")
+                    logger.info("🎉 Dip buy near low trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'Range-Fade-IDL-LONG',
+                        'strategy': 'Dip-Buy-1083',
                         'symbol': 'BTC-PERP-INTX',
                         'side': 'BUY',
                         'entry_price': current_price,
@@ -1245,49 +1180,48 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                         'volume_sma': volume_sma_5m,
                         'volume_ratio': rvol_vs_sma,
                         'current_price': current_price,
-                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}, VWAP: ${vwap:,.0f}",
+                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"Wick < ${idl:,.0f}, close > IDL, RVOL: {rvol_vs_sma:.2f}x, ATR: ${atr5:.0f}"
+                        'notes': f"Buyer absorption at 108.3k, RVOL: {rvol_vs_sma:.2f}x"
                     }
                     log_trade_to_csv(trade_data)
                     
-                    trigger_state["range_fade_long_triggered"] = True
+                    trigger_state["dip_buy_1083k_triggered"] = True
                     trigger_state["active_trade_direction"] = "LONG"
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
                     trigger_state["attempts_per_side"]["LONG"] = long_attempts + 1
-                    trigger_state["range_fade_wick_low"] = last_5m_low
+                    trigger_state["dip_buy_low"] = last_5m_low
                     save_trigger_state(trigger_state)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ Range Fade @ IDL trade failed: {trade_result}")
+                    logger.error(f"❌ Dip buy near low trade failed: {trade_result}")
         
-        # 4) VWAP Rejection - Short Strategy
+        # 4) Breakdown < today's L - Short Strategy
         if (short_strategies_enabled and not trade_executed and
-            not trigger_state.get("vwap_rejection_short_triggered", False) and short_attempts < MAX_PROBES_PER_SIDE):
+            not trigger_state.get("breakdown_below_l_triggered", False) and short_attempts < MAX_PROBES_PER_SIDE):
             
-            # Check for price retests VWAP from below and prints bear engulfing; RVOL5 ≥ 1.2
-            vwap_rejection_retest_condition = current_price < vwap and last_5m_close > vwap  # Retest VWAP from below
-            vwap_rejection_pattern_condition = check_bear_engulfing(candles_5m)  # Bear engulfing pattern
-            vwap_rejection_volume_condition = rvol_vs_sma >= RVOL_VWAP_THRESHOLD
+            # Check for M5 close < 108,100 and RVOL5 ≥ 1.7
+            breakdown_trigger_condition = last_5m_close < 108100
+            breakdown_volume_condition = rvol_vs_sma >= RVOL_BREAKDOWN_THRESHOLD
             
-            # Check if current price is in entry zone (break of pattern low)
-            # For simplicity, we'll check if current price is below VWAP
-            vwap_rejection_entry_condition = current_price < vwap
+            # Check if current price is in entry zone (108,050–107,950)
+            entry_zone_low = 107950
+            entry_zone_high = 108050
+            breakdown_entry_condition = entry_zone_low <= current_price <= entry_zone_high
             
-            vwap_rejection_ready = vwap_rejection_retest_condition and vwap_rejection_pattern_condition and vwap_rejection_entry_condition and vwap_rejection_volume_condition
+            breakdown_ready = breakdown_trigger_condition and breakdown_entry_condition and breakdown_volume_condition
 
             logger.info("")
-            logger.info("🔍 SHORT - VWAP Rejection Analysis:")
-            logger.info(f"   • Retest VWAP from below: {'✅' if vwap_rejection_retest_condition else '❌'} (current: ${current_price:,.0f}, VWAP: ${vwap:,.0f})")
-            logger.info(f"   • Bear engulfing pattern: {'✅' if vwap_rejection_pattern_condition else '❌'}")
-            logger.info(f"   • RVOL5 ≥ {RVOL_VWAP_THRESHOLD}: {'✅' if vwap_rejection_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
-            logger.info(f"   • Entry below VWAP: {'✅' if vwap_rejection_entry_condition else '❌'} (current: ${current_price:,.0f})")
-            logger.info(f"   • VWAP Rejection Ready: {'🎯 YES' if vwap_rejection_ready else '⏳ NO'}")
+            logger.info("🔍 SHORT - Breakdown < today's L Analysis:")
+            logger.info(f"   • M5 close < $108,100: {'✅' if breakdown_trigger_condition else '❌'} (last 5m close: ${last_5m_close:,.0f})")
+            logger.info(f"   • RVOL5 ≥ {RVOL_BREAKDOWN_THRESHOLD}: {'✅' if breakdown_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
+            logger.info(f"   • Entry in zone ${entry_zone_low:,.0f}–${entry_zone_high:,.0f}: {'✅' if breakdown_entry_condition else '❌'} (current: ${current_price:,.0f})")
+            logger.info(f"   • Breakdown < today's L Ready: {'🎯 YES' if breakdown_ready else '⏳ NO'}")
 
-            if vwap_rejection_ready:
+            if breakdown_ready:
                 logger.info("")
-                logger.info("🎯 SHORT - VWAP Rejection conditions met - executing trade...")
+                logger.info("🎯 SHORT - Breakdown < today's L conditions met - executing trade...")
 
                 try:
                     play_alert_sound()
@@ -1296,13 +1230,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                     logger.error(f"Failed to play alert sound: {e}")
 
                 # Calculate stop loss and take profits
-                stop_loss = vwap + 0.5 * atr5  # Above VWAP + 0.5·ATR5
-                tp1 = id_mid  # TP1 = ID mid
-                tp2 = idl  # TP2 = IDL
+                stop_loss = 108350
+                tp1 = 107200
+                tp2 = 106400
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
-                    trade_type="BTC Intraday - VWAP Rejection",
+                    trade_type="BTC Intraday - Breakdown < today's L",
                     entry_price=current_price,
                     stop_loss=stop_loss,
                     take_profit=tp1,
@@ -1313,13 +1247,13 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                 )
 
                 if trade_success:
-                    logger.info("🎉 VWAP Rejection trade executed successfully!")
+                    logger.info("🎉 Breakdown < today's L trade executed successfully!")
                     logger.info(f"Trade output: {trade_result}")
                     
                     # Log trade to CSV
                     trade_data = {
                         'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'VWAP-Rejection-SHORT',
+                        'strategy': 'Breakdown-BelowL',
                         'symbol': 'BTC-PERP-INTX',
                         'side': 'SELL',
                         'entry_price': current_price,
@@ -1331,202 +1265,34 @@ def btc_intraday_alert(cb_service, last_alert_ts=None, direction='BOTH'):
                         'volume_sma': volume_sma_5m,
                         'volume_ratio': rvol_vs_sma,
                         'current_price': current_price,
-                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}, VWAP: ${vwap:,.0f}",
+                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}",
                         'trade_status': 'EXECUTED',
                         'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"VWAP retest, bear engulfing, RVOL: {rvol_vs_sma:.2f}x, ATR: ${atr5:.0f}"
+                        'notes': f"M5 close <108100; hold momentum, RVOL: {rvol_vs_sma:.2f}x"
                     }
                     log_trade_to_csv(trade_data)
                     
-                    trigger_state["vwap_rejection_short_triggered"] = True
+                    trigger_state["breakdown_below_l_triggered"] = True
                     trigger_state["active_trade_direction"] = "SHORT"
                     trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
                     trigger_state["attempts_per_side"]["SHORT"] = short_attempts + 1
+                    trigger_state["breakdown_low"] = last_5m_low
                     save_trigger_state(trigger_state)
                     trade_executed = True
                 else:
-                    logger.error(f"❌ VWAP Rejection trade failed: {trade_result}")
+                    logger.error(f"❌ Breakdown < today's L trade failed: {trade_result}")
         
-        # 5) VWAP Reclaim - Long Strategy
-        if (long_strategies_enabled and not trade_executed and
-            not trigger_state.get("vwap_reclaim_long_triggered", False) and long_attempts < MAX_PROBES_PER_SIDE):
-            
-            # Check for reclaim and hold > VWAP for 3 consecutive 1m closes; RVOL5 ≥ 1.2
-            vwap_reclaim_consecutive_condition = check_vwap_reclaim_consecutive(candles_1m, vwap)
-            vwap_reclaim_volume_condition = rvol_vs_sma >= RVOL_VWAP_THRESHOLD
-            
-            # Check if current price is in entry zone (first 5m HL above VWAP)
-            vwap_reclaim_entry_condition = current_price > vwap
-            
-            vwap_reclaim_ready = vwap_reclaim_consecutive_condition and vwap_reclaim_entry_condition and vwap_reclaim_volume_condition
 
-            logger.info("")
-            logger.info("🔍 LONG - VWAP Reclaim Analysis:")
-            logger.info(f"   • 3 consecutive 1m closes > VWAP: {'✅' if vwap_reclaim_consecutive_condition else '❌'} (current: ${current_price:,.0f}, VWAP: ${vwap:,.0f})")
-            logger.info(f"   • RVOL5 ≥ {RVOL_VWAP_THRESHOLD}: {'✅' if vwap_reclaim_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
-            logger.info(f"   • Entry above VWAP: {'✅' if vwap_reclaim_entry_condition else '❌'} (current: ${current_price:,.0f})")
-            logger.info(f"   • VWAP Reclaim Ready: {'🎯 YES' if vwap_reclaim_ready else '⏳ NO'}")
-
-            if vwap_reclaim_ready:
-                logger.info("")
-                logger.info("🎯 LONG - VWAP Reclaim conditions met - executing trade...")
-
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-
-                # Calculate stop loss and take profits
-                stop_loss = vwap - 0.5 * atr5  # Below VWAP - 0.5·ATR5
-                tp1 = id_mid  # TP1 = ID mid
-                tp2 = idh  # TP2 = IDH
-
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="BTC Intraday - VWAP Reclaim",
-                    entry_price=current_price,
-                    stop_loss=stop_loss,
-                    take_profit=tp1,
-                    margin=MARGIN,
-                    leverage=LEVERAGE,
-                    side="BUY",
-                    product=PRODUCT_ID
-                )
-
-                if trade_success:
-                    logger.info("🎉 VWAP Reclaim trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                    
-                    # Log trade to CSV
-                    trade_data = {
-                        'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'VWAP-Reclaim-LONG',
-                        'symbol': 'BTC-PERP-INTX',
-                        'side': 'BUY',
-                        'entry_price': current_price,
-                        'stop_loss': stop_loss,
-                        'take_profit': tp1,
-                        'position_size_usd': MARGIN * LEVERAGE,
-                        'margin': MARGIN,
-                        'leverage': LEVERAGE,
-                        'volume_sma': volume_sma_5m,
-                        'volume_ratio': rvol_vs_sma,
-                        'current_price': current_price,
-                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}, VWAP: ${vwap:,.0f}",
-                        'trade_status': 'EXECUTED',
-                        'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"VWAP reclaim, RVOL: {rvol_vs_sma:.2f}x, ATR: ${atr5:.0f}"
-                    }
-                    log_trade_to_csv(trade_data)
-                    
-                    trigger_state["vwap_reclaim_long_triggered"] = True
-                    trigger_state["active_trade_direction"] = "LONG"
-                    trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
-                    trigger_state["attempts_per_side"]["LONG"] = long_attempts + 1
-                    save_trigger_state(trigger_state)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ VWAP Reclaim trade failed: {trade_result}")
-        
-        # 6) Trend Pullback - Long Strategy
-        if (long_strategies_enabled and not trade_executed and
-            not trigger_state.get("trend_pullback_long_triggered", False) and long_attempts < MAX_PROBES_PER_SIDE):
-            
-            # Check for 15m EMA20 > EMA50 and pullback tags EMA20 with RVOL5 ≤ 0.9 then bull reversal
-            trend_pullback_ema_condition = ema20_15m > ema50_15m
-            trend_pullback_pullback_condition = current_price <= ema20_15m  # Pullback tags EMA20
-            trend_pullback_volume_condition = rvol_vs_sma <= RVOL_TREND_PULLBACK_THRESHOLD
-            trend_pullback_reversal_condition = check_bull_reversal(candles_5m)  # Bull reversal
-            
-            # Check if current price is in entry zone (break of signal bar high)
-            # For simplicity, we'll check if current price is above EMA20
-            trend_pullback_entry_condition = current_price > ema20_15m
-            
-            trend_pullback_ready = trend_pullback_ema_condition and trend_pullback_pullback_condition and trend_pullback_volume_condition and trend_pullback_reversal_condition and trend_pullback_entry_condition
-
-            logger.info("")
-            logger.info("🔍 LONG - Trend Pullback Analysis:")
-            logger.info(f"   • 15m EMA20 > EMA50: {'✅' if trend_pullback_ema_condition else '❌'} (EMA20: ${ema20_15m:,.0f}, EMA50: ${ema50_15m:,.0f})")
-            logger.info(f"   • Pullback tags EMA20: {'✅' if trend_pullback_pullback_condition else '❌'} (current: ${current_price:,.0f})")
-            logger.info(f"   • RVOL5 ≤ {RVOL_TREND_PULLBACK_THRESHOLD}: {'✅' if trend_pullback_volume_condition else '❌'} (RVOL: {rvol_vs_sma:.2f}×)")
-            logger.info(f"   • Bull reversal: {'✅' if trend_pullback_reversal_condition else '❌'}")
-            logger.info(f"   • Entry above EMA20: {'✅' if trend_pullback_entry_condition else '❌'} (current: ${current_price:,.0f})")
-            logger.info(f"   • Trend Pullback Ready: {'🎯 YES' if trend_pullback_ready else '⏳ NO'}")
-
-            if trend_pullback_ready:
-                logger.info("")
-                logger.info("🎯 LONG - Trend Pullback conditions met - executing trade...")
-
-                try:
-                    play_alert_sound()
-                    logger.info("Alert sound played successfully")
-                except Exception as e:
-                    logger.error(f"Failed to play alert sound: {e}")
-
-                # Calculate stop loss and take profits
-                stop_loss = last_5m_low - 0.5 * atr5  # Below signal bar low - 0.5·ATR5
-                tp1 = idh  # TP1 = recent swing high (simplified to IDH)
-                tp2 = idh  # TP2 = IDH
-
-                trade_success, trade_result = execute_crypto_trade(
-                    cb_service=cb_service,
-                    trade_type="BTC Intraday - Trend Pullback",
-                    entry_price=current_price,
-                    stop_loss=stop_loss,
-                    take_profit=tp1,
-                    margin=MARGIN,
-                    leverage=LEVERAGE,
-                    side="BUY",
-                    product=PRODUCT_ID
-                )
-
-                if trade_success:
-                    logger.info("🎉 Trend Pullback trade executed successfully!")
-                    logger.info(f"Trade output: {trade_result}")
-                    
-                    # Log trade to CSV
-                    trade_data = {
-                        'timestamp': datetime.now(UTC).isoformat(),
-                        'strategy': 'Trend-Pullback-LONG',
-                        'symbol': 'BTC-PERP-INTX',
-                        'side': 'BUY',
-                        'entry_price': current_price,
-                        'stop_loss': stop_loss,
-                        'take_profit': tp1,
-                        'position_size_usd': MARGIN * LEVERAGE,
-                        'margin': MARGIN,
-                        'leverage': LEVERAGE,
-                        'volume_sma': volume_sma_5m,
-                        'volume_ratio': rvol_vs_sma,
-                        'current_price': current_price,
-                        'market_conditions': f"IDH: ${idh:,.0f}, IDL: ${idl:,.0f}, VWAP: ${vwap:,.0f}",
-                        'trade_status': 'EXECUTED',
-                        'execution_time': datetime.now(UTC).isoformat(),
-                        'notes': f"EMA20: ${ema20_15m:,.0f}, EMA50: ${ema50_15m:,.0f}, RVOL: {rvol_vs_sma:.2f}x, ATR: ${atr5:.0f}"
-                    }
-                    log_trade_to_csv(trade_data)
-                    
-                    trigger_state["trend_pullback_long_triggered"] = True
-                    trigger_state["active_trade_direction"] = "LONG"
-                    trigger_state["last_trigger_ts"] = int(get_candle_value(last_5m, 'start'))
-                    trigger_state["attempts_per_side"]["LONG"] = long_attempts + 1
-                    save_trigger_state(trigger_state)
-                    trade_executed = True
-                else:
-                    logger.error(f"❌ Trend Pullback trade failed: {trade_result}")
         
         if not trade_executed:
             logger.info("")
             logger.info("⏳ No trade conditions met for any strategy")
-            logger.info(f"Breakout > IDH triggered: {trigger_state.get('breakout_long_triggered', False)}")
-            logger.info(f"Sweep-Reject @ IDH triggered: {trigger_state.get('sweep_reject_short_triggered', False)}")
-            logger.info(f"Range Fade @ IDL triggered: {trigger_state.get('range_fade_long_triggered', False)}")
-            logger.info(f"VWAP Rejection triggered: {trigger_state.get('vwap_rejection_short_triggered', False)}")
-            logger.info(f"VWAP Reclaim triggered: {trigger_state.get('vwap_reclaim_long_triggered', False)}")
-            logger.info(f"Trend Pullback triggered: {trigger_state.get('trend_pullback_long_triggered', False)}")
+            logger.info(f"Breakout > today's H triggered: {trigger_state.get('breakout_above_h_triggered', False)}")
+            logger.info(f"Rejection at 109.5k triggered: {trigger_state.get('rejection_at_1095k_triggered', False)}")
+            logger.info(f"Dip buy near low triggered: {trigger_state.get('dip_buy_1083k_triggered', False)}")
+            logger.info(f"Breakdown < today's L triggered: {trigger_state.get('breakdown_below_l_triggered', False)}")
             logger.info(f"Active trade direction: {trigger_state.get('active_trade_direction', 'None')}")
-            logger.info(f"Current IDH: ${idh:,.0f}, IDL: ${idl:,.0f}, VWAP: ${vwap:,.0f}")
+            logger.info(f"Current IDH: ${idh:,.0f}, IDL: ${idl:,.0f}")
             logger.info(f"ATR5: ${atr5:.0f} ({atr_percent*100:.2f}%), RVOL5: {rvol_vs_sma:.2f}×")
         
         logger.info("=== Spiros — BTC Intraday setup completed ===")
@@ -1558,19 +1324,17 @@ def main():
     logger.info("  python crypto_alert_monitor.py --direction LONG   # Monitor only LONG strategies")
     logger.info("  python crypto_alert_monitor.py --direction SHORT  # Monitor only SHORT strategies")
     logger.info("")
-    logger.info("BTC Intraday Strategy Overview (Aug 30, 2025 Setup):")
+    logger.info("BTC Intraday Strategy Overview (Aug 31, 2025 Setup):")
     logger.info("LONG SETUPS:")
-    logger.info(f"  • Breakout > IDH: 5m close > IDH and RVOL5 ≥ {RVOL_BREAKOUT_THRESHOLD} → Next pullback to IDH ± 0.25·ATR5; Stop below IDH - 0.75·ATR5; Targets TP1 = +1R, TP2 = +2R")
-    logger.info(f"  • Range Fade @ IDL: Low wicks below IDL then close back > IDL and RVOL5 ≥ {RVOL_RANGE_FADE_THRESHOLD} → First 5m HL above IDL; Stop below sweep low - 0.5·ATR5; Targets TP1 = VWAP, TP2 = ID mid")
-    logger.info(f"  • VWAP Reclaim: Reclaim and hold > VWAP for 3 consecutive 1m closes; RVOL5 ≥ {RVOL_VWAP_THRESHOLD} → First 5m HL above VWAP; Stop below VWAP - 0.5·ATR5; Targets TP1 = ID mid, TP2 = IDH")
-    logger.info(f"  • Trend Pullback: 15m EMA20 > EMA50 and pullback tags EMA20 with RVOL5 ≤ {RVOL_TREND_PULLBACK_THRESHOLD} then bull reversal → Break of signal bar high; Stop below signal bar low - 0.5·ATR5; Targets TP1 = recent swing high, TP2 = IDH")
+    logger.info(f"  • Breakout > today's H: M5 close > 109,500 and RVOL5 ≥ {RVOL_BREAKOUT_THRESHOLD} → Entry 109,520–109,650; Stop 109,150; Targets TP1 = 110,800, TP2 = 112,000")
+    logger.info(f"  • Dip buy near low: Seller exhaust at 108,300 zone and RVOL5 ≥ {RVOL_DIP_BUY_THRESHOLD} → Entry 108,250–108,350; Stop 107,950; Targets TP1 = 109,000, TP2 = 109,450")
     logger.info("SHORT SETUPS:")
-    logger.info(f"  • Sweep-Reject @ IDH: High wicks above IDH then close back < IDH and RVOL5 ≥ {RVOL_SWEEP_REJECT_THRESHOLD} → First 5m LH below IDH; Stop above sweep high + 0.5·ATR5; Targets TP1 = VWAP, TP2 = ID mid")
-    logger.info(f"  • VWAP Rejection: Price retests VWAP from below and prints bear engulfing; RVOL5 ≥ {RVOL_VWAP_THRESHOLD} → Break of pattern low; Stop above VWAP + 0.5·ATR5; Targets TP1 = ID mid, TP2 = IDL")
+    logger.info(f"  • Rejection at 109.5k: Wick + lower high under 109,500 and RVOL falling → Entry 109,450–109,520; Stop 109,800; Targets TP1 = 108,700, TP2 = 108,100")
+    logger.info(f"  • Breakdown < today's L: M5 close < 108,100 and RVOL5 ≥ {RVOL_BREAKDOWN_THRESHOLD} → Entry 108,050–107,950; Stop 108,350; Targets TP1 = 107,200, TP2 = 106,400")
     logger.info(f"  • Position Size: ${MARGIN * LEVERAGE:,} ({MARGIN} × {LEVERAGE}x)")
     logger.info("  • Trade only on confirmation, not limits")
     logger.info("  • ATR Filter: ATR% ≥ 0.2% minimum for trading")
-    logger.info("  • Skip longs if 15m structure making LLs below VWAP; skip shorts if making HHs above VWAP")
+    logger.info("  • Invalidate longs if M5 closes back below 109,500 after breakout; invalidate shorts if M5 closes back above 109,500 after rejection")
     logger.info("")
     
     direction = args.direction.upper()
