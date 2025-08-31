@@ -107,8 +107,8 @@ RANGE_FADE_SHORT_REJECTION_HIGH = 4487.00
 RANGE_FADE_SHORT_ENTRY_LOW = 4478.00
 RANGE_FADE_SHORT_ENTRY_HIGH = 4485.00
 RANGE_FADE_SHORT_VOLUME_FACTOR_MAX = 0.9
-RANGE_FADE_SHORT_INVALIDATION = 4493.00  # Close > 4,493
-RANGE_FADE_SHORT_HIGH_BUFFER = 0.05  # No close > high +0.05%
+RANGE_FADE_SHORT_INVALIDATION = 4493.00     # close > 4,493 invalidates
+RANGE_FADE_SHORT_HIGH_BUFFER_BP = 5         # 5 bps = 0.05%
 
 # Setup 3: Breakdown SHORT
 BREAKDOWN_SHORT_TRIGGER = 4337.00  # 1-min close < 4,337
@@ -124,6 +124,7 @@ RANGE_FADE_LONG_ENTRY_LOW = 4342.00
 RANGE_FADE_LONG_ENTRY_HIGH = 4346.00
 RANGE_FADE_LONG_VOLUME_FACTOR_MAX = 0.9
 RANGE_FADE_LONG_INVALIDATION = 4332.00  # Close < 4,332
+RANGE_FADE_LONG_LOW_BUFFER_BP = 5       # 5 bps below wick
 
 # Trade parameters - Position size: margin x leverage = 250 x 20 = 5000 USD
 MARGIN = 250  # USD
@@ -136,8 +137,10 @@ PER_TRADE_RISK_PCT = 0.5
 SKIP_IF_SPREAD_BPS_GT = 3
 
 # Additional filters
-RANGE_FADE_VOLUME_FACTOR_MIN = 1.2  # Skip fades if RVOL>1.2
-VWAP_DISTANCE_MAX = 1.0  # Skip fades if distance from VWAP>1.0%
+RANGE_FADE_VOLUME_FACTOR_MIN = 1.2      # Skip fades if RVOL>1.2
+VWAP_DISTANCE_MAX_PCT = 1.0             # percent (1.0% max VWAP distance)
+TICK_SIZE = 0.1
+MAX_STOP_PCT_CAP = 0.5                  # percent cap for any SL distance
 
 # State files for strategy tracking
 BREAKOUT_LONG_TRIGGER_FILE = "eth_breakout_long_trigger_state.json"
@@ -285,6 +288,20 @@ def setup_coinbase():
 def format_eth_price(price: float) -> str:
     """Format ETH price to 1 decimal place for ETH-PERP-INTX"""
     return f"{round(price, 1):.1f}"
+
+def pct(x: float) -> float:
+    """percent to ratio, e.g. 0.35 -> 0.0035"""
+    return x / 100.0
+
+def bp(x: float) -> float:
+    """basis points to ratio, e.g. 5 -> 0.0005"""
+    return x / 10000.0
+
+def enforce_stop_cap(entry_price: float, stop_loss: float):
+    sl_pct = abs(stop_loss - entry_price) / entry_price * 100
+    if sl_pct > MAX_STOP_PCT_CAP:
+        raise ValueError(f"SL too far ({sl_pct:.3f}%). Cap {MAX_STOP_PCT_CAP:.2f}%")
+    return sl_pct
 
 def execute_crypto_trade(cb_service, trade_type: str, entry_price: float, stop_loss: float, take_profit: float, 
                      margin: float = 250, leverage: int = 20, side: str = "BUY", product: str = PRODUCT_ID):
@@ -569,11 +586,15 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
 
-                # Calculate entry, stop, and targets (rounded to 1 decimal place for ETH-PERP-INTX)
+                # Calculate entry, stop, and targets
                 entry_price = round(current_close_5m, 1)
-                stop_loss = round(min(last_low_5m, entry_price * (1 - VWAP_DISTANCE_MAX)), 1) # VWAP distance as SL
+                # Standard breakout protection ~0.35%
+                stop_loss = round(min(last_low_5m, entry_price * (1 - pct(0.35))), 1)
                 tp1 = round(entry_price * (1 + PER_TRADE_RISK_PCT / 100), 1)
                 tp2 = round(entry_price * (1 + PER_TRADE_RISK_PCT * 2 / 100), 1)
+
+                sl_pct = enforce_stop_cap(entry_price, stop_loss)
+                logger.info(f"   • SL distance: {sl_pct:.3f}%")
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
@@ -636,7 +657,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             range_fade_short_volume_not_high = relative_volume_5m < RANGE_FADE_VOLUME_FACTOR_MIN  # Do not take if RVOL_5m >= 1.2x
             invalidation_condition = last_close_5m <= RANGE_FADE_SHORT_INVALIDATION  # Close > 4,493
             vwap_distance = abs(current_close_5m - vwap) / vwap * 100
-            vwap_distance_condition = vwap_distance <= VWAP_DISTANCE_MAX  # Skip if distance from VWAP>1.0%
+            vwap_distance_condition = vwap_distance <= VWAP_DISTANCE_MAX_PCT  # Skip if distance >1.0%
             
             range_fade_short_ready = rejection_zone_condition and range_fade_short_volume_condition and range_fade_short_volume_not_high and invalidation_condition and vwap_distance_condition
 
@@ -658,11 +679,17 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
 
-                # Calculate entry, stop, and targets (rounded to 1 decimal place for ETH-PERP-INTX)
+                # Calculate entry, stop, and targets
                 entry_price = round(current_close_5m, 1)
-                stop_loss = round(last_high_5m * (1 + RANGE_FADE_SHORT_HIGH_BUFFER), 1) # Above wick high + 0.05%
-                tp1 = round(MID_LEVEL, 1)  # Mid-range target
+                # Price SL = max(wick+buffer, invalidation+tick)
+                wick_buffer_sl = last_high_5m * (1 + bp(RANGE_FADE_SHORT_HIGH_BUFFER_BP))
+                invalidation_sl = RANGE_FADE_SHORT_INVALIDATION + TICK_SIZE
+                stop_loss = round(max(wick_buffer_sl, invalidation_sl), 1)
+                tp1 = round(MID_LEVEL, 1)
                 tp2 = round(entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100), 1)  # 2R target
+
+                sl_pct = enforce_stop_cap(entry_price, stop_loss)
+                logger.info(f"   • SL distance: {sl_pct:.3f}% (wick+{RANGE_FADE_SHORT_HIGH_BUFFER_BP}bp vs invalidation)")
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
@@ -741,11 +768,15 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
 
-                # Calculate entry, stop, and targets (rounded to 1 decimal place for ETH-PERP-INTX)
+                # Calculate entry, stop, and targets
                 entry_price = round(current_close_5m, 1)
-                stop_loss = round(entry_price * (1 + VWAP_DISTANCE_MAX), 1) # VWAP distance as SL
+                # Standard breakdown protection ~0.35%
+                stop_loss = round(entry_price * (1 + pct(0.35)), 1)
                 tp1 = round(entry_price * (1 - PER_TRADE_RISK_PCT / 100), 1)
                 tp2 = round(entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100), 1)
+
+                sl_pct = enforce_stop_cap(entry_price, stop_loss)
+                logger.info(f"   • SL distance: {sl_pct:.3f}%")
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
@@ -808,7 +839,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             range_fade_long_volume_not_high = relative_volume_5m < RANGE_FADE_VOLUME_FACTOR_MIN  # Do not take if RVOL_5m >= 1.2x
             invalidation_condition = last_close_5m >= RANGE_FADE_LONG_INVALIDATION  # Close < 4,332
             vwap_distance = abs(current_close_5m - vwap) / vwap * 100
-            vwap_distance_condition = vwap_distance <= VWAP_DISTANCE_MAX  # Skip if distance from VWAP>1.0%
+            vwap_distance_condition = vwap_distance <= VWAP_DISTANCE_MAX_PCT  # Skip if distance >1.0%
             
             range_fade_long_ready = rejection_zone_condition and range_fade_long_volume_condition and range_fade_long_volume_not_high and invalidation_condition and vwap_distance_condition
 
@@ -830,11 +861,17 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
                 except Exception as e:
                     logger.error(f"Failed to play alert sound: {e}")
 
-                # Calculate entry, stop, and targets (rounded to 1 decimal place for ETH-PERP-INTX)
+                # Calculate entry, stop, and targets
                 entry_price = round(current_close_5m, 1)
-                stop_loss = round(last_high_5m * (1 + VWAP_DISTANCE_MAX), 1) # VWAP distance as SL
-                tp1 = round(MID_LEVEL, 1)  # Mid-range target
+                # Long fade: SL below wick or invalidation- tick
+                wick_buffer_sl = last_low_5m * (1 - bp(RANGE_FADE_LONG_LOW_BUFFER_BP))
+                invalidation_sl = RANGE_FADE_LONG_INVALIDATION - TICK_SIZE
+                stop_loss = round(min(wick_buffer_sl, invalidation_sl), 1)
+                tp1 = round(MID_LEVEL, 1)
                 tp2 = round(entry_price * (1 - PER_TRADE_RISK_PCT * 2 / 100), 1)  # 2R target
+
+                sl_pct = enforce_stop_cap(entry_price, stop_loss)
+                logger.info(f"   • SL distance: {sl_pct:.3f}%")
 
                 trade_success, trade_result = execute_crypto_trade(
                     cb_service=cb_service,
