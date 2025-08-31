@@ -666,7 +666,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • Volume exhausted (≤{RANGE_FADE_SHORT_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_short_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info(f"   • Volume not high (<{RANGE_FADE_VOLUME_FACTOR_MIN}x): {'✅' if range_fade_short_volume_not_high else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info(f"   • Invalidation: Close ≤ ${RANGE_FADE_SHORT_INVALIDATION:,.2f}: {'✅' if invalidation_condition else '❌'} (last close: {last_close_5m:,.2f})")
-            logger.info(f"   • VWAP distance ≤{VWAP_DISTANCE_MAX}%: {'✅' if vwap_distance_condition else '❌'} (distance: {vwap_distance:.2f}%)")
+            logger.info(f"   • VWAP distance ≤{VWAP_DISTANCE_MAX_PCT}%: {'✅' if vwap_distance_condition else '❌'} (distance: {vwap_distance:.2f}%)")
             logger.info(f"   • Range-fade Ready: {'🎯 YES' if range_fade_short_ready else '⏳ NO'}")
 
             if range_fade_short_ready:
@@ -848,7 +848,7 @@ def eth_trading_strategy_alert(cb_service, last_alert_ts=None, direction='BOTH')
             logger.info(f"   • Volume exhausted (≤{RANGE_FADE_LONG_VOLUME_FACTOR_MAX}x): {'✅' if range_fade_long_volume_condition else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info(f"   • Volume not high (<{RANGE_FADE_VOLUME_FACTOR_MIN}x): {'✅' if range_fade_long_volume_not_high else '❌'} (current: {relative_volume_5m:.2f}x)")
             logger.info(f"   • Invalidation: Close ≥ ${RANGE_FADE_LONG_INVALIDATION:,.2f}: {'✅' if invalidation_condition else '❌'} (last close: {last_close_5m:,.2f})")
-            logger.info(f"   • VWAP distance ≤{VWAP_DISTANCE_MAX}%: {'✅' if vwap_distance_condition else '❌'} (distance: {vwap_distance:.2f}%)")
+            logger.info(f"   • VWAP distance ≤{VWAP_DISTANCE_MAX_PCT}%: {'✅' if vwap_distance_condition else '❌'} (distance: {vwap_distance:.2f}%)")
             logger.info(f"   • Range-fade Ready: {'🎯 YES' if range_fade_long_ready else '⏳ NO'}")
 
             if range_fade_long_ready:
