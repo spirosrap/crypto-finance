@@ -1,5 +1,33 @@
 # Trading Journal
 
+## June 18, 2025 - Strategic Pivot: Moving to Long-Term Approach
+
+### Trading Philosophy Shift
+- Stopped relying on cursor coding ChatGPT suggestions for trade execution
+- Recognized that short-term trade suggestions lack sustainable edge
+- Pivoting to a more long-term, systematic approach to trading
+- Focus shifting from immediate trade opportunities to building robust trading systems
+
+### Key Changes
+1. **Reduced Trade Frequency**: Moving away from high-frequency trading based on AI suggestions
+2. **System Development Focus**: Emphasizing long-term strategy development over immediate execution
+3. **Risk Management Priority**: Strengthening position sizing and risk management frameworks
+4. **Patience and Discipline**: Accepting that sustainable trading requires patience and systematic approaches
+
+### Rationale
+- Realized that ChatGPT suggestions, while informative, don't provide a consistent edge
+- Short-term trading based on external suggestions leads to inconsistent results
+- Long-term success requires developing and following proven systems
+- Better to build sustainable processes than chase immediate opportunities
+
+### Forward Strategy
+- Focus on developing comprehensive trading systems with clear entry/exit criteria
+- Implement proper backtesting and forward testing before live execution
+- Build portfolio management approaches that compound over time
+- Document and refine processes based on actual market behavior
+
+---
+
 ## June 17, 2025 - Bitcoin RSI Dip Trading
 
 ### Market Context
