@@ -1,5 +1,27 @@
 # Trading Journal
 
+## June 19, 2025 - Single Bitcoin Position Reflection
+
+### Personal Trading Philosophy Evolution
+Having a single Bitcoin position feels much better and safer. The ups and downs don't matter as much when you're focused on one position rather than constantly monitoring multiple trades or small price movements.
+
+### Previous Approach Analysis
+I think I previously focused way too much on such small price action, which really messed me up. That kind of intense focus on tiny fluctuations created unnecessary stress and pressure that wasn't sustainable.
+
+### Current Mindset
+I don't think I could accept that kind of constant ups and downs anymore. The single position approach provides peace of mind and allows for a more patient, long-term perspective that aligns better with my current trading psychology.
+
+### Key Realizations
+1. **Simplified Focus**: One position means one thing to monitor, reducing decision fatigue
+2. **Emotional Stability**: Less stress from multiple position management
+3. **Better Risk Control**: Single position allows for clearer risk management
+4. **Long-term Perspective**: Enables focus on broader market trends rather than micro-movements
+
+### Going Forward
+This approach feels more sustainable and aligned with where I want to be mentally. The goal is to maintain this simplified strategy while continuing to develop the supporting systems and analysis tools.
+
+---
+
 ## June 18, 2025 - Strategic Pivot: Moving to Long-Term Approach
 
 ### Trading Philosophy Shift
