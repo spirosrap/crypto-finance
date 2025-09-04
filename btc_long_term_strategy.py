@@ -144,6 +144,9 @@ class BTCLongTermStrategy:
             if "BTC-USDC" in prices:
                 # Use ask price for buying
                 return prices["BTC-USDC"]["ask"]
+            # Fallback to BTC-USD if BTC-USDC not available
+            if "BTC-USD" in prices:
+                return prices["BTC-USD"]["ask"]
             else:
                 logger.error("BTC-USDC price not available")
                 return 0.0
@@ -199,6 +202,13 @@ class BTCLongTermStrategy:
             self.portfolio_stats.current_value_usd = total_value
             self.portfolio_stats.total_btc_owned = btc_balance
             self.portfolio_stats.total_return_usd = total_value - self.portfolio_stats.total_invested_usd
+            # Maintain average price based on current holdings
+            if btc_balance > 0 and self.portfolio_stats.total_invested_usd > 0:
+                self.portfolio_stats.average_price_usd = round(
+                    self.portfolio_stats.total_invested_usd / btc_balance, 2
+                )
+            else:
+                self.portfolio_stats.average_price_usd = 0.0
             
             if self.portfolio_stats.total_invested_usd > 0:
                 self.portfolio_stats.total_return_percent = (
@@ -233,6 +243,9 @@ class BTCLongTermStrategy:
                 logger.error("Invalid BTC price")
                 return False
             
+            # Ensure currency precision: 2 decimals for USD amounts
+            usd_amount = round(usd_amount, 2)
+
             logger.info(f"Placing {trade_type} order:")
             logger.info(f"  USD Amount: ${usd_amount:.2f}")
             logger.info(f"  USDC Balance: ${usdc_balance:.2f}")
@@ -248,7 +261,8 @@ class BTCLongTermStrategy:
                 "side": "BUY",
                 "order_configuration": {
                     "market_market_ioc": {
-                        "quote_size": str(usd_amount)
+                        # Pass quote size with at most two decimals per USD precision
+                        "quote_size": f"{usd_amount:.2f}"
                     }
                 }
             }
@@ -297,7 +311,7 @@ class BTCLongTermStrategy:
                     trade_type=trade_type,
                     btc_amount=btc_amount,
                     usd_amount=usd_amount,
-                    price_per_btc=btc_price,
+                    price_per_btc=round(btc_price, 2),
                     portfolio_value_after=self.calculate_portfolio_value()
                 )
                 
@@ -306,8 +320,10 @@ class BTCLongTermStrategy:
                 
                 # Update portfolio stats
                 self.portfolio_stats.total_invested_usd += usd_amount
-                self.portfolio_stats.dca_count += 1
-                self.portfolio_stats.last_dca_date = datetime.now().isoformat()
+                # Update DCA counters only for DCA buys
+                if trade_type == "DCA_BUY":
+                    self.portfolio_stats.dca_count += 1
+                    self.portfolio_stats.last_dca_date = datetime.now().isoformat()
                 self._save_portfolio_stats()
                 
                 logger.info(f"✅ {trade_type} order successful!")
