@@ -6,7 +6,7 @@ A comprehensive Python program that analyzes cryptocurrencies to identify the be
 
 ### 🔍 Comprehensive Analysis
 - **Technical Analysis**: RSI, MACD, Bollinger Bands, trend strength, volatility metrics
-- **Fundamental Analysis**: Market cap, volume analysis, ATH/ATL positioning
+- **Fundamental Analysis**: Market cap, volume analysis, ATH/ATL positioning (ATH/ATL sourced from CoinGecko)
 - **Risk Assessment**: Sharpe ratio, Sortino ratio, maximum drawdown, risk-adjusted returns
 - **Momentum Analysis**: Recent price performance and trend acceleration
 
@@ -24,12 +24,19 @@ A comprehensive Python program that analyzes cryptocurrencies to identify the be
 - **ATH/ATL Distance**: Current market positioning
 - **Volume Analysis**: Liquidity and market interest
 
+### 🧭 Trading Levels (New)
+- **Entry Price**: Current market price as baseline
+- **Stop Loss**: Conservative selection from ATR-based, support-based, and volatility-adjusted methods
+- **Take Profit**: Conservative selection from R:R target, resistance-based, and ATH-scaled targets
+- **Risk:Reward Ratio**: Calculated from selected SL/TP
+- **Position Sizing**: Suggested % of portfolio based on R:R (1.0%–2.0%)
+
 ## Installation
 
 Ensure you have the required dependencies installed:
 
 ```bash
-pip install requests pandas numpy
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -96,7 +103,7 @@ Market Cap: $890,123,456,789 (Rank #1)
 24h Change: 2.34%
 7d Change: -1.23%
 30d Change: 15.67%
-ATH: $69000.00 (Date: 2021-11-10)
+ATH: $69000.00 (Date: 2021-11-10)   # Sourced via CoinGecko
 ATL: $67.81 (Date: 2013-07-05)
 Volatility (30d): 0.234
 Sharpe Ratio: 1.45
@@ -112,14 +119,21 @@ Technical Score: 72.1/100
 Risk Score: 32.0/100
 Risk Level: MEDIUM_LOW
 Overall Score: 78.3/100
+
+💼 TRADING LEVELS (LONG POSITION):
+Entry Price: $45,123.456789
+Stop Loss: $43,867.0   # blended (ATR / support / % stop)
+Take Profit: $50,415.0 # blended (R:R / resistance / ATH-scaled)
+Risk:Reward Ratio: 3.0:1
+Recommended Position Size: 2.0% of portfolio
 ```
 
 ## Methodology
 
 ### 1. Data Collection
-- Uses CoinGecko API for comprehensive crypto data
-- Historical price data (365 days) for technical analysis
-- Real-time market metrics and trading volumes
+- **Primary Market Data**: Coinbase REST API (candles, prices, volumes)
+- **Historical Candles**: Coinbase (up to 365+ days via chunked retrieval and caching)
+- **ATH/ATL**: CoinGecko API (accurate all-time extremes and dates)
 
 ### 2. Technical Analysis
 - **RSI (14)**: Momentum oscillator for overbought/oversold conditions
@@ -149,10 +163,9 @@ Risk Adjustment = 1 - (Risk Score / 200)
 
 ## Rate Limiting
 
-The program includes built-in rate limiting to respect CoinGecko API limits:
-- 1 second delay between API requests
-- Exponential backoff retry logic for rate limit errors
-- Maximum 3 retry attempts per request
+The program includes rate limiting and graceful fallbacks:
+- **Coinbase**: Requests are paced and historical candles are chunked and cached to minimize calls
+- **CoinGecko (ATH/ATL only)**: If the API rate-limits (HTTP 429), the program logs a warning and continues with missing ATH/ATL for that asset; other analysis is unaffected
 
 ## Error Handling
 
