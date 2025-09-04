@@ -15,7 +15,7 @@ import numpy as np
 from datetime import datetime, timedelta, UTC
 import logging
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import json
 import argparse
 from dataclasses import dataclass
@@ -148,7 +148,7 @@ class LongTermCryptoFinder:
 
     def get_cryptocurrencies_to_analyze(self) -> List[Dict]:
         """
-        Get cryptocurrencies to analyze using Coinbase products.
+        Get cryptocurrencies to analyze using Coinbase products with enhanced ATH/ATL data.
 
         Returns:
             List of cryptocurrency data with basic info
@@ -172,6 +172,9 @@ class LongTermCryptoFinder:
                 if candles and len(candles) > 0:
                     current_price = float(candles[-1]['close'])
 
+                    # Get accurate ATH/ATL data from CoinGecko
+                    ath_data = self._get_ath_atl_from_coingecko(product_id.split('-')[0])
+
                     # Create a simplified data structure
                     crypto_info = {
                         'product_id': product_id,
@@ -180,7 +183,11 @@ class LongTermCryptoFinder:
                         'current_price': current_price,
                         'price_change_24h': self._calculate_price_change(candles),
                         'volume_24h': self._calculate_volume(candles),
-                        'market_cap': self._estimate_market_cap(product_id.split('-')[0], current_price)
+                        'market_cap': self._estimate_market_cap(product_id.split('-')[0], current_price),
+                        'ath_price': ath_data.get('ath', 0),
+                        'ath_date': ath_data.get('ath_date', ''),
+                        'atl_price': ath_data.get('atl', 0),
+                        'atl_date': ath_data.get('atl_date', '')
                     }
 
                     crypto_data.append(crypto_info)
@@ -683,10 +690,10 @@ class LongTermCryptoFinder:
                 price_change_24h=coin_data.get('price_change_24h', 0),
                 price_change_7d=price_changes.get('7d', 0),
                 price_change_30d=price_changes.get('30d', 0),
-                ath_price=price_changes.get('ath', 0),
-                ath_date='',  # Not available from basic Coinbase data
-                atl_price=price_changes.get('atl', 0),
-                atl_date='',  # Not available from basic Coinbase data
+                ath_price=coin_data.get('ath_price', price_changes.get('ath', 0)),
+                ath_date=coin_data.get('ath_date', ''),
+                atl_price=coin_data.get('atl_price', price_changes.get('atl', 0)),
+                atl_date=coin_data.get('atl_date', ''),
                 volatility_30d=technical_metrics['volatility_30d'],
                 sharpe_ratio=technical_metrics['sharpe_ratio'],
                 sortino_ratio=technical_metrics['sortino_ratio'],
@@ -749,6 +756,69 @@ class LongTermCryptoFinder:
         except Exception as e:
             logger.error(f"Error calculating price changes: {str(e)}")
             return {'7d': 0, '30d': 0, 'ath': 0, 'atl': 0}
+
+    def _get_ath_atl_from_coingecko(self, symbol: str) -> Dict[str, Union[float, str]]:
+        """
+        Get accurate ATH/ATL data from CoinGecko API.
+
+        Args:
+            symbol: Cryptocurrency symbol (e.g., 'btc', 'eth')
+
+        Returns:
+            Dictionary with ATH/ATL data
+        """
+        try:
+            # Map Coinbase symbols to CoinGecko IDs
+            coingecko_id_map = {
+                'BTC': 'bitcoin',
+                'ETH': 'ethereum',
+                'ADA': 'cardano',
+                'SOL': 'solana',
+                'DOT': 'polkadot',
+                'LINK': 'chainlink',
+                'UNI': 'uniswap',
+                'AAVE': 'aave',
+                'SUSHI': 'sushi',
+                'COMP': 'compound-governance-token',
+                'MKR': 'maker',
+                'YFI': 'yearn-finance',
+                'BAL': 'balancer',
+                'MATIC': 'matic-network',
+                'AVAX': 'avalanche-2'
+            }
+
+            coingecko_id = coingecko_id_map.get(symbol.upper(), symbol.lower())
+
+            # Fetch data from CoinGecko
+            url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract ATH/ATL data
+            market_data = data.get('market_data', {})
+
+            ath_price = market_data.get('ath', {}).get('usd', 0)
+            ath_date = market_data.get('ath_date', {}).get('usd', '')
+            atl_price = market_data.get('atl', {}).get('usd', 0)
+            atl_date = market_data.get('atl_date', {}).get('usd', '')
+
+            return {
+                'ath': float(ath_price) if ath_price else 0,
+                'ath_date': ath_date[:10] if ath_date else '',
+                'atl': float(atl_price) if atl_price else 0,
+                'atl_date': atl_date[:10] if atl_date else ''
+            }
+
+        except Exception as e:
+            logger.warning(f"Failed to get ATH/ATL data for {symbol}: {str(e)}")
+            # Return fallback data
+            return {
+                'ath': 0,
+                'ath_date': '',
+                'atl': 0,
+                'atl_date': ''
+            }
 
     def calculate_trading_levels(self, df: pd.DataFrame, current_price: float, technical_metrics: Dict) -> Dict[str, float]:
         """
@@ -977,8 +1047,8 @@ class LongTermCryptoFinder:
             print(f"24h Change: {crypto.price_change_24h:.2f}%")
             print(f"7d Change: {crypto.price_change_7d:.2f}%")
             print(f"30d Change: {crypto.price_change_30d:.2f}%")
-            print(f"ATH: ${crypto.ath_price:.2f} (Date: {crypto.ath_date[:10] if crypto.ath_date else 'N/A'})")
-            print(f"ATL: ${crypto.atl_price:.6f} (Date: {crypto.atl_date[:10] if crypto.atl_date else 'N/A'})")
+            print(f"ATH: ${crypto.ath_price:.2f} (Date: {crypto.ath_date or 'N/A'})")
+            print(f"ATL: ${crypto.atl_price:.6f} (Date: {crypto.atl_date or 'N/A'})")
             print(f"Volatility (30d): {crypto.volatility_30d:.3f}")
             print(f"Sharpe Ratio: {crypto.sharpe_ratio:.2f}")
             print(f"Sortino Ratio: {crypto.sortino_ratio:.2f}")
