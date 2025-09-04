@@ -73,6 +73,12 @@ class CryptoMetrics:
     risk_score: float
     overall_score: float
     risk_level: RiskLevel
+    # Trading levels
+    entry_price: float
+    stop_loss_price: float
+    take_profit_price: float
+    risk_reward_ratio: float
+    position_size_percentage: float
 
 class LongTermCryptoFinder:
     """
@@ -660,6 +666,13 @@ class LongTermCryptoFinder:
             # Calculate additional price changes from historical data
             price_changes = self._calculate_price_changes_from_history(historical_df)
 
+            # Calculate trading levels (entry, stop loss, take profit)
+            trading_levels = self.calculate_trading_levels(
+                historical_df,
+                coin_data.get('current_price', 0),
+                technical_metrics
+            )
+
             return CryptoMetrics(
                 symbol=symbol,
                 name=name,
@@ -687,7 +700,13 @@ class LongTermCryptoFinder:
                 technical_score=technical_score,
                 risk_score=risk_score,
                 overall_score=overall_score,
-                risk_level=risk_level
+                risk_level=risk_level,
+                # Trading levels
+                entry_price=trading_levels['entry_price'],
+                stop_loss_price=trading_levels['stop_loss_price'],
+                take_profit_price=trading_levels['take_profit_price'],
+                risk_reward_ratio=trading_levels['risk_reward_ratio'],
+                position_size_percentage=trading_levels['position_size_percentage']
             )
 
         except Exception as e:
@@ -730,6 +749,111 @@ class LongTermCryptoFinder:
         except Exception as e:
             logger.error(f"Error calculating price changes: {str(e)}")
             return {'7d': 0, '30d': 0, 'ath': 0, 'atl': 0}
+
+    def calculate_trading_levels(self, df: pd.DataFrame, current_price: float, technical_metrics: Dict) -> Dict[str, float]:
+        """
+        Calculate entry, stop loss, and take profit levels based on technical analysis.
+
+        Args:
+            df: Historical price data
+            current_price: Current market price
+            technical_metrics: Technical indicators
+
+        Returns:
+            Dictionary with trading levels
+        """
+        try:
+            # Entry price (use current price as entry)
+            entry_price = current_price
+
+            # Stop Loss calculation based on multiple methods
+            stop_loss_methods = []
+
+            # Method 1: ATR-based stop loss (2x ATR below entry)
+            atr = technical_metrics.get('atr', df['price'].pct_change().std() * 100)
+            if atr > 0:
+                atr_stop = entry_price * (1 - atr / 100 * 2)
+                stop_loss_methods.append(atr_stop)
+
+            # Method 2: Recent low support (10-day low)
+            if len(df) >= 10:
+                recent_low = df['low'].tail(10).min()
+                support_stop = recent_low * 0.98  # 2% below recent low
+                stop_loss_methods.append(support_stop)
+
+            # Method 3: Percentage-based stop (5-8% depending on volatility)
+            volatility = technical_metrics.get('volatility_30d', 0.5)
+            if volatility < 0.3:
+                pct_stop = entry_price * 0.92  # 8% stop for low volatility
+            elif volatility < 0.6:
+                pct_stop = entry_price * 0.94  # 6% stop for medium volatility
+            else:
+                pct_stop = entry_price * 0.95  # 5% stop for high volatility
+            stop_loss_methods.append(pct_stop)
+
+            # Choose the most conservative stop loss (highest price)
+            stop_loss_price = max(stop_loss_methods) if stop_loss_methods else entry_price * 0.95
+
+            # Take Profit calculation
+            take_profit_methods = []
+
+            # Method 1: Reward-to-risk ratio (3:1)
+            risk_amount = entry_price - stop_loss_price
+            rr_take_profit = entry_price + (risk_amount * 3)
+            take_profit_methods.append(rr_take_profit)
+
+            # Method 2: Recent high resistance
+            if len(df) >= 20:
+                recent_high = df['high'].tail(20).max()
+                resistance_tp = recent_high * 1.02  # 2% above recent high
+                take_profit_methods.append(resistance_tp)
+
+            # Method 3: ATH-based target (scaled based on distance from ATH)
+            ath_price = df['high'].max()
+            ath_distance = (ath_price - current_price) / current_price
+
+            if ath_distance < 0.2:  # Within 20% of ATH
+                ath_tp = ath_price * 1.05  # 5% above ATH
+            elif ath_distance < 0.5:  # Within 50% of ATH
+                ath_tp = ath_price * 1.10  # 10% above ATH
+            else:  # Far from ATH
+                ath_tp = entry_price * 2.0  # 100% return target
+            take_profit_methods.append(ath_tp)
+
+            # Choose the most conservative take profit (lowest price)
+            take_profit_price = min(take_profit_methods) if take_profit_methods else entry_price * 1.50
+
+            # Calculate risk-reward ratio
+            risk = entry_price - stop_loss_price
+            reward = take_profit_price - entry_price
+            risk_reward_ratio = reward / risk if risk > 0 else 0
+
+            # Calculate position size percentage based on risk
+            if risk_reward_ratio >= 3:
+                position_size_percentage = 2.0  # 2% of portfolio for good R:R
+            elif risk_reward_ratio >= 2:
+                position_size_percentage = 1.5  # 1.5% for decent R:R
+            else:
+                position_size_percentage = 1.0  # 1% for lower R:R
+
+            return {
+                'entry_price': entry_price,
+                'stop_loss_price': stop_loss_price,
+                'take_profit_price': take_profit_price,
+                'risk_reward_ratio': risk_reward_ratio,
+                'position_size_percentage': position_size_percentage
+            }
+
+        except Exception as e:
+            logger.error(f"Error calculating trading levels: {str(e)}")
+            # Return conservative defaults
+            return {
+                'entry_price': current_price,
+                'stop_loss_price': current_price * 0.95,
+                'take_profit_price': current_price * 1.50,
+                'risk_reward_ratio': 2.0,
+                'position_size_percentage': 1.0
+            }
 
     def _calculate_technical_score(self, technical_metrics: Dict, momentum_score: float) -> float:
         """Calculate technical score from various indicators."""
@@ -869,6 +993,15 @@ class LongTermCryptoFinder:
             print(f"Risk Score: {crypto.risk_score:.1f}/100")
             print(f"Risk Level: {crypto.risk_level.value}")
             print(f"Overall Score: {crypto.overall_score:.2f}/100")
+
+            # Trading Levels Section
+            print("")
+            print("💼 TRADING LEVELS (LONG POSITION):")
+            print(f"Entry Price: ${crypto.entry_price:.6f}")
+            print(f"Stop Loss: ${crypto.stop_loss_price:.6f}")
+            print(f"Take Profit: ${crypto.take_profit_price:.6f}")
+            print(f"Risk:Reward Ratio: {crypto.risk_reward_ratio:.1f}:1")
+            print(f"Recommended Position Size: {crypto.position_size_percentage:.1f}% of portfolio")
 
 def main():
     """Main function to run the crypto opportunity finder."""
