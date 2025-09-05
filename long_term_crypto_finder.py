@@ -174,11 +174,17 @@ class RiskLevel(Enum):
     HIGH = "HIGH"
     VERY_HIGH = "VERY_HIGH"
 
+class PositionSide(Enum):
+    LONG = "LONG"
+    SHORT = "SHORT"
+
 @dataclass
 class CryptoMetrics:
     """Data class to hold comprehensive crypto metrics."""
     symbol: str
     name: str
+    # Position side for which trading levels and scores are computed
+    position_side: str
     current_price: float
     market_cap: float
     market_cap_rank: int
@@ -1191,7 +1197,7 @@ class LongTermCryptoFinder:
             logger.info(f"Analyzing {symbol} ({name})")
 
             # Get historical data
-            historical_df = self.get_historical_data(product_id, days=365)
+            historical_df = self.get_historical_data(product_id, days=self.config.analysis_days)
             if historical_df is None or len(historical_df) < 30:
                 logger.warning(f"Insufficient historical data for {symbol}")
                 return None
@@ -1234,6 +1240,7 @@ class LongTermCryptoFinder:
             return CryptoMetrics(
                 symbol=symbol,
                 name=name,
+                position_side=PositionSide.LONG.value,
                 current_price=coin_data.get('current_price', 0),
                 market_cap=coin_data.get('market_cap', 0),
                 market_cap_rank=0,  # Not available from Coinbase basic data
@@ -1492,6 +1499,93 @@ class LongTermCryptoFinder:
                 'position_size_percentage': 1.0
             }
 
+    def calculate_short_trading_levels(self, df: pd.DataFrame, current_price: float, technical_metrics: Dict) -> Dict[str, float]:
+        """
+        Calculate entry, stop loss, and take profit levels for a SHORT position.
+
+        Mirrors the long calculation but inverted for short bias.
+        """
+        try:
+            entry_price = current_price
+
+            # Stop Loss (above entry for shorts)
+            stop_loss_methods = []
+
+            atr = technical_metrics.get('atr', df['price'].pct_change().std() * 100)
+            if atr > 0:
+                atr_stop = entry_price * (1 + atr / 100 * 2)
+                stop_loss_methods.append(atr_stop)
+
+            if len(df) >= 10:
+                recent_high = df['high'].tail(10).max()
+                resistance_stop = recent_high * 1.02  # 2% above recent high
+                stop_loss_methods.append(resistance_stop)
+
+            volatility = technical_metrics.get('volatility_30d', 0.5)
+            if volatility < 0.3:
+                pct_stop = entry_price * 1.08  # 8% stop for low volatility
+            elif volatility < 0.6:
+                pct_stop = entry_price * 1.06  # 6% stop
+            else:
+                pct_stop = entry_price * 1.05  # 5% stop
+            stop_loss_methods.append(pct_stop)
+
+            # For shorts choose the tightest stop (lowest above entry)
+            stop_loss_price = min(stop_loss_methods) if stop_loss_methods else entry_price * 1.05
+
+            # Take Profit (below entry for shorts)
+            take_profit_methods = []
+
+            risk_amount = stop_loss_price - entry_price
+            rr_take_profit = entry_price - (risk_amount * 3)
+            take_profit_methods.append(rr_take_profit)
+
+            if len(df) >= 20:
+                recent_low = df['low'].tail(20).min()
+                support_tp = recent_low * 0.98  # 2% below recent low
+                take_profit_methods.append(support_tp)
+
+            atl_price = df['low'].min()
+            atl_distance = (current_price - atl_price) / current_price if current_price > 0 else 0
+            if atl_distance < 0.2:  # Within 20% of ATL
+                atl_tp = atl_price * 0.95  # 5% below ATL
+            elif atl_distance < 0.5:
+                atl_tp = atl_price * 0.90  # 10% below ATL
+            else:
+                atl_tp = entry_price * 0.5  # 50% drawdown target when far from ATL
+            take_profit_methods.append(atl_tp)
+
+            # Conservative take profit (closest to entry for shorts => highest price)
+            take_profit_price = max(take_profit_methods) if take_profit_methods else entry_price * 0.85
+
+            risk = stop_loss_price - entry_price
+            reward = entry_price - take_profit_price
+            risk_reward_ratio = reward / risk if risk > 0 else 0
+
+            if risk_reward_ratio >= 3:
+                position_size_percentage = 2.0
+            elif risk_reward_ratio >= 2:
+                position_size_percentage = 1.5
+            else:
+                position_size_percentage = 1.0
+
+            return {
+                'entry_price': entry_price,
+                'stop_loss_price': stop_loss_price,
+                'take_profit_price': take_profit_price,
+                'risk_reward_ratio': risk_reward_ratio,
+                'position_size_percentage': position_size_percentage
+            }
+        except Exception as e:
+            logger.error(f"Error calculating short trading levels: {str(e)}")
+            return {
+                'entry_price': current_price,
+                'stop_loss_price': current_price * 1.05,
+                'take_profit_price': current_price * 0.85,
+                'risk_reward_ratio': 2.0,
+                'position_size_percentage': 1.0
+            }
+
     def _calculate_technical_score(self, technical_metrics: Dict, momentum_score: float) -> float:
         """Calculate technical score from various indicators."""
         try:
@@ -1552,9 +1646,66 @@ class LongTermCryptoFinder:
             logger.error(f"Error calculating technical score: {str(e)}")
             return 50
 
+    def _calculate_technical_score_short(self, technical_metrics: Dict, momentum_score_long: float) -> float:
+        """Calculate technical score for SHORT bias by inverting bullish signals."""
+        try:
+            score = 0
+
+            # RSI: overbought better for shorts
+            rsi = technical_metrics.get('rsi_14', 50)
+            if rsi >= 70:
+                rsi_score = 90
+            elif rsi >= 30:
+                rsi_score = 70
+            else:  # oversold -> worse for shorts
+                rsi_score = 45
+            score += rsi_score * 0.2
+
+            # MACD: bearish preferred
+            macd = technical_metrics.get('macd_signal', 'NEUTRAL')
+            if macd == 'BEARISH':
+                macd_score = 85
+            elif macd == 'NEUTRAL':
+                macd_score = 60
+            else:  # BULLISH
+                macd_score = 40
+            score += macd_score * 0.2
+
+            # Bollinger Bands: overbought preferred for shorts
+            bb = technical_metrics.get('bb_position', 'NEUTRAL')
+            if bb == 'OVERBOUGHT':
+                bb_score = 85
+            elif bb == 'NEUTRAL':
+                bb_score = 60
+            else:  # OVERSOLD -> worse for shorts
+                bb_score = 45
+            score += bb_score * 0.15
+
+            # Trend strength: negative trend favored for shorts
+            trend = technical_metrics.get('trend_strength', 0)
+            if trend < -0.5:
+                trend_score = 90
+            elif trend < -0.1:
+                trend_score = 70
+            elif trend < 0.1:
+                trend_score = 50
+            else:
+                trend_score = 30
+            score += trend_score * 0.25
+
+            # Momentum: derive short momentum from long momentum
+            short_momentum = max(0.0, min(100.0, 100.0 - momentum_score_long))
+            score += short_momentum * 0.2
+
+            return min(100, score)
+        except Exception as e:
+            logger.error(f"Error calculating short technical score: {str(e)}")
+            return 50
+
     def find_best_opportunities(self, limit: int = 15) -> List[CryptoMetrics]:
         """
         Find the best long-term cryptocurrency opportunities using Coinbase.
+        Now evaluates both LONG and SHORT candidates and ranks across both.
 
         Args:
             limit: Number of cryptocurrencies to analyze
@@ -1570,23 +1721,95 @@ class LongTermCryptoFinder:
             logger.error("Failed to retrieve cryptocurrency list")
             return []
 
-        # Analyze each cryptocurrency
-        analyzed_cryptos = []
+        # Analyze each cryptocurrency and include both LONG and SHORT candidates
+        analyzed_candidates: List[CryptoMetrics] = []
         for i, coin_data in enumerate(crypto_list[:limit]):
             logger.info(f"Analyzing {i+1}/{min(len(crypto_list), limit)}: {coin_data['symbol']} ({coin_data['name']})")
 
-            metrics = self.analyze_cryptocurrency(coin_data)
-            if metrics:
-                analyzed_cryptos.append(metrics)
+            # Long analysis via existing path
+            long_metrics = self.analyze_cryptocurrency(coin_data)
 
-            # Small delay to avoid overwhelming the API
+            # Build short candidate using same data where possible
+            try:
+                product_id = coin_data['product_id']
+                historical_df = self.get_historical_data(product_id, days=self.config.analysis_days)
+                if historical_df is not None and len(historical_df) >= 30:
+                    technical_metrics = self.calculate_technical_indicators(historical_df)
+                    long_momentum = self.calculate_momentum_score(historical_df)
+                    short_tech_score = self._calculate_technical_score_short(technical_metrics, long_momentum)
+                    fundamental_score = self.calculate_fundamental_score(coin_data)
+                    risk_score, risk_level = self.calculate_risk_score({
+                        **technical_metrics,
+                        'fundamental_score': fundamental_score
+                    })
+
+                    # Risk-adjusted overall score for shorts
+                    short_overall = (
+                        short_tech_score * 0.4 +
+                        fundamental_score * 0.4 +
+                        (max(0.0, min(100.0, 100.0 - long_momentum))) * 0.2
+                    ) * (1 - risk_score / 200)
+
+                    short_levels = self.calculate_short_trading_levels(
+                        historical_df,
+                        coin_data.get('current_price', 0),
+                        technical_metrics
+                    )
+
+                    short_candidate = CryptoMetrics(
+                        symbol=coin_data['symbol'],
+                        name=coin_data['name'],
+                        position_side=PositionSide.SHORT.value,
+                        current_price=coin_data.get('current_price', 0),
+                        market_cap=coin_data.get('market_cap', 0),
+                        market_cap_rank=0,
+                        volume_24h=coin_data.get('volume_24h', 0),
+                        price_change_24h=coin_data.get('price_change_24h', 0),
+                        price_change_7d=self._calculate_price_changes_from_history(historical_df).get('7d', 0),
+                        price_change_30d=self._calculate_price_changes_from_history(historical_df).get('30d', 0),
+                        ath_price=coin_data.get('ath_price', 0),
+                        ath_date=coin_data.get('ath_date', ''),
+                        atl_price=coin_data.get('atl_price', 0),
+                        atl_date=coin_data.get('atl_date', ''),
+                        volatility_30d=technical_metrics['volatility_30d'],
+                        sharpe_ratio=technical_metrics['sharpe_ratio'],
+                        sortino_ratio=technical_metrics['sortino_ratio'],
+                        max_drawdown=technical_metrics['max_drawdown'],
+                        rsi_14=technical_metrics['rsi_14'],
+                        macd_signal=technical_metrics['macd_signal'],
+                        bb_position=technical_metrics['bb_position'],
+                        trend_strength=technical_metrics['trend_strength'],
+                        momentum_score=max(0.0, min(100.0, 100.0 - long_momentum)),
+                        fundamental_score=fundamental_score,
+                        technical_score=short_tech_score,
+                        risk_score=risk_score,
+                        overall_score=short_overall,
+                        risk_level=risk_level,
+                        entry_price=short_levels['entry_price'],
+                        stop_loss_price=short_levels['stop_loss_price'],
+                        take_profit_price=short_levels['take_profit_price'],
+                        risk_reward_ratio=short_levels['risk_reward_ratio'],
+                        position_size_percentage=short_levels['position_size_percentage']
+                    )
+                else:
+                    short_candidate = None
+            except Exception as e:
+                logger.error(f"Failed to build SHORT candidate for {coin_data.get('symbol', 'unknown')}: {str(e)}")
+                short_candidate = None
+
+            # Collect available candidates
+            if long_metrics:
+                analyzed_candidates.append(long_metrics)
+            if short_candidate:
+                analyzed_candidates.append(short_candidate)
+
             time.sleep(1.0)
 
         # Sort by overall score (descending)
-        analyzed_cryptos.sort(key=lambda x: x.overall_score, reverse=True)
+        analyzed_candidates.sort(key=lambda x: x.overall_score, reverse=True)
 
-        # Return top results
-        top_results = analyzed_cryptos[:self.config.max_results]
+        # Return top results across both sides
+        top_results = analyzed_candidates[:self.config.max_results]
 
         logger.info(f"Analysis complete. Found {len(top_results)} top opportunities.")
         return top_results
@@ -1606,7 +1829,7 @@ class LongTermCryptoFinder:
         print("="*100)
 
         for i, crypto in enumerate(results, 1):
-            print(f"\n{i}. {crypto.symbol} ({crypto.name})")
+            print(f"\n{i}. {crypto.symbol} ({crypto.name}) — {crypto.position_side}")
             print("-" * 50)
             print(f"Price: ${crypto.current_price:.6f}")
             print(f"Market Cap: ${crypto.market_cap:,.0f} (Rank #{crypto.market_cap_rank})")
@@ -1633,7 +1856,7 @@ class LongTermCryptoFinder:
 
             # Trading Levels Section
             print("")
-            print("💼 TRADING LEVELS (LONG POSITION):")
+            print(f"💼 TRADING LEVELS ({crypto.position_side}):")
             print(f"Entry Price: ${crypto.entry_price:.6f}")
             print(f"Stop Loss: ${crypto.stop_loss_price:.6f}")
             print(f"Take Profit: ${crypto.take_profit_price:.6f}")
@@ -1678,6 +1901,7 @@ def main():
             crypto_dict = {
                 'symbol': crypto.symbol,
                 'name': crypto.name,
+                'position_side': getattr(crypto, 'position_side', 'LONG'),
                 'current_price': crypto.current_price,
                 'market_cap': crypto.market_cap,
                 'market_cap_rank': crypto.market_cap_rank,
@@ -1702,7 +1926,12 @@ def main():
                 'technical_score': crypto.technical_score,
                 'risk_score': crypto.risk_score,
                 'overall_score': crypto.overall_score,
-                'risk_level': crypto.risk_level.value
+                'risk_level': crypto.risk_level.value,
+                'entry_price': crypto.entry_price,
+                'stop_loss_price': crypto.stop_loss_price,
+                'take_profit_price': crypto.take_profit_price,
+                'risk_reward_ratio': crypto.risk_reward_ratio,
+                'position_size_percentage': crypto.position_size_percentage
             }
             json_results.append(crypto_dict)
 
