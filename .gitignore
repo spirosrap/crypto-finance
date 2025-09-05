@@ -1,6 +1,7 @@
 config.py
 __pycache__
 candle_data/
+cache/
 .DS_Store
 bitcoin_direction_prediction.png
 ml_model.joblib-good4
