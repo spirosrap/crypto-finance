@@ -20,20 +20,151 @@ import json
 import argparse
 from dataclasses import dataclass
 from enum import Enum
+import os
+import sys
+from pathlib import Path
+from functools import wraps, lru_cache
+import traceback
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import pickle
+import hashlib
 from coinbaseservice import CoinbaseService
 from config import API_KEY, API_SECRET
 from historicaldata import HistoricalData
 
-# Configure logging
+# Configuration management
+@dataclass
+class CryptoFinderConfig:
+    """Configuration class for the crypto finder."""
+    min_market_cap: int = 100000000  # $100M default
+    max_results: int = 20
+    max_workers: int = 4
+    request_delay: float = 0.5  # seconds
+    cache_ttl: int = 300  # 5 minutes
+    risk_free_rate: float = 0.03  # 3% annual
+    analysis_days: int = 365
+    rsi_period: int = 14
+    atr_period: int = 14
+    stochastic_period: int = 14
+    williams_period: int = 14
+    cci_period: int = 20
+    adx_period: int = 14
+    bb_period: int = 20
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    
+    @classmethod
+    def from_env(cls) -> 'CryptoFinderConfig':
+        """Create configuration from environment variables."""
+        return cls(
+            min_market_cap=int(os.getenv('CRYPTO_MIN_MARKET_CAP', '100000000')),
+            max_results=int(os.getenv('CRYPTO_MAX_RESULTS', '20')),
+            max_workers=int(os.getenv('CRYPTO_MAX_WORKERS', '4')),
+            request_delay=float(os.getenv('CRYPTO_REQUEST_DELAY', '0.5')),
+            cache_ttl=int(os.getenv('CRYPTO_CACHE_TTL', '300')),
+            risk_free_rate=float(os.getenv('CRYPTO_RISK_FREE_RATE', '0.03')),
+            analysis_days=int(os.getenv('CRYPTO_ANALYSIS_DAYS', '365')),
+            rsi_period=int(os.getenv('CRYPTO_RSI_PERIOD', '14')),
+            atr_period=int(os.getenv('CRYPTO_ATR_PERIOD', '14')),
+            stochastic_period=int(os.getenv('CRYPTO_STOCHASTIC_PERIOD', '14')),
+            williams_period=int(os.getenv('CRYPTO_WILLIAMS_PERIOD', '14')),
+            cci_period=int(os.getenv('CRYPTO_CCI_PERIOD', '20')),
+            adx_period=int(os.getenv('CRYPTO_ADX_PERIOD', '14')),
+            bb_period=int(os.getenv('CRYPTO_BB_PERIOD', '20')),
+            macd_fast=int(os.getenv('CRYPTO_MACD_FAST', '12')),
+            macd_slow=int(os.getenv('CRYPTO_MACD_SLOW', '26')),
+            macd_signal=int(os.getenv('CRYPTO_MACD_SIGNAL', '9'))
+        )
+    
+    def to_dict(self) -> Dict:
+        """Convert configuration to dictionary."""
+        return {
+            'min_market_cap': self.min_market_cap,
+            'max_results': self.max_results,
+            'max_workers': self.max_workers,
+            'request_delay': self.request_delay,
+            'cache_ttl': self.cache_ttl,
+            'risk_free_rate': self.risk_free_rate,
+            'analysis_days': self.analysis_days,
+            'rsi_period': self.rsi_period,
+            'atr_period': self.atr_period,
+            'stochastic_period': self.stochastic_period,
+            'williams_period': self.williams_period,
+            'cci_period': self.cci_period,
+            'adx_period': self.adx_period,
+            'bb_period': self.bb_period,
+            'macd_fast': self.macd_fast,
+            'macd_slow': self.macd_slow,
+            'macd_signal': self.macd_signal
+        }
+
+# Configure enhanced logging with file rotation
+from logging.handlers import RotatingFileHandler
+
+# Create logs directory if it doesn't exist
+log_dir = Path('logs')
+log_dir.mkdir(exist_ok=True)
+
+# Configure logging with rotation
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
     handlers=[
-        logging.FileHandler('long_term_crypto_finder.log'),
-        logging.StreamHandler()
+        RotatingFileHandler(
+            log_dir / 'long_term_crypto_finder.log',
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5
+        ),
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Custom exception classes
+class CryptoAnalysisError(Exception):
+    """Base exception for crypto analysis errors."""
+    pass
+
+class APIRateLimitError(CryptoAnalysisError):
+    """Exception raised when API rate limit is exceeded."""
+    pass
+
+class InsufficientDataError(CryptoAnalysisError):
+    """Exception raised when insufficient data is available for analysis."""
+    pass
+
+class DataValidationError(CryptoAnalysisError):
+    """Exception raised when data validation fails."""
+    pass
+
+# Decorator for error handling
+def handle_errors(default_return=None, log_errors=True):
+    """Decorator to handle common errors in crypto analysis methods."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except APIRateLimitError as e:
+                if log_errors:
+                    logger.error(f"API rate limit exceeded in {func.__name__}: {str(e)}")
+                raise
+            except InsufficientDataError as e:
+                if log_errors:
+                    logger.warning(f"Insufficient data in {func.__name__}: {str(e)}")
+                return default_return
+            except DataValidationError as e:
+                if log_errors:
+                    logger.error(f"Data validation failed in {func.__name__}: {str(e)}")
+                return default_return
+            except Exception as e:
+                if log_errors:
+                    logger.error(f"Unexpected error in {func.__name__}: {str(e)}\n{traceback.format_exc()}")
+                return default_return
+        return wrapper
+    return decorator
 
 class RiskLevel(Enum):
     LOW = "LOW"
@@ -85,14 +216,16 @@ class LongTermCryptoFinder:
     A comprehensive tool for finding long-term cryptocurrency investment opportunities using Coinbase API.
     """
 
-    def __init__(self, min_market_cap: int = 100000000, max_results: int = 20):
+    def __init__(self, config: Optional[CryptoFinderConfig] = None):
         """
         Initialize the crypto finder.
 
         Args:
-            min_market_cap: Minimum market capitalization to consider (default: $100M)
-            max_results: Maximum number of results to return
+            config: Configuration object. If None, will use environment variables or defaults.
         """
+        # Load configuration
+        self.config = config or CryptoFinderConfig.from_env()
+        
         # Initialize Coinbase service
         self.coinbase_service = CoinbaseService(API_KEY, API_SECRET)
         self.historical_data = HistoricalData(self.coinbase_service.client)
@@ -104,29 +237,69 @@ class LongTermCryptoFinder:
             "MKR-USDC", "YFI-USDC", "BAL-USDC", "MATIC-USDC", "AVAX-USDC"
         ]
 
-        self.min_market_cap = min_market_cap
-        self.max_results = max_results
-
         # Rate limiting for Coinbase API
-        self.request_delay = 0.5  # 0.5 second delay between requests
+        self.request_delay = self.config.request_delay
         self.last_request_time = 0
 
-        logger.info("Long-Term Crypto Finder initialized with Coinbase API")
+        # Caching system
+        self.cache_dir = Path('cache')
+        self.cache_dir.mkdir(exist_ok=True)
+        self.cache_ttl = self.config.cache_ttl
+        self._cache_lock = threading.Lock()
+        
+        # Thread pool for parallel processing
+        self.max_workers = min(self.config.max_workers, len(self.major_cryptos))
+
+        logger.info(f"Long-Term Crypto Finder initialized with Coinbase API")
+        logger.info(f"Configuration: {self.config.to_dict()}")
+        
+        # Validate API credentials
+        self._validate_api_credentials()
 
     def _make_request(self, url: str, params: Optional[Dict] = None, max_retries: int = 3) -> Optional[Dict]:
-        """Make API request with rate limiting and retry logic."""
+        """Make API request with enhanced rate limiting and retry logic."""
+        if not url or not isinstance(url, str):
+            raise DataValidationError("Invalid URL provided")
+            
         for attempt in range(max_retries):
             try:
                 current_time = time.time()
                 time_since_last = current_time - self.last_request_time
 
                 if time_since_last < self.request_delay:
-                    time.sleep(self.request_delay - time_since_last)
+                    sleep_time = self.request_delay - time_since_last
+                    logger.debug(f"Rate limiting: sleeping for {sleep_time:.2f} seconds")
+                    time.sleep(sleep_time)
 
-                response = requests.get(url, params=params, timeout=10)
+                # Add request headers for better API compatibility
+                headers = {
+                    'User-Agent': 'CryptoFinanceToolkit/1.0',
+                    'Accept': 'application/json',
+                    'Accept-Encoding': 'gzip, deflate'
+                }
+                
+                response = requests.get(
+                    url, 
+                    params=params, 
+                    headers=headers,
+                    timeout=15,  # Increased timeout
+                    verify=True  # Ensure SSL verification
+                )
+                
+                # Log response details for debugging
+                logger.debug(f"API request to {url} returned status {response.status_code}")
+                
                 response.raise_for_status()
                 self.last_request_time = time.time()
-                return response.json()
+                
+                # Validate response is valid JSON
+                try:
+                    data = response.json()
+                    if not isinstance(data, (dict, list)):
+                        raise DataValidationError("API response is not a valid JSON object or array")
+                    return data
+                except json.JSONDecodeError as e:
+                    raise DataValidationError(f"Invalid JSON response: {str(e)}")
 
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:  # Rate limit exceeded
@@ -134,18 +307,213 @@ class LongTermCryptoFinder:
                     logger.warning(f"Rate limit exceeded. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
                     time.sleep(wait_time)
                     continue
+                elif e.response.status_code >= 500:  # Server errors
+                    wait_time = (2 ** attempt) * 2
+                    logger.warning(f"Server error {e.response.status_code}. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                    time.sleep(wait_time)
+                    continue
                 else:
-                    logger.error(f"HTTP error: {str(e)}")
-                    return None
+                    logger.error(f"HTTP error {e.response.status_code}: {str(e)}")
+                    raise APIRateLimitError(f"HTTP {e.response.status_code}: {str(e)}")
+                    
+            except requests.exceptions.Timeout as e:
+                logger.warning(f"Request timeout (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)  # Exponential backoff for timeouts
+                    continue
+                raise APIRateLimitError(f"Request timeout after {max_retries} attempts")
+                
+            except requests.exceptions.ConnectionError as e:
+                logger.warning(f"Connection error (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise APIRateLimitError(f"Connection failed after {max_retries} attempts")
+                
             except Exception as e:
-                logger.error(f"API request failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                logger.error(f"Unexpected API request error (attempt {attempt + 1}/{max_retries}): {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(2)
                     continue
+                raise CryptoAnalysisError(f"API request failed after {max_retries} attempts: {str(e)}")
+
                 return None
 
-        return None
+    def _validate_api_credentials(self) -> None:
+        """Validate that API credentials are properly configured."""
+        try:
+            if not API_KEY or not API_SECRET:
+                raise DataValidationError("API credentials not found in config")
+            
+            # Test API connection with a simple request
+            test_url = "https://api.coinbase.com/v2/time"
+            response = requests.get(test_url, timeout=5)
+            response.raise_for_status()
+            
+            logger.info("API credentials validated successfully")
+            
+        except Exception as e:
+            logger.error(f"API credential validation failed: {str(e)}")
+            raise DataValidationError(f"Invalid API configuration: {str(e)}")
+    
+    def _validate_crypto_data(self, data: Dict) -> bool:
+        """Validate cryptocurrency data structure and values."""
+        required_fields = ['product_id', 'symbol', 'name', 'current_price']
+        
+        for field in required_fields:
+            if field not in data:
+                logger.warning(f"Missing required field '{field}' in crypto data")
+                return False
+        
+        # Validate price is positive
+        if not isinstance(data.get('current_price'), (int, float)) or data['current_price'] <= 0:
+            logger.warning(f"Invalid price value: {data.get('current_price')}")
+            return False
+            
+        # Validate symbol format
+        symbol = data.get('symbol', '')
+        if not symbol or not isinstance(symbol, str) or len(symbol) < 2:
+            logger.warning(f"Invalid symbol format: {symbol}")
+            return False
+            
+        return True
+    
+    def _sanitize_price(self, price: Union[str, float, int]) -> float:
+        """Sanitize and validate price values."""
+        try:
+            if isinstance(price, str):
+                price = float(price.replace(',', '').replace('$', ''))
+            elif not isinstance(price, (int, float)):
+                raise ValueError(f"Invalid price type: {type(price)}")
+                
+            if price < 0:
+                raise ValueError(f"Negative price not allowed: {price}")
+                
+            return float(price)
+            
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Price sanitization failed: {str(e)}")
+            return 0.0
+    
+    def _get_cache_key(self, data: str) -> str:
+        """Generate a cache key from data string."""
+        return hashlib.md5(data.encode()).hexdigest()
+    
+    def _get_cached_data(self, cache_key: str) -> Optional[Dict]:
+        """Retrieve data from cache if valid."""
+        try:
+            cache_file = self.cache_dir / f"{cache_key}.pkl"
+            if not cache_file.exists():
+                return None
 
+            # Check if cache is still valid
+            cache_age = time.time() - cache_file.stat().st_mtime
+            if cache_age > self.cache_ttl:
+                cache_file.unlink()  # Remove expired cache
+                return None
+                
+            with open(cache_file, 'rb') as f:
+                return pickle.load(f)
+                
+        except Exception as e:
+            logger.warning(f"Cache read error: {str(e)}")
+            return None
+    
+    def _set_cached_data(self, cache_key: str, data: Dict) -> None:
+        """Store data in cache."""
+        try:
+            with self._cache_lock:
+                cache_file = self.cache_dir / f"{cache_key}.pkl"
+                with open(cache_file, 'wb') as f:
+                    pickle.dump(data, f)
+        except Exception as e:
+            logger.warning(f"Cache write error: {str(e)}")
+    
+    def _make_cached_request(self, url: str, params: Optional[Dict] = None) -> Optional[Dict]:
+        """Make API request with caching."""
+        # Create cache key from URL and params
+        cache_data = f"{url}:{json.dumps(params or {}, sort_keys=True)}"
+        cache_key = self._get_cache_key(cache_data)
+        
+        # Try to get from cache first
+        cached_data = self._get_cached_data(cache_key)
+        if cached_data is not None:
+            logger.debug(f"Cache hit for {url}")
+            return cached_data
+        
+        # Make API request
+        data = self._make_request(url, params)
+        if data is not None:
+            self._set_cached_data(cache_key, data)
+            logger.debug(f"Cached data for {url}")
+        
+        return data
+    
+    def _process_single_crypto(self, product_id: str, index: int, total: int) -> Optional[Dict]:
+        """Process a single cryptocurrency in parallel."""
+        try:
+            logger.info(f"Processing {index+1}/{total}: {product_id}")
+            
+            # Get current price from Coinbase
+            current_time = datetime.now(UTC)
+            start_time = current_time - timedelta(hours=1)
+
+            candles = self.historical_data.get_historical_data(
+                product_id,
+                start_time,
+                current_time,
+                "ONE_HOUR"
+                )
+
+            if not candles or len(candles) == 0:
+                logger.warning(f"No candle data available for {product_id}")
+                return None
+            
+            # Validate candle data
+            latest_candle = candles[-1]
+            required_candle_fields = ['close', 'high', 'low', 'open']
+            for field in required_candle_fields:
+                if field not in latest_candle:
+                    logger.warning(f"Missing {field} in candle data for {product_id}")
+                    return None
+                    
+            current_price = self._sanitize_price(latest_candle['close'])
+            
+            if current_price <= 0:
+                logger.warning(f"Invalid price for {product_id}: {current_price}")
+                return None
+
+            # Get accurate ATH/ATL data from CoinGecko
+            ath_data = self._get_ath_atl_from_coingecko(product_id.split('-')[0])
+
+            # Create a validated data structure
+            crypto_info = {
+                'product_id': product_id,
+                'symbol': product_id.split('-')[0],
+                'name': self._get_crypto_name(product_id.split('-')[0]),
+                'current_price': current_price,
+                'price_change_24h': self._calculate_price_change(candles),
+                'volume_24h': self._calculate_volume(candles),
+                'market_cap': self._estimate_market_cap(product_id.split('-')[0], current_price),
+                'ath_price': self._sanitize_price(ath_data.get('ath', 0)),
+                'ath_date': ath_data.get('ath_date', ''),
+                'atl_price': self._sanitize_price(ath_data.get('atl', 0)),
+                'atl_date': ath_data.get('atl_date', '')
+            }
+
+            # Validate the complete crypto info
+            if self._validate_crypto_data(crypto_info):
+                logger.debug(f"Successfully processed {product_id}: ${current_price:.2f}")
+                return crypto_info
+            else:
+                logger.warning(f"Data validation failed for {product_id}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Failed to process {product_id}: {str(e)}")
+            return None
+
+    @handle_errors(default_return=[], log_errors=True)
     def get_cryptocurrencies_to_analyze(self) -> List[Dict]:
         """
         Get cryptocurrencies to analyze using Coinbase products with enhanced ATH/ATL data.
@@ -153,53 +521,41 @@ class LongTermCryptoFinder:
         Returns:
             List of cryptocurrency data with basic info
         """
-        logger.info("Fetching cryptocurrencies for analysis using Coinbase")
+        logger.info("Fetching cryptocurrencies for analysis using Coinbase with parallel processing")
 
         crypto_data = []
-        for product_id in self.major_cryptos[:15]:  # Limit to 15 for analysis
-            try:
-                # Get current price from Coinbase
-                current_time = datetime.now(UTC)
-                start_time = current_time - timedelta(hours=1)
+        failed_products = []
+        products_to_process = self.major_cryptos[:15]  # Limit to 15 for analysis
+        
+        # Use ThreadPoolExecutor for parallel processing
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all tasks
+            future_to_product = {
+                executor.submit(self._process_single_crypto, product_id, i, len(products_to_process)): product_id
+                for i, product_id in enumerate(products_to_process)
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_product):
+                product_id = future_to_product[future]
+                try:
+                    result = future.result()
+                    if result is not None:
+                        crypto_data.append(result)
+                    else:
+                        failed_products.append(product_id)
+                except Exception as e:
+                            logger.error(f"Exception in parallel processing for {product_id}: {str(e)}")
+                            failed_products.append(product_id)
 
-                candles = self.historical_data.get_historical_data(
-                    product_id,
-                    start_time,
-                    current_time,
-                    "ONE_HOUR"
-                )
-
-                if candles and len(candles) > 0:
-                    current_price = float(candles[-1]['close'])
-
-                    # Get accurate ATH/ATL data from CoinGecko
-                    ath_data = self._get_ath_atl_from_coingecko(product_id.split('-')[0])
-
-                    # Create a simplified data structure
-                    crypto_info = {
-                        'product_id': product_id,
-                        'symbol': product_id.split('-')[0],
-                        'name': self._get_crypto_name(product_id.split('-')[0]),
-                        'current_price': current_price,
-                        'price_change_24h': self._calculate_price_change(candles),
-                        'volume_24h': self._calculate_volume(candles),
-                        'market_cap': self._estimate_market_cap(product_id.split('-')[0], current_price),
-                        'ath_price': ath_data.get('ath', 0),
-                        'ath_date': ath_data.get('ath_date', ''),
-                        'atl_price': ath_data.get('atl', 0),
-                        'atl_date': ath_data.get('atl_date', '')
-                    }
-
-                    crypto_data.append(crypto_info)
-                    logger.debug(f"Retrieved data for {product_id}: ${current_price:.2f}")
-
-                time.sleep(self.request_delay)
-
-            except Exception as e:
-                logger.warning(f"Failed to get data for {product_id}: {str(e)}")
-                continue
-
-        logger.info(f"Retrieved {len(crypto_data)} cryptocurrencies for analysis")
+        if failed_products:
+            logger.warning(f"Failed to retrieve data for {len(failed_products)} products: {failed_products}")
+            
+        logger.info(f"Successfully retrieved {len(crypto_data)} cryptocurrencies for analysis")
+        
+        if len(crypto_data) == 0:
+            raise InsufficientDataError("No valid cryptocurrency data retrieved")
+            
         return crypto_data
 
     def _get_crypto_name(self, symbol: str) -> str:
@@ -335,7 +691,7 @@ class LongTermCryptoFinder:
             volatility_30d = np.std(returns[-30:]) * np.sqrt(365) if len(returns) >= 30 else 0
 
             # Sharpe ratio (annualized)
-            risk_free_rate = 0.03  # 3% annual risk-free rate
+            risk_free_rate = self.config.risk_free_rate
             excess_returns = returns - (risk_free_rate / 365)
             sharpe_ratio = np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(365) if len(excess_returns) > 0 else 0
 
@@ -348,8 +704,8 @@ class LongTermCryptoFinder:
             drawdown = (prices - peak) / peak
             max_drawdown = np.min(drawdown)
 
-            # RSI (simplified 14-day)
-            rsi_period = 14
+            # RSI (configurable period)
+            rsi_period = self.config.rsi_period
             if len(prices) >= rsi_period:
                 gains = np.maximum(np.diff(prices), 0)
                 losses = np.maximum(-np.diff(prices), 0)
@@ -362,11 +718,11 @@ class LongTermCryptoFinder:
             else:
                 rsi = 50
 
-            # MACD signal (simplified)
-            if len(prices) >= 26:
-                ema_12 = pd.Series(prices).ewm(span=12).mean().iloc[-1]
-                ema_26 = pd.Series(prices).ewm(span=26).mean().iloc[-1]
-                macd = ema_12 - ema_26
+            # MACD signal (configurable)
+            if len(prices) >= self.config.macd_slow:
+                ema_fast = pd.Series(prices).ewm(span=self.config.macd_fast).mean().iloc[-1]
+                ema_slow = pd.Series(prices).ewm(span=self.config.macd_slow).mean().iloc[-1]
+                macd = ema_fast - ema_slow
 
                 if macd > 0:
                     macd_signal = "BULLISH"
@@ -378,11 +734,11 @@ class LongTermCryptoFinder:
                 macd_signal = "INSUFFICIENT_DATA"
 
             # Bollinger Bands position
-            if len(prices) >= 20:
-                sma_20 = np.mean(prices[-20:])
-                std_20 = np.std(prices[-20:])
-                upper_band = sma_20 + (2 * std_20)
-                lower_band = sma_20 - (2 * std_20)
+            if len(prices) >= self.config.bb_period:
+                sma_bb = np.mean(prices[-self.config.bb_period:])
+                std_bb = np.std(prices[-self.config.bb_period:])
+                upper_band = sma_bb + (2 * std_bb)
+                lower_band = sma_bb - (2 * std_bb)
                 current_price = prices[-1]
 
                 if current_price > upper_band:
@@ -402,6 +758,19 @@ class LongTermCryptoFinder:
             else:
                 trend_strength = 0
 
+            # Additional advanced indicators
+            atr = self._calculate_atr(df, self.config.atr_period) if len(df) >= self.config.atr_period else 0
+            stochastic = self._calculate_stochastic(df, self.config.stochastic_period) if len(df) >= self.config.stochastic_period else 50
+            williams_r = self._calculate_williams_r(df, self.config.williams_period) if len(df) >= self.config.williams_period else -50
+            cci = self._calculate_cci(df, self.config.cci_period) if len(df) >= self.config.cci_period else 0
+            adx = self._calculate_adx(df, self.config.adx_period) if len(df) >= self.config.adx_period else 0
+            obv = self._calculate_obv(df) if len(df) >= 2 else 0
+            
+            # Volume indicators
+            volume_sma = df['volume'].rolling(window=20).mean().iloc[-1] if len(df) >= 20 else 0
+            current_volume = df['volume'].iloc[-1] if len(df) > 0 else 0
+            volume_ratio = current_volume / volume_sma if volume_sma > 0 else 1
+
             return {
                 'volatility_30d': volatility_30d,
                 'sharpe_ratio': sharpe_ratio,
@@ -410,7 +779,14 @@ class LongTermCryptoFinder:
                 'rsi_14': rsi,
                 'macd_signal': macd_signal,
                 'bb_position': bb_position,
-                'trend_strength': trend_strength
+                'trend_strength': trend_strength,
+                'atr': atr,
+                'stochastic': stochastic,
+                'williams_r': williams_r,
+                'cci': cci,
+                'adx': adx,
+                'obv': obv,
+                'volume_ratio': volume_ratio
             }
 
         except Exception as e:
@@ -423,8 +799,183 @@ class LongTermCryptoFinder:
                 'rsi_14': 50,
                 'macd_signal': 'ERROR',
                 'bb_position': 'ERROR',
-                'trend_strength': 0
+                'trend_strength': 0,
+                'atr': 0,
+                'stochastic': 50,
+                'williams_r': -50,
+                'cci': 0,
+                'adx': 0,
+                'obv': 0,
+                'volume_ratio': 1
             }
+    
+    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Average True Range (ATR)."""
+        try:
+            if len(df) < period + 1:
+                return 0.0
+                
+            high = df['high'].values
+            low = df['low'].values
+            close = df['price'].values
+            
+            tr_list = []
+            for i in range(1, len(high)):
+                tr1 = high[i] - low[i]
+                tr2 = abs(high[i] - close[i-1])
+                tr3 = abs(low[i] - close[i-1])
+                tr_list.append(max(tr1, tr2, tr3))
+            
+            if len(tr_list) >= period:
+                return np.mean(tr_list[-period:])
+            return 0.0
+            
+        except Exception as e:
+            logger.warning(f"ATR calculation error: {str(e)}")
+            return 0.0
+    
+    def _calculate_stochastic(self, df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> float:
+        """Calculate Stochastic Oscillator %K."""
+        try:
+            if len(df) < k_period:
+                return 50.0
+                
+            high = df['high'].values[-k_period:]
+            low = df['low'].values[-k_period:]
+            close = df['price'].values[-1]
+            
+            lowest_low = np.min(low)
+            highest_high = np.max(high)
+            
+            if highest_high == lowest_low:
+                return 50.0
+                
+            k_percent = ((close - lowest_low) / (highest_high - lowest_low)) * 100
+            return k_percent
+            
+        except Exception as e:
+            logger.warning(f"Stochastic calculation error: {str(e)}")
+            return 50.0
+    
+    def _calculate_williams_r(self, df: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Williams %R."""
+        try:
+            if len(df) < period:
+                return -50.0
+                
+            high = df['high'].values[-period:]
+            low = df['low'].values[-period:]
+            close = df['price'].values[-1]
+            
+            highest_high = np.max(high)
+            lowest_low = np.min(low)
+            
+            if highest_high == lowest_low:
+                return -50.0
+                
+            williams_r = ((highest_high - close) / (highest_high - lowest_low)) * -100
+            return williams_r
+            
+        except Exception as e:
+            logger.warning(f"Williams %R calculation error: {str(e)}")
+            return -50.0
+    
+    def _calculate_cci(self, df: pd.DataFrame, period: int = 20) -> float:
+        """Calculate Commodity Channel Index (CCI)."""
+        try:
+            if len(df) < period:
+                return 0.0
+                
+            high = df['high'].values[-period:]
+            low = df['low'].values[-period:]
+            close = df['price'].values[-period:]
+            
+            # Typical Price
+            tp = (high + low + close) / 3
+            
+            # Simple Moving Average of TP
+            sma_tp = np.mean(tp)
+            
+            # Mean Deviation
+            mean_dev = np.mean(np.abs(tp - sma_tp))
+            
+            if mean_dev == 0:
+                return 0.0
+                
+            cci = (tp[-1] - sma_tp) / (0.015 * mean_dev)
+            return cci
+            
+        except Exception as e:
+            logger.warning(f"CCI calculation error: {str(e)}")
+            return 0.0
+    
+    def _calculate_adx(self, df: pd.DataFrame, period: int = 14) -> float:
+        """Calculate Average Directional Index (ADX) - simplified version."""
+        try:
+            if len(df) < period + 1:
+                return 0.0
+                
+            high = df['high'].values
+            low = df['low'].values
+            close = df['price'].values
+            
+            # Calculate True Range and Directional Movement
+            tr_list = []
+            dm_plus_list = []
+            dm_minus_list = []
+            
+            for i in range(1, len(high)):
+                # True Range
+                tr1 = high[i] - low[i]
+                tr2 = abs(high[i] - close[i-1])
+                tr3 = abs(low[i] - close[i-1])
+                tr_list.append(max(tr1, tr2, tr3))
+                
+                # Directional Movement
+                dm_plus = high[i] - high[i-1] if high[i] - high[i-1] > low[i-1] - low[i] else 0
+                dm_minus = low[i-1] - low[i] if low[i-1] - low[i] > high[i] - high[i-1] else 0
+                
+                dm_plus_list.append(max(dm_plus, 0))
+                dm_minus_list.append(max(dm_minus, 0))
+            
+            if len(tr_list) >= period:
+                # Smoothed averages
+                atr = np.mean(tr_list[-period:])
+                di_plus = np.mean(dm_plus_list[-period:]) / atr * 100 if atr > 0 else 0
+                di_minus = np.mean(dm_minus_list[-period:]) / atr * 100 if atr > 0 else 0
+                
+                # ADX calculation
+                dx = abs(di_plus - di_minus) / (di_plus + di_minus) * 100 if (di_plus + di_minus) > 0 else 0
+                return dx
+                
+            return 0.0
+            
+        except Exception as e:
+            logger.warning(f"ADX calculation error: {str(e)}")
+            return 0.0
+    
+    def _calculate_obv(self, df: pd.DataFrame) -> float:
+        """Calculate On-Balance Volume (OBV)."""
+        try:
+            if len(df) < 2:
+                return 0.0
+                
+            close = df['price'].values
+            volume = df['volume'].values
+            
+            obv = 0
+            for i in range(1, len(close)):
+                if close[i] > close[i-1]:
+                    obv += volume[i]
+                elif close[i] < close[i-1]:
+                    obv -= volume[i]
+                # If close[i] == close[i-1], OBV remains unchanged
+            
+            return obv
+            
+        except Exception as e:
+            logger.warning(f"OBV calculation error: {str(e)}")
+            return 0.0
 
     def calculate_momentum_score(self, df: pd.DataFrame) -> float:
         """
@@ -789,11 +1340,27 @@ class LongTermCryptoFinder:
 
             coingecko_id = coingecko_id_map.get(symbol.upper(), symbol.lower())
 
-            # Fetch data from CoinGecko
+            # Fetch data from CoinGecko with caching
             url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
+            try:
+                data = self._make_cached_request(url)
+            except Exception as e:
+                logger.warning(f"Failed to fetch CoinGecko data for {symbol}: {str(e)}")
+                return {
+                    'ath': 0,
+                    'ath_date': '',
+                    'atl': 0,
+                    'atl_date': ''
+                }
+            
+            if data is None:
+                logger.warning(f"No data returned from CoinGecko for {symbol}")
+                return {
+                    'ath': 0,
+                    'ath_date': '',
+                    'atl': 0,
+                    'atl_date': ''
+                }
 
             # Extract ATH/ATL data
             market_data = data.get('market_data', {})
@@ -1019,7 +1586,7 @@ class LongTermCryptoFinder:
         analyzed_cryptos.sort(key=lambda x: x.overall_score, reverse=True)
 
         # Return top results
-        top_results = analyzed_cryptos[:self.max_results]
+        top_results = analyzed_cryptos[:self.config.max_results]
 
         logger.info(f"Analysis complete. Found {len(top_results)} top opportunities.")
         return top_results
@@ -1087,11 +1654,14 @@ def main():
 
     args = parser.parse_args()
 
-    # Initialize the finder
-    finder = LongTermCryptoFinder(
+    # Create configuration
+    config = CryptoFinderConfig(
         min_market_cap=args.min_market_cap,
         max_results=args.max_results
     )
+    
+    # Initialize the finder
+    finder = LongTermCryptoFinder(config=config)
 
     # Find opportunities
     results = finder.find_best_opportunities(limit=args.limit)
