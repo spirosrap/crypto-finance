@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Add file handler for persistent logging test
+# Add file handler for persistent logging test test
 log_file = 'btc_long_term_strategy.log'
 file_handler = logging.FileHandler(log_file)
 file_handler.setLevel(logging.DEBUG)
