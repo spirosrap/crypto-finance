@@ -212,3 +212,14 @@ This project is part of the Crypto Finance Toolkit.
 
 - `cache/*.pkl`: Pickle cache for HTTP responses (e.g., CoinGecko ATH/ATL). Auto-expires based on `CRYPTO_CACHE_TTL` (default 300s). Safe to delete anytime.
 - `candle_data/*.json`: Candle cache managed by `historicaldata.py` (TTL 1h). Safe to delete; data will be refetched.
+
+## Logging
+
+- Location: logs are written under `logs/long_term_crypto_finder/` with daily rotation and ~14 backups, plus a size-rotated safety log.
+- Format: each line includes a short `run_id` to correlate a single program run.
+- Console: logs also stream to stdout by default.
+- Tuning via env vars:
+  - `CRYPTO_FINDER_LOG_LEVEL` (default `INFO`): e.g., `DEBUG`, `WARNING`.
+  - `CRYPTO_FINDER_LOG_TO_CONSOLE` (default `1`): set to `0` to disable console logs.
+  - `CRYPTO_FINDER_LOG_RETENTION` (default `14`): number of daily backups to keep.
+  - `CRYPTO_FINDER_HISTDATA_VERBOSE` (default `0`): set to `1` for verbose candle cache/fetch logs.

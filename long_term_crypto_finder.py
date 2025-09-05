@@ -101,26 +101,82 @@ class CryptoFinderConfig:
         }
 
 # Configure enhanced logging with file rotation
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+import uuid
 
-# Create logs directory if it doesn't exist
-log_dir = Path('logs')
-log_dir.mkdir(exist_ok=True)
+def _setup_logging() -> logging.Logger:
+    """Configure logging with improved structure and configurability."""
+    # Direct logs into a subfolder for this tool
+    base_logs_dir = Path('logs') / 'long_term_crypto_finder'
+    base_logs_dir.mkdir(parents=True, exist_ok=True)
 
-# Configure logging with rotation
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
-    handlers=[
-        RotatingFileHandler(
-            log_dir / 'long_term_crypto_finder.log',
-            maxBytes=10*1024*1024,  # 10MB
-            backupCount=5
-        ),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
+    # Environment overrides
+    log_level_str = os.getenv('CRYPTO_FINDER_LOG_LEVEL', 'INFO').upper()
+    log_to_console = os.getenv('CRYPTO_FINDER_LOG_TO_CONSOLE', '1') not in ('0', 'false', 'False')
+    histdata_verbose = os.getenv('CRYPTO_FINDER_HISTDATA_VERBOSE', '0') in ('1', 'true', 'True')
+    backups = int(os.getenv('CRYPTO_FINDER_LOG_RETENTION', '14'))
+
+    # Parse level
+    level = getattr(logging, log_level_str, logging.INFO)
+
+    # Run ID for correlating a single execution
+    run_id = uuid.uuid4().hex[:8]
+
+    # Clear any existing handlers if reconfigured
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        for h in list(root_logger.handlers):
+            root_logger.removeHandler(h)
+
+    # Create handlers
+    file_handler = TimedRotatingFileHandler(
+        base_logs_dir / 'long_term_crypto_finder.log', when='midnight', backupCount=backups, encoding='utf-8'
+    )
+    # Additional small rotating handler for safety if file grows fast
+    size_handler = RotatingFileHandler(
+        base_logs_dir / 'long_term_crypto_finder.size.log', maxBytes=10 * 1024 * 1024, backupCount=3, encoding='utf-8'
+    )
+
+    # Inject run_id into every record via Filter
+    class _ContextFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            record.run_id = run_id
+            return True
+
+    context_filter = _ContextFilter()
+    file_handler.addFilter(context_filter)
+    size_handler.addFilter(context_filter)
+
+    # Format
+    fmt = '%(asctime)s - %(run_id)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s'
+    formatter = logging.Formatter(fmt)
+    file_handler.setFormatter(formatter)
+    size_handler.setFormatter(formatter)
+
+    # Set up root logger
+    root_logger.setLevel(level)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(size_handler)
+
+    # Optional console output
+    if log_to_console:
+        console = logging.StreamHandler(sys.stdout)
+        console.setFormatter(formatter)
+        console.addFilter(context_filter)
+        root_logger.addHandler(console)
+
+    # Tune verbosity of noisy modules
+    logging.getLogger('historicaldata').setLevel(logging.INFO if histdata_verbose else logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging initialized (level={log_level_str}, run_id={run_id}, retention={backups}d)")
+    logger.info(f"Logs directory: {base_logs_dir}")
+    return logger
+
+# Initialize logging once for this module
+logger = _setup_logging()
 
 # Custom exception classes
 class CryptoAnalysisError(Exception):
@@ -1811,7 +1867,11 @@ class LongTermCryptoFinder:
         # Return top results across both sides
         top_results = analyzed_candidates[:self.config.max_results]
 
-        logger.info(f"Analysis complete. Found {len(top_results)} top opportunities.")
+        long_count = sum(1 for x in top_results if getattr(x, 'position_side', 'LONG') == 'LONG')
+        short_count = sum(1 for x in top_results if getattr(x, 'position_side', 'LONG') == 'SHORT')
+        logger.info(
+            f"Analysis complete. Found {len(top_results)} top opportunities (LONG={long_count}, SHORT={short_count})."
+        )
         return top_results
 
     def print_results(self, results: List[CryptoMetrics]):
@@ -1825,7 +1885,7 @@ class LongTermCryptoFinder:
         print("LONG-TERM CRYPTO OPPORTUNITIES ANALYSIS")
         print("="*100)
         print(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Total cryptocurrencies analyzed: {len(results)}")
+        print(f"Total opportunities listed: {len(results)}")
         print("="*100)
 
         for i, crypto in enumerate(results, 1):
