@@ -342,6 +342,7 @@ class LongTermCryptoFinder:
         self._coingecko_list: Optional[List[Dict[str, str]]] = None
         # Fast lookup index for CoinGecko symbol->record
         self._cg_index: Optional[Dict[str, Dict[str, str]]] = None
+        self._cg_id_cache: Dict[str, str] = {}  # memo for symbol -> coingecko_id
 
         # Rate limiting for Coinbase API
         self.request_delay = self.config.request_delay
@@ -596,6 +597,11 @@ class LongTermCryptoFinder:
                     'symbol': str(x.get('symbol','')).upper(),
                     'name': str(x.get('name',''))
                 } for x in data]
+                # Build fast index: SYMBOL -> {id, symbol, name}
+                try:
+                    self._cg_index = {item['symbol'].upper(): item for item in self._coingecko_list if item.get('symbol')}
+                except Exception:
+                    self._cg_index = {}
                 envelope = {'v': 1, 'ts': time.time(), 'data': self._coingecko_list}
                 self._atomic_write_json(cache_path, envelope)
             else:
@@ -608,7 +614,16 @@ class LongTermCryptoFinder:
     def _coingecko_id_for_symbol(self, symbol: str) -> Optional[str]:
         """Resolve CoinGecko id from symbol. Prefer highest-market-cap id on collisions."""
         sym = (symbol or '').upper()
+        # memo hit
+        if sym in self._cg_id_cache:
+            return self._cg_id_cache[sym]
         lst = self._load_coingecko_list()
+        # fast path via index (exact symbol match)
+        if self._cg_index and sym in self._cg_index:
+            cid = self._cg_index[sym].get('id')
+            if cid:
+                self._cg_id_cache[sym] = cid
+                return cid
         candidates = []
         for item in lst:
             try:
@@ -618,22 +633,29 @@ class LongTermCryptoFinder:
                 continue
         if not candidates:
             # Fallback hard map for common assets
-            return {
+            cid = {
                 'BTC': 'bitcoin', 'ETH': 'ethereum', 'ADA': 'cardano', 'SOL': 'solana', 'DOT': 'polkadot',
                 'LINK': 'chainlink', 'UNI': 'uniswap', 'AAVE': 'aave', 'SUSHI': 'sushi', 'COMP': 'compound-governance-token',
                 'MKR': 'maker', 'YFI': 'yearn-finance', 'BAL': 'balancer', 'MATIC': 'matic-network', 'AVAX': 'avalanche-2'
             }.get(sym)
+            if cid:
+                self._cg_id_cache[sym] = cid
+            return cid
         if len(candidates) == 1 or getattr(self, 'offline', False):
-            return candidates[0]
+            self._cg_id_cache[sym] = candidates[0]
+            return self._cg_id_cache[sym]
         # When online, query markets to pick the largest by market cap
         try:
             markets = self._cg_markets(candidates)
             if isinstance(markets, list) and markets:
                 markets.sort(key=lambda m: float(m.get('market_cap') or 0), reverse=True)
-                return str(markets[0].get('id') or candidates[0])
+                cid = str(markets[0].get('id') or candidates[0])
+                self._cg_id_cache[sym] = cid
+                return cid
         except Exception:
             pass
-        return candidates[0]
+        self._cg_id_cache[sym] = candidates[0]
+        return self._cg_id_cache[sym]
 
     def _cg_markets(self, ids: List[str]) -> List[Dict]:
         """Fetch CoinGecko markets snapshot for given ids (batched)."""
@@ -786,7 +808,15 @@ class LongTermCryptoFinder:
             current_price = self._sanitize_price(latest_candle['close'])
             # Data timestamp from latest candle
             try:
-                ts = int(latest_candle.get('start') or latest_candle.get('time') or 0)
+                ts_raw = latest_candle.get('start') or latest_candle.get('time') or 0
+                # normalize int and handle ms vs s
+                ts = int(ts_raw)
+                # if looks like milliseconds (>= 10^12), convert to seconds
+                if ts >= 10**12:
+                    ts //= 1000
+            except Exception:
+                ts = 0
+            try:
                 data_ts = datetime.fromtimestamp(ts, UTC).strftime('%Y-%m-%d %H:%M:%SZ') if ts else ''
             except Exception:
                 data_ts = ''
@@ -914,10 +944,11 @@ class LongTermCryptoFinder:
     def _get_crypto_name(self, symbol: str) -> str:
         """Get readable asset name using CoinGecko index; fallback to symbol."""
         sym = (symbol or '').upper()
-        if self._cg_index is None:
-            # ensure index exists
-            _ = self._coingecko_id_for_symbol(sym)
-        item = (self._cg_index or {}).get(sym)
+        # ensure list/index loaded
+        _ = self._load_coingecko_list()
+        item = None
+        if self._cg_index:
+            item = self._cg_index.get(sym)
         nm = (item or {}).get('name') if item else None
         return nm or sym
 
