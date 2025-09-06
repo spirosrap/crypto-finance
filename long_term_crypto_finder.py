@@ -581,14 +581,29 @@ class LongTermCryptoFinder:
 
         Gracefully falls back to a small static set if auth/public endpoint fails.
         """
-        try:
-            data = self._make_cached_request(
-                "https://api.coinbase.com/api/v3/brokerage/products",
-                {"limit": 250}
-            ) or {}
-            products = data.get("products", []) if isinstance(data, dict) else []
-        except Exception:
-            products = []
+        products: List = []
+        # Prefer authenticated product list when keys are present to avoid public 401 noise
+        if getattr(self, "_has_auth", False):
+            try:
+                from coinbase.rest import products as cb_products  # type: ignore
+                auth_resp = cb_products.get_products(self.coinbase_service.client)
+                if isinstance(auth_resp, dict):
+                    products = auth_resp.get("products", []) or []
+                else:
+                    products = getattr(auth_resp, "products", []) or []
+            except Exception as e:
+                logger.warning(f"Authenticated products fetch failed: {e}")
+                products = []
+        # If no auth or auth fetch empty, try public endpoint
+        if not products:
+            try:
+                data = self._make_cached_request(
+                    "https://api.coinbase.com/api/v3/brokerage/products",
+                    {"limit": 250}
+                ) or {}
+                products = data.get("products", []) if isinstance(data, dict) else []
+            except Exception:
+                products = []
         result: Dict[str, Dict[str, str]] = {}
         # Determine preferred quotes from config/env
         quotes = None
@@ -603,17 +618,62 @@ class LongTermCryptoFinder:
         kept = 0
         total_online = 0
         order = {q: i for i, q in enumerate(quotes)}
+        # If still empty, try public best bid/ask to derive available product_ids
+        if not products:
+            try:
+                from coinbase.rest import products as cb_products  # type: ignore
+                pbooks = cb_products.get_best_bid_ask(self.coinbase_service.client)
+                books = []
+                if isinstance(pbooks, dict):
+                    books = pbooks.get('pricebooks', []) or []
+                else:
+                    books = getattr(pbooks, 'pricebooks', []) or []
+                derived: Dict[str, Dict[str, str]] = {}
+                for b in books:
+                    pid = b.get('product_id') if isinstance(b, dict) else getattr(b, 'product_id', '')
+                    if not pid or '-' not in pid:
+                        continue
+                    base, quote = pid.split('-', 1)
+                    base = str(base or '').upper()
+                    quote = str(quote or '').upper()
+                    if quote not in quotes_set:
+                        continue
+                    cur = derived.get(base)
+                    if (not cur) or (order.get(quote, 1e9) < order.get(cur.get('quote', 'ZZZ'), 1e9)):
+                        derived[base] = {"product_id": pid, "base_name": base, "quote": quote}
+                if derived:
+                    result.update(derived)
+            except Exception as e:
+                logger.warning(f"Failed deriving products from best bid/ask: {e}")
+
+        def _pget(obj, key: str):
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
+
+        def _is_online(prod) -> bool:
+            st = str(_pget(prod, "status") or '').lower()
+            if st:
+                return st == "online"
+            td = _pget(prod, "trading_disabled")
+            co = _pget(prod, "cancel_only")
+            try:
+                return (td is False) and (co is False)
+            except Exception:
+                return False
+
         for p in products:
-            if p.get("status") == "online":
+            online = _is_online(p)
+            if online:
                 total_online += 1
-            q = (p.get("quote_currency") or '').upper()
-            if p.get("status") == "online" and q in quotes_set:
-                base = (p.get("base_currency") or "").upper()
+            q = str((_pget(p, "quote_currency") or _pget(p, "quote_currency_id") or '')).upper()
+            if online and q in quotes_set:
+                base = str((_pget(p, "base_currency") or _pget(p, "base_currency_id") or '')).upper()
                 if base:
                     cur = result.get(base)
                     candidate = {
-                        "product_id": p.get("product_id"),
-                        "base_name": p.get("base_name", base),
+                        "product_id": _pget(p, "product_id"),
+                        "base_name": _pget(p, "base_name") or base,
                         "quote": q
                     }
                     if (not cur) or (order.get(q, 1e9) < order.get(cur.get("quote", "ZZZ"), 1e9)):
