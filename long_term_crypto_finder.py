@@ -54,10 +54,23 @@ class CryptoFinderConfig:
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
+    # New configurable options
+    side: str = "both"  # one of: long, short, both
+    unique_by_symbol: bool = False  # keep only the best side per symbol
+    min_overall_score: float = 0.0  # filter out weak candidates
+    offline: bool = False  # avoid external HTTP where possible
+    symbols: Optional[List[str]] = None  # analyze explicit symbols if provided
+    top_per_side: Optional[int] = None  # when set, cap results per side
     
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
         """Create configuration from environment variables."""
+        # Parse optional list of symbols from env (comma-separated)
+        symbols_env = os.getenv('CRYPTO_SYMBOLS')
+        symbols_list: Optional[List[str]] = None
+        if symbols_env:
+            symbols_list = [s.strip().upper() for s in symbols_env.split(',') if s.strip()]
+
         return cls(
             min_market_cap=int(os.getenv('CRYPTO_MIN_MARKET_CAP', '100000000')),
             max_results=int(os.getenv('CRYPTO_MAX_RESULTS', '20')),
@@ -75,7 +88,13 @@ class CryptoFinderConfig:
             bb_period=int(os.getenv('CRYPTO_BB_PERIOD', '20')),
             macd_fast=int(os.getenv('CRYPTO_MACD_FAST', '12')),
             macd_slow=int(os.getenv('CRYPTO_MACD_SLOW', '26')),
-            macd_signal=int(os.getenv('CRYPTO_MACD_SIGNAL', '9'))
+            macd_signal=int(os.getenv('CRYPTO_MACD_SIGNAL', '9')),
+            side=os.getenv('CRYPTO_SIDE', 'both').lower(),
+            unique_by_symbol=os.getenv('CRYPTO_UNIQUE_BY_SYMBOL', '0') in ('1', 'true', 'True'),
+            min_overall_score=float(os.getenv('CRYPTO_MIN_SCORE', '0')),
+            offline=os.getenv('CRYPTO_OFFLINE', '0') in ('1', 'true', 'True'),
+            symbols=symbols_list,
+            top_per_side=int(os.getenv('CRYPTO_TOP_PER_SIDE')) if os.getenv('CRYPTO_TOP_PER_SIDE') else None
         )
     
     def to_dict(self) -> Dict:
@@ -310,7 +329,14 @@ class LongTermCryptoFinder:
         self._cache_lock = threading.Lock()
         
         # Thread pool for parallel processing
-        self.max_workers = min(self.config.max_workers, len(self.major_cryptos))
+        self.max_workers = max(1, self.config.max_workers)
+
+        # Behavior flags
+        self.offline = bool(self.config.offline)
+        # Normalize side
+        self.side = (self.config.side or 'both').lower()
+        if self.side not in ('long', 'short', 'both'):
+            self.side = 'both'
 
         logger.info(f"Long-Term Crypto Finder initialized with Coinbase API")
         logger.info(f"Configuration: {self.config.to_dict()}")
@@ -503,6 +529,11 @@ class LongTermCryptoFinder:
             logger.debug(f"Cache hit for {url}")
             return cached_data
         
+        # If offline, don't attempt network
+        if getattr(self, 'offline', False):
+            logger.info(f"Offline mode: skipping network request for {url}")
+            return None
+
         # Make API request
         data = self._make_request(url, params)
         if data is not None:
@@ -545,8 +576,8 @@ class LongTermCryptoFinder:
                 logger.warning(f"Invalid price for {product_id}: {current_price}")
                 return None
 
-            # Get accurate ATH/ATL data from CoinGecko
-            ath_data = self._get_ath_atl_from_coingecko(product_id.split('-')[0])
+            # Get accurate ATH/ATL and market snapshot from CoinGecko
+            cg = self._get_ath_atl_from_coingecko(product_id.split('-')[0])
 
             # Create a validated data structure
             crypto_info = {
@@ -556,11 +587,16 @@ class LongTermCryptoFinder:
                 'current_price': current_price,
                 'price_change_24h': self._calculate_price_change(candles),
                 'volume_24h': self._calculate_volume(candles),
-                'market_cap': self._estimate_market_cap(product_id.split('-')[0], current_price),
-                'ath_price': self._sanitize_price(ath_data.get('ath', 0)),
-                'ath_date': ath_data.get('ath_date', ''),
-                'atl_price': self._sanitize_price(ath_data.get('atl', 0)),
-                'atl_date': ath_data.get('atl_date', '')
+                # Prefer CoinGecko market cap if available
+                'market_cap': self._sanitize_price(cg.get('market_cap_usd', 0)) or self._estimate_market_cap(product_id.split('-')[0], current_price),
+                'market_cap_rank': int(cg.get('market_cap_rank', 0) or 0),
+                'total_volume': self._sanitize_price(cg.get('total_volume_usd', 0)),
+                'ath_price': self._sanitize_price(cg.get('ath', 0)),
+                'ath_date': cg.get('ath_date', ''),
+                'atl_price': self._sanitize_price(cg.get('atl', 0)),
+                'atl_date': cg.get('atl_date', ''),
+                'price_change_percentage_7d_in_currency': float(cg.get('price_change_7d_pct', 0) or 0),
+                'price_change_percentage_30d_in_currency': float(cg.get('price_change_30d_pct', 0) or 0)
             }
 
             # Validate the complete crypto info
@@ -576,7 +612,7 @@ class LongTermCryptoFinder:
             return None
 
     @handle_errors(default_return=[], log_errors=True)
-    def get_cryptocurrencies_to_analyze(self) -> List[Dict]:
+    def get_cryptocurrencies_to_analyze(self, limit: Optional[int] = None, symbols: Optional[List[str]] = None) -> List[Dict]:
         """
         Get cryptocurrencies to analyze using Coinbase products with enhanced ATH/ATL data.
 
@@ -585,9 +621,18 @@ class LongTermCryptoFinder:
         """
         logger.info("Fetching cryptocurrencies for analysis using Coinbase with parallel processing")
 
-        crypto_data = []
-        failed_products = []
-        products_to_process = self.major_cryptos[:15]  # Limit to 15 for analysis
+        # Build product list
+        if symbols:
+            product_ids = [f"{sym.upper()}-USDC" for sym in symbols]
+        else:
+            product_ids = list(self.major_cryptos)
+
+        # Apply limit if given
+        max_to_process = limit if (isinstance(limit, int) and limit > 0) else len(product_ids)
+        products_to_process = product_ids[:max_to_process]
+
+        crypto_data: List[Dict] = []
+        failed_products: List[str] = []
         
         # Use ThreadPoolExecutor for parallel processing
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -613,6 +658,13 @@ class LongTermCryptoFinder:
         if failed_products:
             logger.warning(f"Failed to retrieve data for {len(failed_products)} products: {failed_products}")
             
+        # Filter by minimum market cap if specified
+        min_mc = float(self.config.min_market_cap or 0)
+        if min_mc > 0:
+            pre_filter_count = len(crypto_data)
+            crypto_data = [c for c in crypto_data if float(c.get('market_cap', 0) or 0) >= min_mc]
+            logger.info(f"Applied market cap filter >= ${min_mc:,.0f}: {len(crypto_data)}/{pre_filter_count} remaining")
+
         logger.info(f"Successfully retrieved {len(crypto_data)} cryptocurrencies for analysis")
         
         if len(crypto_data) == 0:
@@ -755,11 +807,19 @@ class LongTermCryptoFinder:
             # Sharpe ratio (annualized)
             risk_free_rate = self.config.risk_free_rate
             excess_returns = returns - (risk_free_rate / 365)
-            sharpe_ratio = np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(365) if len(excess_returns) > 0 else 0
+            if len(excess_returns) > 0:
+                ex_std = np.std(excess_returns)
+                sharpe_ratio = (np.mean(excess_returns) / ex_std * np.sqrt(365)) if ex_std > 0 else 0
+            else:
+                sharpe_ratio = 0
 
             # Sortino ratio
             downside_returns = excess_returns[excess_returns < 0]
-            sortino_ratio = np.mean(excess_returns) / np.std(downside_returns) * np.sqrt(365) if len(downside_returns) > 0 else 0
+            if len(downside_returns) > 0:
+                down_std = np.std(downside_returns)
+                sortino_ratio = (np.mean(excess_returns) / down_std * np.sqrt(365)) if down_std > 0 else 0
+            else:
+                sortino_ratio = 0
 
             # Maximum drawdown
             peak = np.maximum.accumulate(prices)
@@ -1092,7 +1152,11 @@ class LongTermCryptoFinder:
             score = 0
 
             # Market cap score (larger cap = higher score, but not too large)
-            market_cap = coin_data.get('market_cap', 0)
+            market_cap = (
+                coin_data.get('market_cap')
+                or coin_data.get('market_cap_usd')
+                or 0
+            )
             if market_cap > 1000000000:  # > $1B
                 market_cap_score = 80
             elif market_cap > 500000000:  # > $500M
@@ -1105,9 +1169,14 @@ class LongTermCryptoFinder:
             score += market_cap_score * 0.3
 
             # Volume score (higher volume = better liquidity)
-            volume_24h = coin_data.get('total_volume', 0)
-            market_cap = coin_data.get('market_cap', 1)
-            volume_to_market_cap = volume_24h / market_cap
+            volume_24h = (
+                coin_data.get('total_volume')
+                or coin_data.get('total_volume_usd')
+                or coin_data.get('volume_24h')
+                or 0
+            )
+            mc = market_cap if market_cap and market_cap > 0 else 1
+            volume_to_market_cap = float(volume_24h) / float(mc)
 
             if volume_to_market_cap > 0.1:  # Very high volume
                 volume_score = 100
@@ -1123,7 +1192,10 @@ class LongTermCryptoFinder:
             score += volume_score * 0.25
 
             # Price stability score (lower volatility = higher score)
-            price_change_7d = abs(coin_data.get('price_change_percentage_7d_in_currency', 0))
+            price_change_7d = abs(
+                coin_data.get('price_change_7d', 0)
+                or coin_data.get('price_change_percentage_7d_in_currency', 0)
+            )
             if price_change_7d < 10:
                 stability_score = 90
             elif price_change_7d < 25:
@@ -1136,8 +1208,8 @@ class LongTermCryptoFinder:
             score += stability_score * 0.25
 
             # ATH distance score (further from ATH = better buying opportunity)
-            current_price = coin_data.get('current_price', 0)
-            ath_price = coin_data.get('ath', 0)
+            current_price = coin_data.get('current_price', 0) or coin_data.get('current_price_usd', 0)
+            ath_price = coin_data.get('ath', 0) or coin_data.get('ath_price', 0)
             if ath_price > 0:
                 ath_distance = (current_price / ath_price) * 100
                 if ath_distance < 20:  # Very close to ATH
@@ -1299,7 +1371,7 @@ class LongTermCryptoFinder:
                 position_side=PositionSide.LONG.value,
                 current_price=coin_data.get('current_price', 0),
                 market_cap=coin_data.get('market_cap', 0),
-                market_cap_rank=0,  # Not available from Coinbase basic data
+                market_cap_rank=int(coin_data.get('market_cap_rank', 0) or 0),
                 volume_24h=coin_data.get('volume_24h', 0),
                 price_change_24h=coin_data.get('price_change_24h', 0),
                 price_change_7d=price_changes.get('7d', 0),
@@ -1371,7 +1443,7 @@ class LongTermCryptoFinder:
             logger.error(f"Error calculating price changes: {str(e)}")
             return {'7d': 0, '30d': 0, 'ath': 0, 'atl': 0}
 
-    def _get_ath_atl_from_coingecko(self, symbol: str) -> Dict[str, Union[float, str]]:
+    def _get_ath_atl_from_coingecko(self, symbol: str) -> Dict[str, Union[float, str, int]]:
         """
         Get accurate ATH/ATL data from CoinGecko API.
 
@@ -1425,19 +1497,31 @@ class LongTermCryptoFinder:
                     'atl_date': ''
                 }
 
-            # Extract ATH/ATL data
+            # Extract market data
             market_data = data.get('market_data', {})
 
             ath_price = market_data.get('ath', {}).get('usd', 0)
             ath_date = market_data.get('ath_date', {}).get('usd', '')
             atl_price = market_data.get('atl', {}).get('usd', 0)
             atl_date = market_data.get('atl_date', {}).get('usd', '')
+            current_price = market_data.get('current_price', {}).get('usd', 0)
+            market_cap = market_data.get('market_cap', {}).get('usd', 0)
+            total_volume = market_data.get('total_volume', {}).get('usd', 0)
+            price_change_7d = market_data.get('price_change_percentage_7d_in_currency', {}).get('usd', 0)
+            price_change_30d = market_data.get('price_change_percentage_30d_in_currency', {}).get('usd', 0)
+            market_cap_rank = data.get('market_cap_rank', 0) or 0
 
             return {
                 'ath': float(ath_price) if ath_price else 0,
                 'ath_date': ath_date[:10] if ath_date else '',
                 'atl': float(atl_price) if atl_price else 0,
-                'atl_date': atl_date[:10] if atl_date else ''
+                'atl_date': atl_date[:10] if atl_date else '',
+                'current_price_usd': float(current_price) if current_price else 0,
+                'market_cap_usd': float(market_cap) if market_cap else 0,
+                'total_volume_usd': float(total_volume) if total_volume else 0,
+                'price_change_7d_pct': float(price_change_7d) if price_change_7d else 0,
+                'price_change_30d_pct': float(price_change_30d) if price_change_30d else 0,
+                'market_cap_rank': int(market_cap_rank)
             }
 
         except Exception as e:
@@ -1770,87 +1854,89 @@ class LongTermCryptoFinder:
         """
         logger.info("Starting comprehensive crypto analysis using Coinbase...")
 
-        # Get cryptocurrencies to analyze
-        crypto_list = self.get_cryptocurrencies_to_analyze()
+        # Get cryptocurrencies to analyze (respect limit and optional symbols)
+        crypto_list = self.get_cryptocurrencies_to_analyze(limit=limit, symbols=self.config.symbols)
         if not crypto_list:
             logger.error("Failed to retrieve cryptocurrency list")
             return []
 
-        # Analyze each cryptocurrency and include both LONG and SHORT candidates
+        # Analyze each cryptocurrency and include applicable side(s)
         analyzed_candidates: List[CryptoMetrics] = []
         for i, coin_data in enumerate(crypto_list[:limit]):
             logger.info(f"Analyzing {i+1}/{min(len(crypto_list), limit)}: {coin_data['symbol']} ({coin_data['name']})")
+            long_metrics = None
+            short_candidate = None
 
-            # Long analysis via existing path
-            long_metrics = self.analyze_cryptocurrency(coin_data)
+            # Long analysis if enabled
+            if self.side in ('long', 'both'):
+                long_metrics = self.analyze_cryptocurrency(coin_data)
 
-            # Build short candidate using same data where possible
-            try:
-                product_id = coin_data['product_id']
-                historical_df = self.get_historical_data(product_id, days=self.config.analysis_days)
-                if historical_df is not None and len(historical_df) >= 30:
-                    technical_metrics = self.calculate_technical_indicators(historical_df)
-                    long_momentum = self.calculate_momentum_score(historical_df)
-                    short_tech_score = self._calculate_technical_score_short(technical_metrics, long_momentum)
-                    fundamental_score = self.calculate_fundamental_score(coin_data)
-                    risk_score, risk_level = self.calculate_risk_score({
-                        **technical_metrics,
-                        'fundamental_score': fundamental_score
-                    })
+            # Short analysis if enabled
+            if self.side in ('short', 'both'):
+                try:
+                    product_id = coin_data['product_id']
+                    historical_df = self.get_historical_data(product_id, days=self.config.analysis_days)
+                    if historical_df is not None and len(historical_df) >= 30:
+                        technical_metrics = self.calculate_technical_indicators(historical_df)
+                        long_momentum = self.calculate_momentum_score(historical_df)
+                        short_tech_score = self._calculate_technical_score_short(technical_metrics, long_momentum)
+                        fundamental_score = self.calculate_fundamental_score(coin_data)
+                        risk_score, risk_level = self.calculate_risk_score({
+                            **technical_metrics,
+                            'fundamental_score': fundamental_score
+                        })
 
-                    # Risk-adjusted overall score for shorts
-                    short_overall = (
-                        short_tech_score * 0.4 +
-                        fundamental_score * 0.4 +
-                        (max(0.0, min(100.0, 100.0 - long_momentum))) * 0.2
-                    ) * (1 - risk_score / 200)
+                        # Risk-adjusted overall score for shorts
+                        short_overall = (
+                            short_tech_score * 0.4 +
+                            fundamental_score * 0.4 +
+                            (max(0.0, min(100.0, 100.0 - long_momentum))) * 0.2
+                        ) * (1 - risk_score / 200)
 
-                    short_levels = self.calculate_short_trading_levels(
-                        historical_df,
-                        coin_data.get('current_price', 0),
-                        technical_metrics
-                    )
+                        short_levels = self.calculate_short_trading_levels(
+                            historical_df,
+                            coin_data.get('current_price', 0),
+                            technical_metrics
+                        )
 
-                    short_candidate = CryptoMetrics(
-                        symbol=coin_data['symbol'],
-                        name=coin_data['name'],
-                        position_side=PositionSide.SHORT.value,
-                        current_price=coin_data.get('current_price', 0),
-                        market_cap=coin_data.get('market_cap', 0),
-                        market_cap_rank=0,
-                        volume_24h=coin_data.get('volume_24h', 0),
-                        price_change_24h=coin_data.get('price_change_24h', 0),
-                        price_change_7d=self._calculate_price_changes_from_history(historical_df).get('7d', 0),
-                        price_change_30d=self._calculate_price_changes_from_history(historical_df).get('30d', 0),
-                        ath_price=coin_data.get('ath_price', 0),
-                        ath_date=coin_data.get('ath_date', ''),
-                        atl_price=coin_data.get('atl_price', 0),
-                        atl_date=coin_data.get('atl_date', ''),
-                        volatility_30d=technical_metrics['volatility_30d'],
-                        sharpe_ratio=technical_metrics['sharpe_ratio'],
-                        sortino_ratio=technical_metrics['sortino_ratio'],
-                        max_drawdown=technical_metrics['max_drawdown'],
-                        rsi_14=technical_metrics['rsi_14'],
-                        macd_signal=technical_metrics['macd_signal'],
-                        bb_position=technical_metrics['bb_position'],
-                        trend_strength=technical_metrics['trend_strength'],
-                        momentum_score=max(0.0, min(100.0, 100.0 - long_momentum)),
-                        fundamental_score=fundamental_score,
-                        technical_score=short_tech_score,
-                        risk_score=risk_score,
-                        overall_score=short_overall,
-                        risk_level=risk_level,
-                        entry_price=short_levels['entry_price'],
-                        stop_loss_price=short_levels['stop_loss_price'],
-                        take_profit_price=short_levels['take_profit_price'],
-                        risk_reward_ratio=short_levels['risk_reward_ratio'],
-                        position_size_percentage=short_levels['position_size_percentage']
-                    )
-                else:
+                        short_candidate = CryptoMetrics(
+                            symbol=coin_data['symbol'],
+                            name=coin_data['name'],
+                            position_side=PositionSide.SHORT.value,
+                            current_price=coin_data.get('current_price', 0),
+                            market_cap=coin_data.get('market_cap', 0),
+                            market_cap_rank=int(coin_data.get('market_cap_rank', 0) or 0),
+                            volume_24h=coin_data.get('volume_24h', 0),
+                            price_change_24h=coin_data.get('price_change_24h', 0),
+                            price_change_7d=self._calculate_price_changes_from_history(historical_df).get('7d', 0),
+                            price_change_30d=self._calculate_price_changes_from_history(historical_df).get('30d', 0),
+                            ath_price=coin_data.get('ath_price', 0),
+                            ath_date=coin_data.get('ath_date', ''),
+                            atl_price=coin_data.get('atl_price', 0),
+                            atl_date=coin_data.get('atl_date', ''),
+                            volatility_30d=technical_metrics['volatility_30d'],
+                            sharpe_ratio=technical_metrics['sharpe_ratio'],
+                            sortino_ratio=technical_metrics['sortino_ratio'],
+                            max_drawdown=technical_metrics['max_drawdown'],
+                            rsi_14=technical_metrics['rsi_14'],
+                            macd_signal=technical_metrics['macd_signal'],
+                            bb_position=technical_metrics['bb_position'],
+                            trend_strength=technical_metrics['trend_strength'],
+                            momentum_score=max(0.0, min(100.0, 100.0 - long_momentum)),
+                            fundamental_score=fundamental_score,
+                            technical_score=short_tech_score,
+                            risk_score=risk_score,
+                            overall_score=short_overall,
+                            risk_level=risk_level,
+                            entry_price=short_levels['entry_price'],
+                            stop_loss_price=short_levels['stop_loss_price'],
+                            take_profit_price=short_levels['take_profit_price'],
+                            risk_reward_ratio=short_levels['risk_reward_ratio'],
+                            position_size_percentage=short_levels['position_size_percentage']
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to build SHORT candidate for {coin_data.get('symbol', 'unknown')}: {str(e)}")
                     short_candidate = None
-            except Exception as e:
-                logger.error(f"Failed to build SHORT candidate for {coin_data.get('symbol', 'unknown')}: {str(e)}")
-                short_candidate = None
 
             # Collect available candidates
             if long_metrics:
@@ -1860,11 +1946,36 @@ class LongTermCryptoFinder:
 
             time.sleep(1.0)
 
+        # Filter by minimum score if requested
+        min_score = float(self.config.min_overall_score or 0)
+        if min_score > 0:
+            analyzed_candidates = [c for c in analyzed_candidates if c and float(c.overall_score) >= min_score]
+
+        # Unique by symbol: keep best side per symbol
+        if self.config.unique_by_symbol:
+            best_by_symbol: Dict[str, CryptoMetrics] = {}
+            for c in analyzed_candidates:
+                if not c:
+                    continue
+                prev = best_by_symbol.get(c.symbol)
+                if (prev is None) or (c.overall_score > prev.overall_score):
+                    best_by_symbol[c.symbol] = c
+            analyzed_candidates = list(best_by_symbol.values())
+
+        # Optional per-side cap
+        tps = self.config.top_per_side
+        if tps and tps > 0:
+            longs = [c for c in analyzed_candidates if getattr(c, 'position_side', 'LONG') == 'LONG']
+            shorts = [c for c in analyzed_candidates if getattr(c, 'position_side', 'LONG') == 'SHORT']
+            longs.sort(key=lambda x: x.overall_score, reverse=True)
+            shorts.sort(key=lambda x: x.overall_score, reverse=True)
+            analyzed_candidates = longs[:tps] + shorts[:tps]
+
         # Sort by overall score (descending)
         analyzed_candidates.sort(key=lambda x: x.overall_score, reverse=True)
 
-        # Return top results across both sides
-        top_results = analyzed_candidates[:self.config.max_results]
+        # Return top results across selected side(s)
+        top_results = analyzed_candidates[: self.config.max_results]
 
         long_count = sum(1 for x in top_results if getattr(x, 'position_side', 'LONG') == 'LONG')
         short_count = sum(1 for x in top_results if getattr(x, 'position_side', 'LONG') == 'SHORT')
@@ -1891,7 +2002,8 @@ class LongTermCryptoFinder:
             print(f"\n{i}. {crypto.symbol} ({crypto.name}) — {crypto.position_side}")
             print("-" * 50)
             print(f"Price: ${crypto.current_price:.6f}")
-            print(f"Market Cap: ${crypto.market_cap:,.0f} (Rank #{crypto.market_cap_rank})")
+            rank_str = f"#{crypto.market_cap_rank}" if getattr(crypto, 'market_cap_rank', 0) else "N/A"
+            print(f"Market Cap: ${crypto.market_cap:,.0f} (Rank {rank_str})")
             print(f"24h Volume: ${crypto.volume_24h:,.0f}")
             print(f"24h Change: {crypto.price_change_24h:.2f}%")
             print(f"7d Change: {crypto.price_change_7d:.2f}%")
@@ -1931,15 +2043,42 @@ def main():
                        help='Minimum market cap in USD (default: $100M)')
     parser.add_argument('--max-results', type=int, default=20,
                        help='Maximum number of results to display (default: 20)')
-    parser.add_argument('--output', type=str, choices=['console', 'json'],
+    parser.add_argument('--output', type=str, choices=['console', 'json'], default='console',
                        help='Output format (default: console)')
+    parser.add_argument('--side', type=str, choices=['long', 'short', 'both'], default='both',
+                       help='Which side(s) to evaluate (default: both)')
+    parser.add_argument('--unique-by-symbol', action='store_true',
+                       help='Keep only the best side per symbol')
+    parser.add_argument('--min-score', type=float, default=0.0,
+                       help='Filter out candidates below this overall score')
+    parser.add_argument('--save', type=str,
+                       help='Optional path to save results (json or csv)')
+    parser.add_argument('--symbols', type=str,
+                       help='Comma-separated list of symbols to analyze (e.g., BTC,ETH,SOL)')
+    parser.add_argument('--top-per-side', type=int,
+                       help='Cap results per side before final sorting')
+    parser.add_argument('--max-workers', type=int,
+                       help='Override worker threads for parallel fetch')
+    parser.add_argument('--offline', action='store_true',
+                       help='Avoid external HTTP where possible (use cache only)')
 
     args = parser.parse_args()
 
     # Create configuration
+    symbols_list = None
+    if args.symbols:
+        symbols_list = [s.strip().upper() for s in args.symbols.split(',') if s.strip()]
+
     config = CryptoFinderConfig(
         min_market_cap=args.min_market_cap,
-        max_results=args.max_results
+        max_results=args.max_results,
+        side=args.side,
+        unique_by_symbol=bool(args.unique_by_symbol),
+        min_overall_score=float(args.min_score or 0.0),
+        offline=bool(args.offline),
+        symbols=symbols_list,
+        top_per_side=args.top_per_side,
+        max_workers=args.max_workers or CryptoFinderConfig.from_env().max_workers
     )
     
     # Initialize the finder
@@ -1953,7 +2092,7 @@ def main():
         return
 
     # Output results
-    if args.output == 'json':
+    if args.output == 'json' or (args.save and args.save.lower().endswith('.json')):
         # Convert results to dictionaries for JSON serialization
         json_results = []
         for crypto in results:
@@ -1993,10 +2132,68 @@ def main():
                 'position_size_percentage': crypto.position_size_percentage
             }
             json_results.append(crypto_dict)
-
-        print(json.dumps(json_results, indent=2))
+        if args.save and args.save.lower().endswith('.json'):
+            with open(args.save, 'w') as f:
+                json.dump(json_results, f, indent=2)
+            print(f"Saved {len(json_results)} results to {args.save}")
+        if args.output == 'json':
+            print(json.dumps(json_results, indent=2))
     else:
         finder.print_results(results)
+
+        # Optional CSV saving when not using --output json
+        if args.save and args.save.lower().endswith('.csv'):
+            import csv
+            fieldnames = [
+                'symbol', 'name', 'position_side', 'current_price', 'market_cap', 'market_cap_rank',
+                'volume_24h', 'price_change_24h', 'price_change_7d', 'price_change_30d',
+                'ath_price', 'ath_date', 'atl_price', 'atl_date',
+                'volatility_30d', 'sharpe_ratio', 'sortino_ratio', 'max_drawdown', 'rsi_14',
+                'macd_signal', 'bb_position', 'trend_strength', 'momentum_score', 'fundamental_score',
+                'technical_score', 'risk_score', 'overall_score', 'risk_level',
+                'entry_price', 'stop_loss_price', 'take_profit_price', 'risk_reward_ratio',
+                'position_size_percentage'
+            ]
+            with open(args.save, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for crypto in results:
+                    writer.writerow({
+                        'symbol': crypto.symbol,
+                        'name': crypto.name,
+                        'position_side': getattr(crypto, 'position_side', 'LONG'),
+                        'current_price': crypto.current_price,
+                        'market_cap': crypto.market_cap,
+                        'market_cap_rank': crypto.market_cap_rank,
+                        'volume_24h': crypto.volume_24h,
+                        'price_change_24h': crypto.price_change_24h,
+                        'price_change_7d': crypto.price_change_7d,
+                        'price_change_30d': crypto.price_change_30d,
+                        'ath_price': crypto.ath_price,
+                        'ath_date': crypto.ath_date,
+                        'atl_price': crypto.atl_price,
+                        'atl_date': crypto.atl_date,
+                        'volatility_30d': crypto.volatility_30d,
+                        'sharpe_ratio': crypto.sharpe_ratio,
+                        'sortino_ratio': crypto.sortino_ratio,
+                        'max_drawdown': crypto.max_drawdown,
+                        'rsi_14': crypto.rsi_14,
+                        'macd_signal': crypto.macd_signal,
+                        'bb_position': crypto.bb_position,
+                        'trend_strength': crypto.trend_strength,
+                        'momentum_score': crypto.momentum_score,
+                        'fundamental_score': crypto.fundamental_score,
+                        'technical_score': crypto.technical_score,
+                        'risk_score': crypto.risk_score,
+                        'overall_score': crypto.overall_score,
+                        'risk_level': crypto.risk_level.value,
+                        'entry_price': crypto.entry_price,
+                        'stop_loss_price': crypto.stop_loss_price,
+                        'take_profit_price': crypto.take_profit_price,
+                        'risk_reward_ratio': crypto.risk_reward_ratio,
+                        'position_size_percentage': crypto.position_size_percentage
+                    })
+            print(f"Saved {len(results)} results to {args.save}")
 
 if __name__ == "__main__":
     main()

@@ -71,6 +71,14 @@ python long_term_crypto_finder.py --output json
 | `--min-market-cap` | 100000000 | Minimum market cap in USD ($100M) |
 | `--max-results` | 20 | Maximum number of results to display |
 | `--output` | console | Output format: 'console' or 'json' |
+| `--side` | both | Evaluate `long`, `short`, or `both` |
+| `--unique-by-symbol` | false | Keep only the best side per symbol |
+| `--min-score` | 0.0 | Minimum overall score to include |
+| `--symbols` | - | Comma-separated symbols (e.g., BTC,ETH,SOL) |
+| `--top-per-side` | - | Cap results per side before final sort |
+| `--save` | - | Save results to path (.json or .csv) |
+| `--offline` | false | Avoid external HTTP where possible |
+| `--max-workers` | env | Override parallel workers |
 
 ### Environment Variables
 - `CRYPTO_ANALYSIS_DAYS`: Lookback window for historical analysis (default 365)
