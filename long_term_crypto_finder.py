@@ -14,7 +14,12 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta
+try:  # Py3.11+
+    from datetime import UTC  # type: ignore
+except Exception:  # Py<=3.10
+    from datetime import timezone as _tz  # type: ignore
+    UTC = _tz.utc  # type: ignore
 import logging
 import time
 from typing import Dict, List, Optional, Tuple, Union
@@ -465,26 +470,14 @@ class LongTermCryptoFinder:
 
 
     def _validate_api_credentials(self) -> None:
-        """Validate that API credentials are properly configured."""
-        try:
-            # Skip validation when offline or public-only mode is requested
-            if getattr(self, 'offline', False) or os.getenv("CRYPTO_PUBLIC_ONLY") in ("1", "true", "True"):
-                logger.info("Public-only/offline: skipping API credential validation")
-                return
-
-            if not self.api_key or not self.api_secret:
-                raise DataValidationError("API credentials not found in config")
-            
-            # Test API connection with a simple request
-            test_url = "https://api.coinbase.com/v2/time"
-            response = self._sess.get(test_url, timeout=5)
-            response.raise_for_status()
-            
-            logger.info("API credentials validated successfully")
-            
-        except Exception as e:
-            logger.error(f"API credential validation failed: {str(e)}")
-            raise DataValidationError(f"Invalid API configuration: {str(e)}")
+        """Lightweight presence check; do not block public/offline usage."""
+        if getattr(self, 'offline', False) or os.getenv("CRYPTO_PUBLIC_ONLY") in ("1", "true", "True"):
+            logger.info("Public-only/offline: skipping API credential presence check")
+            return
+        if not self.api_key or not self.api_secret:
+            logger.warning("API credentials not found; continuing with public endpoints only")
+            return
+        logger.info("API credentials present (no on-start auth call performed)")
     
     def _validate_crypto_data(self, data: Dict) -> bool:
         """Validate cryptocurrency data structure and values."""
@@ -883,11 +876,14 @@ class LongTermCryptoFinder:
         return sym
 
     def _calculate_price_change(self, candles: List[Dict]) -> float:
-        """Calculate 24h price change from candles; if <24, use first→last."""
+        """Calculate ~24h price change from hourly candles."""
         if not candles:
             return 0.0
         current_price = float(candles[-1]['close'])
-        price_ago = float(candles[0]['close']) if len(candles) < 24 else float(candles[0]['close'])
+        if len(candles) >= 24:
+            price_ago = float(candles[-24]['close'])
+        else:
+            price_ago = float(candles[0]['close'])
         return ((current_price - price_ago) / price_ago) * 100 if price_ago else 0.0
 
     def _calculate_volume(self, candles: List[Dict]) -> float:
