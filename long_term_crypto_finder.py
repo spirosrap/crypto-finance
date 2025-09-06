@@ -180,6 +180,15 @@ def _setup_logging() -> logging.Logger:
 # Initialize logging once for this module
 logger = _setup_logging()
 
+
+def _finite(x: Union[float, int], default: float = 0.0) -> float:
+    """Coerce non-finite numbers to a default float for JSON safety."""
+    try:
+        xv = float(x)
+        return xv if np.isfinite(xv) else float(default)
+    except Exception:
+        return float(default)
+
 # Custom exception classes
 class CryptoAnalysisError(Exception):
     """Base exception for crypto analysis errors."""
@@ -1015,6 +1024,10 @@ class LongTermCryptoFinder:
             Dictionary of technical indicators
         """
         try:
+            # Basic cleaning to handle NaNs/Infs at head/tail
+            df = df.copy()
+            df[['price', 'high', 'low', 'open', 'volume']] = df[['price', 'high', 'low', 'open', 'volume']].replace([np.inf, -np.inf], np.nan).fillna(method='ffill').fillna(method='bfill')
+
             prices = df['price'].values
             returns = np.diff(prices) / prices[:-1] if len(prices) > 1 else np.array([])
 
@@ -2430,13 +2443,6 @@ def main():
     # Output results
     if args.output == 'json' or (args.save and args.save.lower().endswith('.json')):
         # Convert results to dictionaries for JSON serialization
-        def _finite(x, default=0.0):
-            try:
-                xv = float(x)
-                return xv if np.isfinite(xv) else float(default)
-            except Exception:
-                return float(default)
-
         json_results = []
         for crypto in results:
             crypto_dict = {
