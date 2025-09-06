@@ -34,7 +34,6 @@ from functools import wraps, lru_cache
 import traceback
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import pickle
 import hashlib
 from coinbaseservice import CoinbaseService
 from historicaldata import HistoricalData
@@ -346,6 +345,7 @@ class LongTermCryptoFinder:
         # Thread-safety: serialize request timing updates
         self._req_lock = threading.Lock()
         self._cb_lock = threading.Lock()
+        self._cg_lock = threading.Lock()
         # Thread-local session holder
         self._tls = threading.local()
 
@@ -589,10 +589,14 @@ class LongTermCryptoFinder:
         except Exception:
             quotes = None
         if not quotes:
-            env_q = os.getenv('CRYPTO_QUOTES', 'USDC')
+            env_q = os.getenv('CRYPTO_QUOTES', 'USDC,USD,USDT')
             quotes = [q.strip().upper() for q in env_q.split(',') if q.strip()]
         quotes_set = set(quotes or ['USDC'])
+        kept = 0
+        total_online = 0
         for p in products:
+            if p.get("status") == "online":
+                total_online += 1
             if p.get("status") == "online" and (p.get("quote_currency") or '').upper() in quotes_set:
                 base = (p.get("base_currency") or "").upper()
                 if base:
@@ -600,10 +604,13 @@ class LongTermCryptoFinder:
                         "product_id": p.get("product_id"),
                         "base_name": p.get("base_name", base)
                     }
+                    kept += 1
         if not result:
             for sym in ["BTC", "ETH", "SOL", "ADA", "MATIC", "AVAX", "DOT", "LINK"]:
                 result[sym] = {"product_id": f"{sym}-USDC", "base_name": sym}
         self._symbol_to_product = {k: v["product_id"] for k, v in result.items() if v.get("product_id")}
+        skipped = max(0, total_online - kept)
+        logger.info(f"Coinbase products filtered by quotes {sorted(quotes_set)}: kept {kept}, skipped {skipped}")
         return result
 
     def _load_coingecko_list(self) -> List[Dict[str, str]]:
@@ -658,15 +665,17 @@ class LongTermCryptoFinder:
     def _coingecko_id_for_symbol(self, symbol: str) -> Optional[str]:
         """Resolve CoinGecko id from symbol. Prefer highest-market-cap id on collisions."""
         sym = (symbol or '').upper()
-        # memo hit
-        if sym in self._cg_id_cache:
-            return self._cg_id_cache[sym]
+        # memo hit (thread-safe)
+        with self._cg_lock:
+            if sym in self._cg_id_cache:
+                return self._cg_id_cache[sym]
         lst = self._load_coingecko_list()
         # fast path via index (exact symbol match)
         if self._cg_index and sym in self._cg_index:
             cid = self._cg_index[sym].get('id')
             if cid:
-                self._cg_id_cache[sym] = cid
+                with self._cg_lock:
+                    self._cg_id_cache[sym] = cid
                 return cid
         candidates = []
         for item in lst:
@@ -683,23 +692,27 @@ class LongTermCryptoFinder:
                 'MKR': 'maker', 'YFI': 'yearn-finance', 'BAL': 'balancer', 'MATIC': 'matic-network', 'AVAX': 'avalanche-2'
             }.get(sym)
             if cid:
-                self._cg_id_cache[sym] = cid
+                with self._cg_lock:
+                    self._cg_id_cache[sym] = cid
             return cid
         if len(candidates) == 1 or getattr(self, 'offline', False):
-            self._cg_id_cache[sym] = candidates[0]
-            return self._cg_id_cache[sym]
+            with self._cg_lock:
+                self._cg_id_cache[sym] = candidates[0]
+                return self._cg_id_cache[sym]
         # When online, query markets to pick the largest by market cap
         try:
             markets = self._cg_markets(candidates)
             if isinstance(markets, list) and markets:
                 markets.sort(key=lambda m: float(m.get('market_cap') or 0), reverse=True)
                 cid = str(markets[0].get('id') or candidates[0])
-                self._cg_id_cache[sym] = cid
+                with self._cg_lock:
+                    self._cg_id_cache[sym] = cid
                 return cid
         except Exception:
             pass
-        self._cg_id_cache[sym] = candidates[0]
-        return self._cg_id_cache[sym]
+        with self._cg_lock:
+            self._cg_id_cache[sym] = candidates[0]
+            return self._cg_id_cache[sym]
 
     def _cg_markets(self, ids: List[str]) -> List[Dict]:
         """Fetch CoinGecko markets snapshot for given ids (batched)."""
@@ -1645,8 +1658,8 @@ class LongTermCryptoFinder:
                 or coin_data.get('volume_24h')
                 or 0
             )
-            mc = market_cap if market_cap and market_cap > 0 else 1
-            volume_to_market_cap = float(volume_24h) / float(mc)
+            real_mc = market_cap if market_cap and market_cap > 0 else None
+            volume_to_market_cap = (float(volume_24h) / float(real_mc)) if real_mc else 0.0
 
             if volume_to_market_cap > 0.1:  # Very high volume
                 volume_score = 100
@@ -1659,6 +1672,9 @@ class LongTermCryptoFinder:
             else:
                 volume_score = 50
 
+            # Optionally cap volume score when market cap is not real
+            if not real_mc:
+                volume_score = min(volume_score, 60)
             score += volume_score * 0.25
 
             # Price stability score (lower volatility = higher score)
@@ -1824,6 +1840,7 @@ class LongTermCryptoFinder:
                 fundamental_score * 0.4 +
                 momentum_score * 0.2
             ) * (1 - risk_score / 200)  # Risk adjustment
+            overall_score = max(0.0, min(100.0, overall_score))
 
             # Calculate additional price changes from historical data
             price_changes = self._calculate_price_changes_from_history(historical_df)
@@ -1893,6 +1910,7 @@ class LongTermCryptoFinder:
             overall_score = (
                 technical_score * 0.4 + fundamental_score * 0.4 + momentum_score * 0.2
             ) * (1 - risk_score / 200)
+            overall_score = max(0.0, min(100.0, overall_score))
             trading_levels = self.calculate_trading_levels(df, coin_data.get('current_price', 0), technical_metrics)
             try:
                 ts_idx = df.index.max()
@@ -1949,6 +1967,7 @@ class LongTermCryptoFinder:
             short_overall = (
                 short_tech_score * 0.4 + fundamental_score * 0.4 + (max(0.0, min(100.0, 100.0 - long_momentum))) * 0.2
             ) * (1 - risk_score / 200)
+            short_overall = max(0.0, min(100.0, short_overall))
             short_levels = self.calculate_short_trading_levels(df, coin_data.get('current_price', 0), technical_metrics)
             try:
                 ts_idx = df.index.max()
@@ -2150,9 +2169,9 @@ class LongTermCryptoFinder:
 
             # Method 3: Percentage-based stop via DAILY vol thresholds
             daily_vol = float(technical_metrics.get('daily_vol_30d', 0.0) or 0.0)
-            if daily_vol < 0.02:
+            if daily_vol >= 0.04:
                 pct = 0.08
-            elif daily_vol < 0.04:
+            elif daily_vol >= 0.02:
                 pct = 0.06
             else:
                 pct = 0.05
@@ -2197,7 +2216,7 @@ class LongTermCryptoFinder:
 
             # Calculate risk-reward ratio with floor and cap, include ATR-based floor
             raw_risk = entry_price - stop_loss_price
-            risk = max(entry_price * 1e-3, raw_risk, (atr_raw * 0.25) if atr_raw > 0 else 0.0)
+            risk = max(entry_price * 1e-3, raw_risk, (atr_raw * 0.5) if atr_raw > 0 else 0.0)
             reward = max(0.0, take_profit_price - entry_price)
             risk_reward_ratio = min(10.0, (reward / risk) if risk > 0 else 0.0)
 
@@ -2255,9 +2274,9 @@ class LongTermCryptoFinder:
                 stop_loss_methods.append(resistance_stop)
 
             daily_vol = float(technical_metrics.get('daily_vol_30d', 0.0) or 0.0)
-            if daily_vol < 0.02:
+            if daily_vol >= 0.04:
                 pct = 0.08
-            elif daily_vol < 0.04:
+            elif daily_vol >= 0.02:
                 pct = 0.06
             else:
                 pct = 0.05
@@ -2297,7 +2316,7 @@ class LongTermCryptoFinder:
             take_profit_price = min(take_profit_price, entry_price * 0.999)
 
             raw_risk = stop_loss_price - entry_price
-            risk = max(entry_price * 1e-3, raw_risk, (atr_raw * 0.25) if atr_raw > 0 else 0.0)
+            risk = max(entry_price * 1e-3, raw_risk, (atr_raw * 0.5) if atr_raw > 0 else 0.0)
             reward = max(0.0, entry_price - take_profit_price)
             risk_reward_ratio = min(10.0, (reward / risk) if risk > 0 else 0.0)
 
@@ -2440,6 +2459,12 @@ class LongTermCryptoFinder:
             # Momentum: derive short momentum from long momentum
             short_momentum = max(0.0, min(100.0, 100.0 - momentum_score_long))
             score += short_momentum * 0.2
+
+            # MACD cross small bonus/penalty (inverted for shorts)
+            macd_cross = bool(technical_metrics.get('macd_cross', False))
+            if macd_cross:
+                macd_hist = float(technical_metrics.get('macd_hist', 0.0) or 0.0)
+                score += 5 if macd_hist < 0 else -5
 
             return min(100, score)
         except Exception as e:
