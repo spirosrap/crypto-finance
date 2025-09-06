@@ -368,7 +368,7 @@ class LongTermCryptoFinder:
         self._cache_lock = threading.Lock()
         
         # Thread pool for parallel processing
-        self.max_workers = max(1, self.config.max_workers)
+        self.max_workers = max(1, self.config.max_workers or (os.cpu_count() or 4))
 
         # Behavior flags
         self.offline = bool(self.config.offline)
@@ -444,7 +444,7 @@ class LongTermCryptoFinder:
             logger.warning("API credentials not found in environment or config.py; public endpoints may still work.")
             return None, None
 
-    def _make_request(self, url: str, params: Optional[Dict] = None, max_retries: int = 3) -> Optional[Dict]:
+    def _make_request(self, url: str, params: Optional[Dict] = None, max_retries: int = 3) -> Optional[Union[Dict, List]]:
         """Make API request via shared Session with retries and thread-safe throttle."""
         if not url or not isinstance(url, str):
             raise DataValidationError("Invalid URL provided")
@@ -477,25 +477,27 @@ class LongTermCryptoFinder:
                     raise DataValidationError(f"Invalid JSON response: {str(e)}")
 
             except requests.exceptions.HTTPError as e:
-                if e.response.status_code == 429:  # Rate limit exceeded
+                resp = getattr(e, 'response', None)
+                code = getattr(resp, 'status_code', None)
+                if code == 429:  # Rate limit exceeded
                     wait_time = (2 ** attempt) * 5  # Exponential backoff: 5s, 10s, 20s
                     logger.warning(f"Rate limit exceeded. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
                     time.sleep(wait_time)
                     continue
-                elif e.response.status_code >= 500:  # Server errors
+                elif isinstance(code, int) and code >= 500:  # Server errors
                     wait_time = (2 ** attempt) * 2
-                    logger.warning(f"Server error {e.response.status_code}. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                    logger.warning(f"Server error {code}. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
                     time.sleep(wait_time)
                     continue
                 else:
                     # Validation or client errors: surface server message and do not retry
                     server_msg = None
                     try:
-                        server_msg = e.response.json()
+                        server_msg = resp.json() if resp is not None else None
                     except Exception:
-                        server_msg = e.response.text
-                    logger.error(f"HTTP {e.response.status_code} error: {server_msg}")
-                    raise DataValidationError(f"HTTP {e.response.status_code}: {server_msg}")
+                        server_msg = getattr(resp, 'text', str(e))
+                    logger.error(f"HTTP {code or 'N/A'} error: {server_msg}")
+                    raise DataValidationError(f"HTTP {code or 'N/A'}: {server_msg}")
                     
             except requests.exceptions.Timeout as e:
                 logger.warning(f"Request timeout (attempt {attempt + 1}/{max_retries}): {str(e)}")
@@ -554,6 +556,10 @@ class LongTermCryptoFinder:
     def _sanitize_price(self, price: Union[str, float, int]) -> float:
         """Sanitize and validate price values."""
         try:
+            if price is None:
+                return 0.0
+            if isinstance(price, float) and not np.isfinite(price):
+                return 0.0
             if isinstance(price, str):
                 price = float(price.replace(',', '').replace('$', ''))
             elif not isinstance(price, (int, float)):
@@ -630,6 +636,10 @@ class LongTermCryptoFinder:
                     data = envelope.get('data', []) or []
                     if long_ttl <= 0 or (time.time() - ts) <= long_ttl:
                         self._coingecko_list = data
+                        try:
+                            self._cg_index = {item['symbol'].upper(): item for item in self._coingecko_list if item.get('symbol')}
+                        except Exception:
+                            self._cg_index = {}
                         return self._coingecko_list
         except Exception:
             pass
@@ -832,7 +842,7 @@ class LongTermCryptoFinder:
         data = json.dumps(obj, indent=2).encode('utf-8')
         self._atomic_write_bytes(Path(path), data)
     
-    def _make_cached_request(self, url: str, params: Optional[Dict] = None) -> Optional[Dict]:
+    def _make_cached_request(self, url: str, params: Optional[Dict] = None) -> Optional[Union[Dict, List]]:
         """Make API request with caching."""
         # Create cache key from URL and params
         cache_data = f"{url}:{json.dumps(params or {}, sort_keys=True)}"
@@ -1019,11 +1029,12 @@ class LongTermCryptoFinder:
             
         # Filter by minimum market cap if specified (only accept real CoinGecko market caps)
         min_mc = float(self.config.min_market_cap or 0)
+        allow_est = os.getenv('CRYPTO_ALLOW_EST_MC', '0') in ('1','true','True')
         if min_mc > 0:
             pre_filter_count = len(crypto_data)
             filtered: List[Dict] = []
             for c in crypto_data:
-                if not c.get('market_cap_is_real', False):
+                if not (c.get('market_cap_is_real', False) or allow_est):
                     continue
                 if float(c.get('market_cap', 0) or 0) >= min_mc:
                     filtered.append(c)
@@ -1212,9 +1223,10 @@ class LongTermCryptoFinder:
             prices = df['price'].values
             returns = np.diff(prices) / prices[:-1] if len(prices) > 1 else np.array([])
 
-            # Daily vol (last 30 returns), annualized vol
-            if len(returns) >= 30:
-                daily_vol = float(np.std(returns[-30:], ddof=1))
+            # Daily vol (use available window up to last 30), annualized
+            if len(returns) >= 2:
+                win = returns[-30:] if len(returns) >= 30 else returns
+                daily_vol = float(np.std(win, ddof=1)) if len(win) >= 2 else 0.0
             else:
                 daily_vol = 0.0
             volatility_30d = daily_vol * float(np.sqrt(365))
@@ -1265,7 +1277,8 @@ class LongTermCryptoFinder:
                 macd_signal = "BULLISH" if hist > 0 else "BEARISH" if hist < 0 else "NEUTRAL"
                 macd_cross = False
                 if len(hist_series) >= 2:
-                    macd_cross = (np.sign(hist_series[-1]) != np.sign(hist_series[-2]))
+                    eps = 1e-9
+                    macd_cross = (np.sign(hist_series[-1]) != np.sign(hist_series[-2])) and (abs(hist_series[-1]) > eps or abs(hist_series[-2]) > eps)
             else:
                 macd_line = 0.0
                 signal_line = 0.0
@@ -1730,15 +1743,15 @@ class LongTermCryptoFinder:
         try:
             risk_score = 0
 
-            # Volatility risk
+            # Volatility risk (annualized fraction). Broader bands for crypto.
             volatility = metrics.get('volatility_30d', 0)
-            if volatility < 0.5:  # Low volatility
+            if volatility < 0.6:  # <60%
                 vol_risk = 20
-            elif volatility < 1.0:
+            elif volatility < 1.0:  # <100%
                 vol_risk = 40
-            elif volatility < 1.5:
+            elif volatility < 1.5:  # <150%
                 vol_risk = 60
-            elif volatility < 2.0:
+            elif volatility < 2.0:  # <200%
                 vol_risk = 80
             else:
                 vol_risk = 100
@@ -2153,13 +2166,8 @@ class LongTermCryptoFinder:
 
             # Method 1: ATR-based stop loss (2x ATR below entry). ATR is in price units.
             atr_raw = float(technical_metrics.get('atr', 0.0))
-            if atr_raw > 0 and entry_price > 0:
-                atr_pct = atr_raw / entry_price * 100.0
-            else:
-                atr_pct = float(df['price'].pct_change().std(ddof=1) * 100.0) if len(df) >= 2 else 0.0
-            if np.isfinite(atr_pct) and atr_pct > 0:
-                atr_stop = entry_price * (1 - 2.0 * atr_pct / 100.0)
-                stop_loss_methods.append(atr_stop)
+            if atr_raw > 0:
+                stop_loss_methods.append(entry_price - 2.0 * atr_raw)
 
             # Method 2: Recent low support (10-day low)
             if len(df) >= 10:
@@ -2260,13 +2268,8 @@ class LongTermCryptoFinder:
             stop_loss_methods = []
 
             atr_raw = float(technical_metrics.get('atr', 0.0))
-            if atr_raw > 0 and entry_price > 0:
-                atr_pct = atr_raw / entry_price * 100.0
-            else:
-                atr_pct = float(df['price'].pct_change().std(ddof=1) * 100.0) if len(df) >= 2 else 0.0
-            if np.isfinite(atr_pct) and atr_pct > 0:
-                atr_stop = entry_price * (1 + 2.0 * atr_pct / 100.0)
-                stop_loss_methods.append(atr_stop)
+            if atr_raw > 0:
+                stop_loss_methods.append(entry_price + 2.0 * atr_raw)
 
             if len(df) >= 10:
                 recent_high = df['high'].tail(10).max()
@@ -2718,7 +2721,12 @@ def main():
             finder._atomic_write_json(Path(args.save), json_results)
             print(f"Saved {len(json_results)} results to {args.save}")
         if args.output == 'json':
-            print(json.dumps(json_results, indent=2))
+            print(json.dumps({
+                'version': '1.0',
+                'config': finder.config.to_dict(),
+                'generated_utc': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%SZ'),
+                'results': json_results
+            }, indent=2))
     else:
         finder.print_results(results)
 
