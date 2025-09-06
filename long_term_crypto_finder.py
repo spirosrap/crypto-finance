@@ -333,11 +333,15 @@ class LongTermCryptoFinder:
         )
         # Thread-safety: serialize request timing updates
         self._req_lock = threading.Lock()
+        # Thread-local session holder
+        self._tls = threading.local()
 
         # Dynamic product mapping (symbol -> product_id) populated lazily
         self._symbol_to_product: Dict[str, str] = {}
         # Lazy CoinGecko list cache in-memory
         self._coingecko_list: Optional[List[Dict[str, str]]] = None
+        # Fast lookup index for CoinGecko symbol->record
+        self._cg_index: Optional[Dict[str, Dict[str, str]]] = None
 
         # Rate limiting for Coinbase API
         self.request_delay = self.config.request_delay
@@ -364,6 +368,15 @@ class LongTermCryptoFinder:
         
         # Validate API credentials
         self._validate_api_credentials()
+
+    def _throttle(self) -> None:
+        """Apply a simple global throttle for outbound calls (thread-safe)."""
+        with self._req_lock:
+            now = time.time()
+            wait = max(0.0, self.request_delay - (now - self.last_request_time))
+            if wait > 0:
+                time.sleep(wait)
+            self.last_request_time = time.time()
 
     def _load_api_credentials(self) -> Tuple[Optional[str], Optional[str]]:
         """Load API credentials from environment or optional .env; fallback to config.py if present.
@@ -409,7 +422,14 @@ class LongTermCryptoFinder:
                     if wait:
                         logger.debug(f"Rate limiting: sleeping for {wait:.2f} seconds")
                         time.sleep(wait)
-                    response = self._sess.get(url, params=params, timeout=15, verify=True)
+                    # Use a thread-local session to avoid cross-thread state issues
+                    sess = getattr(self._tls, 'session', None)
+                    if sess is None:
+                        sess = requests.Session()
+                        sess.headers.update(self._sess.headers)
+                        sess.mount('https://', HTTPAdapter(max_retries=Retry(total=5, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])))
+                        self._tls.session = sess
+                    response = sess.get(url, params=params, timeout=15, verify=True)
                     self.last_request_time = time.time()
 
                 # Log response details for debugging
@@ -591,23 +611,27 @@ class LongTermCryptoFinder:
         return self._coingecko_list
 
     def _coingecko_id_for_symbol(self, symbol: str) -> Optional[str]:
-        """Resolve CoinGecko id from symbol (case-insensitive). Fallback to hard map if unmatched."""
+        """Resolve CoinGecko id from symbol using an indexed map; fallback to hard map if unmatched."""
         sym = (symbol or '').upper()
-        # Try dynamic list
-        clist = self._load_coingecko_list()
-        for item in clist:
-            try:
-                if (item.get('symbol') or '').upper() == sym:
-                    return item.get('id')
-            except Exception:
-                continue
+        # Build index lazily once
+        if self._cg_index is None:
+            self._cg_index = {}
+            for item in self._load_coingecko_list():
+                try:
+                    s = (item.get('symbol') or '').upper()
+                    if s and s not in self._cg_index:
+                        self._cg_index[s] = item
+                except Exception:
+                    continue
+        item = (self._cg_index or {}).get(sym)
+        if item:
+            return item.get('id')
         # Fallback hard map for common assets
-        fallback = {
+        return {
             'BTC': 'bitcoin', 'ETH': 'ethereum', 'ADA': 'cardano', 'SOL': 'solana', 'DOT': 'polkadot',
             'LINK': 'chainlink', 'UNI': 'uniswap', 'AAVE': 'aave', 'SUSHI': 'sushi', 'COMP': 'compound-governance-token',
             'MKR': 'maker', 'YFI': 'yearn-finance', 'BAL': 'balancer', 'MATIC': 'matic-network', 'AVAX': 'avalanche-2'
-        }
-        return fallback.get(sym)
+        }.get(sym)
     
     def _get_cache_key(self, data: str) -> str:
         """Generate a cache key from data string."""
@@ -723,6 +747,8 @@ class LongTermCryptoFinder:
             current_time = datetime.now(UTC)
             start_time = current_time - timedelta(hours=24)
 
+            # Throttle Coinbase hourly candles request
+            self._throttle()
             candles = self.historical_data.get_historical_data(
                 product_id,
                 start_time,
@@ -863,17 +889,14 @@ class LongTermCryptoFinder:
         return crypto_data
 
     def _get_crypto_name(self, symbol: str) -> str:
-        """Get readable asset name; prefer CoinGecko list; fallback to symbol."""
+        """Get readable asset name using CoinGecko index; fallback to symbol."""
         sym = (symbol or '').upper()
-        try:
-            for item in self._load_coingecko_list():
-                if (item.get('symbol') or '').upper() == sym:
-                    nm = item.get('name')
-                    if nm:
-                        return nm
-        except Exception:
-            pass
-        return sym
+        if self._cg_index is None:
+            # ensure index exists
+            _ = self._coingecko_id_for_symbol(sym)
+        item = (self._cg_index or {}).get(sym)
+        nm = (item or {}).get('name') if item else None
+        return nm or sym
 
     def _calculate_price_change(self, candles: List[Dict]) -> float:
         """Calculate ~24h price change from hourly candles."""
@@ -1008,6 +1031,8 @@ class LongTermCryptoFinder:
         try:
             start_time = datetime.fromisoformat(start_iso)
             end_time = datetime.fromisoformat(end_iso)
+            # Throttle Coinbase historical fetches to avoid burst rate limits
+            self._throttle()
             data = self.historical_data.get_historical_data(product_id, start_time, end_time, granularity)
             return tuple(data or [])
         except Exception as e:
@@ -1966,7 +1991,7 @@ class LongTermCryptoFinder:
                 atr_pct = atr_raw / entry_price * 100.0
             else:
                 atr_pct = float(df['price'].pct_change().std(ddof=1) * 100.0) if len(df) >= 2 else 0.0
-            if atr_pct > 0:
+            if np.isfinite(atr_pct) and atr_pct > 0:
                 atr_stop = entry_price * (1 - 2.0 * atr_pct / 100.0)
                 stop_loss_methods.append(atr_stop)
 
@@ -2007,7 +2032,7 @@ class LongTermCryptoFinder:
 
             # Method 3: ATH-based target (scaled based on distance from ATH)
             ath_price = df['high'].max()
-            ath_distance = (ath_price - current_price) / current_price
+            ath_distance = max((ath_price - current_price) / current_price, 0.0)
 
             if ath_distance < 0.2:  # Within 20% of ATH
                 ath_tp = ath_price * 1.05  # 5% above ATH
@@ -2026,7 +2051,9 @@ class LongTermCryptoFinder:
             # Calculate risk-reward ratio
             risk = entry_price - stop_loss_price
             reward = take_profit_price - entry_price
-            risk_reward_ratio = reward / risk if risk > 0 else 0
+            # Avoid division explosion when risk is extremely small
+            denom = risk if risk > 0 else 0.0
+            risk_reward_ratio = (reward / max(denom, entry_price * 1e-6)) if denom > 0 else 0.0
 
             # Calculate position size percentage based on risk
             if risk_reward_ratio >= 3:
@@ -2072,7 +2099,7 @@ class LongTermCryptoFinder:
                 atr_pct = atr_raw / entry_price * 100.0
             else:
                 atr_pct = float(df['price'].pct_change().std(ddof=1) * 100.0) if len(df) >= 2 else 0.0
-            if atr_pct > 0:
+            if np.isfinite(atr_pct) and atr_pct > 0:
                 atr_stop = entry_price * (1 + 2.0 * atr_pct / 100.0)
                 stop_loss_methods.append(atr_stop)
 
@@ -2125,7 +2152,8 @@ class LongTermCryptoFinder:
 
             risk = stop_loss_price - entry_price
             reward = entry_price - take_profit_price
-            risk_reward_ratio = reward / risk if risk > 0 else 0
+            denom = risk if risk > 0 else 0.0
+            risk_reward_ratio = (reward / max(denom, entry_price * 1e-6)) if denom > 0 else 0.0
 
             if risk_reward_ratio >= 3:
                 position_size_percentage = 2.0
@@ -2204,7 +2232,13 @@ class LongTermCryptoFinder:
             # Momentum score (already calculated)
             score += momentum_score * 0.2
 
-            return min(100, score)
+            # MACD cross small bonus/penalty
+            macd_cross = bool(technical_metrics.get('macd_cross', False))
+            if macd_cross:
+                macd_hist = float(technical_metrics.get('macd_hist', 0.0) or 0.0)
+                score += 5 if macd_hist > 0 else -5
+
+            return min(100, max(0, score))
 
         except Exception as e:
             logger.error(f"Error calculating technical score: {str(e)}")
@@ -2327,8 +2361,8 @@ class LongTermCryptoFinder:
         # Optional per-side cap
         tps = self.config.top_per_side
         if tps and tps > 0:
-            longs = [c for c in analyzed_candidates if getattr(c, 'position_side', 'LONG') == 'LONG']
-            shorts = [c for c in analyzed_candidates if getattr(c, 'position_side', 'LONG') == 'SHORT']
+            longs = [c for c in analyzed_candidates if getattr(c, 'position_side', '') == 'LONG']
+            shorts = [c for c in analyzed_candidates if getattr(c, 'position_side', '') == 'SHORT']
             longs.sort(key=lambda x: x.overall_score, reverse=True)
             shorts.sort(key=lambda x: x.overall_score, reverse=True)
             analyzed_candidates = longs[:tps] + shorts[:tps]
@@ -2339,8 +2373,8 @@ class LongTermCryptoFinder:
         # Return top results across selected side(s)
         top_results = analyzed_candidates[: self.config.max_results]
 
-        long_count = sum(1 for x in top_results if getattr(x, 'position_side', 'LONG') == 'LONG')
-        short_count = sum(1 for x in top_results if getattr(x, 'position_side', 'LONG') == 'SHORT')
+        long_count = sum(1 for x in top_results if getattr(x, 'position_side', '') == 'LONG')
+        short_count = sum(1 for x in top_results if getattr(x, 'position_side', '') == 'SHORT')
         logger.info(
             f"Analysis complete. Found {len(top_results)} top opportunities (LONG={long_count}, SHORT={short_count})."
         )
@@ -2375,7 +2409,7 @@ class LongTermCryptoFinder:
             print(f"30d Change: {crypto.price_change_30d:.2f}%")
             print(f"ATH: ${crypto.ath_price:.2f} (Date: {crypto.ath_date or 'N/A'})")
             print(f"ATL: ${crypto.atl_price:.6f} (Date: {crypto.atl_date or 'N/A'})")
-            print(f"Volatility (30d): {crypto.volatility_30d:.3f}")
+            print(f"Volatility (30d, ann.): {crypto.volatility_30d*100:.1f}%")
             print(f"Sharpe Ratio: {crypto.sharpe_ratio:.2f}")
             print(f"Sortino Ratio: {crypto.sortino_ratio:.2f}")
             # max_drawdown is negative fraction; display as signed percent with minus sign
