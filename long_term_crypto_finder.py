@@ -30,7 +30,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pickle
 import hashlib
 from coinbaseservice import CoinbaseService
-from config import API_KEY, API_SECRET
 from historicaldata import HistoricalData
 
 # Configuration management
@@ -307,8 +306,11 @@ class LongTermCryptoFinder:
         # Load configuration
         self.config = config or CryptoFinderConfig.from_env()
         
+        # Load API credentials from environment (fallback to config.py only if needed)
+        self.api_key, self.api_secret = self._load_api_credentials()
+
         # Initialize Coinbase service
-        self.coinbase_service = CoinbaseService(API_KEY, API_SECRET)
+        self.coinbase_service = CoinbaseService(self.api_key, self.api_secret)
         self.historical_data = HistoricalData(self.coinbase_service.client)
 
         # List of major cryptocurrencies available on Coinbase (verified product IDs)
@@ -343,6 +345,36 @@ class LongTermCryptoFinder:
         
         # Validate API credentials
         self._validate_api_credentials()
+
+    def _load_api_credentials(self) -> Tuple[Optional[str], Optional[str]]:
+        """Load API credentials from environment or optional .env; fallback to config.py if present.
+
+        Returns:
+            Tuple of (api_key, api_secret) which may be None if not configured.
+        """
+        # Attempt to load from .env if python-dotenv is available
+        try:
+            from dotenv import load_dotenv  # type: ignore
+
+            load_dotenv()
+        except Exception:
+            # Best-effort: ignore if dotenv is not installed
+            pass
+
+        env_key = os.getenv('API_KEY')
+        env_secret = os.getenv('API_SECRET')
+
+        if env_key and env_secret:
+            return env_key, env_secret
+
+        # Fallback to config.py if available
+        try:
+            from config import API_KEY as CFG_API_KEY, API_SECRET as CFG_API_SECRET  # type: ignore
+
+            return CFG_API_KEY, CFG_API_SECRET
+        except Exception:
+            logger.warning("API credentials not found in environment or config.py; public endpoints may still work.")
+            return None, None
 
     def _make_request(self, url: str, params: Optional[Dict] = None, max_retries: int = 3) -> Optional[Dict]:
         """Make API request with enhanced rate limiting and retry logic."""
@@ -401,8 +433,14 @@ class LongTermCryptoFinder:
                     time.sleep(wait_time)
                     continue
                 else:
-                    logger.error(f"HTTP error {e.response.status_code}: {str(e)}")
-                    raise APIRateLimitError(f"HTTP {e.response.status_code}: {str(e)}")
+                    # Validation or client errors: surface server message and do not retry
+                    server_msg = None
+                    try:
+                        server_msg = e.response.json()
+                    except Exception:
+                        server_msg = e.response.text
+                    logger.error(f"HTTP {e.response.status_code} error: {server_msg}")
+                    raise DataValidationError(f"HTTP {e.response.status_code}: {server_msg}")
                     
             except requests.exceptions.Timeout as e:
                 logger.warning(f"Request timeout (attempt {attempt + 1}/{max_retries}): {str(e)}")
@@ -430,7 +468,12 @@ class LongTermCryptoFinder:
     def _validate_api_credentials(self) -> None:
         """Validate that API credentials are properly configured."""
         try:
-            if not API_KEY or not API_SECRET:
+            # Skip validation when offline mode is requested
+            if getattr(self, 'offline', False):
+                logger.info("Offline mode: skipping API credential validation")
+                return
+
+            if not self.api_key or not self.api_secret:
                 raise DataValidationError("API credentials not found in config")
             
             # Test API connection with a simple request
@@ -508,14 +551,51 @@ class LongTermCryptoFinder:
             return None
     
     def _set_cached_data(self, cache_key: str, data: Dict) -> None:
-        """Store data in cache."""
+        """Store data in cache using atomic write and a file lock to avoid corruption."""
         try:
             with self._cache_lock:
                 cache_file = self.cache_dir / f"{cache_key}.pkl"
-                with open(cache_file, 'wb') as f:
-                    pickle.dump(data, f)
+                self._atomic_write_bytes(cache_file, pickle.dumps(data))
         except Exception as e:
             logger.warning(f"Cache write error: {str(e)}")
+
+    # -------- Persistence helpers (atomic write + file lock) --------
+    def _atomic_write_bytes(self, path: Path, payload: bytes) -> None:
+        """Atomically write bytes to a file with an exclusive, best-effort lock."""
+        path = Path(path)
+        tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}.{int(time.time()*1000)}")
+        lock_path = path.with_suffix(path.suffix + '.lock')
+
+        # Acquire a best-effort lock on lock_path
+        try:
+            import fcntl  # type: ignore
+
+            lock_fd = open(lock_path, 'w')
+            try:
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+                with open(tmp, 'wb') as f:
+                    f.write(payload)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)
+            finally:
+                try:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    pass
+                lock_fd.close()
+        except Exception:
+            # Fallback: no fcntl available; still write atomically via os.replace
+            with open(tmp, 'wb') as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+
+    def _atomic_write_json(self, path: Path, obj: Union[Dict, List]) -> None:
+        """Atomically write a JSON object (utf-8, indented)."""
+        data = json.dumps(obj, indent=2).encode('utf-8')
+        self._atomic_write_bytes(Path(path), data)
     
     def _make_cached_request(self, url: str, params: Optional[Dict] = None) -> Optional[Dict]:
         """Make API request with caching."""
@@ -717,28 +797,36 @@ class LongTermCryptoFinder:
         return total_volume
 
     def _calculate_usd_volume(self, candles: List[Dict]) -> float:
-        """Estimate 24h USD volume from candles by summing base volume * typical price per candle."""
+        """Estimate 24h USD volume from candles using Decimal for precise accounting.
+
+        Sums base volume × typical price per candle.
+        """
         if not candles:
             return 0.0
-        usd_volume = 0.0
+        from decimal import Decimal, getcontext, ROUND_DOWN
+
+        getcontext().prec = 28
+        total = Decimal('0')
         for c in candles:
             try:
-                base_vol = float(c.get('volume', 0) or 0.0)
-                o = float(c.get('open', 0) or 0.0)
-                h = float(c.get('high', 0) or 0.0)
-                l = float(c.get('low', 0) or 0.0)
-                cl = float(c.get('close', 0) or 0.0)
-                typical = (o + h + l + cl) / 4 if (o or h or l or cl) else cl
-                usd_volume += base_vol * typical
+                base_vol = Decimal(str(c.get('volume', 0) or '0'))
+                o = Decimal(str(c.get('open', 0) or '0'))
+                h = Decimal(str(c.get('high', 0) or '0'))
+                l = Decimal(str(c.get('low', 0) or '0'))
+                cl = Decimal(str(c.get('close', 0) or '0'))
+                # Typical price; prefer average of O/H/L/C if available
+                typical = (o + h + l + cl) / Decimal(4) if (o != 0 or h != 0 or l != 0 or cl != 0) else cl
+                total += base_vol * typical
             except Exception:
-                # Fallback to close price if any parsing issues
+                # Fallback to close × volume if any parsing issues
                 try:
-                    base_vol = float(c.get('volume', 0) or 0.0)
-                    cl = float(c.get('close', 0) or 0.0)
-                    usd_volume += base_vol * cl
+                    base_vol = Decimal(str(c.get('volume', 0) or '0'))
+                    cl = Decimal(str(c.get('close', 0) or '0'))
+                    total += base_vol * cl
                 except Exception:
                     continue
-        return float(usd_volume)
+        # Return as float for compatibility with downstream dataclass
+        return float(total)
 
     def _estimate_market_cap(self, symbol: str, price: float) -> float:
         """Estimate market cap (simplified - would need actual circulating supply)."""
@@ -2023,7 +2111,8 @@ class LongTermCryptoFinder:
         print("\n" + "="*100)
         print("LONG-TERM CRYPTO OPPORTUNITIES ANALYSIS")
         print("="*100)
-        print(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        # Use UTC for deterministic timestamps
+        print(f"Generated on (UTC): {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}Z")
         print(f"Total opportunities listed: {len(results)}")
         print("="*100)
 
@@ -2163,8 +2252,8 @@ def main():
             }
             json_results.append(crypto_dict)
         if args.save and args.save.lower().endswith('.json'):
-            with open(args.save, 'w') as f:
-                json.dump(json_results, f, indent=2)
+            # Atomic JSON save
+            finder._atomic_write_json(Path(args.save), json_results)
             print(f"Saved {len(json_results)} results to {args.save}")
         if args.output == 'json':
             print(json.dumps(json_results, indent=2))
@@ -2184,7 +2273,10 @@ def main():
                 'entry_price', 'stop_loss_price', 'take_profit_price', 'risk_reward_ratio',
                 'position_size_percentage'
             ]
-            with open(args.save, 'w', newline='') as f:
+            # Atomic CSV save: write to temp and replace
+            tmp_path = Path(args.save + f".tmp.{os.getpid()}.{int(time.time()*1000)}")
+            final_path = Path(args.save)
+            with open(tmp_path, 'w', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 for crypto in results:
@@ -2223,6 +2315,7 @@ def main():
                         'risk_reward_ratio': crypto.risk_reward_ratio,
                         'position_size_percentage': crypto.position_size_percentage
                     })
+            os.replace(tmp_path, final_path)
             print(f"Saved {len(results)} results to {args.save}")
 
 if __name__ == "__main__":
