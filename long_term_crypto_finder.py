@@ -345,6 +345,7 @@ class LongTermCryptoFinder:
         )
         # Thread-safety: serialize request timing updates
         self._req_lock = threading.Lock()
+        self._cb_lock = threading.Lock()
         # Thread-local session holder
         self._tls = threading.local()
 
@@ -381,6 +382,27 @@ class LongTermCryptoFinder:
         
         # Validate API credentials
         self._validate_api_credentials()
+
+    def _normalize_ts(self, t) -> int:
+        """Return epoch seconds from seconds/ms/us or ISO string; 0 on failure."""
+        try:
+            # numeric path: s, ms, µs
+            ts = int(str(t))
+            if ts >= 10**15:
+                ts //= 10**9
+            elif ts >= 10**12:
+                ts //= 10**3
+            return ts
+        except Exception:
+            pass
+        try:
+            from dateutil import parser  # type: ignore
+            return int(parser.isoparse(str(t)).timestamp())
+        except Exception:
+            try:
+                return int(datetime.fromisoformat(str(t).replace('Z', '+00:00')).timestamp())
+            except Exception:
+                return 0
 
     def _throttle(self) -> None:
         """Apply a simple global throttle for outbound calls (thread-safe, monotonic clock)."""
@@ -691,6 +713,31 @@ class LongTermCryptoFinder:
         }
         data = self._make_cached_request(url, params)
         return data if isinstance(data, list) else []
+
+    def _prefetch_cg_markets(self, ids: List[str]) -> Dict[str, Dict]:
+        """Prefetch markets data for ids and shape to our fields."""
+        market_map: Dict[str, Dict] = {}
+        try:
+            data = self._cg_markets(ids)
+            for m in data or []:
+                cid = str(m.get('id', '') or '')
+                if not cid:
+                    continue
+                market_map[cid] = {
+                    'ath': m.get('ath'),
+                    'ath_date': (m.get('ath_date') or '')[:10],
+                    'atl': m.get('atl'),
+                    'atl_date': (m.get('atl_date') or '')[:10],
+                    'current_price_usd': m.get('current_price'),
+                    'market_cap_usd': m.get('market_cap'),
+                    'total_volume_usd': m.get('total_volume'),
+                    'price_change_7d_pct': m.get('price_change_percentage_7d_in_currency') or 0,
+                    'price_change_30d_pct': m.get('price_change_percentage_30d_in_currency') or 0,
+                    'market_cap_rank': m.get('market_cap_rank')
+                }
+        except Exception:
+            return {}
+        return market_map
     
     def _get_cache_key(self, data: str) -> str:
         """Generate a cache key from data string."""
@@ -737,6 +784,7 @@ class LongTermCryptoFinder:
     def _atomic_write_bytes(self, path: Path, payload: bytes) -> None:
         """Atomically write bytes to a file with an exclusive, best-effort lock."""
         path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}.{int(time.time()*1000)}")
         lock_path = path.with_suffix(path.suffix + '.lock')
 
@@ -808,11 +856,12 @@ class LongTermCryptoFinder:
 
             # Throttle Coinbase hourly candles request
             self._throttle()
-            candles = self.historical_data.get_historical_data(
-                product_id,
-                start_time,
-                current_time,
-                "ONE_HOUR"
+            with self._cb_lock:
+                candles = self.historical_data.get_historical_data(
+                    product_id,
+                    start_time,
+                    current_time,
+                    "ONE_HOUR"
                 )
 
             if not candles or len(candles) == 0:
@@ -829,15 +878,7 @@ class LongTermCryptoFinder:
                     
             current_price = self._sanitize_price(latest_candle['close'])
             # Data timestamp from latest candle
-            try:
-                ts_raw = latest_candle.get('start') or latest_candle.get('time') or 0
-                # normalize int and handle ms vs s
-                ts = int(ts_raw)
-                # if looks like milliseconds (>= 10^12), convert to seconds
-                if ts >= 10**12:
-                    ts //= 1000
-            except Exception:
-                ts = 0
+            ts = self._normalize_ts(latest_candle.get('start') or latest_candle.get('time'))
             try:
                 data_ts = datetime.fromtimestamp(ts, UTC).strftime('%Y-%m-%d %H:%M:%SZ') if ts else ''
             except Exception:
@@ -847,8 +888,18 @@ class LongTermCryptoFinder:
                 logger.warning(f"Invalid price for {product_id}: {current_price}")
                 return None
 
-            # Get accurate ATH/ATL and market snapshot from CoinGecko
-            cg = self._get_ath_atl_from_coingecko(product_id.split('-')[0])
+            # Get accurate ATH/ATL and market snapshot (prefer prefetch from markets)
+            base_sym = product_id.split('-')[0]
+            cg: Dict[str, Union[float, str, int]] = {}
+            try:
+                cid = self._coingecko_id_for_symbol(base_sym)
+                pre = getattr(self, '_cg_prefetch_map', {}) or {}
+                if cid and cid in pre:
+                    cg = pre[cid]
+                else:
+                    cg = self._get_ath_atl_from_coingecko(base_sym)
+            except Exception:
+                cg = self._get_ath_atl_from_coingecko(base_sym)
 
             # Create a validated data structure
             real_mc = float(cg.get('market_cap_usd', 0) or 0.0) > 0.0
@@ -919,6 +970,16 @@ class LongTermCryptoFinder:
         crypto_data: List[Dict] = []
         failed_products: List[str] = []
         
+        # Prefetch CoinGecko markets snapshot for all symbols to reduce per-coin hits
+        base_syms = [pid.split('-')[0] for pid in products_to_process]
+        cg_ids: List[str] = []
+        if not self.offline:
+            for s in base_syms:
+                cid = self._coingecko_id_for_symbol(s)
+                if cid:
+                    cg_ids.append(cid)
+        self._cg_prefetch_map = self._prefetch_cg_markets(cg_ids) if cg_ids else {}
+
         # Use ThreadPoolExecutor for parallel processing (cap pool to workload)
         with ThreadPoolExecutor(max_workers=min(self.max_workers, len(products_to_process))) as executor:
             # Submit all tasks
@@ -1006,7 +1067,7 @@ class LongTermCryptoFinder:
         total = Decimal('0')
         for c in candles:
             try:
-                base_vol = Decimal(str(c.get('volume', 0) or '0'))
+                base_vol = Decimal(str(c.get('volume', 0) or c.get('volume_in_base', 0) or c.get('volumeBase', 0) or '0'))
                 o = Decimal(str(c.get('open', 0) or '0'))
                 h = Decimal(str(c.get('high', 0) or '0'))
                 l = Decimal(str(c.get('low', 0) or '0'))
@@ -1017,7 +1078,7 @@ class LongTermCryptoFinder:
             except Exception:
                 # Fallback to close × volume if any parsing issues
                 try:
-                    base_vol = Decimal(str(c.get('volume', 0) or '0'))
+                    base_vol = Decimal(str(c.get('volume', 0) or c.get('volume_in_base', 0) or c.get('volumeBase', 0) or '0'))
                     cl = Decimal(str(c.get('close', 0) or '0'))
                     total += base_vol * cl
                 except Exception:
@@ -1082,8 +1143,10 @@ class LongTermCryptoFinder:
             # Convert to DataFrame
             df_data = []
             for candle in candles:
+                ts_i = self._normalize_ts(candle.get('start') or candle.get('time'))
+                ts_dt = datetime.fromtimestamp(ts_i, UTC) if ts_i else None
                 df_data.append({
-                    'timestamp': (lambda ts_raw: datetime.fromtimestamp((int(ts_raw)//1000 if int(ts_raw) >= 10**12 else int(ts_raw)), UTC))(candle.get('start') or candle.get('time') or 0),
+                    'timestamp': ts_dt,
                     'price': float(candle['close']),
                     'high': float(candle['high']),
                     'low': float(candle['low']),
@@ -1092,6 +1155,7 @@ class LongTermCryptoFinder:
                 })
 
             df = pd.DataFrame(df_data)
+            df = df.dropna(subset=['timestamp'])
             df.set_index('timestamp', inplace=True)
             df.sort_index(inplace=True)
 
@@ -1109,7 +1173,8 @@ class LongTermCryptoFinder:
             end_time = datetime.fromisoformat(end_iso)
             # Throttle Coinbase historical fetches to avoid burst rate limits
             self._throttle()
-            data = self.historical_data.get_historical_data(product_id, start_time, end_time, granularity)
+            with self._cb_lock:
+                data = self.historical_data.get_historical_data(product_id, start_time, end_time, granularity)
             return tuple(data or [])
         except Exception as e:
             logger.warning(f"Cached candles retrieval failed for {product_id}: {e}")
@@ -1560,6 +1625,8 @@ class LongTermCryptoFinder:
                 or coin_data.get('market_cap_usd')
                 or 0
             )
+            if not coin_data.get('market_cap_is_real', False):
+                market_cap = 0
             if market_cap > 1000000000:  # > $1B
                 market_cap_score = 100
             elif market_cap > 500000000:  # > $500M
@@ -1983,6 +2050,7 @@ class LongTermCryptoFinder:
             url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}"
             params = {
                 'localization': 'false',
+                'tickers': 'false',
                 'market_data': 'true',
                 'community_data': 'false',
                 'developer_data': 'false',
@@ -2645,6 +2713,7 @@ def main():
             # Atomic CSV save: write to temp and replace
             tmp_path = Path(args.save + f".tmp.{os.getpid()}.{int(time.time()*1000)}")
             final_path = Path(args.save)
+            final_path.parent.mkdir(parents=True, exist_ok=True)
             with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
