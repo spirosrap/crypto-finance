@@ -67,6 +67,7 @@ class CryptoFinderConfig:
     offline: bool = False  # avoid external HTTP where possible
     symbols: Optional[List[str]] = None  # analyze explicit symbols if provided
     top_per_side: Optional[int] = None  # when set, cap results per side
+    quotes: Optional[List[str]] = None  # preferred quote currencies, e.g., ["USDC","USD","USDT"]
     
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -76,6 +77,10 @@ class CryptoFinderConfig:
         symbols_list: Optional[List[str]] = None
         if symbols_env:
             symbols_list = [s.strip().upper() for s in symbols_env.split(',') if s.strip()]
+        quotes_env = os.getenv('CRYPTO_QUOTES')
+        quotes_list: Optional[List[str]] = None
+        if quotes_env:
+            quotes_list = [q.strip().upper() for q in quotes_env.split(',') if q.strip()]
 
         return cls(
             min_market_cap=int(os.getenv('CRYPTO_MIN_MARKET_CAP', '100000000')),
@@ -101,6 +106,7 @@ class CryptoFinderConfig:
             offline=os.getenv('CRYPTO_OFFLINE', '0') in ('1', 'true', 'True'),
             symbols=symbols_list,
             top_per_side=int(os.getenv('CRYPTO_TOP_PER_SIDE')) if os.getenv('CRYPTO_TOP_PER_SIDE') else None
+            ,quotes=quotes_list
         )
     
     def to_dict(self) -> Dict:
@@ -122,7 +128,13 @@ class CryptoFinderConfig:
             'bb_period': self.bb_period,
             'macd_fast': self.macd_fast,
             'macd_slow': self.macd_slow,
-            'macd_signal': self.macd_signal
+            'macd_signal': self.macd_signal,
+            'side': self.side,
+            'unique_by_symbol': self.unique_by_symbol,
+            'min_overall_score': self.min_overall_score,
+            'top_per_side': self.top_per_side,
+            'quotes': self.quotes,
+            'offline': self.offline
         }
 
 # Configure enhanced logging with file rotation
@@ -535,7 +547,7 @@ class LongTermCryptoFinder:
             return 0.0
 
     def _fetch_usdc_products(self) -> Dict[str, Dict[str, str]]:
-        """Fetch Coinbase products and return mapping symbol -> {product_id, base_name} for USDC, status online.
+        """Fetch Coinbase products and return mapping symbol -> {product_id, base_name} filtered by preferred quotes, status online.
 
         Gracefully falls back to a small static set if auth/public endpoint fails.
         """
@@ -548,8 +560,18 @@ class LongTermCryptoFinder:
         except Exception:
             products = []
         result: Dict[str, Dict[str, str]] = {}
+        # Determine preferred quotes from config/env
+        quotes = None
+        try:
+            quotes = [q.strip().upper() for q in (self.config.quotes or []) if q]
+        except Exception:
+            quotes = None
+        if not quotes:
+            env_q = os.getenv('CRYPTO_QUOTES', 'USDC')
+            quotes = [q.strip().upper() for q in env_q.split(',') if q.strip()]
+        quotes_set = set(quotes or ['USDC'])
         for p in products:
-            if p.get("status") == "online" and p.get("quote_currency") == "USDC":
+            if p.get("status") == "online" and (p.get("quote_currency") or '').upper() in quotes_set:
                 base = (p.get("base_currency") or "").upper()
                 if base:
                     result[base] = {
@@ -1061,7 +1083,7 @@ class LongTermCryptoFinder:
             df_data = []
             for candle in candles:
                 df_data.append({
-                    'timestamp': datetime.fromtimestamp(int(candle['start']), UTC),
+                    'timestamp': (lambda ts_raw: datetime.fromtimestamp((int(ts_raw)//1000 if int(ts_raw) >= 10**12 else int(ts_raw)), UTC))(candle.get('start') or candle.get('time') or 0),
                     'price': float(candle['close']),
                     'high': float(candle['high']),
                     'low': float(candle['low']),
@@ -1107,6 +1129,7 @@ class LongTermCryptoFinder:
             # Basic cleaning to handle NaNs/Infs at head/tail
             df = df.copy()
             df[['price', 'high', 'low', 'open', 'volume']] = df[['price', 'high', 'low', 'open', 'volume']].replace([np.inf, -np.inf], np.nan).fillna(method='ffill').fillna(method='bfill')
+            df['volume'] = df['volume'].fillna(0.0)
 
             prices = df['price'].values
             returns = np.diff(prices) / prices[:-1] if len(prices) > 1 else np.array([])
@@ -1123,6 +1146,7 @@ class LongTermCryptoFinder:
             if len(returns) >= 2:
                 mean_daily = float(np.mean(returns) - risk_free_rate / 365.0)
                 std_daily = float(np.std(returns, ddof=1))
+                std_daily = max(std_daily, 1e-8)
                 sharpe_ratio = (mean_daily * 365.0 / (std_daily * np.sqrt(365.0))) if std_daily > 0 else 0.0
             else:
                 sharpe_ratio = 0.0
@@ -1133,6 +1157,7 @@ class LongTermCryptoFinder:
                 downside = excess[excess < 0]
                 if len(downside) >= 2:
                     down_std = float(np.std(downside, ddof=1))
+                    down_std = max(down_std, 1e-8)
                     sortino_ratio = (float(np.mean(excess)) * 365.0 / (down_std * np.sqrt(365.0))) if down_std > 0 else 0.0
                 else:
                     sortino_ratio = 0.0
@@ -2102,9 +2127,9 @@ class LongTermCryptoFinder:
             # Clamp invariants for long positions
             take_profit_price = max(take_profit_price, entry_price * 1.001)
 
-            # Calculate risk-reward ratio with floor and cap
+            # Calculate risk-reward ratio with floor and cap, include ATR-based floor
             raw_risk = entry_price - stop_loss_price
-            risk = max(entry_price * 1e-3, raw_risk)  # floor to 0.1% of price
+            risk = max(entry_price * 1e-3, raw_risk, (atr_raw * 0.25) if atr_raw > 0 else 0.0)
             reward = max(0.0, take_profit_price - entry_price)
             risk_reward_ratio = min(10.0, (reward / risk) if risk > 0 else 0.0)
 
@@ -2204,7 +2229,7 @@ class LongTermCryptoFinder:
             take_profit_price = min(take_profit_price, entry_price * 0.999)
 
             raw_risk = stop_loss_price - entry_price
-            risk = max(entry_price * 1e-3, raw_risk)  # floor to 0.1% of price
+            risk = max(entry_price * 1e-3, raw_risk, (atr_raw * 0.25) if atr_raw > 0 else 0.0)
             reward = max(0.0, entry_price - take_profit_price)
             risk_reward_ratio = min(10.0, (reward / risk) if risk > 0 else 0.0)
 
@@ -2465,8 +2490,8 @@ class LongTermCryptoFinder:
             print(f"Volatility (30d, ann.): {crypto.volatility_30d*100:.1f}%")
             print(f"Sharpe Ratio: {crypto.sharpe_ratio:.2f}")
             print(f"Sortino Ratio: {crypto.sortino_ratio:.2f}")
-            # max_drawdown is negative fraction; display as signed percent with minus sign
-            print(f"Max Drawdown: -{abs(crypto.max_drawdown) * 100:.2f}%")
+            # Display drawdown with its actual sign
+            print(f"Max Drawdown: {crypto.max_drawdown * 100:.2f}%")
             print(f"RSI (14): {crypto.rsi_14:.1f}")
             print(f"MACD Signal: {crypto.macd_signal}")
             print(f"BB Position: {crypto.bb_position}")
@@ -2514,6 +2539,10 @@ def main():
                        help='Override worker threads for parallel fetch')
     parser.add_argument('--offline', action='store_true',
                        help='Avoid external HTTP where possible (use cache only)')
+    parser.add_argument('--quotes', type=str,
+                       help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT')
+    parser.add_argument('--risk-free-rate', type=float,
+                       help='Override annual risk-free rate (e.g., 0.03 for 3%)')
 
     args = parser.parse_args()
 
@@ -2521,6 +2550,9 @@ def main():
     symbols_list = None
     if args.symbols:
         symbols_list = [s.strip().upper() for s in args.symbols.split(',') if s.strip()]
+    quotes_list = None
+    if args.quotes:
+        quotes_list = [q.strip().upper() for q in args.quotes.split(',') if q.strip()]
 
     config = CryptoFinderConfig(
         min_market_cap=args.min_market_cap,
@@ -2531,7 +2563,9 @@ def main():
         offline=bool(args.offline),
         symbols=symbols_list,
         top_per_side=args.top_per_side,
-        max_workers=args.max_workers or CryptoFinderConfig.from_env().max_workers
+        max_workers=args.max_workers or CryptoFinderConfig.from_env().max_workers,
+        quotes=quotes_list,
+        risk_free_rate=args.risk_free_rate if args.risk_free_rate is not None else CryptoFinderConfig.from_env().risk_free_rate
     )
     
     # Initialize the finder
