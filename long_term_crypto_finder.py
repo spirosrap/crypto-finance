@@ -1336,9 +1336,11 @@ class LongTermCryptoFinder:
             Dictionary of technical indicators
         """
         try:
-            # Basic cleaning to handle NaNs/Infs at head/tail
+            # Basic cleaning to handle NaNs/Infs at head/tail (use ffill/bfill to avoid deprecated 'method' kw)
             df = df.copy()
-            df[['price', 'high', 'low', 'open', 'volume']] = df[['price', 'high', 'low', 'open', 'volume']].replace([np.inf, -np.inf], np.nan).fillna(method='ffill').fillna(method='bfill')
+            cols = ['price', 'high', 'low', 'open', 'volume']
+            df[cols] = df[cols].replace([np.inf, -np.inf], np.nan)
+            df[cols] = df[cols].ffill().bfill()
             df['volume'] = df['volume'].fillna(0.0)
 
             prices = df['price'].values
