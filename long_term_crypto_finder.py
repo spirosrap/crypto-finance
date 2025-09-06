@@ -345,6 +345,7 @@ class LongTermCryptoFinder:
         # Thread-safety: serialize request timing updates
         self._req_lock = threading.Lock()
         self._cb_lock = threading.Lock()
+        self._cb_sem = threading.Semaphore(int(os.getenv("CRYPTO_CB_CONCURRENCY", "3")))
         self._cg_lock = threading.Lock()
         # Thread-local session holder
         self._tls = threading.local()
@@ -356,6 +357,7 @@ class LongTermCryptoFinder:
         # Fast lookup index for CoinGecko symbol->record
         self._cg_index: Optional[Dict[str, Dict[str, str]]] = None
         self._cg_id_cache: Dict[str, str] = {}  # memo for symbol -> coingecko_id
+        self._cg_neg_cache: set[str] = set()    # memo for symbols with no match
 
         # Rate limiting for Coinbase API
         self.request_delay = self.config.request_delay
@@ -600,17 +602,23 @@ class LongTermCryptoFinder:
         quotes_set = set(quotes or ['USDC'])
         kept = 0
         total_online = 0
+        order = {q: i for i, q in enumerate(quotes)}
         for p in products:
             if p.get("status") == "online":
                 total_online += 1
-            if p.get("status") == "online" and (p.get("quote_currency") or '').upper() in quotes_set:
+            q = (p.get("quote_currency") or '').upper()
+            if p.get("status") == "online" and q in quotes_set:
                 base = (p.get("base_currency") or "").upper()
                 if base:
-                    result[base] = {
+                    cur = result.get(base)
+                    candidate = {
                         "product_id": p.get("product_id"),
-                        "base_name": p.get("base_name", base)
+                        "base_name": p.get("base_name", base),
+                        "quote": q
                     }
-                    kept += 1
+                    if (not cur) or (order.get(q, 1e9) < order.get(cur.get("quote", "ZZZ"), 1e9)):
+                        result[base] = candidate
+                        kept += 1
         if not result:
             for sym in ["BTC", "ETH", "SOL", "ADA", "MATIC", "AVAX", "DOT", "LINK"]:
                 result[sym] = {"product_id": f"{sym}-USDC", "base_name": sym}
@@ -679,6 +687,8 @@ class LongTermCryptoFinder:
         with self._cg_lock:
             if sym in self._cg_id_cache:
                 return self._cg_id_cache[sym]
+            if sym in self._cg_neg_cache:
+                return None
         lst = self._load_coingecko_list()
         # fast path via index (exact symbol match)
         if self._cg_index and sym in self._cg_index:
@@ -704,7 +714,11 @@ class LongTermCryptoFinder:
             if cid:
                 with self._cg_lock:
                     self._cg_id_cache[sym] = cid
-            return cid
+                return cid
+            with self._cg_lock:
+                self._cg_neg_cache.add(sym)
+            logger.debug(f"No CoinGecko id found for symbol {sym}")
+            return None
         if len(candidates) == 1 or getattr(self, 'offline', False):
             with self._cg_lock:
                 self._cg_id_cache[sym] = candidates[0]
@@ -720,6 +734,7 @@ class LongTermCryptoFinder:
                 return cid
         except Exception:
             pass
+        logger.debug(f"Ambiguous CoinGecko id for {sym}; picking first candidate")
         with self._cg_lock:
             self._cg_id_cache[sym] = candidates[0]
             return self._cg_id_cache[sym]
@@ -959,7 +974,7 @@ class LongTermCryptoFinder:
 
             # Throttle Coinbase hourly candles request
             self._throttle()
-            with self._cb_lock:
+            with self._cb_sem:
                 candles = self.historical_data.get_historical_data(
                     product_id,
                     start_time,
@@ -1115,19 +1130,37 @@ class LongTermCryptoFinder:
         if failed_products:
             logger.warning(f"Failed to retrieve data for {len(failed_products)} products: {failed_products}")
             
-        # Filter by minimum market cap if specified (only accept real CoinGecko market caps)
+        # Filter by minimum market cap if specified (real MC by default; estimated MC optional with separate threshold)
         min_mc = float(self.config.min_market_cap or 0)
         allow_est = os.getenv('CRYPTO_ALLOW_EST_MC', '0') in ('1','true','True')
+        min_est_mc = float(os.getenv('CRYPTO_MIN_EST_MC', '0') or 0)
         if min_mc > 0:
             pre_filter_count = len(crypto_data)
             filtered: List[Dict] = []
+            dropped_no_mc = 0
+            dropped_below_real = 0
+            dropped_below_est = 0
             for c in crypto_data:
-                if not (c.get('market_cap_is_real', False) or allow_est):
-                    continue
-                if float(c.get('market_cap', 0) or 0) >= min_mc:
-                    filtered.append(c)
+                mc_val = float(c.get('market_cap', 0) or 0)
+                is_real = bool(c.get('market_cap_is_real', False))
+                if is_real:
+                    if mc_val >= min_mc:
+                        filtered.append(c)
+                    else:
+                        dropped_below_real += 1
+                else:
+                    if not allow_est:
+                        dropped_no_mc += 1
+                        continue
+                    if mc_val >= min_est_mc:
+                        filtered.append(c)
+                    else:
+                        dropped_below_est += 1
             crypto_data = filtered
-            logger.info(f"Applied market cap filter (real >= ${min_mc:,.0f}): {len(crypto_data)}/{pre_filter_count} remaining")
+            logger.info(
+                f"Applied market cap filter (real >= ${min_mc:,.0f}, est >= ${min_est_mc:,.0f} if allowed): "
+                f"{len(crypto_data)}/{pre_filter_count} remaining; drops — no_mc:{dropped_no_mc}, real_below:{dropped_below_real}, est_below:{dropped_below_est}"
+            )
 
         logger.info(f"Successfully retrieved {len(crypto_data)} cryptocurrencies for analysis")
         
@@ -1285,7 +1318,7 @@ class LongTermCryptoFinder:
             end_time = datetime.fromisoformat(end_iso)
             # Throttle Coinbase historical fetches to avoid burst rate limits
             self._throttle()
-            with self._cb_lock:
+            with self._cb_sem:
                 data = self.historical_data.get_historical_data(product_id, start_time, end_time, granularity)
             return tuple(data or [])
         except Exception as e:
@@ -1366,7 +1399,10 @@ class LongTermCryptoFinder:
                 macd_cross = False
                 if len(hist_series) >= 2:
                     eps = 1e-9
-                    macd_cross = (np.sign(hist_series[-1]) != np.sign(hist_series[-2])) and (abs(hist_series[-1]) > eps or abs(hist_series[-2]) > eps)
+                    macd_cross = (
+                        np.sign(hist_series[-1]) != np.sign(hist_series[-2]) and
+                        (abs(hist_series[-1]) > 3*eps or abs(hist_series[-2]) > 3*eps)
+                    )
             else:
                 macd_line = 0.0
                 signal_line = 0.0
@@ -1480,7 +1516,7 @@ class LongTermCryptoFinder:
             atr[period] = tr[1:period + 1].sum()
             for i in range(period + 1, len(tr)):
                 atr[i] = atr[i - 1] - atr[i - 1] / period + tr[i]
-            val = float(atr[-1] / period) if np.isfinite(atr[-1]) else 0.0
+            val = float(np.nan_to_num(atr[-1] / period, nan=0.0, posinf=0.0, neginf=0.0)) if np.isfinite(atr[-1]) else 0.0
             return max(0.0, val)
         except Exception as e:
             logger.warning(f"ATR calculation error: {str(e)}")
@@ -1612,7 +1648,7 @@ class LongTermCryptoFinder:
             for i in range(start + 1, len(close)):
                 adx[i] = (adx[i - 1] * (period - 1) + dx[i]) / period
 
-            val = float(adx[-1])
+            val = float(np.nan_to_num(adx[-1], nan=0.0, posinf=0.0, neginf=0.0))
             return max(0.0, min(100.0, val)) if np.isfinite(val) else 0.0
         except Exception as e:
             logger.warning(f"ADX calculation error: {str(e)}")
@@ -1655,6 +1691,10 @@ class LongTermCryptoFinder:
                 return 50.0
             avg_gain = gains[:period].mean()
             avg_loss = losses[:period].mean()
+            if avg_loss == 0:
+                if avg_gain == 0:
+                    return 50.0
+                return 100.0
             for i in range(period, len(deltas)):
                 avg_gain = (avg_gain * (period - 1) + gains[i]) / period
                 avg_loss = (avg_loss * (period - 1) + losses[i]) / period
@@ -2317,12 +2357,10 @@ class LongTermCryptoFinder:
             risk_reward_ratio = min(10.0, (reward / risk) if risk > 0 else 0.0)
 
             # Calculate position size percentage based on risk
-            if risk_reward_ratio >= 3:
-                position_size_percentage = 2.0  # 2% of portfolio for good R:R
-            elif risk_reward_ratio >= 2:
-                position_size_percentage = 1.5  # 1.5% for decent R:R
-            else:
-                position_size_percentage = 1.0  # 1% for lower R:R
+            # Risk-based position sizing (percent of portfolio) with bounds
+            risk_pct = float(os.getenv("CRYPTO_RISK_PER_TRADE", "0.01"))  # 1% default
+            risk_frac = max(1e-6, abs(entry_price - stop_loss_price) / max(entry_price, 1e-9))
+            position_size_percentage = float(np.clip((risk_pct / risk_frac) * 100.0, 0.5, 5.0))
 
             return {
                 'entry_price': entry_price,
@@ -2411,12 +2449,9 @@ class LongTermCryptoFinder:
             reward = max(0.0, entry_price - take_profit_price)
             risk_reward_ratio = min(10.0, (reward / risk) if risk > 0 else 0.0)
 
-            if risk_reward_ratio >= 3:
-                position_size_percentage = 2.0
-            elif risk_reward_ratio >= 2:
-                position_size_percentage = 1.5
-            else:
-                position_size_percentage = 1.0
+            risk_pct = float(os.getenv("CRYPTO_RISK_PER_TRADE", "0.01"))
+            risk_frac = max(1e-6, abs(entry_price - stop_loss_price) / max(entry_price, 1e-9))
+            position_size_percentage = float(np.clip((risk_pct / risk_frac) * 100.0, 0.5, 5.0))
 
             return {
                 'entry_price': entry_price,
