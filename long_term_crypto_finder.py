@@ -761,6 +761,86 @@ class LongTermCryptoFinder:
         except Exception:
             return {}
         return market_map
+
+    # -------- Coinbase market cap (best-effort) --------
+    def _extract_market_cap_from_cb_asset(self, rec: Dict) -> float:
+        """Try to pull a USD market cap from a Coinbase asset record."""
+        if not isinstance(rec, dict):
+            return 0.0
+        # common fields across potential CB asset endpoints
+        for key in (
+            'market_cap', 'market_cap_usd', 'market_cap_in_usd',
+            # nested metrics paths
+        ):
+            try:
+                val = rec.get(key)
+                if val is not None:
+                    return float(val)
+            except Exception:
+                continue
+        # Sometimes nested in 'metrics' or 'latest'
+        for parent in ('metrics', 'latest'):
+            try:
+                inner = rec.get(parent) or {}
+                for key in ('market_cap', 'market_cap_usd', 'market_cap_in_usd'):
+                    val = inner.get(key)
+                    if val is not None:
+                        return float(val)
+            except Exception:
+                continue
+        return 0.0
+
+    def _get_market_cap_from_coinbase(self, symbol: str) -> float:
+        """Best-effort public Coinbase market cap for a symbol; returns 0.0 if unavailable."""
+        if not symbol:
+            return 0.0
+        if getattr(self, 'offline', False):
+            return 0.0
+        sym = symbol.upper()
+        # Try summary endpoint first
+        try:
+            url = "https://api.coinbase.com/v2/assets/summary"
+            params = {"base": "USD", "limit": 500}
+            data = self._make_cached_request(url, params)  # type: ignore
+            if isinstance(data, dict):
+                arr = data.get('data') or data.get('assets') or []
+            elif isinstance(data, list):
+                arr = data
+            else:
+                arr = []
+            for rec in arr:
+                try:
+                    rec_sym = (rec.get('symbol') or rec.get('asset_symbol') or '').upper()
+                    if rec_sym == sym:
+                        mc = self._extract_market_cap_from_cb_asset(rec)
+                        if mc and mc > 0:
+                            return float(mc)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        # Try search endpoint
+        try:
+            url = "https://api.coinbase.com/v2/assets/search"
+            params = {"base": "USD", "query": sym, "limit": 50}
+            data = self._make_cached_request(url, params)  # type: ignore
+            arr = []
+            if isinstance(data, dict):
+                arr = data.get('data') or data.get('assets') or []
+            elif isinstance(data, list):
+                arr = data
+            for rec in arr:
+                try:
+                    rec_sym = (rec.get('symbol') or rec.get('asset_symbol') or '').upper()
+                    if rec_sym == sym:
+                        mc = self._extract_market_cap_from_cb_asset(rec)
+                        if mc and mc > 0:
+                            return float(mc)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return 0.0
     
     def _get_cache_key(self, data: str) -> str:
         """Generate a cache key from data string."""
@@ -925,7 +1005,15 @@ class LongTermCryptoFinder:
                 cg = self._get_ath_atl_from_coingecko(base_sym)
 
             # Create a validated data structure
-            real_mc = float(cg.get('market_cap_usd', 0) or 0.0) > 0.0
+            # Prefer Coinbase market cap to avoid CoinGecko limitations
+            cb_mc = self._get_market_cap_from_coinbase(base_sym)
+            cg_mc_val = float(cg.get('market_cap_usd', 0) or 0.0)
+            if cb_mc and cb_mc > 0:
+                mc_value = cb_mc
+                real_mc = True
+            else:
+                mc_value = cg_mc_val
+                real_mc = cg_mc_val > 0.0
             crypto_info = {
                 'product_id': product_id,
                 'symbol': product_id.split('-')[0],
@@ -937,8 +1025,8 @@ class LongTermCryptoFinder:
                     self._sanitize_price(cg.get('total_volume_usd', 0))
                     or self._calculate_usd_volume(candles)
                 ),
-                # Prefer CoinGecko market cap if available (estimate only for display, not filtering)
-                'market_cap': self._sanitize_price(cg.get('market_cap_usd', 0)) or self._estimate_market_cap(product_id.split('-')[0], current_price),
+                # Prefer Coinbase/CG market cap; fallback to estimate only for display
+                'market_cap': float(mc_value) if mc_value else self._estimate_market_cap(product_id.split('-')[0], current_price),
                 'market_cap_is_real': real_mc,
                 'market_cap_rank': int(cg.get('market_cap_rank', 0) or 0),
                 'total_volume': self._sanitize_price(cg.get('total_volume_usd', 0)),
@@ -2788,7 +2876,12 @@ def main():
                         'data_timestamp_utc': getattr(crypto, 'data_timestamp_utc', '')
                     })
             os.replace(tmp_path, final_path)
-            print(f"Saved {len(results)} results to {args.save}")
-
+            print(f"Saved {len(results)} results to {final_path}")
+        else:
+            if args.save:
+                print("Tip: use a .csv or .json extension in --save to write the file.")
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
