@@ -160,13 +160,21 @@ def _setup_logging() -> logging.Logger:
 
     logger = logging.getLogger(__name__)
     logger.setLevel(level)
-    logger.addHandler(file_handler)
-    logger.addHandler(size_handler)
+    logger.propagate = False
+
+    # Prepare console handler if requested
+    console = None
     if log_to_console:
         console = logging.StreamHandler(sys.stdout)
         console.setFormatter(formatter)
         console.addFilter(context_filter)
-        logger.addHandler(console)
+
+    # Add handlers only once to avoid duplication on re-imports
+    if not logger.handlers:
+        logger.addHandler(file_handler)
+        logger.addHandler(size_handler)
+        if console is not None:
+            logger.addHandler(console)
 
     # Tune verbosity of noisy modules
     logging.getLogger('historicaldata').setLevel(logging.INFO if histdata_verbose else logging.WARNING)
@@ -455,7 +463,6 @@ class LongTermCryptoFinder:
                     continue
                 raise CryptoAnalysisError(f"API request failed after {max_retries} attempts: {str(e)}")
 
-                return None
 
     def _validate_api_credentials(self) -> None:
         """Validate that API credentials are properly configured."""
@@ -824,8 +831,8 @@ class LongTermCryptoFinder:
         crypto_data: List[Dict] = []
         failed_products: List[str] = []
         
-        # Use ThreadPoolExecutor for parallel processing
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        # Use ThreadPoolExecutor for parallel processing (cap pool to workload)
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(products_to_process))) as executor:
             # Submit all tasks
             future_to_product = {
                 executor.submit(self._process_single_crypto, product_id, i, len(products_to_process)): product_id
@@ -876,14 +883,12 @@ class LongTermCryptoFinder:
         return sym
 
     def _calculate_price_change(self, candles: List[Dict]) -> float:
-        """Calculate 24h price change from candles."""
-        if len(candles) < 24:
+        """Calculate 24h price change from candles; if <24, use first→last."""
+        if not candles:
             return 0.0
-
         current_price = float(candles[-1]['close'])
-        price_24h_ago = float(candles[0]['close'])
-
-        return ((current_price - price_24h_ago) / price_24h_ago) * 100
+        price_ago = float(candles[0]['close']) if len(candles) < 24 else float(candles[0]['close'])
+        return ((current_price - price_ago) / price_ago) * 100 if price_ago else 0.0
 
     def _calculate_volume(self, candles: List[Dict]) -> float:
         """Calculate 24h volume from candles."""
@@ -1177,26 +1182,27 @@ class LongTermCryptoFinder:
             }
     
     def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
-        """Calculate Average True Range (ATR)."""
+        """Calculate Average True Range (ATR) using Wilder smoothing."""
         try:
             if len(df) < period + 1:
                 return 0.0
-                
-            high = df['high'].values
-            low = df['low'].values
-            close = df['price'].values
-            
-            tr_list = []
-            for i in range(1, len(high)):
-                tr1 = high[i] - low[i]
-                tr2 = abs(high[i] - close[i-1])
-                tr3 = abs(low[i] - close[i-1])
-                tr_list.append(max(tr1, tr2, tr3))
-            
-            if len(tr_list) >= period:
-                return np.mean(tr_list[-period:])
-            return 0.0
-            
+
+            high = df['high'].to_numpy()
+            low = df['low'].to_numpy()
+            close = df['price'].to_numpy()
+
+            tr = np.r_[0.0, np.maximum.reduce([
+                high[1:] - low[1:],
+                np.abs(high[1:] - close[:-1]),
+                np.abs(low[1:] - close[:-1])
+            ])]
+            atr = np.empty_like(tr)
+            atr[:period] = np.nan
+            atr[period] = tr[1:period + 1].sum()
+            for i in range(period + 1, len(tr)):
+                atr[i] = atr[i - 1] - atr[i - 1] / period + tr[i]
+            val = float(atr[-1] / period) if np.isfinite(atr[-1]) else 0.0
+            return max(0.0, val)
         except Exception as e:
             logger.warning(f"ATR calculation error: {str(e)}")
             return 0.0
@@ -1321,7 +1327,7 @@ class LongTermCryptoFinder:
             # First ADX value is average of first 'period' DX values starting at index period+1
             adx = np.zeros(len(close))
             start = period * 2
-            if len(close) <= start:
+            if len(close) <= start or not np.isfinite(np.nanmean(dx[period + 1:start + 1])):
                 return 0.0
             adx[start] = np.nanmean(dx[period + 1:start + 1])
             for i in range(start + 1, len(close)):
@@ -1448,18 +1454,18 @@ class LongTermCryptoFinder:
         try:
             score = 0
 
-            # Market cap score (larger cap = higher score, but not too large)
+            # Market cap score (larger cap = higher score)
             market_cap = (
                 coin_data.get('market_cap')
                 or coin_data.get('market_cap_usd')
                 or 0
             )
             if market_cap > 1000000000:  # > $1B
-                market_cap_score = 80
+                market_cap_score = 100
             elif market_cap > 500000000:  # > $500M
                 market_cap_score = 90
             elif market_cap > 100000000:  # > $100M
-                market_cap_score = 100
+                market_cap_score = 80
             else:
                 market_cap_score = 70
 
@@ -1873,10 +1879,17 @@ class LongTermCryptoFinder:
         try:
             coingecko_id = self._coingecko_id_for_symbol(symbol) or symbol.lower()
 
-            # Fetch data from CoinGecko with caching
+            # Fetch data from CoinGecko with caching (slim payload to reduce rate caps)
             url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}"
+            params = {
+                'localization': 'false',
+                'market_data': 'true',
+                'community_data': 'false',
+                'developer_data': 'false',
+                'sparkline': 'false'
+            }
             try:
-                data = self._make_cached_request(url)
+                data = self._make_cached_request(url, params)
             except Exception as e:
                 logger.warning(f"Failed to fetch CoinGecko data for {symbol}: {str(e)}")
                 return {
@@ -1979,6 +1992,8 @@ class LongTermCryptoFinder:
 
             # Choose the most conservative stop loss (highest price)
             stop_loss_price = max(stop_loss_methods) if stop_loss_methods else entry_price * 0.95
+            # Clamp invariants for long positions
+            stop_loss_price = min(stop_loss_price, entry_price * 0.999)
 
             # Take Profit calculation
             take_profit_methods = []
@@ -2009,6 +2024,8 @@ class LongTermCryptoFinder:
             # Choose the most conservative take profit (lowest price), clamp above entry
             tp_raw = min(take_profit_methods) if take_profit_methods else entry_price * 1.50
             take_profit_price = max(entry_price * 1.01, tp_raw)
+            # Clamp invariants for long positions
+            take_profit_price = max(take_profit_price, entry_price * 1.001)
 
             # Calculate risk-reward ratio
             risk = entry_price - stop_loss_price
@@ -2079,6 +2096,8 @@ class LongTermCryptoFinder:
 
             # For shorts choose the tightest stop (lowest above entry)
             stop_loss_price = min(stop_loss_methods) if stop_loss_methods else entry_price * 1.05
+            # Clamp invariants for short positions
+            stop_loss_price = max(stop_loss_price, entry_price * 1.001)
 
             # Take Profit (below entry for shorts)
             take_profit_methods = []
@@ -2105,6 +2124,8 @@ class LongTermCryptoFinder:
             # Conservative take profit (closest to entry for shorts => highest price), clamp below entry
             tp_raw = max(take_profit_methods) if take_profit_methods else entry_price * 0.85
             take_profit_price = min(entry_price * 0.99, tp_raw)
+            # Clamp invariants for short positions
+            take_profit_price = min(take_profit_price, entry_price * 0.999)
 
             risk = stop_loss_price - entry_price
             reward = entry_price - take_profit_price
@@ -2507,7 +2528,7 @@ def main():
             # Atomic CSV save: write to temp and replace
             tmp_path = Path(args.save + f".tmp.{os.getpid()}.{int(time.time()*1000)}")
             final_path = Path(args.save)
-            with open(tmp_path, 'w', newline='') as f:
+            with open(tmp_path, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 for crypto in results:
