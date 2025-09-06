@@ -547,9 +547,10 @@ class LongTermCryptoFinder:
         try:
             logger.info(f"Processing {index+1}/{total}: {product_id}")
             
-            # Get current price from Coinbase
+            # Get last 24 hours of hourly candles from Coinbase
+            # This supports accurate 24h change and 24h volume calculations
             current_time = datetime.now(UTC)
-            start_time = current_time - timedelta(hours=1)
+            start_time = current_time - timedelta(hours=24)
 
             candles = self.historical_data.get_historical_data(
                 product_id,
@@ -586,7 +587,11 @@ class LongTermCryptoFinder:
                 'name': self._get_crypto_name(product_id.split('-')[0]),
                 'current_price': current_price,
                 'price_change_24h': self._calculate_price_change(candles),
-                'volume_24h': self._calculate_volume(candles),
+                # Prefer CoinGecko USD volume; fall back to estimated USD from candles
+                'volume_24h': (
+                    self._sanitize_price(cg.get('total_volume_usd', 0))
+                    or self._calculate_usd_volume(candles)
+                ),
                 # Prefer CoinGecko market cap if available
                 'market_cap': self._sanitize_price(cg.get('market_cap_usd', 0)) or self._estimate_market_cap(product_id.split('-')[0], current_price),
                 'market_cap_rank': int(cg.get('market_cap_rank', 0) or 0),
@@ -710,6 +715,30 @@ class LongTermCryptoFinder:
 
         total_volume = sum(float(candle.get('volume', 0)) for candle in candles)
         return total_volume
+
+    def _calculate_usd_volume(self, candles: List[Dict]) -> float:
+        """Estimate 24h USD volume from candles by summing base volume * typical price per candle."""
+        if not candles:
+            return 0.0
+        usd_volume = 0.0
+        for c in candles:
+            try:
+                base_vol = float(c.get('volume', 0) or 0.0)
+                o = float(c.get('open', 0) or 0.0)
+                h = float(c.get('high', 0) or 0.0)
+                l = float(c.get('low', 0) or 0.0)
+                cl = float(c.get('close', 0) or 0.0)
+                typical = (o + h + l + cl) / 4 if (o or h or l or cl) else cl
+                usd_volume += base_vol * typical
+            except Exception:
+                # Fallback to close price if any parsing issues
+                try:
+                    base_vol = float(c.get('volume', 0) or 0.0)
+                    cl = float(c.get('close', 0) or 0.0)
+                    usd_volume += base_vol * cl
+                except Exception:
+                    continue
+        return float(usd_volume)
 
     def _estimate_market_cap(self, symbol: str, price: float) -> float:
         """Estimate market cap (simplified - would need actual circulating supply)."""
@@ -2013,7 +2042,8 @@ class LongTermCryptoFinder:
             print(f"Volatility (30d): {crypto.volatility_30d:.3f}")
             print(f"Sharpe Ratio: {crypto.sharpe_ratio:.2f}")
             print(f"Sortino Ratio: {crypto.sortino_ratio:.2f}")
-            print(f"Max Drawdown: {crypto.max_drawdown:.2f}")
+            # max_drawdown is a negative fraction (e.g., -0.28 for -28%). Display as percentage.
+            print(f"Max Drawdown: {crypto.max_drawdown * 100:.2f}%")
             print(f"RSI (14): {crypto.rsi_14:.1f}")
             print(f"MACD Signal: {crypto.macd_signal}")
             print(f"BB Position: {crypto.bb_position}")
