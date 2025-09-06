@@ -370,13 +370,14 @@ class LongTermCryptoFinder:
         self._validate_api_credentials()
 
     def _throttle(self) -> None:
-        """Apply a simple global throttle for outbound calls (thread-safe)."""
+        """Apply a simple global throttle for outbound calls (thread-safe, monotonic clock)."""
         with self._req_lock:
-            now = time.time()
-            wait = max(0.0, self.request_delay - (now - self.last_request_time))
+            now = time.monotonic()
+            last = getattr(self, "_last_tick", 0.0)
+            wait = max(0.0, self.request_delay - (now - last))
             if wait > 0:
                 time.sleep(wait)
-            self.last_request_time = time.time()
+            self._last_tick = time.monotonic()
 
     def _load_api_credentials(self) -> Tuple[Optional[str], Optional[str]]:
         """Load API credentials from environment or optional .env; fallback to config.py if present.
@@ -415,22 +416,16 @@ class LongTermCryptoFinder:
             
         for attempt in range(max_retries):
             try:
-                # Thread-safe delay enforcement
-                with self._req_lock:
-                    now = time.time()
-                    wait = max(0.0, self.request_delay - (now - self.last_request_time))
-                    if wait:
-                        logger.debug(f"Rate limiting: sleeping for {wait:.2f} seconds")
-                        time.sleep(wait)
-                    # Use a thread-local session to avoid cross-thread state issues
-                    sess = getattr(self._tls, 'session', None)
-                    if sess is None:
-                        sess = requests.Session()
-                        sess.headers.update(self._sess.headers)
-                        sess.mount('https://', HTTPAdapter(max_retries=Retry(total=5, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])))
-                        self._tls.session = sess
-                    response = sess.get(url, params=params, timeout=15, verify=True)
-                    self.last_request_time = time.time()
+                # Global throttle
+                self._throttle()
+                # Use a thread-local session to avoid cross-thread state issues
+                sess = getattr(self._tls, 'session', None)
+                if sess is None:
+                    sess = requests.Session()
+                    sess.headers.update(self._sess.headers)
+                    sess.mount('https://', HTTPAdapter(max_retries=Retry(total=5, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504])))
+                    self._tls.session = sess
+                response = sess.get(url, params=params, timeout=15, verify=True)
 
                 # Log response details for debugging
                 logger.debug(f"API request to {url} returned status {response.status_code}")
@@ -611,27 +606,47 @@ class LongTermCryptoFinder:
         return self._coingecko_list
 
     def _coingecko_id_for_symbol(self, symbol: str) -> Optional[str]:
-        """Resolve CoinGecko id from symbol using an indexed map; fallback to hard map if unmatched."""
+        """Resolve CoinGecko id from symbol. Prefer highest-market-cap id on collisions."""
         sym = (symbol or '').upper()
-        # Build index lazily once
-        if self._cg_index is None:
-            self._cg_index = {}
-            for item in self._load_coingecko_list():
-                try:
-                    s = (item.get('symbol') or '').upper()
-                    if s and s not in self._cg_index:
-                        self._cg_index[s] = item
-                except Exception:
-                    continue
-        item = (self._cg_index or {}).get(sym)
-        if item:
-            return item.get('id')
-        # Fallback hard map for common assets
-        return {
-            'BTC': 'bitcoin', 'ETH': 'ethereum', 'ADA': 'cardano', 'SOL': 'solana', 'DOT': 'polkadot',
-            'LINK': 'chainlink', 'UNI': 'uniswap', 'AAVE': 'aave', 'SUSHI': 'sushi', 'COMP': 'compound-governance-token',
-            'MKR': 'maker', 'YFI': 'yearn-finance', 'BAL': 'balancer', 'MATIC': 'matic-network', 'AVAX': 'avalanche-2'
-        }.get(sym)
+        lst = self._load_coingecko_list()
+        candidates = []
+        for item in lst:
+            try:
+                if (item.get('symbol') or '').upper() == sym and item.get('id'):
+                    candidates.append(item['id'])
+            except Exception:
+                continue
+        if not candidates:
+            # Fallback hard map for common assets
+            return {
+                'BTC': 'bitcoin', 'ETH': 'ethereum', 'ADA': 'cardano', 'SOL': 'solana', 'DOT': 'polkadot',
+                'LINK': 'chainlink', 'UNI': 'uniswap', 'AAVE': 'aave', 'SUSHI': 'sushi', 'COMP': 'compound-governance-token',
+                'MKR': 'maker', 'YFI': 'yearn-finance', 'BAL': 'balancer', 'MATIC': 'matic-network', 'AVAX': 'avalanche-2'
+            }.get(sym)
+        if len(candidates) == 1 or getattr(self, 'offline', False):
+            return candidates[0]
+        # When online, query markets to pick the largest by market cap
+        try:
+            markets = self._cg_markets(candidates)
+            if isinstance(markets, list) and markets:
+                markets.sort(key=lambda m: float(m.get('market_cap') or 0), reverse=True)
+                return str(markets[0].get('id') or candidates[0])
+        except Exception:
+            pass
+        return candidates[0]
+
+    def _cg_markets(self, ids: List[str]) -> List[Dict]:
+        """Fetch CoinGecko markets snapshot for given ids (batched)."""
+        if not ids:
+            return []
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {
+            "vs_currency": "usd",
+            "ids": ",".join(ids[:250]),
+            "price_change_percentage": "7d,30d"
+        }
+        data = self._make_cached_request(url, params)
+        return data if isinstance(data, list) else []
     
     def _get_cache_key(self, data: str) -> str:
         """Generate a cache key from data string."""
@@ -784,6 +799,7 @@ class LongTermCryptoFinder:
             cg = self._get_ath_atl_from_coingecko(product_id.split('-')[0])
 
             # Create a validated data structure
+            real_mc = float(cg.get('market_cap_usd', 0) or 0.0) > 0.0
             crypto_info = {
                 'product_id': product_id,
                 'symbol': product_id.split('-')[0],
@@ -795,8 +811,9 @@ class LongTermCryptoFinder:
                     self._sanitize_price(cg.get('total_volume_usd', 0))
                     or self._calculate_usd_volume(candles)
                 ),
-                # Prefer CoinGecko market cap if available
+                # Prefer CoinGecko market cap if available (estimate only for display, not filtering)
                 'market_cap': self._sanitize_price(cg.get('market_cap_usd', 0)) or self._estimate_market_cap(product_id.split('-')[0], current_price),
+                'market_cap_is_real': real_mc,
                 'market_cap_rank': int(cg.get('market_cap_rank', 0) or 0),
                 'total_volume': self._sanitize_price(cg.get('total_volume_usd', 0)),
                 'ath_price': self._sanitize_price(cg.get('ath', 0)),
@@ -874,12 +891,18 @@ class LongTermCryptoFinder:
         if failed_products:
             logger.warning(f"Failed to retrieve data for {len(failed_products)} products: {failed_products}")
             
-        # Filter by minimum market cap if specified
+        # Filter by minimum market cap if specified (only accept real CoinGecko market caps)
         min_mc = float(self.config.min_market_cap or 0)
         if min_mc > 0:
             pre_filter_count = len(crypto_data)
-            crypto_data = [c for c in crypto_data if float(c.get('market_cap', 0) or 0) >= min_mc]
-            logger.info(f"Applied market cap filter >= ${min_mc:,.0f}: {len(crypto_data)}/{pre_filter_count} remaining")
+            filtered: List[Dict] = []
+            for c in crypto_data:
+                if not c.get('market_cap_is_real', False):
+                    continue
+                if float(c.get('market_cap', 0) or 0) >= min_mc:
+                    filtered.append(c)
+            crypto_data = filtered
+            logger.info(f"Applied market cap filter (real >= ${min_mc:,.0f}): {len(crypto_data)}/{pre_filter_count} remaining")
 
         logger.info(f"Successfully retrieved {len(crypto_data)} cryptocurrencies for analysis")
         
@@ -1441,7 +1464,7 @@ class LongTermCryptoFinder:
 
             # Recent performance (last 30 days vs previous 30 days)
             recent_30d = prices[-30:]
-            previous_30d = prices[-60:-30] if len(prices) >= 60 else prices[:30]
+            previous_30d = prices[-60:-30] if len(prices) >= 60 else prices[: max(1, len(prices) // 2)]
 
             recent_return = (recent_30d[-1] - recent_30d[0]) / recent_30d[0]
             previous_return = (previous_30d[-1] - previous_30d[0]) / previous_30d[0] if len(previous_30d) > 1 else 0
@@ -1531,19 +1554,19 @@ class LongTermCryptoFinder:
 
             score += stability_score * 0.25
 
-            # ATH distance score (further from ATH = better buying opportunity)
+            # ATH gap score (further below ATH = better entry)
             current_price = coin_data.get('current_price', 0) or coin_data.get('current_price_usd', 0)
             ath_price = coin_data.get('ath', 0) or coin_data.get('ath_price', 0)
-            if ath_price > 0:
-                ath_distance = (current_price / ath_price) * 100
-                if ath_distance < 20:  # Very close to ATH
-                    ath_score = 30
-                elif ath_distance < 50:
+            if ath_price and ath_price > 0:
+                ath_gap_pct = max(0.0, ((ath_price - current_price) / ath_price) * 100.0)
+                if ath_gap_pct < 20:
+                    ath_score = 30   # close to ATH → worse entry
+                elif ath_gap_pct < 50:
                     ath_score = 60
-                elif ath_distance < 80:
+                elif ath_gap_pct < 80:
                     ath_score = 80
                 else:
-                    ath_score = 100  # Deep correction = buying opportunity
+                    ath_score = 100  # deep discount
             else:
                 ath_score = 50
 
@@ -2048,12 +2071,11 @@ class LongTermCryptoFinder:
             # Clamp invariants for long positions
             take_profit_price = max(take_profit_price, entry_price * 1.001)
 
-            # Calculate risk-reward ratio
-            risk = entry_price - stop_loss_price
-            reward = take_profit_price - entry_price
-            # Avoid division explosion when risk is extremely small
-            denom = risk if risk > 0 else 0.0
-            risk_reward_ratio = (reward / max(denom, entry_price * 1e-6)) if denom > 0 else 0.0
+            # Calculate risk-reward ratio with floor and cap
+            raw_risk = entry_price - stop_loss_price
+            risk = max(entry_price * 1e-3, raw_risk)  # floor to 0.1% of price
+            reward = max(0.0, take_profit_price - entry_price)
+            risk_reward_ratio = min(10.0, (reward / risk) if risk > 0 else 0.0)
 
             # Calculate position size percentage based on risk
             if risk_reward_ratio >= 3:
@@ -2150,10 +2172,10 @@ class LongTermCryptoFinder:
             # Clamp invariants for short positions
             take_profit_price = min(take_profit_price, entry_price * 0.999)
 
-            risk = stop_loss_price - entry_price
-            reward = entry_price - take_profit_price
-            denom = risk if risk > 0 else 0.0
-            risk_reward_ratio = (reward / max(denom, entry_price * 1e-6)) if denom > 0 else 0.0
+            raw_risk = stop_loss_price - entry_price
+            risk = max(entry_price * 1e-3, raw_risk)  # floor to 0.1% of price
+            reward = max(0.0, entry_price - take_profit_price)
+            risk_reward_ratio = min(10.0, (reward / risk) if risk > 0 else 0.0)
 
             if risk_reward_ratio >= 3:
                 position_size_percentage = 2.0
