@@ -532,7 +532,116 @@ class LongTermCryptoFinder:
             logger.warning("API credentials not found; continuing with public endpoints only")
             return
         logger.info("API credentials present (no on-start auth call performed)")
-    
+        
+    # --- Shared helpers (risk/position sizing/ranks) ---
+    def _position_size_percentage(self, entry_price: float, stop_loss_price: float, atr_raw: float) -> float:
+        """Account-currency position sizing with ATR floor and fee/slippage add-on.
+
+        Uses env vars: CRYPTO_ACCOUNT_EQUITY_USD, CRYPTO_RISK_PER_TRADE, CRYPTO_POS_CAP_PCT,
+        CRYPTO_ATR_SL_MULT, CRYPTO_FEE_BPS, CRYPTO_SLIPPAGE_BPS.
+        """
+        try:
+            fee_bps = float(os.getenv("CRYPTO_FEE_BPS", "10"))
+            slp_bps = float(os.getenv("CRYPTO_SLIPPAGE_BPS", "10"))
+            fee_add = (fee_bps + slp_bps) / 10000.0 * entry_price
+            atr_floor_mult = float(os.getenv("CRYPTO_ATR_SL_MULT", "0.5"))
+            dist = max(
+                entry_price * 1e-3,
+                abs(entry_price - stop_loss_price),
+                (atr_raw * atr_floor_mult) if atr_raw and atr_raw > 0 else 0.0,
+                fee_add,
+            )
+            risk_pct = float(os.getenv("CRYPTO_RISK_PER_TRADE", "0.01"))  # 1% default
+            cap_pct = float(os.getenv("CRYPTO_POS_CAP_PCT", "5.0"))  # cap percent of equity
+            equity_env = os.getenv("CRYPTO_ACCOUNT_EQUITY_USD")
+            if equity_env is not None:
+                try:
+                    eq = max(1.0, float(equity_env))
+                    risk_usd = max(0.0, risk_pct * eq)
+                    units = risk_usd / dist if dist > 0 else 0.0
+                    pos_value = units * entry_price
+                    return float(min(cap_pct, (pos_value / eq) * 100.0))
+                except Exception:
+                    pass
+            # Fallback: percentage-of-portfolio approximation
+            risk_frac = max(1e-6, dist / max(entry_price, 1e-9))
+            return float(np.clip((risk_pct / risk_frac) * 100.0, 0.5, cap_pct))
+        except Exception:
+            return 1.0
+
+    def _apply_risk_haircut(self, analyzed_candidates: List["CryptoMetrics"]) -> None:
+        """Compute cross-sectional ranks and continuous risk haircut in-place for candidates."""
+        if not analyzed_candidates:
+            return
+        # Rank helpers
+        def _rank01(vals: List[float], higher_is_better: bool = True) -> List[float]:
+            n = len(vals)
+            if n <= 1:
+                return [0.5 for _ in vals]
+            arr = np.array(vals, dtype=float)
+            arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+            order = np.argsort(-arr if higher_is_better else arr)
+            ranks = np.empty(n, dtype=float)
+            ranks[order] = np.arange(1, n + 1, dtype=float)
+            return list((ranks - 1.0) / max(1.0, n - 1.0))
+
+        tech = [float(c.technical_score) for c in analyzed_candidates]
+        fund = [float(c.fundamental_score) for c in analyzed_candidates]
+        mom = [float(c.momentum_score) for c in analyzed_candidates]
+        r_tech, r_fund, r_mom = _rank01(tech, True), _rank01(fund, True), _rank01(mom, True)
+
+        # Continuous risk via sigmoid(z) of vol, dd, and -sharpe, plus liquidity penalty
+        vol = np.array([float(abs(c.volatility_30d)) for c in analyzed_candidates], dtype=float)
+        dd = np.array([float(abs(c.max_drawdown)) for c in analyzed_candidates], dtype=float)
+        sharpe = np.array([float(c.sharpe_ratio) for c in analyzed_candidates], dtype=float)
+        vol = np.nan_to_num(vol, nan=0.0, posinf=0.0, neginf=0.0)
+        dd = np.nan_to_num(dd, nan=0.0, posinf=0.0, neginf=0.0)
+        sharpe = np.nan_to_num(sharpe, nan=0.0, posinf=0.0, neginf=0.0)
+        vol_mean, vol_std = float(np.nanmean(vol)), float(np.nanstd(vol))
+        dd_mean, dd_std = float(np.nanmean(dd)), float(np.nanstd(dd))
+        sh_mean, sh_std = float(np.nanmean(sharpe)), float(np.nanstd(sharpe))
+        vol_z = (vol - vol_mean) / (vol_std if vol_std > 0 else 1.0)
+        dd_z = (dd - dd_mean) / (dd_std if dd_std > 0 else 1.0)
+        sh_z = (sharpe - sh_mean) / (sh_std if sh_std > 0 else 1.0)
+        k = float(os.getenv('CRYPTO_RISK_SIGMOID_K', '1.0'))
+        sig = lambda x: 1.0 / (1.0 + np.exp(-k * x))
+        risk_vol = sig(vol_z)
+        risk_dd = sig(dd_z)
+        risk_sh = sig(-sh_z)
+        inv_vmc = []
+        for c in analyzed_candidates:
+            mc = float(c.market_cap or 0.0)
+            vol_usd = float(c.volume_24h or 0.0)
+            vmc = (vol_usd / mc) if mc > 0 else 0.0
+            inv_vmc.append(1.0 / max(vmc, 1e-9))
+        inv_vmc = np.array(inv_vmc, dtype=float)
+        if inv_vmc.size:
+            inv_vmc = np.nan_to_num(inv_vmc, nan=0.0, posinf=float(np.nanmax(inv_vmc)) if np.any(np.isfinite(inv_vmc)) else 0.0, neginf=0.0)
+            inv_min, inv_max = float(np.nanmin(inv_vmc)), float(np.nanmax(inv_vmc))
+            risk_liq = (inv_vmc - inv_min) / (inv_max - inv_min) if inv_max > inv_min else np.zeros_like(inv_vmc)
+        else:
+            risk_liq = np.zeros_like(inv_vmc)
+        risk_norm = np.clip((risk_vol + risk_dd + risk_sh + risk_liq) / 4.0, 0.0, 1.0)
+        lam = float(os.getenv('CRYPTO_RISK_LAMBDA', '1.2'))
+        haircut = np.exp(-lam * risk_norm)
+
+        new_overall = 100.0 * (0.45 * np.array(r_tech) + 0.35 * np.array(r_fund) + 0.20 * np.array(r_mom)) * haircut
+        for idx, c in enumerate(analyzed_candidates):
+            c.overall_score = float(max(0.0, min(100.0, new_overall[idx])))
+            r = float(np.clip(risk_norm[idx], 0.0, 1.0))
+            c.risk_score = r * 100.0
+            if r < 0.25:
+                c.risk_level = RiskLevel.LOW
+            elif r < 0.40:
+                c.risk_level = RiskLevel.MEDIUM_LOW
+            elif r < 0.55:
+                c.risk_level = RiskLevel.MEDIUM
+            elif r < 0.70:
+                c.risk_level = RiskLevel.MEDIUM_HIGH
+            elif r < 0.85:
+                c.risk_level = RiskLevel.HIGH
+            else:
+                c.risk_level = RiskLevel.VERY_HIGH
     def _validate_crypto_data(self, data: Dict) -> bool:
         """Validate cryptocurrency data structure and values."""
         required_fields = ['product_id', 'symbol', 'name', 'current_price']
@@ -2051,13 +2160,8 @@ class LongTermCryptoFinder:
                 'fundamental_score': fundamental_score
             })
 
-            # Calculate overall score (risk-adjusted)
-            overall_score = (
-                technical_score * 0.4 +
-                fundamental_score * 0.4 +
-                momentum_score * 0.2
-            ) * (1 - risk_score / 200)  # Risk adjustment
-            overall_score = max(0.0, min(100.0, overall_score))
+            # Overall score is computed cross-sectionally in find_best_opportunities
+            overall_score = 0.0
 
             # Calculate additional price changes from historical data
             price_changes = self._calculate_price_changes_from_history(historical_df)
@@ -2124,10 +2228,8 @@ class LongTermCryptoFinder:
             fundamental_score = self.calculate_fundamental_score(coin_data)
             technical_score = self._calculate_technical_score(technical_metrics, momentum_score)
             risk_score, risk_level = self.calculate_risk_score({**technical_metrics, 'fundamental_score': fundamental_score})
-            overall_score = (
-                technical_score * 0.4 + fundamental_score * 0.4 + momentum_score * 0.2
-            ) * (1 - risk_score / 200)
-            overall_score = max(0.0, min(100.0, overall_score))
+            # Overall score is computed cross-sectionally in find_best_opportunities
+            overall_score = 0.0
             trading_levels = self.calculate_trading_levels(df, coin_data.get('current_price', 0), technical_metrics)
             try:
                 ts_idx = df.index.max()
@@ -2181,10 +2283,8 @@ class LongTermCryptoFinder:
             short_tech_score = self._calculate_technical_score_short(technical_metrics, long_momentum)
             fundamental_score = self.calculate_fundamental_score(coin_data)
             risk_score, risk_level = self.calculate_risk_score({**technical_metrics, 'fundamental_score': fundamental_score})
-            short_overall = (
-                short_tech_score * 0.4 + fundamental_score * 0.4 + (max(0.0, min(100.0, 100.0 - long_momentum))) * 0.2
-            ) * (1 - risk_score / 200)
-            short_overall = max(0.0, min(100.0, short_overall))
+            # Overall score is computed cross-sectionally in find_best_opportunities
+            short_overall = 0.0
             short_levels = self.calculate_short_trading_levels(df, coin_data.get('current_price', 0), technical_metrics)
             try:
                 ts_idx = df.index.max()
@@ -2436,23 +2536,8 @@ class LongTermCryptoFinder:
             reward = max(0.0, take_profit_price - entry_price)
             risk_reward_ratio = min(10.0, (reward / dist) if dist > 0 else 0.0)
 
-            # Account-currency sizing; fallback to percent-of-portfolio if equity unknown
-            risk_pct = float(os.getenv("CRYPTO_RISK_PER_TRADE", "0.01"))  # 1% default
-            cap_pct = float(os.getenv("CRYPTO_POS_CAP_PCT", "5.0"))  # cap percent of equity
-            equity = os.getenv("CRYPTO_ACCOUNT_EQUITY_USD")
-            if equity is not None:
-                try:
-                    eq = max(1.0, float(equity))
-                    risk_usd = max(0.0, risk_pct * eq)
-                    units = risk_usd / dist if dist > 0 else 0.0
-                    pos_value = units * entry_price
-                    position_size_percentage = float(min(cap_pct, (pos_value / eq) * 100.0))
-                except Exception:
-                    risk_frac = max(1e-6, dist / max(entry_price, 1e-9))
-                    position_size_percentage = float(np.clip((risk_pct / risk_frac) * 100.0, 0.5, cap_pct))
-            else:
-                risk_frac = max(1e-6, dist / max(entry_price, 1e-9))
-                position_size_percentage = float(np.clip((risk_pct / risk_frac) * 100.0, 0.5, cap_pct))
+            # Position sizing via shared helper
+            position_size_percentage = self._position_size_percentage(entry_price, stop_loss_price, atr_raw)
 
             return {
                 'entry_price': entry_price,
@@ -2546,22 +2631,7 @@ class LongTermCryptoFinder:
             reward = max(0.0, entry_price - take_profit_price)
             risk_reward_ratio = min(10.0, (reward / dist) if dist > 0 else 0.0)
 
-            risk_pct = float(os.getenv("CRYPTO_RISK_PER_TRADE", "0.01"))  # 1% default
-            cap_pct = float(os.getenv("CRYPTO_POS_CAP_PCT", "5.0"))  # hard cap percent of equity
-            equity = os.getenv("CRYPTO_ACCOUNT_EQUITY_USD")
-            if equity is not None:
-                try:
-                    eq = max(1.0, float(equity))
-                    risk_usd = max(0.0, risk_pct * eq)
-                    units = risk_usd / dist if dist > 0 else 0.0
-                    pos_value = units * entry_price
-                    position_size_percentage = float(min(cap_pct, (pos_value / eq) * 100.0))
-                except Exception:
-                    risk_frac = max(1e-6, dist / max(entry_price, 1e-9))
-                    position_size_percentage = float(np.clip((risk_pct / risk_frac) * 100.0, 0.5, cap_pct))
-            else:
-                risk_frac = max(1e-6, dist / max(entry_price, 1e-9))
-                position_size_percentage = float(np.clip((risk_pct / risk_frac) * 100.0, 0.5, cap_pct))
+            position_size_percentage = self._position_size_percentage(entry_price, stop_loss_price, atr_raw)
 
             return {
                 'entry_price': entry_price,
@@ -2748,88 +2818,7 @@ class LongTermCryptoFinder:
 
         # Cross-sectional ranks and continuous risk re-scaling
         if analyzed_candidates:
-            import math
-            def _rank01(vals: List[float], higher_is_better: bool = True) -> List[float]:
-                n = len(vals)
-                if n <= 1:
-                    return [0.5 for _ in vals]
-                arr = np.array(vals, dtype=float)
-                # Guard against NaN/Inf in ranks
-                arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-                if higher_is_better:
-                    order = np.argsort(-arr)
-                else:
-                    order = np.argsort(arr)
-                ranks = np.empty(n, dtype=float)
-                ranks[order] = np.arange(1, n + 1, dtype=float)
-                return list((ranks - 1.0) / max(1.0, n - 1.0))
-
-            tech = [float(c.technical_score) for c in analyzed_candidates]
-            fund = [float(c.fundamental_score) for c in analyzed_candidates]
-            mom = [float(c.momentum_score) for c in analyzed_candidates]
-            r_tech = _rank01(tech, higher_is_better=True)
-            r_fund = _rank01(fund, higher_is_better=True)
-            r_mom = _rank01(mom, higher_is_better=True)
-
-            # Build a continuous risk metric in [0,1] using sigmoid transforms of z-scores
-            vol = np.array([float(abs(c.volatility_30d)) for c in analyzed_candidates], dtype=float)
-            dd = np.array([float(abs(c.max_drawdown)) for c in analyzed_candidates], dtype=float)
-            sharpe = np.array([float(c.sharpe_ratio) for c in analyzed_candidates], dtype=float)
-            vol = np.nan_to_num(vol, nan=0.0, posinf=0.0, neginf=0.0)
-            dd = np.nan_to_num(dd, nan=0.0, posinf=0.0, neginf=0.0)
-            sharpe = np.nan_to_num(sharpe, nan=0.0, posinf=0.0, neginf=0.0)
-            vol_mean, vol_std = float(np.nanmean(vol) if vol.size else 0.0), float(np.nanstd(vol) if vol.size else 1.0)
-            dd_mean, dd_std = float(np.nanmean(dd) if dd.size else 0.0), float(np.nanstd(dd) if dd.size else 1.0)
-            sh_mean, sh_std = float(np.nanmean(sharpe) if sharpe.size else 0.0), float(np.nanstd(sharpe) if sharpe.size else 1.0)
-            vol_z = (vol - vol_mean) / (vol_std if vol_std > 0 else 1.0)
-            dd_z = (dd - dd_mean) / (dd_std if dd_std > 0 else 1.0)
-            sh_z = (sharpe - sh_mean) / (sh_std if sh_std > 0 else 1.0)
-            k = float(os.getenv('CRYPTO_RISK_SIGMOID_K', '1.0'))
-            sig = lambda x: 1.0 / (1.0 + np.exp(-k * x))
-            risk_vol = sig(vol_z)
-            risk_dd = sig(dd_z)
-            risk_sh = sig(-sh_z)  # higher Sharpe => lower risk
-
-            # Liquidity penalty via 1/volume_to_mc normalized to [0,1]
-            inv_vmc = []
-            for c in analyzed_candidates:
-                mc = float(c.market_cap or 0.0)
-                vol_usd = float(c.volume_24h or 0.0)
-                vmc = (vol_usd / mc) if mc > 0 else 0.0
-                inv_vmc.append(1.0 / max(vmc, 1e-9))
-            inv_vmc = np.array(inv_vmc, dtype=float)
-            inv_vmc = np.nan_to_num(inv_vmc, nan=0.0, posinf=np.max(inv_vmc[np.isfinite(inv_vmc)]) if inv_vmc.size and np.any(np.isfinite(inv_vmc)) else 0.0, neginf=0.0)
-            if inv_vmc.size:
-                inv_min = float(np.nanmin(inv_vmc))
-                inv_max = float(np.nanmax(inv_vmc))
-                risk_liq = (inv_vmc - inv_min) / (inv_max - inv_min) if inv_max > inv_min else np.zeros_like(inv_vmc)
-            else:
-                risk_liq = np.zeros_like(inv_vmc)
-
-            # Combine risks equally
-            risk_norm = np.clip((risk_vol + risk_dd + risk_sh + risk_liq) / 4.0, 0.0, 1.0)
-            lam = float(os.getenv('CRYPTO_RISK_LAMBDA', '1.2'))
-            haircut = np.exp(-lam * risk_norm)
-
-            new_overall = 100.0 * (0.45 * np.array(r_tech) + 0.35 * np.array(r_fund) + 0.20 * np.array(r_mom)) * haircut
-
-            for idx, c in enumerate(analyzed_candidates):
-                c.overall_score = float(max(0.0, min(100.0, new_overall[idx])))
-                # Update risk score/level to reflect continuous model
-                r = float(np.clip(risk_norm[idx], 0.0, 1.0))
-                c.risk_score = r * 100.0
-                if r < 0.25:
-                    c.risk_level = RiskLevel.LOW
-                elif r < 0.40:
-                    c.risk_level = RiskLevel.MEDIUM_LOW
-                elif r < 0.55:
-                    c.risk_level = RiskLevel.MEDIUM
-                elif r < 0.70:
-                    c.risk_level = RiskLevel.MEDIUM_HIGH
-                elif r < 0.85:
-                    c.risk_level = RiskLevel.HIGH
-                else:
-                    c.risk_level = RiskLevel.VERY_HIGH
+            self._apply_risk_haircut(analyzed_candidates)
 
         # Filter by minimum score if requested (apply after rank-based recompute)
         min_score = float(self.config.min_overall_score or 0)
