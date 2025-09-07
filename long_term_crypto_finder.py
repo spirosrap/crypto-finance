@@ -2754,6 +2754,8 @@ class LongTermCryptoFinder:
                 if n <= 1:
                     return [0.5 for _ in vals]
                 arr = np.array(vals, dtype=float)
+                # Guard against NaN/Inf in ranks
+                arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
                 if higher_is_better:
                     order = np.argsort(-arr)
                 else:
@@ -2773,6 +2775,9 @@ class LongTermCryptoFinder:
             vol = np.array([float(abs(c.volatility_30d)) for c in analyzed_candidates], dtype=float)
             dd = np.array([float(abs(c.max_drawdown)) for c in analyzed_candidates], dtype=float)
             sharpe = np.array([float(c.sharpe_ratio) for c in analyzed_candidates], dtype=float)
+            vol = np.nan_to_num(vol, nan=0.0, posinf=0.0, neginf=0.0)
+            dd = np.nan_to_num(dd, nan=0.0, posinf=0.0, neginf=0.0)
+            sharpe = np.nan_to_num(sharpe, nan=0.0, posinf=0.0, neginf=0.0)
             vol_mean, vol_std = float(np.nanmean(vol) if vol.size else 0.0), float(np.nanstd(vol) if vol.size else 1.0)
             dd_mean, dd_std = float(np.nanmean(dd) if dd.size else 0.0), float(np.nanstd(dd) if dd.size else 1.0)
             sh_mean, sh_std = float(np.nanmean(sharpe) if sharpe.size else 0.0), float(np.nanstd(sharpe) if sharpe.size else 1.0)
@@ -2793,6 +2798,7 @@ class LongTermCryptoFinder:
                 vmc = (vol_usd / mc) if mc > 0 else 0.0
                 inv_vmc.append(1.0 / max(vmc, 1e-9))
             inv_vmc = np.array(inv_vmc, dtype=float)
+            inv_vmc = np.nan_to_num(inv_vmc, nan=0.0, posinf=np.max(inv_vmc[np.isfinite(inv_vmc)]) if inv_vmc.size and np.any(np.isfinite(inv_vmc)) else 0.0, neginf=0.0)
             if inv_vmc.size:
                 inv_min = float(np.nanmin(inv_vmc))
                 inv_max = float(np.nanmax(inv_vmc))
