@@ -569,6 +569,31 @@ class LongTermCryptoFinder:
         except Exception:
             return 1.0
 
+    def _risk_reward_ratio(self, entry_price: float, stop_loss_price: float, take_profit_price: float, atr_raw: float, is_long: bool) -> float:
+        """Compute risk/reward ratio with ATR floor and fee/slippage add-on.
+
+        - dist incorporates min tick (0.1%), ATR floor, and fees/slippage.
+        - reward is direction-aware: long uses (TP - entry), short uses (entry - TP).
+        - clamps to [0, 10].
+        """
+        try:
+            fee_bps = float(os.getenv("CRYPTO_FEE_BPS", "10"))
+            slp_bps = float(os.getenv("CRYPTO_SLIPPAGE_BPS", "10"))
+            fee_add = (fee_bps + slp_bps) / 10000.0 * entry_price
+            atr_floor_mult = float(os.getenv("CRYPTO_ATR_SL_MULT", "0.5"))
+
+            raw_risk = abs(entry_price - stop_loss_price)
+            dist = max(entry_price * 1e-3, raw_risk, (atr_raw * atr_floor_mult) if atr_raw and atr_raw > 0 else 0.0, fee_add)
+
+            if is_long:
+                reward = max(0.0, take_profit_price - entry_price)
+            else:
+                reward = max(0.0, entry_price - take_profit_price)
+
+            return float(min(10.0, (reward / dist) if dist > 0 else 0.0))
+        except Exception:
+            return 0.0
+
     def _apply_risk_haircut(self, analyzed_candidates: List["CryptoMetrics"]) -> None:
         """Compute cross-sectional ranks and continuous risk haircut in-place for candidates."""
         if not analyzed_candidates:
@@ -2527,15 +2552,14 @@ class LongTermCryptoFinder:
             # Clamp invariants for long positions
             take_profit_price = max(take_profit_price, entry_price * 1.001)
 
-            # Risk-reward with ATR floor and fee/slippage add-on
-            raw_risk = entry_price - stop_loss_price
-            fee_bps = float(os.getenv("CRYPTO_FEE_BPS", "10"))
-            slp_bps = float(os.getenv("CRYPTO_SLIPPAGE_BPS", "10"))
-            fee_add = (fee_bps + slp_bps) / 10000.0 * entry_price
-            atr_floor_mult = float(os.getenv("CRYPTO_ATR_SL_MULT", "0.5"))
-            dist = max(entry_price * 1e-3, raw_risk, (atr_raw * atr_floor_mult) if atr_raw > 0 else 0.0, fee_add)
-            reward = max(0.0, take_profit_price - entry_price)
-            risk_reward_ratio = min(10.0, (reward / dist) if dist > 0 else 0.0)
+            # Risk-reward via shared helper
+            risk_reward_ratio = self._risk_reward_ratio(
+                entry_price=entry_price,
+                stop_loss_price=stop_loss_price,
+                take_profit_price=take_profit_price,
+                atr_raw=atr_raw,
+                is_long=True,
+            )
 
             # Position sizing via shared helper
             position_size_percentage = self._position_size_percentage(entry_price, stop_loss_price, atr_raw)
@@ -2622,15 +2646,14 @@ class LongTermCryptoFinder:
             # Clamp invariants for short positions
             take_profit_price = min(take_profit_price, entry_price * 0.999)
 
-            # Account-currency sizing with ATR floor and fees/slippage
-            raw_risk = stop_loss_price - entry_price
-            fee_bps = float(os.getenv("CRYPTO_FEE_BPS", "10"))
-            slp_bps = float(os.getenv("CRYPTO_SLIPPAGE_BPS", "10"))
-            fee_add = (fee_bps + slp_bps) / 10000.0 * entry_price
-            atr_floor_mult = float(os.getenv("CRYPTO_ATR_SL_MULT", "0.5"))
-            dist = max(entry_price * 1e-3, raw_risk, (atr_raw * atr_floor_mult) if atr_raw > 0 else 0.0, fee_add)
-            reward = max(0.0, entry_price - take_profit_price)
-            risk_reward_ratio = min(10.0, (reward / dist) if dist > 0 else 0.0)
+            # Risk-reward via shared helper
+            risk_reward_ratio = self._risk_reward_ratio(
+                entry_price=entry_price,
+                stop_loss_price=stop_loss_price,
+                take_profit_price=take_profit_price,
+                atr_raw=atr_raw,
+                is_long=False,
+            )
 
             position_size_percentage = self._position_size_percentage(entry_price, stop_loss_price, atr_raw)
 
