@@ -587,8 +587,7 @@ class LongTermCryptoFinder:
 
         tech = [float(c.technical_score) for c in analyzed_candidates]
         fund = [float(c.fundamental_score) for c in analyzed_candidates]
-        mom = [float(c.momentum_score) for c in analyzed_candidates]
-        r_tech, r_fund, r_mom = _rank01(tech, True), _rank01(fund, True), _rank01(mom, True)
+        r_tech, r_fund = _rank01(tech, True), _rank01(fund, True)
 
         # Continuous risk via sigmoid(z) of vol, dd, and -sharpe, plus liquidity penalty
         vol = np.array([float(abs(c.volatility_30d)) for c in analyzed_candidates], dtype=float)
@@ -625,7 +624,8 @@ class LongTermCryptoFinder:
         lam = float(os.getenv('CRYPTO_RISK_LAMBDA', '1.2'))
         haircut = np.exp(-lam * risk_norm)
 
-        new_overall = 100.0 * (0.45 * np.array(r_tech) + 0.35 * np.array(r_fund) + 0.20 * np.array(r_mom)) * haircut
+        # Momentum is included in technical score; fold its 0.20 weight into tech (0.45+0.20=0.65)
+        new_overall = 100.0 * (0.65 * np.array(r_tech) + 0.35 * np.array(r_fund)) * haircut
         for idx, c in enumerate(analyzed_candidates):
             c.overall_score = float(max(0.0, min(100.0, new_overall[idx])))
             r = float(np.clip(risk_norm[idx], 0.0, 1.0))
@@ -2650,9 +2650,10 @@ class LongTermCryptoFinder:
                 'position_size_percentage': 1.0
             }
     def _calculate_technical_score(self, technical_metrics: Dict, momentum_score: float) -> float:
-        """Calculate technical score from various indicators.
+        """Technical score with fixed weights.
 
-        Avoid double-counting momentum; MACD acts as a light tie-breaker.
+        Weights: RSI 0.25, MACD 0.05, BB 0.20, Trend 0.30, Momentum 0.20.
+        MACD cross: ±5 as a tie-breaker.
         """
         try:
             score = 0
@@ -2702,7 +2703,10 @@ class LongTermCryptoFinder:
             else:
                 trend_score = 30
 
-            score += trend_score * 0.50
+            score += trend_score * 0.30
+
+            # Momentum contribution (t-stat mapped 0–100)
+            score += max(0.0, min(100.0, float(momentum_score))) * 0.20
 
             # MACD cross small bonus/penalty
             macd_cross = bool(technical_metrics.get('macd_cross', False))
@@ -2717,7 +2721,12 @@ class LongTermCryptoFinder:
             return 50
 
     def _calculate_technical_score_short(self, technical_metrics: Dict, momentum_score_long: float) -> float:
-        """Calculate technical score for SHORT bias by inverting bullish signals."""
+        """Technical score for SHORT bias (inverted) with fixed weights.
+
+        Weights: RSI 0.25 (overbought better), MACD 0.05 (bearish better),
+        BB 0.20 (overbought better), Trend 0.30 (more negative better),
+        Momentum 0.20 (use 100 - long momentum). MACD cross: ±5 inverted.
+        """
         try:
             score = 0
 
@@ -2729,7 +2738,7 @@ class LongTermCryptoFinder:
                 rsi_score = 70
             else:  # oversold -> worse for shorts
                 rsi_score = 45
-            score += rsi_score * 0.2
+            score += rsi_score * 0.25
 
             # MACD: bearish preferred
             macd = technical_metrics.get('macd_signal', 'NEUTRAL')
@@ -2761,7 +2770,11 @@ class LongTermCryptoFinder:
                 trend_score = 50
             else:
                 trend_score = 30
-            score += trend_score * 0.50
+            score += trend_score * 0.30
+
+            # Short momentum from long momentum
+            short_mom = max(0.0, min(100.0, 100.0 - float(momentum_score_long)))
+            score += short_mom * 0.20
 
             # MACD cross small bonus/penalty (inverted for shorts)
             macd_cross = bool(technical_metrics.get('macd_cross', False))
