@@ -587,7 +587,8 @@ class LongTermCryptoFinder:
 
         tech = [float(c.technical_score) for c in analyzed_candidates]
         fund = [float(c.fundamental_score) for c in analyzed_candidates]
-        r_tech, r_fund = _rank01(tech, True), _rank01(fund, True)
+        mom_vals = [float(c.momentum_score) for c in analyzed_candidates]
+        r_tech, r_fund, r_mom = _rank01(tech, True), _rank01(fund, True), _rank01(mom_vals, True)
 
         # Continuous risk via sigmoid(z) of vol, dd, and -sharpe, plus liquidity penalty
         vol = np.array([float(abs(c.volatility_30d)) for c in analyzed_candidates], dtype=float)
@@ -624,8 +625,8 @@ class LongTermCryptoFinder:
         lam = float(os.getenv('CRYPTO_RISK_LAMBDA', '1.2'))
         haircut = np.exp(-lam * risk_norm)
 
-        # Momentum is included in technical score; fold its 0.20 weight into tech (0.45+0.20=0.65)
-        new_overall = 100.0 * (0.65 * np.array(r_tech) + 0.35 * np.array(r_fund)) * haircut
+        # Cross-sectional overall with separate momentum rank
+        new_overall = 100.0 * (0.45 * np.array(r_tech) + 0.35 * np.array(r_fund) + 0.20 * np.array(r_mom)) * haircut
         for idx, c in enumerate(analyzed_candidates):
             c.overall_score = float(max(0.0, min(100.0, new_overall[idx])))
             r = float(np.clip(risk_norm[idx], 0.0, 1.0))
