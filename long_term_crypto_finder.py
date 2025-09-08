@@ -327,6 +327,8 @@ class LongTermCryptoFinder:
         
         # Load API credentials from environment (fallback to config.py only if needed)
         self.api_key, self.api_secret = self._load_api_credentials()
+        # Auth presence flag (used to prefer authenticated product paths)
+        self._has_auth = bool(self.api_key and self.api_secret)
 
         # Initialize Coinbase service
         self.coinbase_service = CoinbaseService(self.api_key, self.api_secret)
@@ -381,6 +383,10 @@ class LongTermCryptoFinder:
 
         logger.info(f"Long-Term Crypto Finder initialized with Coinbase API")
         logger.info(f"Configuration: {self.config.to_dict()}")
+
+        # Counters for diagnostics
+        self._vol_fallbacks = 0
+        self._vol_total = 0
         
         # Validate API credentials
         self._validate_api_credentials()
@@ -634,10 +640,12 @@ class LongTermCryptoFinder:
         risk_dd = sig(dd_z)
         risk_sh = sig(-sh_z)
         inv_vmc = []
+        vol_floor = float(os.getenv('CRYPTO_LIQ_VOL_FLOOR_USD', '50000'))
+        mc_floor = float(os.getenv('CRYPTO_LIQ_MCAP_FLOOR_USD', '1000000'))
         for c in analyzed_candidates:
             mc = float(c.market_cap or 0.0)
             vol_usd = float(c.volume_24h or 0.0)
-            vmc = (vol_usd / mc) if mc > 0 else 0.0
+            vmc = (max(vol_usd, vol_floor) / max(mc, mc_floor)) if (mc > 0 or vol_usd > 0) else 0.0
             inv_vmc.append(1.0 / max(vmc, 1e-9))
         inv_vmc = np.array(inv_vmc, dtype=float)
         if inv_vmc.size:
@@ -966,7 +974,8 @@ class LongTermCryptoFinder:
                     'total_volume_usd': m.get('total_volume'),
                     'price_change_7d_pct': m.get('price_change_percentage_7d_in_currency') or 0,
                     'price_change_30d_pct': m.get('price_change_percentage_30d_in_currency') or 0,
-                    'market_cap_rank': m.get('market_cap_rank')
+                    'market_cap_rank': m.get('market_cap_rank'),
+                    'last_updated': m.get('last_updated') or ''
                 }
         except Exception:
             return {}
@@ -1051,6 +1060,47 @@ class LongTermCryptoFinder:
         except Exception:
             pass
         return 0.0
+
+    def _prefetch_cb_assets_summary(self) -> Dict[str, Dict[str, Union[float, int, str]]]:
+        """Fetch Coinbase assets summary once and build a map: SYMBOL -> fields.
+
+        Returns a dictionary keyed by uppercased symbol containing:
+          - market_cap_usd: float
+          - market_cap_rank: int (best-effort)
+          - name: str (if available)
+        """
+        if getattr(self, 'offline', False):
+            return {}
+        try:
+            url = "https://api.coinbase.com/v2/assets/summary"
+            params = {"base": "USD", "limit": 500}
+            data = self._make_cached_request(url, params)
+            records: List[Dict] = []
+            if isinstance(data, dict):
+                records = data.get('data') or data.get('assets') or []
+            elif isinstance(data, list):
+                records = data
+            result: Dict[str, Dict[str, Union[float, int, str]]] = {}
+            for rec in records or []:
+                try:
+                    sym = (rec.get('symbol') or rec.get('asset_symbol') or '').upper()
+                    if not sym:
+                        continue
+                    mc = self._extract_market_cap_from_cb_asset(rec)
+                    rank = int(rec.get('market_cap_rank') or rec.get('rank') or 0)
+                    name = rec.get('name') or rec.get('asset_name') or ''
+                    result[sym] = {
+                        'market_cap_usd': float(mc) if mc is not None else 0.0,
+                        'market_cap_rank': rank,
+                        'name': str(name or ''),
+                    }
+                except Exception:
+                    continue
+            logger.info(f"Prefetched Coinbase assets summary for {len(result)} symbols")
+            return result
+        except Exception as e:
+            logger.warning(f"Failed to prefetch Coinbase assets summary: {e}")
+            return {}
     
     def _get_cache_key(self, data: str) -> str:
         """Generate a cache key from data string."""
@@ -1224,6 +1274,30 @@ class LongTermCryptoFinder:
             else:
                 mc_value = cg_mc_val
                 real_mc = cg_mc_val > 0.0
+            # Liquidity: favor CoinGecko USD 24h volume if present and fresh; otherwise fallback to candles
+            cg_vol_usd = self._sanitize_price(cg.get('total_volume_usd', 0)) if isinstance(cg, dict) else 0.0
+            last_upd = ''
+            try:
+                last_upd = str(cg.get('last_updated') or '') if isinstance(cg, dict) else ''
+            except Exception:
+                last_upd = ''
+            stale_sec = float(os.getenv('CRYPTO_CG_MARKETS_STALE_SEC', str(12 * 3600)))
+            now_ts = time.time()
+            upd_ts = self._normalize_ts(last_upd) if last_upd else 0
+            cg_is_stale = (upd_ts == 0) or ((now_ts - float(upd_ts)) > stale_sec)
+            vol_source = 'coingecko'
+            if (cg_vol_usd is None) or (cg_vol_usd <= 0) or cg_is_stale:
+                # fallback to candle-derived USD volume
+                cg_vol_usd = self._calculate_usd_volume(candles)
+                vol_source = 'candles'
+                try:
+                    self._vol_fallbacks += 1
+                except Exception:
+                    pass
+            try:
+                self._vol_total += 1
+            except Exception:
+                pass
             crypto_info = {
                 'product_id': product_id,
                 'symbol': product_id.split('-')[0],
@@ -1231,10 +1305,8 @@ class LongTermCryptoFinder:
                 'current_price': current_price,
                 'price_change_24h': self._calculate_price_change(candles),
                 # Prefer CoinGecko USD volume; fall back to estimated USD from candles
-                'volume_24h': (
-                    self._sanitize_price(cg.get('total_volume_usd', 0))
-                    or self._calculate_usd_volume(candles)
-                ),
+                'volume_24h': cg_vol_usd,
+                'volume_24h_source': vol_source,
                 # Prefer Coinbase/CG market cap; fallback to estimate only for display
                 'market_cap': float(mc_value) if mc_value else self._estimate_market_cap(product_id.split('-')[0], current_price),
                 'market_cap_is_real': real_mc,
@@ -1284,9 +1356,39 @@ class LongTermCryptoFinder:
         else:
             product_ids = [info['product_id'] for info in prod_map.values()]
 
-        # Apply limit if given
-        max_to_process = limit if (isinstance(limit, int) and limit > 0) else len(product_ids)
-        products_to_process = product_ids[:max_to_process]
+        # Optional early prefilter by Coinbase market cap before any candle pulls
+        min_mc_prefilter = float(self.config.min_market_cap or 0)
+        products_prefiltered = product_ids
+        if min_mc_prefilter > 0:
+            mc_map = self._prefetch_cb_assets_summary()
+            kept, dropped_below, dropped_unknown = [], 0, 0
+            keep_unknown = os.getenv('CRYPTO_PREFILTER_KEEP_UNKNOWN', '0') in ('1', 'true', 'True')
+            for pid in product_ids:
+                try:
+                    base = pid.split('-')[0].upper()
+                    rec = mc_map.get(base)
+                    mc = float((rec or {}).get('market_cap_usd') or 0.0)
+                    if mc >= min_mc_prefilter:
+                        kept.append(pid)
+                    else:
+                        if rec is None:
+                            if keep_unknown:
+                                kept.append(pid)
+                            else:
+                                dropped_unknown += 1
+                        else:
+                            dropped_below += 1
+                except Exception:
+                    dropped_unknown += 1
+            products_prefiltered = kept
+            logger.info(
+                f"Prefiltered by Coinbase market cap >= ${min_mc_prefilter:,.0f}: kept {len(kept)}, "
+                f"dropped_below {dropped_below}, dropped_unknown {dropped_unknown}"
+            )
+
+        # Apply limit if given (post-prefilter)
+        max_to_process = limit if (isinstance(limit, int) and limit > 0) else len(products_prefiltered)
+        products_to_process = products_prefiltered[:max_to_process]
 
         crypto_data: List[Dict] = []
         failed_products: List[str] = []
@@ -1356,6 +1458,16 @@ class LongTermCryptoFinder:
                 f"Applied market cap filter (real >= ${min_mc:,.0f}, est >= ${min_est_mc:,.0f} if allowed): "
                 f"{len(crypto_data)}/{pre_filter_count} remaining; drops — no_mc:{dropped_no_mc}, real_below:{dropped_below_real}, est_below:{dropped_below_est}"
             )
+
+        # Log liquidity volume fallback rate (CG -> candles)
+        try:
+            if self._vol_total > 0:
+                pct_fb = 100.0 * float(self._vol_fallbacks) / float(self._vol_total)
+                logger.info(
+                    f"Liquidity volume source: fallback_to_candles={self._vol_fallbacks}/{self._vol_total} ({pct_fb:.1f}%)"
+                )
+        except Exception:
+            pass
 
         logger.info(f"Successfully retrieved {len(crypto_data)} cryptocurrencies for analysis")
         
@@ -2980,6 +3092,8 @@ def main():
                        help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT')
     parser.add_argument('--risk-free-rate', type=float,
                        help='Override annual risk-free rate (e.g., 0.03 for 3%)')
+    parser.add_argument('--analysis-days', type=int,
+                       help='Number of daily bars to pull (e.g., 365)')
 
     args = parser.parse_args()
 
@@ -3002,7 +3116,8 @@ def main():
         top_per_side=args.top_per_side,
         max_workers=args.max_workers or CryptoFinderConfig.from_env().max_workers,
         quotes=quotes_list,
-        risk_free_rate=args.risk_free_rate if args.risk_free_rate is not None else CryptoFinderConfig.from_env().risk_free_rate
+        risk_free_rate=args.risk_free_rate if args.risk_free_rate is not None else CryptoFinderConfig.from_env().risk_free_rate,
+        analysis_days=args.analysis_days if args.analysis_days is not None else CryptoFinderConfig.from_env().analysis_days
     )
     
     # Initialize the finder
