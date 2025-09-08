@@ -1361,34 +1361,46 @@ class LongTermCryptoFinder:
         products_prefiltered = product_ids
         if min_mc_prefilter > 0:
             mc_map = self._prefetch_cb_assets_summary()
-            kept, dropped_below, dropped_unknown = [], 0, 0
-            keep_unknown = os.getenv('CRYPTO_PREFILTER_KEEP_UNKNOWN', '0') in ('1', 'true', 'True')
-            for pid in product_ids:
-                try:
-                    base = pid.split('-')[0].upper()
-                    rec = mc_map.get(base)
-                    mc = float((rec or {}).get('market_cap_usd') or 0.0)
-                    if mc >= min_mc_prefilter:
-                        kept.append(pid)
-                    else:
-                        if rec is None:
-                            if keep_unknown:
-                                kept.append(pid)
-                            else:
-                                dropped_unknown += 1
+            if not mc_map:
+                logger.warning(
+                    "Coinbase assets summary returned 0 symbols; skipping market-cap prefilter to avoid false negatives. "
+                    "Set CRYPTO_PREFILTER_KEEP_UNKNOWN=0 to enforce drop of unknowns."
+                )
+                products_prefiltered = product_ids
+            else:
+                kept, dropped_below, dropped_unknown = [], 0, 0
+                keep_unknown = os.getenv('CRYPTO_PREFILTER_KEEP_UNKNOWN', '0') in ('1', 'true', 'True')
+                for pid in product_ids:
+                    try:
+                        base = pid.split('-')[0].upper()
+                        rec = mc_map.get(base)
+                        mc = float((rec or {}).get('market_cap_usd') or 0.0)
+                        if mc >= min_mc_prefilter:
+                            kept.append(pid)
                         else:
-                            dropped_below += 1
-                except Exception:
-                    dropped_unknown += 1
-            products_prefiltered = kept
-            logger.info(
-                f"Prefiltered by Coinbase market cap >= ${min_mc_prefilter:,.0f}: kept {len(kept)}, "
-                f"dropped_below {dropped_below}, dropped_unknown {dropped_unknown}"
-            )
+                            if rec is None:
+                                if keep_unknown:
+                                    kept.append(pid)
+                                else:
+                                    dropped_unknown += 1
+                            else:
+                                dropped_below += 1
+                    except Exception:
+                        dropped_unknown += 1
+                products_prefiltered = kept
+                logger.info(
+                    f"Prefiltered by Coinbase market cap >= ${min_mc_prefilter:,.0f}: kept {len(kept)}, "
+                    f"dropped_below {dropped_below}, dropped_unknown {dropped_unknown}"
+                )
 
         # Apply limit if given (post-prefilter)
         max_to_process = limit if (isinstance(limit, int) and limit > 0) else len(products_prefiltered)
         products_to_process = products_prefiltered[:max_to_process]
+
+        # If nothing to process, exit early to avoid ThreadPoolExecutor(0) error
+        if not products_to_process:
+            logger.warning("No products to process after symbol selection and market-cap prefilter.")
+            return []
 
         crypto_data: List[Dict] = []
         failed_products: List[str] = []
@@ -1404,7 +1416,8 @@ class LongTermCryptoFinder:
         self._cg_prefetch_map = self._prefetch_cg_markets(cg_ids) if cg_ids else {}
 
         # Use ThreadPoolExecutor for parallel processing (cap pool to workload)
-        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(products_to_process))) as executor:
+        pool_workers = max(1, min(self.max_workers, len(products_to_process)))
+        with ThreadPoolExecutor(max_workers=pool_workers) as executor:
             # Submit all tasks
             future_to_product = {
                 executor.submit(self._process_single_crypto, product_id, i, len(products_to_process)): product_id
@@ -3002,6 +3015,16 @@ class LongTermCryptoFinder:
 
         long_count = sum(1 for x in top_results if getattr(x, 'position_side', '') == 'LONG')
         short_count = sum(1 for x in top_results if getattr(x, 'position_side', '') == 'SHORT')
+        # Telemetry: echo liquidity volume fallback ratio at end of run
+        try:
+            if getattr(self, '_vol_total', 0) > 0:
+                pct_fb = 100.0 * float(getattr(self, '_vol_fallbacks', 0)) / float(getattr(self, '_vol_total', 0))
+                logger.info(
+                    f"Liquidity volume source (run): fallback_to_candles={self._vol_fallbacks}/{self._vol_total} ({pct_fb:.1f}%)"
+                )
+        except Exception:
+            pass
+
         logger.info(
             f"Analysis complete. Found {len(top_results)} top opportunities (LONG={long_count}, SHORT={short_count})."
         )
