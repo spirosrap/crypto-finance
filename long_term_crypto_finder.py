@@ -2957,26 +2957,53 @@ class LongTermCryptoFinder:
 
         # Analyze each cryptocurrency and include applicable side(s)
         analyzed_candidates: List[CryptoMetrics] = []
-        for i, coin_data in enumerate(crypto_list[:limit]):
-            logger.info(f"Analyzing {i+1}/{min(len(crypto_list), limit)}: {coin_data['symbol']} ({coin_data['name']})")
-            product_id = coin_data['product_id']
-            df = self.get_historical_data(product_id, days=self.config.analysis_days)
-            if df is None or len(df) < 30:
-                logger.warning(f"Insufficient historical data for {coin_data['symbol']}")
-                continue
-            tech = self.calculate_technical_indicators(df)
-            mom = self.calculate_momentum_score(df)
-            chg = self._calculate_price_changes_from_history(df)
 
-            if self.side in ('long', 'both'):
-                long_metrics = self._build_long_metrics(coin_data, df, tech, mom, chg)
-                if long_metrics and getattr(long_metrics, 'risk_reward_ratio', 0.0) >= 2.0:
-                    analyzed_candidates.append(long_metrics)
+        def _analyze_one(coin: Dict) -> List[CryptoMetrics]:
+            try:
+                symbol = coin.get('symbol', 'UNKNOWN')
+                name = coin.get('name', symbol)
+                logger.info(f"Analyzing {symbol} ({name})")
+                product_id = coin['product_id']
+                df = self.get_historical_data(product_id, days=self.config.analysis_days)
+                if df is None or len(df) < 30:
+                    logger.warning(f"Insufficient historical data for {symbol}")
+                    return []
+                tech = self.calculate_technical_indicators(df)
+                mom = self.calculate_momentum_score(df)
+                chg = self._calculate_price_changes_from_history(df)
 
-            if self.side in ('short', 'both'):
-                short_metrics = self._build_short_metrics(coin_data, df, tech, mom, chg)
-                if short_metrics and getattr(short_metrics, 'risk_reward_ratio', 0.0) >= 2.0:
-                    analyzed_candidates.append(short_metrics)
+                results: List[CryptoMetrics] = []
+                if self.side in ('long', 'both'):
+                    long_metrics = self._build_long_metrics(coin, df, tech, mom, chg)
+                    if long_metrics and getattr(long_metrics, 'risk_reward_ratio', 0.0) >= 2.0:
+                        results.append(long_metrics)
+                if self.side in ('short', 'both'):
+                    short_metrics = self._build_short_metrics(coin, df, tech, mom, chg)
+                    if short_metrics and getattr(short_metrics, 'risk_reward_ratio', 0.0) >= 2.0:
+                        results.append(short_metrics)
+                return results
+            except Exception as e:
+                try:
+                    logger.error(f"Analyze failed for {coin.get('symbol','?')}: {e}")
+                except Exception:
+                    logger.error(f"Analyze failed for unknown coin: {e}")
+                return []
+
+        # Parallelize analysis to speed up runs, respecting API throttles via internal semaphores
+        coins_to_process = crypto_list[:limit]
+        pool_workers = max(1, min(self.max_workers, len(coins_to_process)))
+        if pool_workers == 1:
+            # Keep ordering deterministic in single-thread path
+            for coin in coins_to_process:
+                analyzed_candidates.extend(_analyze_one(coin))
+        else:
+            with ThreadPoolExecutor(max_workers=pool_workers) as ex:
+                futures = [ex.submit(_analyze_one, coin) for coin in coins_to_process]
+                for fut in as_completed(futures):
+                    try:
+                        analyzed_candidates.extend(fut.result() or [])
+                    except Exception as e:
+                        logger.error(f"Worker error during analysis: {e}")
 
         # Cross-sectional ranks and continuous risk re-scaling
         if analyzed_candidates:
