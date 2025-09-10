@@ -115,6 +115,7 @@ class Recommendation:
     current_price: float
     rationale: str
     status: str  # OK | EXIT_HIT | INSUFFICIENT_DATA | ERROR
+    confidence: float = 0.0  # 0..1 confidence in suggested change
 
 
 def _finite(x: Union[float, int]) -> float:
@@ -227,6 +228,84 @@ def _r_multiple(side: Side, entry: float, stop_basis: float, current: float) -> 
         return 0.0
 
 
+def _confidence_from_indicators(
+    tech: Dict,
+    side: Side,
+    entry: float,
+    init_stop: float,
+    cur_price: float,
+    proposed_sl: float,
+) -> Tuple[float, List[str]]:
+    """Compute a 0..1 confidence score for updating the stop.
+
+    The score blends several robust signals:
+      - ADX (trend strength)
+      - Trend slope normalized (finder's trend_strength)
+      - MACD histogram alignment with side
+      - Cushion in ATRs between price and proposed stop (avoid too-tight moves)
+      - RSI regime (extreme overbought/oversold reduces confidence slightly)
+
+    Returns (confidence, reasons).
+    """
+    reasons: List[str] = []
+
+    adx = float(tech.get("adx", 0.0) or 0.0)
+    trend_strength = float(tech.get("trend_strength", 0.0) or 0.0)
+    macd_hist = float(tech.get("macd_hist", 0.0) or 0.0)
+    rsi = float(tech.get("rsi_14", 50.0) or 50.0)
+    atr = float(tech.get("atr", 0.0) or 0.0)
+
+    # 1) ADX component: map ~10..40 -> 0..1
+    adx_comp = max(0.0, min(1.0, (adx - 10.0) / 30.0))
+    if adx >= 25:
+        reasons.append(f"ADX {adx:.1f} (solid trend)")
+    elif adx >= 18:
+        reasons.append(f"ADX {adx:.1f} (moderate trend)")
+    else:
+        reasons.append(f"ADX {adx:.1f} (weak trend)")
+
+    # 2) Trend slope component: favor slope aligned to side
+    if side == Side.LONG:
+        slope_raw = max(-2.0, min(2.0, trend_strength / 10.0))  # compress
+        slope_comp = (slope_raw + 2.0) / 4.0  # map [-2,2] -> [0,1]
+    else:
+        slope_raw = max(-2.0, min(2.0, -trend_strength / 10.0))
+        slope_comp = (slope_raw + 2.0) / 4.0
+    reasons.append(f"Trend {trend_strength:+.1f}bps over 60d")
+
+    # 3) MACD histogram alignment
+    macd_aligned = (macd_hist >= 0 and side == Side.LONG) or (macd_hist <= 0 and side == Side.SHORT)
+    macd_comp = 1.0 if macd_aligned else 0.25
+    reasons.append("MACD aligned" if macd_aligned else "MACD counter-trend")
+
+    # 4) ATR cushion component: require some buffer from current price
+    if atr > 0:
+        cushion_atr = (cur_price - proposed_sl) / atr if side == Side.LONG else (proposed_sl - cur_price) / atr
+    else:
+        cushion_atr = 0.0
+    # Map cushion 0..2 ATR to 0..1 (cap at 2 ATR)
+    cushion_comp = max(0.0, min(1.0, cushion_atr / 2.0))
+    reasons.append(f"Cushion {cushion_atr:.2f} ATR")
+
+    # 5) RSI regime – slight penalty in extremes
+    if rsi <= 25 or rsi >= 75:
+        rsi_comp = 0.6
+        reasons.append(f"RSI {rsi:.1f} (extreme)")
+    else:
+        rsi_comp = 1.0
+        reasons.append(f"RSI {rsi:.1f} (normal)")
+
+    # Weighted blend (favor trend + cushion)
+    conf = (
+        0.30 * adx_comp +
+        0.25 * slope_comp +
+        0.25 * cushion_comp +
+        0.15 * macd_comp +
+        0.05 * rsi_comp
+    )
+    return max(0.0, min(1.0, float(conf))), reasons
+
+
 def _recommend_for_trade(finder: LongTermCryptoFinder, trade: Trade, analysis_days: int, extend_tp: bool,
                          rr_target: float, quotes: List[str]) -> Recommendation:
     try:
@@ -255,7 +334,7 @@ def _recommend_for_trade(finder: LongTermCryptoFinder, trade: Trade, analysis_da
         if df is None or len(df) < 30:
             return Recommendation("KEEP", trade.stop_loss, trade.take_profit, 0.0, "Insufficient historical data", "INSUFFICIENT_DATA")
 
-        # Indicators (ATR, etc.)
+        # Indicators (ATR, trend, etc.)
         tech = finder.calculate_technical_indicators(df)
         atr = float(tech.get("atr", 0.0) or 0.0)
 
@@ -284,6 +363,8 @@ def _recommend_for_trade(finder: LongTermCryptoFinder, trade: Trade, analysis_da
         k_atr = float(os.getenv("TRADE_GUARD_ATR_MULT", "2.0"))
         min_gap = float(os.getenv("TRADE_GUARD_MIN_GAP_PCT", "0.001"))  # 0.1%
         min_step = float(os.getenv("TRADE_GUARD_MIN_STEP_PCT", "0.0025"))  # 0.25%
+        min_conf = float(os.getenv("TRADE_GUARD_MIN_CONF", "0.45"))  # require >=45% confidence to change
+        min_atr_cush = float(os.getenv("TRADE_GUARD_MIN_ATR_CUSH", "0.6"))  # min ATR cushion to accept change
 
         action = "KEEP"
         # rationale_bits initialized earlier
@@ -319,8 +400,22 @@ def _recommend_for_trade(finder: LongTermCryptoFinder, trade: Trade, analysis_da
                 proposed = min(proposed, cur_price * (1 - min_gap))  # keep below price
                 new_sl = max(sl_old, proposed)
                 if new_sl > sl_old * (1 + min_step):
-                    action = "RAISE_SL"
-                    rationale_bits.append("ATR/support/1R progression suggests higher stop")
+                    # Confidence gating
+                    conf, conf_bits = _confidence_from_indicators(tech, side, entry, init_stop, cur_price, new_sl)
+                    rationale_bits.extend(conf_bits)
+                    # ATR cushion hard-floor
+                    cushion_atr = (cur_price - new_sl) / atr if atr > 0 else 0.0
+                    if cushion_atr < min_atr_cush:
+                        rationale_bits.append(f"Cushion {cushion_atr:.2f} ATR below minimum {min_atr_cush:.2f}")
+                        conf *= 0.5
+                    if conf >= min_conf:
+                        action = "RAISE_SL"
+                        rationale_bits.append("ATR/support/1R progression suggests higher stop")
+                        rationale_bits.append(f"Update confidence {conf:.2f}")
+                    else:
+                        action = "KEEP"
+                        new_sl = sl_old
+                        rationale_bits.append(f"Low-confidence gating (score {conf:.2f} < {min_conf:.2f})")
                 else:
                     action = "KEEP"
             else:
@@ -343,8 +438,21 @@ def _recommend_for_trade(finder: LongTermCryptoFinder, trade: Trade, analysis_da
                 proposed = max(proposed, cur_price * (1 + min_gap))
                 new_sl = min(sl_old, proposed)
                 if new_sl < sl_old * (1 - min_step):
-                    action = "LOWER_SL"
-                    rationale_bits.append("ATR/resistance/1R progression suggests lower stop")
+                    # Confidence gating
+                    conf, conf_bits = _confidence_from_indicators(tech, side, entry, init_stop, cur_price, new_sl)
+                    rationale_bits.extend(conf_bits)
+                    cushion_atr = (new_sl - cur_price) / atr if atr > 0 else 0.0
+                    if cushion_atr < min_atr_cush:
+                        rationale_bits.append(f"Cushion {cushion_atr:.2f} ATR below minimum {min_atr_cush:.2f}")
+                        conf *= 0.5
+                    if conf >= min_conf:
+                        action = "LOWER_SL"
+                        rationale_bits.append("ATR/resistance/1R progression suggests lower stop")
+                        rationale_bits.append(f"Update confidence {conf:.2f}")
+                    else:
+                        action = "KEEP"
+                        new_sl = sl_old
+                        rationale_bits.append(f"Low-confidence gating (score {conf:.2f} < {min_conf:.2f})")
                 else:
                     action = "KEEP"
             else:
@@ -364,11 +472,17 @@ def _recommend_for_trade(finder: LongTermCryptoFinder, trade: Trade, analysis_da
                 if tp_old is None or new_tp < (tp_old - max(1e-6, (tp_old if np.isfinite(tp_old) else 1.0) * min_step)):
                     rationale_bits.append(f"Extend TP to maintain ~{rr_target:.1f}:1 RR")
 
+        # Compute final confidence for the outcome (0 if no change)
+        if action in ("RAISE_SL", "LOWER_SL"):
+            conf_final, _ = _confidence_from_indicators(tech, side, entry, init_stop, cur_price, new_sl)
+        else:
+            conf_final = 0.0
+
         rationale = ", ".join(rationale_bits) if rationale_bits else "No material change"
-        return Recommendation(action, float(new_sl), (float(new_tp) if new_tp is not None else None), float(cur_price), rationale, "OK")
+        return Recommendation(action, float(new_sl), (float(new_tp) if new_tp is not None else None), float(cur_price), rationale, "OK", confidence=float(conf_final))
     except Exception as e:
         logger.error(f"Recommendation failed: {e}")
-        return Recommendation("KEEP", trade.stop_loss, trade.take_profit, 0.0, f"Error: {e}", "ERROR")
+        return Recommendation("KEEP", trade.stop_loss, trade.take_profit, 0.0, f"Error: {e}", "ERROR", confidence=0.0)
 
 
 def _load_trades_from_file(path: str) -> List[Trade]:
@@ -460,6 +574,7 @@ def main() -> None:
             "action": rec.action,
             "status": rec.status,
             "rationale": rec.rationale,
+            "confidence": float(rec.confidence),
         }
         results.append(row)
 
@@ -485,6 +600,9 @@ def main() -> None:
                 tp_new_s = f"${tpn:.6f}" if tpn is not None else "N/A"
                 print(f"   Target: old {tp_old_s} -> new {tp_new_s}")
             print(f"   Action: {r['action']}  Status: {r['status']}")
+            conf = float(r.get('confidence', 0.0) or 0.0)
+            if conf > 0:
+                print(f"   Confidence: {conf*100:.1f}%")
             print(f"   Reason: {r['rationale']}")
 
 
