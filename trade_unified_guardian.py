@@ -152,6 +152,9 @@ def main() -> None:
     ap.add_argument("--tighten-threshold", type=float, default=0.50, help="Risk score to suggest tightening (default 0.50)")
     ap.add_argument("--exit-threshold", type=float, default=0.70, help="Risk score to suggest risk-off exit (default 0.70)")
 
+    ap.add_argument("--auto-tighten-on-regime", action="store_true", default=True,
+                    help="When regime is RISK_OFF_TIGHTEN but stop engine keeps, auto-tighten SL using ATR cushion")
+
     args = ap.parse_args()
 
     # Finder once for both engines
@@ -218,9 +221,75 @@ def main() -> None:
             exit_threshold=float(args.exit_threshold),
         )
 
-        # Combine
+        # Optional auto-tighten overlay when regime warns but stop engine kept
+        overlay_sl: Optional[float] = None
+        overlay_action: Optional[str] = None
+        if args.auto_tighten_on_regime and rec_rg.action == "RISK_OFF_TIGHTEN" and rec_tg.action == "KEEP" and rec_tg.status == "OK":
+            try:
+                # Compute ATR-based cushion using same bars policy as trade engine
+                bars_pid = pid_resolved
+                if "PERP" in (pid_resolved or ""):
+                    try:
+                        base = pid_resolved.split("-")[0]
+                        spot_map = finder._fetch_usdc_products()
+                        spid = (spot_map.get(base) or {}).get("product_id")
+                        if spid:
+                            bars_pid = spid
+                    except Exception:
+                        pass
+                df_for_atr = finder.get_historical_data(bars_pid or (t.symbol or ""), days=int(args.analysis_days))
+                tech = finder.calculate_technical_indicators(df_for_atr) if df_for_atr is not None else {"atr": 0.0}
+                atr = float(tech.get("atr", 0.0) or 0.0)
+                cur_price = float(rec_tg.current_price or 0.0)
+                old_sl = float(t.stop_loss or 0.0)
+                min_gap = float(os.getenv("TRADE_GUARD_MIN_GAP_PCT", "0.001"))  # 0.1%
+                min_step = float(os.getenv("TRADE_GUARD_MIN_STEP_PCT", "0.0025"))  # 0.25%
+                min_atr_cush = float(os.getenv("TRADE_GUARD_MIN_ATR_CUSH", "0.6"))
+                risk_off_cush = float(os.getenv("UNIFIED_RISK_OFF_CUSH_ATR", "1.0"))
+                target_cush = max(min_atr_cush, risk_off_cush)
+                if atr > 0 and cur_price > 0 and old_sl > 0:
+                    if str(t.side).upper() == "LONG":
+                        proposal = min(cur_price * (1 - min_gap), cur_price - target_cush * atr)
+                        overlay_sl = max(old_sl, proposal)
+                        if not (overlay_sl > old_sl * (1 + min_step)):
+                            overlay_sl = None
+                        else:
+                            overlay_action = "RAISE_SL"
+                    else:  # SHORT
+                        proposal = max(cur_price * (1 + min_gap), cur_price + target_cush * atr)
+                        overlay_sl = min(old_sl, proposal)
+                        if not (overlay_sl < old_sl * (1 - min_step)):
+                            overlay_sl = None
+                        else:
+                            overlay_action = "LOWER_SL"
+            except Exception:
+                overlay_sl = None
+                overlay_action = None
+
+            # Fallback: percentage-based tighten to ensure a concrete proposal
+            if overlay_sl is None:
+                try:
+                    step_pct = float(os.getenv("UNIFIED_RISK_OFF_STEP_PCT", "0.005"))  # 0.5%
+                    cur_price = float(rec_tg.current_price or 0.0)
+                    old_sl = float(t.stop_loss or 0.0)
+                    if str(t.side).upper() == "LONG":
+                        proposal = min(old_sl * (1.0 + step_pct), cur_price * (1.0 - min_gap)) if cur_price > 0 else old_sl * (1.0 + step_pct)
+                        if proposal > old_sl:
+                            overlay_sl = proposal
+                            overlay_action = "RAISE_SL"
+                    else:
+                        proposal = max(old_sl * (1.0 - step_pct), cur_price * (1.0 + min_gap)) if cur_price > 0 else old_sl * (1.0 - step_pct)
+                        if proposal < old_sl:
+                            overlay_sl = proposal
+                            overlay_action = "LOWER_SL"
+                except Exception:
+                    overlay_sl = None
+                    overlay_action = None
+
+        # Combine (consider overlay_action if present)
+        eff_trade_action = overlay_action if overlay_action else rec_tg.action
         combined_action, combo_reason = _combined_action(
-            trade_action=rec_tg.action,
+            trade_action=eff_trade_action,
             trade_status=rec_tg.status,
             regime_action=rec_rg.action,
             regime_status=rec_rg.status,
@@ -237,10 +306,10 @@ def main() -> None:
             # current and recommended levels
             "stop_loss": _finite(t.stop_loss),
             "take_profit": _finite(t.take_profit) if t.take_profit is not None else None,
-            "recommended_stop": _finite(rec_tg.new_stop_loss),
+            "recommended_stop": _finite(overlay_sl if overlay_sl is not None else rec_tg.new_stop_loss),
             "recommended_takeprofit": _finite(rec_tg.new_take_profit) if rec_tg.new_take_profit is not None else None,
             # per-engine actions
-            "trade_action": rec_tg.action,
+            "trade_action": eff_trade_action or rec_tg.action,
             "trade_status": rec_tg.status,
             "trade_confidence": float(rec_tg.confidence or 0.0),
             "trade_rationale": rec_tg.rationale,
@@ -305,4 +374,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         pass
-
