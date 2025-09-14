@@ -1,6 +1,9 @@
 import os
-from coinbaseservice import CoinbaseService
+import json
 import logging
+from typing import Optional, Dict, Tuple
+import requests
+from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
 import argparse
 import time
@@ -17,20 +20,212 @@ file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
 logger.addHandler(file_handler)
 
+_PRECISION_CACHE: Dict[str, float] = {}
+_BASE_CONSTRAINTS_CACHE: Dict[str, Tuple[float, float]] = {}
+
+def _coerce_float(x) -> Optional[float]:
+    try:
+        v = float(x)
+        return v if v > 0 else None
+    except Exception:
+        return None
+
+def _fetch_increment_public(product_id: str) -> Optional[float]:
+    """Try public products list once and extract price increment for product_id."""
+    try:
+        url = "https://api.coinbase.com/api/v3/brokerage/products"
+        resp = requests.get(url, params={"limit": 250}, timeout=10)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        prods = data.get("products", []) if isinstance(data, dict) else []
+        for p in prods:
+            if str(p.get("product_id", "")).upper() == product_id.upper():
+                # Try several common keys
+                for key in ("price_increment", "display_price_increment", "quote_increment"):
+                    inc = p.get(key)
+                    v = _coerce_float(inc)
+                    if v:
+                        return v
+                # Some payloads encode increments as strings under nested fields
+                try:
+                    inc = p.get("trading_rules", {}).get("price_increment")
+                    v = _coerce_float(inc)
+                    if v:
+                        return v
+                except Exception:
+                    pass
+        return None
+    except Exception:
+        return None
+
+def _fetch_increment_auth(product_id: str) -> Optional[float]:
+    """Try authenticated products list to get price increment."""
+    try:
+        if not (API_KEY_PERPS and API_SECRET_PERPS):
+            return None
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+        # Auth products list
+        try:
+            from coinbase.rest import products as cb_products  # type: ignore
+            auth = cb_products.get_products(cb.client)
+            prods = auth.get("products", []) if isinstance(auth, dict) else getattr(auth, "products", []) or []
+        except Exception:
+            prods = []
+        for p in prods:
+            try:
+                pid = p.get("product_id") if isinstance(p, dict) else getattr(p, "product_id", "")
+                if str(pid or "").upper() != product_id.upper():
+                    continue
+                # check keys on dict or attribute objects
+                def _pget(obj, key: str):
+                    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+                for key in ("price_increment", "display_price_increment", "quote_increment"):
+                    v = _coerce_float(_pget(p, key))
+                    if v:
+                        return v
+                tr = _pget(p, "trading_rules") or {}
+                v = _coerce_float(tr.get("price_increment") if isinstance(tr, dict) else None)
+                if v:
+                    return v
+            except Exception:
+                continue
+        return None
+    except Exception:
+        return None
+
 def get_price_precision(product_id: str) -> float:
-    """Return tick size (price precision) for supported perpetual products."""
+    """Return tick size (price precision) for a product.
+
+    Order of resolution:
+      1) In-memory cache
+      2) Authenticated products listing (if API keys available)
+      3) Public products listing
+      4) Static fallback map (kept for known assets)
+      5) Final default 0.01
+    """
+    if product_id in _PRECISION_CACHE:
+        return _PRECISION_CACHE[product_id]
+
+    # Try authenticated fetch
+    inc = _fetch_increment_auth(product_id)
+    if inc:
+        _PRECISION_CACHE[product_id] = inc
+        return inc
+
+    # Try public fetch
+    inc = _fetch_increment_public(product_id)
+    if inc:
+        _PRECISION_CACHE[product_id] = inc
+        return inc
+
+    # Fallback static map for common perps
     price_precision_map = {
-        'BTC-PERP-INTX': 1.0,     # $1.0 tick
-        'ETH-PERP-INTX': 0.1,     # $0.1 tick
-        'DOGE-PERP-INTX': 0.0001, # $0.0001 tick
-        'SOL-PERP-INTX': 0.01,    # $0.01 tick
-        'XRP-PERP-INTX': 0.001,   # $0.001 tick (typical)
-        '1000SHIB-PERP-INTX': 0.000001, # micro tick
+        'BTC-PERP-INTX': 1.0,
+        'ETH-PERP-INTX': 0.1,
+        'DOGE-PERP-INTX': 0.0001,
+        'SOL-PERP-INTX': 0.01,
+        'XRP-PERP-INTX': 0.001,
+        '1000SHIB-PERP-INTX': 0.000001,
         'NEAR-PERP-INTX': 0.001,
         'SUI-PERP-INTX': 0.0001,
         'ATOM-PERP-INTX': 0.001,
     }
-    return price_precision_map.get(product_id, 0.01)
+    inc = price_precision_map.get(product_id)
+    if inc:
+        _PRECISION_CACHE[product_id] = inc
+        return inc
+
+    logger.warning(f"Using default tick size for {product_id}; could not resolve from API")
+    _PRECISION_CACHE[product_id] = 0.01
+    return 0.01
+
+
+def _fetch_base_constraints_public(product_id: str) -> Optional[Tuple[float, float]]:
+    try:
+        url = "https://api.coinbase.com/api/v3/brokerage/products"
+        resp = requests.get(url, params={"limit": 250}, timeout=10)
+        if resp.status_code != 200:
+            return None
+        prods = (resp.json() or {}).get("products", [])
+        for p in prods:
+            if str(p.get("product_id", "")).upper() == product_id.upper():
+                # Common field names across variants
+                for kmin in ("base_min_size", "min_size", "base_min_increment"):
+                    vmin = _coerce_float(p.get(kmin))
+                    if vmin:
+                        break
+                else:
+                    vmin = None
+                for kinc in ("base_increment", "base_min_increment"):
+                    vinc = _coerce_float(p.get(kinc))
+                    if vinc:
+                        break
+                else:
+                    vinc = None
+                if vmin and vinc:
+                    return float(vmin), float(vinc)
+        return None
+    except Exception:
+        return None
+
+
+def _fetch_base_constraints_auth(product_id: str) -> Optional[Tuple[float, float]]:
+    try:
+        if not (API_KEY_PERPS and API_SECRET_PERPS):
+            return None
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+        from coinbase.rest import products as cb_products  # type: ignore
+        auth = cb_products.get_products(cb.client)
+        prods = auth.get("products", []) if isinstance(auth, dict) else getattr(auth, "products", []) or []
+        for p in prods:
+            pid = p.get("product_id") if isinstance(p, dict) else getattr(p, "product_id", "")
+            if str(pid or "").upper() != product_id.upper():
+                continue
+            def _pget(obj, key: str):
+                return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+            vmin = None
+            for kmin in ("base_min_size", "min_size", "base_min_increment"):
+                vmin = _coerce_float(_pget(p, kmin))
+                if vmin:
+                    break
+            vinc = None
+            for kinc in ("base_increment", "base_min_increment"):
+                vinc = _coerce_float(_pget(p, kinc))
+                if vinc:
+                    break
+            if vmin and vinc:
+                return float(vmin), float(vinc)
+        return None
+    except Exception:
+        return None
+
+
+def get_base_constraints(product_id: str) -> Tuple[float, float]:
+    """Return (min_base_size, base_increment) for product.
+
+    Order: cache -> auth -> public -> fallback map -> defaults (1.0, 0.001)
+    """
+    if product_id in _BASE_CONSTRAINTS_CACHE:
+        return _BASE_CONSTRAINTS_CACHE[product_id]
+    res = _fetch_base_constraints_auth(product_id) or _fetch_base_constraints_public(product_id)
+    if res:
+        _BASE_CONSTRAINTS_CACHE[product_id] = res
+        return res
+    # Fallbacks for common perps
+    fallback = {
+        'BTC-PERP-INTX': (0.0001, 0.0001),
+        'ETH-PERP-INTX': (0.001, 0.001),
+        'SOL-PERP-INTX': (0.01, 0.01),
+        'DOGE-PERP-INTX': (1.0, 1.0),
+        'XRP-PERP-INTX': (1.0, 1.0),
+        'LINK-PERP-INTX': (0.1, 0.1),
+        'NEAR-PERP-INTX': (1.0, 1.0),
+        'SUI-PERP-INTX': (1.0, 1.0),
+        'ATOM-PERP-INTX': (0.1, 0.1),
+    }.get(product_id, (1.0, 0.001))
+    _BASE_CONSTRAINTS_CACHE[product_id] = fallback
+    return fallback
 
 def round_to_precision(value: float, precision: float) -> float:
     """Round value to nearest exchange tick size."""
@@ -104,10 +299,13 @@ def preview_order(cb_service, product_id: str, side: str, size: float, leverage:
         return False, str(e)
 
 def validate_params(product_id: str, side: str, size_usd: float, leverage: float, tp_price: float, sl_price: float, limit_price: float, cb_service):
-    """Validate input parameters."""
-    valid_products = ['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX",'NEAR-PERP-INTX', 'SUI-PERP-INTX', 'ATOM-PERP-INTX']
-    if product_id not in valid_products:
-        raise ValueError(f"Invalid product. Must be one of: {', '.join(valid_products)}")
+    """Validate input parameters.
+
+    Accept any BASE-PERP-INTX product id. If product is unknown to the
+    exchange, later preview/order calls will fail with a clear message.
+    """
+    if '-PERP-' not in product_id.upper():
+        raise ValueError("Product must be a perpetual, e.g., BASE-PERP-INTX")
 
     if side not in ['BUY', 'SELL']:
         raise ValueError("Side must be either 'BUY' or 'SELL'")
@@ -115,7 +313,7 @@ def validate_params(product_id: str, side: str, size_usd: float, leverage: float
     if size_usd <= 0:
         raise ValueError("Position size must be positive")
     
-    if not 1 <= leverage <= 20:
+    if not 1 <= leverage <= 100:
         raise ValueError("Leverage must be between 1 and 20")
     
     if tp_price <= 0:
@@ -184,27 +382,33 @@ def get_min_base_size(product_id: str) -> float:
     return min_sizes.get(product_id, 0.0001)
 
 def calculate_base_size(product_id: str, size_usd: float, current_price: float) -> float:
-    """Calculate the base size respecting minimum size requirements."""
-    min_base_size = get_min_base_size(product_id)
-    calculated_size = size_usd / current_price
-    
-    # Round to appropriate decimal places based on min size
-    if min_base_size >= 1:
-        # For assets like DOGE, round to whole numbers
-        base_size = max(round(calculated_size), min_base_size)
+    """Calculate base size respecting min size and base increment.
+
+    - Start from notional/price
+    - Round to nearest base_increment
+    - Enforce >= min_base_size
+    """
+    min_base_size, base_inc = get_base_constraints(product_id)
+    est = max(size_usd / max(current_price, 1e-9), 0.0)
+    if base_inc > 0:
+        steps = round(est / base_inc)
+        base_size = steps * base_inc
     else:
-        # For assets like BTC, maintain precision
-        decimal_places = len(str(min_base_size).split('.')[-1])
-        base_size = max(round(calculated_size, decimal_places), min_base_size)
-    
-    logger.info(f"Calculated base size: {base_size} (min: {min_base_size})")
+        base_size = est
+    if base_size < min_base_size:
+        # Snap up to min size aligned to increment
+        if base_inc > 0:
+            steps = int((min_base_size + 1e-12) / base_inc)
+            base_size = steps * base_inc
+        else:
+            base_size = min_base_size
+    logger.info(f"Calculated base size: {base_size} (min: {min_base_size}, inc: {base_inc})")
     return base_size
 
 def main():
     parser = argparse.ArgumentParser(description='Place a leveraged market or limit order for perpetual futures')
     parser.add_argument('--product', type=str, default='BTC-PERP-INTX',
-                      choices=['BTC-PERP-INTX', 'DOGE-PERP-INTX', 'SOL-PERP-INTX', 'ETH-PERP-INTX', 'XRP-PERP-INTX', "1000SHIB-PERP-INTX", "NEAR-PERP-INTX", "SUI-PERP-INTX"],
-                      help='Trading product (default: BTC-PERP-INTX)')
+                      help='Trading product (e.g., BTC-PERP-INTX, LINK-PERP-INTX, ETH-INTX-PERP)')
     parser.add_argument('--side', type=str, choices=['BUY', 'SELL'],
                       help='Trade direction (BUY/SELL)')
     parser.add_argument('--size', type=float,
@@ -226,6 +430,24 @@ def main():
                       help='Order ID of the filled limit order')
 
     args = parser.parse_args()
+
+    # Normalize product id to BASE-PERP-INTX if user passed INTX-PERP or mixed
+    def _normalize_perp(pid: str) -> str:
+        s = (pid or '').upper().strip()
+        parts = [p for p in s.split('-') if p]
+        if not parts:
+            return s
+        base = parts[0]
+        has_perp = any(p == 'PERP' for p in parts)
+        has_intx = any(p == 'INTX' for p in parts)
+        if has_perp and has_intx:
+            return f"{base}-PERP-INTX"
+        if has_perp and not has_intx:
+            return f"{base}-PERP-INTX"
+        if has_intx and not has_perp:
+            return f"{base}-PERP-INTX"
+        return f"{base}-PERP-INTX"
+    args.product = _normalize_perp(args.product)
 
     try:
         # Initialize CoinbaseService
