@@ -30,7 +30,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
@@ -113,6 +113,24 @@ def parse_finder_text(text: str) -> ParsedFinder:
     return ParsedFinder(symbol=symbol, side=side, entry=entry, stop=stop, take_profit=take_profit, pos_size_pct=pos_pct)
 
 
+def split_blocks(text: str) -> List[str]:
+    """Split a multi-asset finder text into blocks starting with "<n>. SYMBOL" lines.
+
+    Falls back to a single block when no numbering is detected.
+    """
+    # Normalize line endings
+    t = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Find all header indices
+    heads = [m.start() for m in re.finditer(r"(?m)^\s*\d+\.\s+\S+\s*\(", t)]
+    if not heads:
+        return [text]
+    heads.append(len(t))
+    blocks = []
+    for i in range(len(heads) - 1):
+        blocks.append(t[heads[i]:heads[i+1]].strip())
+    return blocks
+
+
 def setup_cb() -> CoinbaseService:
     api_key = API_KEY_PERPS
     api_secret = API_SECRET_PERPS
@@ -138,83 +156,107 @@ def main() -> None:
             text = f.read()
     else:
         text = sys.stdin.read()
-    parsed = parse_finder_text(text)
+    blocks = split_blocks(text)
+    parsed_list: List[ParsedFinder] = []
+    for b in blocks:
+        try:
+            parsed_list.append(parse_finder_text(b))
+        except Exception as e:
+            print(f"Skipping block due to parse error: {e}")
+            continue
 
-    # Build product id
-    display_pid = normalize_perp(parsed.symbol, prefer=args.product_form)
-    api_pid = normalize_perp(parsed.symbol, prefer="PERP-INTX")
+    commands: List[List[str]] = []
+    summaries: List[str] = []
+    api_pids: List[str] = []
+    side_perps: List[str] = []
+    tps: List[float] = []
+    sls: List[float] = []
+    limits: List[Optional[float]] = []
+    sizes_usd: List[float] = []
 
-    side_perp = "SELL" if parsed.side == "SHORT" else "BUY"
+    for parsed in parsed_list:
+        display_pid = normalize_perp(parsed.symbol, prefer=args.product_form)
+        api_pid = normalize_perp(parsed.symbol, prefer="PERP-INTX")
+        side_perp = "SELL" if parsed.side == "SHORT" else "BUY"
+        size_usd = (args.portfolio_usd * (parsed.pos_size_pct / 100.0)) if parsed.pos_size_pct > 0 else (args.portfolio_usd * 0.05)
+        tick = get_price_precision(api_pid)
+        tp = round_to_precision(parsed.take_profit, tick)
+        sl = round_to_precision(parsed.stop, tick)
+        limit_price = round_to_precision(parsed.entry, tick) if args.order == "limit" else None
 
-    # Compute USD size
-    size_usd = (args.portfolio_usd * (parsed.pos_size_pct / 100.0)) if parsed.pos_size_pct > 0 else (args.portfolio_usd * 0.05)
+        cmd = [
+            "python", "trade_btc_perp.py",
+            "--product", api_pid,
+            "--side", side_perp,
+            "--size", f"{size_usd:.2f}",
+            "--leverage", f"{args.leverage}",
+            "--tp", f"{tp}",
+            "--sl", f"{sl}",
+        ]
+        if limit_price is not None:
+            cmd += ["--limit", f"{limit_price}"]
 
-    # Tick rounding for targets and optional limit
-    tick = get_price_precision(api_pid)
-    tp = round_to_precision(parsed.take_profit, tick)
-    sl = round_to_precision(parsed.stop, tick)
-    limit_price = round_to_precision(parsed.entry, tick) if args.order == "limit" else None
+        commands.append(cmd)
+        api_pids.append(api_pid)
+        side_perps.append(side_perp)
+        tps.append(tp)
+        sls.append(sl)
+        limits.append(limit_price)
+        sizes_usd.append(size_usd)
+        summaries.append(
+            f"Symbol: {parsed.symbol} Side: {parsed.side}  Entry: ${parsed.entry:.6f}  TP: ${tp:.6f}  SL: ${sl:.6f}\n"
+            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}"
+        )
 
-    # Dry-run summary and suggested command
-    cmd = [
-        "python", "trade_btc_perp.py",
-        "--product", api_pid,
-        "--side", side_perp,
-        "--size", f"{size_usd:.2f}",
-        "--leverage", f"{args.leverage}",
-        "--tp", f"{tp}",
-        "--sl", f"{sl}",
-    ]
-    if limit_price is not None:
-        cmd += ["--limit", f"{limit_price}"]
+    print("\n=== Parsed Finder Signals ===")
+    for s in summaries:
+        print("\n" + s)
 
-    print("\n=== Parsed Finder Signal ===")
-    print(f"Symbol: {parsed.symbol}  Side: {parsed.side}")
-    print(f"Entry: ${parsed.entry:.6f}  TP: ${tp:.6f}  SL: ${sl:.6f}")
-    print(f"Position Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}")
-    print(f"Product: {display_pid} (API uses {api_pid})  Order: {args.order.upper()}")
-
-    print("\nDry‑run command:")
-    print(" ".join(cmd))
+    print("\nCommands:")
+    for cmd in commands:
+        print(" ".join(cmd))
 
     if not args.execute:
         return
 
-    # Execute via CoinbaseService similar to trade_btc_perp flow
+    # Execute all sequentially
     cb = setup_cb()
+    for i, api_pid in enumerate(api_pids):
+        try:
+            # Current price for base size calc
+            trades = cb.client.get_market_trades(product_id=api_pid, limit=1)
+            current_price = float(trades['trades'][0]['price'])
+            base_size = calculate_base_size(api_pid, sizes_usd[i], current_price)
 
-    # Derive current price for base size calc
-    trades = cb.client.get_market_trades(product_id=api_pid, limit=1)
-    current_price = float(trades['trades'][0]['price'])
-    base_size = calculate_base_size(api_pid, size_usd, current_price)
-
-    if limit_price is not None:
-        res = cb.place_limit_order_with_targets(
-            product_id=api_pid,
-            side=side_perp,
-            size=base_size,
-            entry_price=limit_price,
-            take_profit_price=tp,
-            stop_loss_price=sl,
-            leverage=str(args.leverage),
-        )
-        if isinstance(res, dict) and "error" in res:
-            print(f"\nError placing limit order: {res['error']}")
-            return
-        print("\nLimit order submitted. Monitor/follow-up bracket flow as needed.")
-    else:
-        res = cb.place_market_order_with_targets(
-            product_id=api_pid,
-            side=side_perp,
-            size=base_size,
-            take_profit_price=tp,
-            stop_loss_price=sl,
-            leverage=str(args.leverage),
-        )
-        if isinstance(res, dict) and "error" in res:
-            print(f"\nError placing market order: {res['error']}")
-            return
-        print("\nMarket order submitted with brackets.")
+            if limits[i] is not None:
+                res = cb.place_limit_order_with_targets(
+                    product_id=api_pid,
+                    side=side_perps[i],
+                    size=base_size,
+                    entry_price=limits[i],
+                    take_profit_price=tps[i],
+                    stop_loss_price=sls[i],
+                    leverage=str(args.leverage),
+                )
+                if isinstance(res, dict) and "error" in res:
+                    print(f"\n[{api_pid}] Error placing limit order: {res['error']}")
+                else:
+                    print(f"\n[{api_pid}] Limit order submitted.")
+            else:
+                res = cb.place_market_order_with_targets(
+                    product_id=api_pid,
+                    side=side_perps[i],
+                    size=base_size,
+                    take_profit_price=tps[i],
+                    stop_loss_price=sls[i],
+                    leverage=str(args.leverage),
+                )
+                if isinstance(res, dict) and "error" in res:
+                    print(f"\n[{api_pid}] Error placing market order: {res['error']}")
+                else:
+                    print(f"\n[{api_pid}] Market order submitted.")
+        except Exception as e:
+            print(f"\n[{api_pid}] Execution error: {e}")
 
 
 if __name__ == "__main__":
@@ -222,4 +264,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         pass
-

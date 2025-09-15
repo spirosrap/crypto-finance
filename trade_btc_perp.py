@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Optional, Dict, Tuple
 import requests
+from decimal import Decimal, ROUND_HALF_UP
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
 import argparse
@@ -65,31 +66,40 @@ def _fetch_increment_auth(product_id: str) -> Optional[float]:
         if not (API_KEY_PERPS and API_SECRET_PERPS):
             return None
         cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
-        # Auth products list
+        # Prefer direct get_product for perps that may not appear in list
+        try:
+            prod = cb.client.get_product(product_id=product_id)
+            for key in ("price_increment", "display_price_increment", "quote_increment"):
+                v = _coerce_float(prod.get(key)) if isinstance(prod, dict) else _coerce_float(getattr(prod, key, None))
+                if v:
+                    return v
+        except Exception:
+            pass
+
+        # Fallback to products list
         try:
             from coinbase.rest import products as cb_products  # type: ignore
             auth = cb_products.get_products(cb.client)
             prods = auth.get("products", []) if isinstance(auth, dict) else getattr(auth, "products", []) or []
-        except Exception:
-            prods = []
-        for p in prods:
-            try:
-                pid = p.get("product_id") if isinstance(p, dict) else getattr(p, "product_id", "")
-                if str(pid or "").upper() != product_id.upper():
-                    continue
-                # check keys on dict or attribute objects
-                def _pget(obj, key: str):
-                    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
-                for key in ("price_increment", "display_price_increment", "quote_increment"):
-                    v = _coerce_float(_pget(p, key))
+            for p in prods:
+                try:
+                    pid = p.get("product_id") if isinstance(p, dict) else getattr(p, "product_id", "")
+                    if str(pid or "").upper() != product_id.upper():
+                        continue
+                    def _pget(obj, key: str):
+                        return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+                    for key in ("price_increment", "display_price_increment", "quote_increment"):
+                        v = _coerce_float(_pget(p, key))
+                        if v:
+                            return v
+                    tr = _pget(p, "trading_rules") or {}
+                    v = _coerce_float(tr.get("price_increment") if isinstance(tr, dict) else None)
                     if v:
                         return v
-                tr = _pget(p, "trading_rules") or {}
-                v = _coerce_float(tr.get("price_increment") if isinstance(tr, dict) else None)
-                if v:
-                    return v
-            except Exception:
-                continue
+                except Exception:
+                    continue
+        except Exception:
+            pass
         return None
     except Exception:
         return None
@@ -141,6 +151,31 @@ def get_price_precision(product_id: str) -> float:
     return 0.01
 
 
+def _decimals_from_increment(inc: float) -> int:
+    """Infer decimal places from a price increment, robust to scientific notation."""
+    if inc >= 1:
+        return 0
+    # Format to 12 decimals, trim trailing zeros, then count
+    s = f"{inc:.12f}".rstrip('0')
+    if '.' in s:
+        return max(0, len(s.split('.')[1]))
+    return 0
+
+
+def format_price_for_product(product_id: str, price: float) -> str:
+    """Return a string price formatted to the product's tick size.
+
+    Ensures we pass Coinbase exactly the allowed number of decimals
+    to avoid PREVIEW_INVALID_PRICE_PRECISION.
+    """
+    inc = get_price_precision(product_id)
+    decimals = _decimals_from_increment(inc)
+    quant = Decimal(1).scaleb(-decimals)  # 1e-<decimals>
+    qprice = Decimal(str(price)).quantize(quant, rounding=ROUND_HALF_UP)
+    # Ensure fixed number of decimals
+    return f"{qprice:.{decimals}f}"
+
+
 def _fetch_base_constraints_public(product_id: str) -> Optional[Tuple[float, float]]:
     try:
         url = "https://api.coinbase.com/api/v3/brokerage/products"
@@ -175,27 +210,42 @@ def _fetch_base_constraints_auth(product_id: str) -> Optional[Tuple[float, float
         if not (API_KEY_PERPS and API_SECRET_PERPS):
             return None
         cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
-        from coinbase.rest import products as cb_products  # type: ignore
-        auth = cb_products.get_products(cb.client)
-        prods = auth.get("products", []) if isinstance(auth, dict) else getattr(auth, "products", []) or []
-        for p in prods:
-            pid = p.get("product_id") if isinstance(p, dict) else getattr(p, "product_id", "")
-            if str(pid or "").upper() != product_id.upper():
-                continue
-            def _pget(obj, key: str):
-                return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
-            vmin = None
-            for kmin in ("base_min_size", "min_size", "base_min_increment"):
-                vmin = _coerce_float(_pget(p, kmin))
-                if vmin:
-                    break
-            vinc = None
-            for kinc in ("base_increment", "base_min_increment"):
-                vinc = _coerce_float(_pget(p, kinc))
-                if vinc:
-                    break
+        # Prefer direct get_product for perps
+        try:
+            prod = cb.client.get_product(product_id=product_id)
+            # Direct keys present in get_product
+            vmin = _coerce_float(prod.get("base_min_size") if isinstance(prod, dict) else getattr(prod, "base_min_size", None))
+            vinc = _coerce_float(prod.get("base_increment") if isinstance(prod, dict) else getattr(prod, "base_increment", None))
             if vmin and vinc:
                 return float(vmin), float(vinc)
+        except Exception:
+            pass
+
+        # Fallback: list products
+        try:
+            from coinbase.rest import products as cb_products  # type: ignore
+            auth = cb_products.get_products(cb.client)
+            prods = auth.get("products", []) if isinstance(auth, dict) else getattr(auth, "products", []) or []
+            for p in prods:
+                pid = p.get("product_id") if isinstance(p, dict) else getattr(p, "product_id", "")
+                if str(pid or "").upper() != product_id.upper():
+                    continue
+                def _pget(obj, key: str):
+                    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+                vmin = None
+                for kmin in ("base_min_size", "min_size", "base_min_increment"):
+                    vmin = _coerce_float(_pget(p, kmin))
+                    if vmin:
+                        break
+                vinc = None
+                for kinc in ("base_increment", "base_min_increment"):
+                    vinc = _coerce_float(_pget(p, kinc))
+                    if vinc:
+                        break
+                if vmin and vinc:
+                    return float(vmin), float(vinc)
+        except Exception:
+            pass
         return None
     except Exception:
         return None
@@ -223,15 +273,21 @@ def get_base_constraints(product_id: str) -> Tuple[float, float]:
         'NEAR-PERP-INTX': (1.0, 1.0),
         'SUI-PERP-INTX': (1.0, 1.0),
         'ATOM-PERP-INTX': (0.1, 0.1),
-    }.get(product_id, (1.0, 0.001))
+    }.get(product_id, (1.0, 1.0))
     _BASE_CONSTRAINTS_CACHE[product_id] = fallback
     return fallback
 
 def round_to_precision(value: float, precision: float) -> float:
-    """Round value to nearest exchange tick size."""
-    if precision <= 0:
+    """Round value to nearest exchange tick size.
+
+    For integers (precision >= 1), use nearest integer. For fractional
+    precisions, round to the nearest multiple to avoid preview rejections.
+    """
+    if precision is None or precision <= 0:
         return value
-    return round(value / precision) * precision
+    # Avoid floating noise
+    steps = round(value / precision)
+    return steps * precision
 
 def setup_coinbase():
     """Initialize CoinbaseService with API credentials."""
@@ -314,7 +370,7 @@ def validate_params(product_id: str, side: str, size_usd: float, leverage: float
         raise ValueError("Position size must be positive")
     
     if not 1 <= leverage <= 100:
-        raise ValueError("Leverage must be between 1 and 20")
+        raise ValueError("Leverage must be between 1 and 100")
     
     if tp_price <= 0:
         raise ValueError("Take profit price must be positive")
@@ -368,18 +424,17 @@ def validate_params(product_id: str, side: str, size_usd: float, leverage: float
                 raise ValueError(f"For SELL limit orders, limit price (${limit_price}) should be above take profit (${tp_price})")
 
 def get_min_base_size(product_id: str) -> float:
-    """Get minimum base size for the given product."""
-    min_sizes = {
-        'BTC-PERP-INTX': 0.0001,  # 0.0001 BTC
-        'ETH-PERP-INTX': 0.001,   # 0.001 ETH
-        'DOGE-PERP-INTX': 100,    # 100 DOGE
-        'SOL-PERP-INTX': 0.1,     # 0.1 SOL
-        'XRP-PERP-INTX': 10,      # 10 XRP
-        '1000SHIB-PERP-INTX': 100, # 100 units of 1000SHIB
-        'NEAR-PERP-INTX': 1,      # 1 NEAR
-        'SUI-PERP-INTX': 1        # 1 SUI
-    }
-    return min_sizes.get(product_id, 0.0001)
+    """Get minimum base size for the given product via API if possible."""
+    # Prefer cached constraints
+    if product_id in _BASE_CONSTRAINTS_CACHE:
+        return _BASE_CONSTRAINTS_CACHE[product_id][0]
+    # Try auth fetch
+    res = _fetch_base_constraints_auth(product_id) or _fetch_base_constraints_public(product_id)
+    if res:
+        _BASE_CONSTRAINTS_CACHE[product_id] = res
+        return res[0]
+    # Conservative default for INTX perps (most use integer contracts)
+    return 1.0
 
 def calculate_base_size(product_id: str, size_usd: float, current_price: float) -> float:
     """Calculate base size respecting min size and base increment.
@@ -390,13 +445,14 @@ def calculate_base_size(product_id: str, size_usd: float, current_price: float) 
     """
     min_base_size, base_inc = get_base_constraints(product_id)
     est = max(size_usd / max(current_price, 1e-9), 0.0)
+    # Quantize to increment (prefer rounding to nearest valid step)
     if base_inc > 0:
         steps = round(est / base_inc)
         base_size = steps * base_inc
     else:
         base_size = est
+    # Ensure meets min size and aligned to increment
     if base_size < min_base_size:
-        # Snap up to min size aligned to increment
         if base_inc > 0:
             steps = int((min_base_size + 1e-12) / base_inc)
             base_size = steps * base_inc
@@ -498,7 +554,15 @@ def main():
         rounded_sl = round_to_precision(args.sl, price_precision)
         rounded_limit = round_to_precision(args.limit, price_precision) if args.limit else None
         if rounded_tp != args.tp or rounded_sl != args.sl or (args.limit and rounded_limit != args.limit):
-            logger.info(f"Rounded prices to tick size {price_precision}: TP {args.tp}→{rounded_tp}, SL {args.sl}→{rounded_sl}" + (f", LIMIT {args.limit}→{rounded_limit}" if args.limit else ""))
+            logger.info(
+                f"Rounded prices to tick size {price_precision}: TP {args.tp}→{rounded_tp}, SL {args.sl}→{rounded_sl}"
+                + (f", LIMIT {args.limit}→{rounded_limit}" if args.limit else "")
+            )
+
+        # Format prices to exactly allowed decimals to avoid precision errors
+        tp_str = format_price_for_product(args.product, rounded_tp)
+        sl_str = format_price_for_product(args.product, rounded_sl)
+        limit_str = format_price_for_product(args.product, rounded_limit) if rounded_limit else None
 
         # Validate parameters (using rounded prices)
         validate_params(args.product, args.side, args.size, args.leverage, rounded_tp, rounded_sl, rounded_limit, cb_service)
@@ -534,8 +598,8 @@ def main():
         print(f"Leverage: {args.leverage}x")
         print(f"Required Margin: ${args.size / args.leverage}")
         print(f"Current Price: ${current_price}")
-        print(f"Take Profit Price: ${rounded_tp}")
-        print(f"Stop Loss Price: ${rounded_sl}")
+        print(f"Take Profit Price: ${tp_str}")
+        print(f"Stop Loss Price: ${sl_str}")
         
         # Calculate and display potential profit/loss in dollars
         if args.side == 'BUY':
@@ -550,7 +614,7 @@ def main():
         print(f"Risk/Reward Ratio: 1:{(potential_profit/potential_loss):.2f}")
         
         if rounded_limit:
-            print(f"Limit Price: ${rounded_limit}")
+            print(f"Limit Price: ${limit_str}")
             # Recalculate potential profit/loss based on limit price
             if args.side == 'BUY':
                 limit_potential_profit = (rounded_tp - rounded_limit) / rounded_limit * args.size
@@ -571,9 +635,9 @@ def main():
                 product_id=args.product,
                 side=args.side,
                 size=size,
-                entry_price=rounded_limit,
-                take_profit_price=rounded_tp,
-                stop_loss_price=rounded_sl,
+                entry_price=limit_str,
+                take_profit_price=tp_str,
+                stop_loss_price=sl_str,
                 leverage=str(args.leverage)
             )
             
@@ -600,8 +664,8 @@ def main():
                 product_id=args.product,
                 order_id=result['order_id'],
                 size=size,
-                take_profit_price=rounded_tp,
-                stop_loss_price=rounded_sl,
+                take_profit_price=tp_str,
+                stop_loss_price=sl_str,
                 leverage=str(args.leverage)
             )
             
@@ -629,7 +693,11 @@ def main():
             
             if "error" in result:
                 print(f"\nError placing order: {result['error']}")
-                if isinstance(result['error'], dict):
+                # Surface any nested bracket preview/placement errors
+                bracket_err = result.get('bracket_error')
+                if isinstance(bracket_err, dict):
+                    print(f"Bracket error details: {bracket_err}")
+                elif isinstance(result['error'], dict):
                     print(f"Error details: {result['error'].get('message', 'No message')}")
                     print(f"Preview failure reason: {result['error'].get('preview_failure_reason', 'Unknown')}")
             else:

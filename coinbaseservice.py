@@ -20,6 +20,53 @@ class CoinbaseService:
         self.historical_data = HistoricalData(self.client)  # Initialize HistoricalData
         self.logger = logging.getLogger(__name__)
 
+    # --- Internal helpers for precision/formatting ---
+    def _get_product_increments(self, product_id: str) -> Tuple[float, float, float]:
+        """Return (price_increment, quote_increment, base_increment) as floats.
+
+        Falls back to conservative defaults if unavailable.
+        """
+        try:
+            p = self.client.get_product(product_id=product_id)
+            def _coerce(x, default):
+                try:
+                    return float(x)
+                except Exception:
+                    return default
+            price_inc = _coerce(p.get("price_increment") if isinstance(p, dict) else getattr(p, "price_increment", None), 0.01)
+            quote_inc = _coerce(p.get("quote_increment") if isinstance(p, dict) else getattr(p, "quote_increment", None), price_inc)
+            base_inc = _coerce(p.get("base_increment") if isinstance(p, dict) else getattr(p, "base_increment", None), 1.0)
+            return price_inc, quote_inc, base_inc
+        except Exception:
+            # Reasonable defaults for INTX perps
+            return 0.01, 0.01, 1.0
+
+    def _decimals_from_increment(self, inc: float) -> int:
+        if inc >= 1:
+            return 0
+        s = f"{inc:.12f}".rstrip('0')
+        return len(s.split('.')[-1]) if '.' in s else 0
+
+    def _format_price(self, price: str | float, inc: float) -> str:
+        from decimal import Decimal, ROUND_HALF_UP
+        decimals = self._decimals_from_increment(inc)
+        quant = Decimal(1).scaleb(-decimals)
+        q = Decimal(str(price)).quantize(quant, rounding=ROUND_HALF_UP)
+        return f"{q:.{decimals}f}"
+
+    def _format_base_size(self, size: float, base_inc: float) -> str:
+        # Quantize size to increment and avoid trailing .0 when increment is integer
+        if base_inc <= 0:
+            base_inc = 1.0
+        steps = round(size / base_inc)
+        q = steps * base_inc
+        if self._decimals_from_increment(base_inc) == 0:
+            return str(int(round(q)))
+        # Use plain string without scientific notation
+        from decimal import Decimal
+        decs = self._decimals_from_increment(base_inc)
+        return f"{Decimal(str(q)):.{decs}f}"
+
     def get_portfolio_info(self, portfolio_type="DEFAULT"):
         """
         Get portfolio information for either DEFAULT or PERPETUALS portfolio.
@@ -311,7 +358,7 @@ class CoinbaseService:
             return []
 
     def place_market_order_with_targets(self, product_id: str, side: str, size: float, 
-                                      take_profit_price: float, stop_loss_price: float,
+                                      take_profit_price: float | str, stop_loss_price: float | str,
                                       leverage: str = None) -> dict:
         """
         Place a market order followed by a bracket order for take profit and stop loss.
@@ -337,11 +384,15 @@ class CoinbaseService:
             client_order_id = f"market_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
             # Place the initial market order
+            # Use formatted base size for perps
+            price_inc, quote_inc, base_inc = self._get_product_increments(product_id)
+            base_size_str = self._format_base_size(size, base_inc)
+
             market_order = self.client.market_order(
                 client_order_id=client_order_id,
                 product_id=product_id,
                 side=side.upper(),
-                base_size=str(size),
+                base_size=base_size_str,
                 leverage=leverage,
                 margin_type="CROSS" if leverage else None
             )
@@ -409,13 +460,51 @@ class CoinbaseService:
             
             # Place the bracket order
             try:
+                # Format prices precisely per leg
+                tp_limit = self._format_price(take_profit_price, price_inc)
+                sl_stop = self._format_price(stop_loss_price, quote_inc)
+
+                # Optional preview to catch precision failures early
+                try:
+                    if bracket_side == "SELL":
+                        prev = self.client.preview_trigger_bracket_order_gtd_sell(
+                            product_id=product_id,
+                            base_size=base_size_str,
+                            limit_price=tp_limit,
+                            stop_trigger_price=sl_stop,
+                            end_time=end_time,
+                            leverage=leverage,
+                            margin_type="CROSS" if leverage else None
+                        )
+                    else:
+                        prev = self.client.preview_trigger_bracket_order_gtd_buy(
+                            product_id=product_id,
+                            base_size=base_size_str,
+                            limit_price=tp_limit,
+                            stop_trigger_price=sl_stop,
+                            end_time=end_time,
+                            leverage=leverage,
+                            margin_type="CROSS" if leverage else None
+                        )
+                    # If preview returns error list, surface it
+                    if isinstance(prev, dict) and prev.get('errs'):
+                        errs = prev.get('errs')
+                        # Allow close-only preview errors to pass through; block precision errors
+                        fatal = [e for e in errs if 'PRECISION' in e or 'INVALID' in e]
+                        if fatal:
+                            self.logger.error(f"Bracket preview fatal errors: {fatal}")
+                            return {"error": "Bracket preview failed", "bracket_error": prev}
+                except Exception as e:
+                    # Non-fatal; proceed to attempt placement, but log
+                    self.logger.warning(f"Bracket preview call failed: {e}")
+
                 if bracket_side == "SELL":
                     bracket_order = self.client.trigger_bracket_order_gtd_sell(
                         client_order_id=bracket_client_order_id,
                         product_id=product_id,
-                        base_size=str(size),
-                        limit_price=str(take_profit_price),
-                        stop_trigger_price=str(stop_loss_price),
+                        base_size=base_size_str,
+                        limit_price=tp_limit,
+                        stop_trigger_price=sl_stop,
                         end_time=end_time,
                         leverage=leverage,
                         margin_type="CROSS" if leverage else None
@@ -424,9 +513,9 @@ class CoinbaseService:
                     bracket_order = self.client.trigger_bracket_order_gtd_buy(
                         client_order_id=bracket_client_order_id,
                         product_id=product_id,
-                        base_size=str(size),
-                        limit_price=str(take_profit_price),
-                        stop_trigger_price=str(stop_loss_price),
+                        base_size=base_size_str,
+                        limit_price=tp_limit,
+                        stop_trigger_price=sl_stop,
                         end_time=end_time,
                         leverage=leverage,
                         margin_type="CROSS" if leverage else None
@@ -448,8 +537,8 @@ class CoinbaseService:
                     "bracket_order": str(bracket_order),
                     "status": "success",
                     "order_id": order_id,
-                    "tp_price": take_profit_price,
-                    "sl_price": stop_loss_price
+                    "tp_price": tp_limit,
+                    "sl_price": sl_stop
                 }
                 
             except Exception as e:
@@ -464,8 +553,8 @@ class CoinbaseService:
             return {"error": str(e)}
 
     def place_limit_order_with_targets(self, product_id: str, side: str, size: float, 
-                                     entry_price: float, take_profit_price: float, 
-                                     stop_loss_price: float, leverage: str = None) -> dict:
+                                     entry_price: float | str, take_profit_price: float | str, 
+                                     stop_loss_price: float | str, leverage: str = None) -> dict:
         """
         Place a limit order first, then monitor for fill before placing take profit and stop loss orders.
         
@@ -503,12 +592,15 @@ class CoinbaseService:
             client_order_id = f"limit_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
             # Place the initial limit order
+            price_inc, quote_inc, base_inc = self._get_product_increments(product_id)
+            base_size_str = self._format_base_size(size, base_inc)
+            entry_price_str = self._format_price(entry_price, price_inc)
             limit_order = self.client.limit_order_gtc(
                 client_order_id=client_order_id,
                 product_id=product_id,
                 side=side.upper(),
-                base_size=str(size),
-                limit_price=str(entry_price),
+                base_size=base_size_str,
+                limit_price=entry_price_str,
                 leverage=leverage,
                 margin_type="CROSS" if leverage else None
             )
@@ -547,13 +639,17 @@ class CoinbaseService:
                 return {"error": f"Order not found on exchange: {e}", "limit_order": str(limit_order)}
             
             # Return the limit order details immediately
+            # Prepare normalized TP/SL strings for downstream
+            tp_limit = self._format_price(take_profit_price, price_inc)
+            sl_stop = self._format_price(stop_loss_price, quote_inc)
+
             return {
                 "limit_order": str(limit_order),
                 "status": "pending_fill",
                 "order_id": order_id,
-                "entry_price": entry_price,
-                "tp_price": take_profit_price,
-                "sl_price": stop_loss_price,
+                "entry_price": entry_price_str,
+                "tp_price": tp_limit,
+                "sl_price": sl_stop,
                 "message": "Limit order placed. Once filled, you can place take profit and stop loss orders using place_bracket_after_fill method."
             }
                 
@@ -562,7 +658,7 @@ class CoinbaseService:
             return {"error": str(e)}
 
     def place_bracket_after_fill(self, product_id: str, order_id: str, size: float,
-                               take_profit_price: float, stop_loss_price: float,
+                               take_profit_price: float | str, stop_loss_price: float | str,
                                leverage: str = None) -> dict:
         """
         Place bracket orders (take profit and stop loss) after a limit order has been filled.
@@ -611,13 +707,49 @@ class CoinbaseService:
             
             # Place the bracket order
             try:
+                price_inc, quote_inc, base_inc = self._get_product_increments(product_id)
+                base_size_str = self._format_base_size(size, base_inc)
+                tp_limit = self._format_price(take_profit_price, price_inc)
+                sl_stop = self._format_price(stop_loss_price, quote_inc)
+
+                # Optional preview to catch precision issues
+                try:
+                    if bracket_side == "SELL":
+                        prev = self.client.preview_trigger_bracket_order_gtd_sell(
+                            product_id=product_id,
+                            base_size=base_size_str,
+                            limit_price=tp_limit,
+                            stop_trigger_price=sl_stop,
+                            end_time=end_time,
+                            leverage=leverage,
+                            margin_type="CROSS" if leverage else None
+                        )
+                    else:
+                        prev = self.client.preview_trigger_bracket_order_gtd_buy(
+                            product_id=product_id,
+                            base_size=base_size_str,
+                            limit_price=tp_limit,
+                            stop_trigger_price=sl_stop,
+                            end_time=end_time,
+                            leverage=leverage,
+                            margin_type="CROSS" if leverage else None
+                        )
+                    if isinstance(prev, dict) and prev.get('errs'):
+                        errs = prev.get('errs')
+                        fatal = [e for e in errs if 'PRECISION' in e or 'INVALID' in e]
+                        if fatal:
+                            self.logger.error(f"Bracket preview fatal errors: {fatal}")
+                            return {"error": "Bracket preview failed", "bracket_error": prev}
+                except Exception as e:
+                    self.logger.warning(f"Bracket preview call failed: {e}")
+
                 if bracket_side == "SELL":
                     bracket_order = self.client.trigger_bracket_order_gtd_sell(
                         client_order_id=bracket_client_order_id,
                         product_id=product_id,
-                        base_size=str(size),
-                        limit_price=str(take_profit_price),
-                        stop_trigger_price=str(stop_loss_price),
+                        base_size=base_size_str,
+                        limit_price=tp_limit,
+                        stop_trigger_price=sl_stop,
                         end_time=end_time,
                         leverage=leverage,
                         margin_type="CROSS" if leverage else None
@@ -626,9 +758,9 @@ class CoinbaseService:
                     bracket_order = self.client.trigger_bracket_order_gtd_buy(
                         client_order_id=bracket_client_order_id,
                         product_id=product_id,
-                        base_size=str(size),
-                        limit_price=str(take_profit_price),
-                        stop_trigger_price=str(stop_loss_price),
+                        base_size=base_size_str,
+                        limit_price=tp_limit,
+                        stop_trigger_price=sl_stop,
                         end_time=end_time,
                         leverage=leverage,
                         margin_type="CROSS" if leverage else None
@@ -647,8 +779,8 @@ class CoinbaseService:
                 return {
                     "bracket_order": str(bracket_order),
                     "status": "success",
-                    "tp_price": take_profit_price,
-                    "sl_price": stop_loss_price
+                    "tp_price": tp_limit,
+                    "sl_price": sl_stop
                 }
                 
             except Exception as e:
