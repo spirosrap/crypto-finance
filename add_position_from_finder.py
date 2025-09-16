@@ -60,6 +60,20 @@ except Exception:
         return max(size_usd / max(current_price, 1e-9), 0.0)
 
 
+def _decimals_for_tick(tick: float) -> int:
+    """Return the number of decimal places implied by a tick size.
+
+    Examples: 1.0 -> 0, 0.1 -> 1, 0.01 -> 2, 0.0001 -> 4
+    """
+    if tick <= 0:
+        return 0
+    # Convert to string safely and count fractional digits after trimming zeros
+    s = f"{tick:.10f}".rstrip("0").rstrip(".")
+    if "." in s:
+        return len(s.split(".")[1])
+    return 0
+
+
 @dataclass
 class ParsedFinder:
     symbol: str
@@ -184,17 +198,23 @@ def main() -> None:
         sl = round_to_precision(parsed.stop, tick)
         limit_price = round_to_precision(parsed.entry, tick) if args.order == "limit" else None
 
+        # Format numbers according to tick precision to avoid float noise
+        decimals = _decimals_for_tick(tick)
+        tp_str = f"{tp:.{decimals}f}"
+        sl_str = f"{sl:.{decimals}f}"
+        limit_str = f"{limit_price:.{decimals}f}" if limit_price is not None else None
+
         cmd = [
             "python", "trade_btc_perp.py",
             "--product", api_pid,
             "--side", side_perp,
             "--size", f"{size_usd:.2f}",
             "--leverage", f"{args.leverage}",
-            "--tp", f"{tp}",
-            "--sl", f"{sl}",
+            "--tp", tp_str,
+            "--sl", sl_str,
         ]
-        if limit_price is not None:
-            cmd += ["--limit", f"{limit_price}"]
+        if limit_str is not None:
+            cmd += ["--limit", limit_str]
 
         commands.append(cmd)
         api_pids.append(api_pid)
@@ -203,8 +223,9 @@ def main() -> None:
         sls.append(sl)
         limits.append(limit_price)
         sizes_usd.append(size_usd)
+        entry_disp = f"{parsed.entry:.{decimals}f}"
         summaries.append(
-            f"Symbol: {parsed.symbol} Side: {parsed.side}  Entry: ${parsed.entry:.6f}  TP: ${tp:.6f}  SL: ${sl:.6f}\n"
+            f"Symbol: {parsed.symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
             f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}"
         )
 
