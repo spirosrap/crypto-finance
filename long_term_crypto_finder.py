@@ -2992,18 +2992,58 @@ class LongTermCryptoFinder:
         # Parallelize analysis to speed up runs, respecting API throttles via internal semaphores
         coins_to_process = crypto_list[:limit]
         pool_workers = max(1, min(self.max_workers, len(coins_to_process)))
+        total_coins = len(coins_to_process)
+        completed_count = 0
+        error_count = 0
+        failed_symbols = []
+        
         if pool_workers == 1:
-            # Keep ordering deterministic in single-thread path
-            for coin in coins_to_process:
-                analyzed_candidates.extend(_analyze_one(coin))
+            # Keep ordering deterministic in single-thread path with progress reporting
+            logger.info(f"Analyzing {total_coins} cryptocurrencies (single-threaded)")
+            for i, coin in enumerate(coins_to_process, 1):
+                try:
+                    result = _analyze_one(coin)
+                    analyzed_candidates.extend(result)
+                    completed_count += 1
+                    if i % 5 == 0 or i == total_coins:  # Report every 5 coins or at end
+                        progress_pct = (i / total_coins) * 100
+                        logger.info(f"Progress: {i}/{total_coins} ({progress_pct:.1f}%) - {len(analyzed_candidates)} candidates found")
+                except Exception as e:
+                    error_count += 1
+                    symbol = coin.get('symbol', 'UNKNOWN')
+                    failed_symbols.append(symbol)
+                    logger.error(f"Failed to analyze {symbol}: {e}")
         else:
+            logger.info(f"Analyzing {total_coins} cryptocurrencies using {pool_workers} workers")
             with ThreadPoolExecutor(max_workers=pool_workers) as ex:
-                futures = [ex.submit(_analyze_one, coin) for coin in coins_to_process]
-                for fut in as_completed(futures):
+                # Submit all futures with symbol mapping for better error reporting
+                future_to_symbol = {ex.submit(_analyze_one, coin): coin.get('symbol', 'UNKNOWN') for coin in coins_to_process}
+                
+                for fut in as_completed(future_to_symbol):
+                    symbol = future_to_symbol[fut]
                     try:
-                        analyzed_candidates.extend(fut.result() or [])
+                        result = fut.result() or []
+                        analyzed_candidates.extend(result)
+                        completed_count += 1
+                        
+                        # Report progress every 5 completions or at end
+                        if completed_count % 5 == 0 or completed_count == total_coins:
+                            progress_pct = (completed_count / total_coins) * 100
+                            logger.info(f"Progress: {completed_count}/{total_coins} ({progress_pct:.1f}%) - {len(analyzed_candidates)} candidates found")
+                            
                     except Exception as e:
-                        logger.error(f"Worker error during analysis: {e}")
+                        error_count += 1
+                        failed_symbols.append(symbol)
+                        logger.error(f"Worker error analyzing {symbol}: {e}")
+        
+        # Summary of analysis results
+        if error_count > 0:
+            logger.warning(f"Analysis completed with {error_count} errors. Failed symbols: {', '.join(failed_symbols[:10])}" + 
+                          (f" and {len(failed_symbols) - 10} more..." if len(failed_symbols) > 10 else ""))
+        else:
+            logger.info(f"Analysis completed successfully for all {completed_count} cryptocurrencies")
+        
+        logger.info(f"Found {len(analyzed_candidates)} total candidates (long/short positions) for ranking")
 
         # Cross-sectional ranks and continuous risk re-scaling
         if analyzed_candidates:

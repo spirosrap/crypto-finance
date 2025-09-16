@@ -70,19 +70,80 @@ python long_term_crypto_finder.py --output json
 | `--limit` | 50 | Number of top cryptocurrencies to analyze |
 | `--min-market-cap` | 100000000 | Minimum market cap in USD ($100M) |
 | `--max-results` | 20 | Maximum number of results to display |
-| `--output` | console | Output format: 'console' or 'json' |
+| `--output` | console | Output format: `console` or `json` |
 | `--side` | both | Evaluate `long`, `short`, or `both` |
 | `--unique-by-symbol` | false | Keep only the best side per symbol |
 | `--min-score` | 0.0 | Minimum overall score to include |
-| `--symbols` | - | Comma-separated symbols (e.g., BTC,ETH,SOL) |
+| `--symbols` | - | Comma-separated symbols (e.g., `BTC,ETH,SOL`) |
 | `--top-per-side` | - | Cap results per side before final sort |
-| `--save` | - | Save results to path (.json or .csv) |
-| `--offline` | false | Avoid external HTTP where possible |
-| `--max-workers` | env | Override parallel workers |
+| `--save` | - | Save results to path (`.json` or `.csv`) |
+| `--offline` | false | Avoid external HTTP where possible (use cache) |
+| `--max-workers` | env | Override parallel workers; defaults from env or CPU count |
+| `--quotes` | env | Preferred quote currencies, e.g., `USDC,USD,USDT` |
+| `--risk-free-rate` | env | Annual risk-free rate (e.g., `0.03` for 3%) |
+| `--analysis-days` | env | Lookback window for technical/risk metrics (e.g., `365`) |
 
 ### Environment Variables
-- `CRYPTO_ANALYSIS_DAYS`: Lookback window for historical analysis (default 365)
-- `CRYPTO_MAX_RESULTS`, `CRYPTO_MAX_WORKERS`, `CRYPTO_CACHE_TTL`, `CRYPTO_REQUEST_DELAY`, etc. — see `CryptoFinderConfig.from_env()` for the full set.
+- `CRYPTO_MAX_RESULTS`: Default for `--max-results` (default `20`)
+- `CRYPTO_MAX_WORKERS`: Default worker threads for parallelism (default `4`)
+- `CRYPTO_REQUEST_DELAY`: Global throttle between outbound requests in seconds (default `0.5`)
+- `CRYPTO_CACHE_TTL`: Seconds to retain HTTP cache (default `300`)
+- `CRYPTO_RISK_FREE_RATE`: Annual risk-free rate used in Sharpe/Sortino (default `0.03`)
+- `CRYPTO_ANALYSIS_DAYS`: Lookback window for historical analysis (default `365`)
+- `CRYPTO_RSI_PERIOD`: RSI length (default `14`)
+- `CRYPTO_ATR_PERIOD`: ATR length (default `14`)
+- `CRYPTO_CB_CONCURRENCY`: Max in-flight Coinbase requests (default `3`)
+- `CRYPTO_MIN_MARKET_CAP`: Default filter for market cap (default `$100,000,000`)
+
+See `CryptoFinderConfig.from_env()` for the authoritative list and defaults.
+
+## Quick Start
+
+```bash
+# Install deps
+pip install -r requirements.txt
+
+# Run with sensible defaults
+python long_term_crypto_finder.py --limit 50 --max-results 20
+
+# Save JSON to file
+python long_term_crypto_finder.py --limit 100 --max-results 20 --output json --save finder.json
+```
+
+## Performance & Speed Tips
+
+For larger scans (e.g., `--limit 400`), tune concurrency and caching:
+
+```bash
+# Faster defaults for a single run (tune based on your network and API limits)
+export CRYPTO_MAX_WORKERS=12
+export CRYPTO_REQUEST_DELAY=0.05
+export CRYPTO_CB_CONCURRENCY=8
+export CRYPTO_CACHE_TTL=3600
+
+python long_term_crypto_finder.py --limit 400 --max-results 20 --max-workers 12 --analysis-days 90
+```
+
+- Prefer `--max-workers` between 8–16 on modern CPUs; lower if you hit 429s.
+- Reduce `CRYPTO_REQUEST_DELAY` gradually; increase it if you see rate limits.
+- Reduce `--analysis-days` (e.g., 365 → 90) to cut compute for technical metrics.
+
+### Caching and Offline Mode
+
+The tool caches both HTTP responses and candles.
+
+- HTTP cache: `cache/*.pkl`, TTL controlled by `CRYPTO_CACHE_TTL`.
+- Candles cache: `candle_data/*.json`, managed by `historicaldata.py`.
+
+Warm the cache, then run in offline mode for maximum speed:
+
+```bash
+# First run to populate cache
+python long_term_crypto_finder.py --limit 120 --max-results 20
+
+# Subsequent runs use cached data where possible
+python long_term_crypto_finder.py --limit 400 --max-results 20 --offline
+```
 
 ## Output Explanation
 
@@ -231,3 +292,75 @@ This project is part of the Crypto Finance Toolkit.
   - `CRYPTO_FINDER_LOG_TO_CONSOLE` (default `1`): set to `0` to disable console logs.
   - `CRYPTO_FINDER_LOG_RETENTION` (default `14`): number of daily backups to keep.
   - `CRYPTO_FINDER_HISTDATA_VERBOSE` (default `0`): set to `1` for verbose candle cache/fetch logs.
+
+## JSON Output Schema
+
+When `--output json` is used (and optionally `--save <path>.json`), each result includes:
+
+```json
+{
+  "symbol": "BTC",
+  "name": "Bitcoin",
+  "position_side": "LONG",
+  "current_price": 45123.45,
+  "market_cap": 890123456789,
+  "market_cap_rank": 1,
+  "volume_24h": 23456789012.0,
+  "price_change_24h": 2.34,
+  "price_change_7d": -1.23,
+  "price_change_30d": 15.67,
+  "ath_price": 69000.0,
+  "ath_date": "2021-11-10",
+  "atl_price": 67.81,
+  "atl_date": "2013-07-05",
+  "volatility_30d": 0.234,
+  "sharpe_ratio": 1.45,
+  "sortino_ratio": 2.12,
+  "max_drawdown": -0.156,
+  "rsi_14": 67.8,
+  "macd_signal": "BULLISH",
+  "bb_position": "NEUTRAL",
+  "trend_strength": 0.23,
+  "momentum_score": 78.5,
+  "fundamental_score": 85.2,
+  "technical_score": 72.1,
+  "risk_score": 32.0,
+  "overall_score": 78.3,
+  "risk_level": "MEDIUM_LOW",
+  "entry_price": 45123.45,
+  "stop_loss_price": 43867.0,
+  "take_profit_price": 50415.0,
+  "risk_reward_ratio": 3.0,
+  "position_size_percentage": 2.0,
+  "data_timestamp_utc": "2025-01-15 14:30:22"
+}
+```
+
+For CSV saves (`--save results.csv`), the columns mirror the JSON keys.
+
+## Examples
+
+```bash
+# Top 10 across both sides from top 30 by market cap
+python long_term_crypto_finder.py --limit 30 --max-results 10
+
+# Filter by symbols and save to CSV
+python long_term_crypto_finder.py --symbols BTC,ETH,SOL,ADA,DOT --max-results 20 --save results.csv
+
+# Only LONG side, require minimum score, restrict per side
+python long_term_crypto_finder.py --side long --min-score 70 --top-per-side 10
+
+# Prefer specific quote currencies
+python long_term_crypto_finder.py --quotes USDC,USD,USDT --limit 100 --max-results 20
+```
+
+## Troubleshooting
+
+- Too slow on large scans:
+  - Increase `--max-workers` and reduce `--analysis-days`.
+  - Raise `CRYPTO_CACHE_TTL` and run once to warm cache, then use `--offline`.
+- HTTP 429 (rate limited):
+  - Lower `CRYPTO_CB_CONCURRENCY` and/or increase `CRYPTO_REQUEST_DELAY`.
+  - Reduce `--limit` or run during off-peak hours.
+- Missing ATH/ATL fields:
+  - CoinGecko may throttle; values will be filled on subsequent runs or omitted gracefully.
