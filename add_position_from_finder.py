@@ -179,6 +179,9 @@ def main() -> None:
             print(f"Skipping block due to parse error: {e}")
             continue
 
+    # Format leverage without unnecessary decimals (e.g., 50.0 -> 50)
+    leverage_str = f"{args.leverage:g}"
+
     commands: List[List[str]] = []
     summaries: List[str] = []
     api_pids: List[str] = []
@@ -209,7 +212,7 @@ def main() -> None:
             "--product", api_pid,
             "--side", side_perp,
             "--size", f"{size_usd:.2f}",
-            "--leverage", f"{args.leverage}",
+            "--leverage", leverage_str,
             "--tp", tp_str,
             "--sl", sl_str,
         ]
@@ -257,7 +260,7 @@ def main() -> None:
                     entry_price=limits[i],
                     take_profit_price=tps[i],
                     stop_loss_price=sls[i],
-                    leverage=str(args.leverage),
+                    leverage=leverage_str,
                 )
                 if isinstance(res, dict) and "error" in res:
                     print(f"\n[{api_pid}] Error placing limit order: {res['error']}")
@@ -270,7 +273,7 @@ def main() -> None:
                     size=base_size,
                     take_profit_price=tps[i],
                     stop_loss_price=sls[i],
-                    leverage=str(args.leverage),
+                    leverage=leverage_str,
                 )
                 if isinstance(res, dict) and "error" in res:
                     print(f"\n[{api_pid}] Error placing market order: {res['error']}")
