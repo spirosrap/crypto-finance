@@ -3372,6 +3372,53 @@ class LongTermCryptoFinder:
         )
         return top_results
 
+    def _macd_short_phrase(self, crypto: CryptoMetrics) -> str:
+        """Create a concise MACD phrase tailored to the trade side."""
+        side = (getattr(crypto, 'position_side', 'LONG') or 'LONG').upper()
+        macd_raw = (getattr(crypto, 'macd_signal', '') or '').strip().upper()
+
+        if not macd_raw:
+            return 'MACD flat'
+
+        if macd_raw == 'BULLISH':
+            return 'bullish MACD support' if side == 'LONG' else 'bullish MACD fade'
+        if macd_raw == 'BEARISH':
+            return 'bearish MACD rebound' if side == 'LONG' else 'bearish MACD momentum'
+        if macd_raw == 'NEUTRAL':
+            return 'MACD neutral'
+
+        return f"{macd_raw.lower()} MACD"
+
+    def _format_short_summary(self, crypto: CryptoMetrics, index: int) -> str:
+        """Render a short single-line summary for quick scanning."""
+        side_lower = (getattr(crypto, 'position_side', 'LONG') or 'LONG').lower()
+
+        score = getattr(crypto, 'overall_score', float('nan'))
+        score_text = f"{score:.2f}" if np.isfinite(score) else "n/a"
+
+        rr = getattr(crypto, 'risk_reward_ratio', float('nan'))
+        rr_text = f"{rr:.1f}× RR" if np.isfinite(rr) else "RR n/a"
+
+        rsi = getattr(crypto, 'rsi_14', float('nan'))
+        rsi_text = f"RSI {rsi:.0f}" if np.isfinite(rsi) else "RSI n/a"
+
+        macd_text = self._macd_short_phrase(crypto)
+
+        risk_level = getattr(crypto, 'risk_level', RiskLevel.MEDIUM)
+        risk_text = f"risk {risk_level.value.replace('_', ' ').lower()}"
+
+        trend = getattr(crypto, 'trend_strength', float('nan'))
+        trend_text = ""
+        if np.isfinite(trend) and abs(trend) >= 0.1:
+            trend_text = f"trend {trend:+.2f}%/d"
+
+        segments = [rr_text, rsi_text, macd_text, risk_text]
+        if trend_text:
+            segments.append(trend_text)
+
+        detail = "; ".join(filter(None, segments))
+        return f"{index}. Summary: {crypto.symbol} {side_lower} – score {score_text}, {detail}."
+
     def print_results(self, results: List[CryptoMetrics]):
         """
         Print formatted analysis results.
@@ -3386,6 +3433,8 @@ class LongTermCryptoFinder:
         print(f"Generated on (UTC): {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}Z")
         print(f"Total opportunities listed: {len(results)}")
         print("="*100)
+
+        short_summaries: List[str] = []
 
         for i, crypto in enumerate(results, 1):
             print(f"\n{i}. {crypto.symbol} ({crypto.name}) — {crypto.position_side}")
@@ -3425,6 +3474,14 @@ class LongTermCryptoFinder:
             print(f"Take Profit: ${crypto.take_profit_price:.6f}")
             print(f"Risk:Reward Ratio: {crypto.risk_reward_ratio:.1f}:1")
             print(f"Recommended Position Size: {crypto.position_size_percentage:.1f}% of portfolio")
+
+            short_summaries.append(self._format_short_summary(crypto, i))
+
+        if short_summaries:
+            print("\nShort-Line Summaries")
+            print("-" * 50)
+            for line in short_summaries:
+                print(line)
 
 def main():
     """Main function to run the crypto opportunity finder."""
