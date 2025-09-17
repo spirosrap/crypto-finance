@@ -67,6 +67,7 @@ class CryptoFinderConfig:
     symbols: Optional[List[str]] = None  # analyze explicit symbols if provided
     top_per_side: Optional[int] = None  # when set, cap results per side
     quotes: Optional[List[str]] = None  # preferred quote currencies, e.g., ["USDC","USD","USDT"]
+    max_risk_level: Optional[str] = None  # highest risk level to include (e.g., "MEDIUM")
     
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -80,6 +81,8 @@ class CryptoFinderConfig:
         quotes_list: Optional[List[str]] = None
         if quotes_env:
             quotes_list = [q.strip().upper() for q in quotes_env.split(',') if q.strip()]
+        max_risk_level_env = os.getenv('CRYPTO_MAX_RISK_LEVEL')
+        max_risk_level = max_risk_level_env.strip() if max_risk_level_env else None
 
         return cls(
             min_market_cap=int(os.getenv('CRYPTO_MIN_MARKET_CAP', '100000000')),
@@ -106,8 +109,9 @@ class CryptoFinderConfig:
             symbols=symbols_list,
             top_per_side=int(os.getenv('CRYPTO_TOP_PER_SIDE')) if os.getenv('CRYPTO_TOP_PER_SIDE') else None
             ,quotes=quotes_list
+            ,max_risk_level=max_risk_level
         )
-    
+
     def to_dict(self) -> Dict:
         """Convert configuration to dictionary."""
         return {
@@ -133,7 +137,8 @@ class CryptoFinderConfig:
             'min_overall_score': self.min_overall_score,
             'top_per_side': self.top_per_side,
             'quotes': self.quotes,
-            'offline': self.offline
+            'offline': self.offline,
+            'max_risk_level': self.max_risk_level.upper() if isinstance(self.max_risk_level, str) else self.max_risk_level
         }
 
 # Configure enhanced logging with file rotation
@@ -399,6 +404,8 @@ class LongTermCryptoFinder:
         self.side = (self.config.side or 'both').lower()
         if self.side not in ('long', 'short', 'both'):
             self.side = 'both'
+
+        self._max_risk_level = self._parse_risk_level(self.config.max_risk_level)
 
         logger.info(f"Long-Term Crypto Finder initialized with Coinbase API")
         logger.info(f"Configuration: {self.config.to_dict()}")
@@ -893,6 +900,55 @@ class LongTermCryptoFinder:
         params['mcap_floor'] = max(100000, self.DEFAULT_MCAP_FLOOR_USD)
         
         return params
+
+    def _parse_risk_level(self, value: Optional[Union[str, RiskLevel]]) -> Optional[RiskLevel]:
+        """Normalize user-supplied risk level sentinel to the RiskLevel enum."""
+        if value is None:
+            return None
+        if isinstance(value, RiskLevel):
+            return value
+        try:
+            candidate = str(value).strip().upper()
+            if candidate in RiskLevel.__members__:
+                return RiskLevel[candidate]
+            for level in RiskLevel:
+                if level.value == candidate:
+                    return level
+        except Exception:
+            pass
+        logger.warning(f"Ignoring unsupported risk level value: {value}")
+        return None
+
+    def _filter_by_max_risk_level(self, candidates: List["CryptoMetrics"]) -> List["CryptoMetrics"]:
+        """Filter candidates whose risk level exceeds the configured maximum."""
+        if not candidates:
+            return candidates
+        max_level = getattr(self, '_max_risk_level', None)
+        if max_level is None:
+            return candidates
+
+        order = {level: idx for idx, level in enumerate(RiskLevel)}
+        max_idx = order.get(max_level, len(order) - 1)
+        filtered: List[CryptoMetrics] = []
+        dropped = 0
+        for candidate in candidates:
+            level_attr = getattr(candidate, 'risk_level', None)
+            if isinstance(level_attr, RiskLevel):
+                level = level_attr
+            else:
+                level = self._parse_risk_level(level_attr)
+            if level is None:
+                level = RiskLevel.VERY_HIGH
+            if order.get(level, len(order)) <= max_idx:
+                filtered.append(candidate)
+            else:
+                dropped += 1
+        if dropped:
+            logger.info(
+                f"Filtered {dropped} candidates exceeding risk level {max_level.name}; "
+                f"{len(filtered)} remain."
+            )
+        return filtered
     def _validate_crypto_data(self, data: Dict) -> bool:
         """Validate cryptocurrency data structure and values."""
         required_fields = ['product_id', 'symbol', 'name', 'current_price']
@@ -3271,6 +3327,8 @@ class LongTermCryptoFinder:
         if min_score > 0:
             analyzed_candidates = [c for c in analyzed_candidates if c and float(c.overall_score) >= min_score]
 
+        analyzed_candidates = self._filter_by_max_risk_level(analyzed_candidates)
+
         # Unique by symbol: keep best side per symbol
         if self.config.unique_by_symbol:
             best_by_symbol: Dict[str, CryptoMetrics] = {}
@@ -3370,37 +3428,58 @@ class LongTermCryptoFinder:
 
 def main():
     """Main function to run the crypto opportunity finder."""
+    env_defaults = CryptoFinderConfig.from_env()
+
+    valid_risk_levels = {level.name for level in RiskLevel}
+
+    def risk_level_type(value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in valid_risk_levels:
+            raise argparse.ArgumentTypeError(
+                f"Invalid risk level '{value}'. Choose from: {', '.join(sorted(valid_risk_levels))}."
+            )
+        return normalized
+
+    default_max_risk: Optional[str] = None
+    if env_defaults.max_risk_level:
+        try:
+            default_max_risk = risk_level_type(str(env_defaults.max_risk_level))
+        except argparse.ArgumentTypeError as exc:
+            logger.warning(f"Ignoring invalid CRYPTO_MAX_RISK_LEVEL value: {exc}")
+
     parser = argparse.ArgumentParser(description='Find the best long-term cryptocurrency opportunities')
     parser.add_argument('--limit', type=int, default=50,
                        help='Number of top cryptocurrencies to analyze (default: 50)')
-    parser.add_argument('--min-market-cap', type=int, default=100000000,
-                       help='Minimum market cap in USD (default: $100M)')
-    parser.add_argument('--max-results', type=int, default=20,
-                       help='Maximum number of results to display (default: 20)')
+    parser.add_argument('--min-market-cap', type=int, default=env_defaults.min_market_cap,
+                       help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})")
+    parser.add_argument('--max-results', type=int, default=env_defaults.max_results,
+                       help=f"Maximum number of results to display (default: {env_defaults.max_results})")
     parser.add_argument('--output', type=str, choices=['console', 'json'], default='console',
                        help='Output format (default: console)')
-    parser.add_argument('--side', type=str, choices=['long', 'short', 'both'], default='both',
-                       help='Which side(s) to evaluate (default: both)')
-    parser.add_argument('--unique-by-symbol', action='store_true',
+    parser.add_argument('--side', type=str, choices=['long', 'short', 'both'], default=env_defaults.side,
+                       help=f"Which side(s) to evaluate (default: {env_defaults.side})")
+    parser.add_argument('--unique-by-symbol', action='store_true', default=env_defaults.unique_by_symbol,
                        help='Keep only the best side per symbol')
-    parser.add_argument('--min-score', type=float, default=0.0,
-                       help='Filter out candidates below this overall score')
+    parser.add_argument('--min-score', type=float, default=env_defaults.min_overall_score,
+                       help=f"Filter out candidates below this overall score (default: {env_defaults.min_overall_score})")
     parser.add_argument('--save', type=str,
                        help='Optional path to save results (json or csv)')
     parser.add_argument('--symbols', type=str,
                        help='Comma-separated list of symbols to analyze (e.g., BTC,ETH,SOL)')
-    parser.add_argument('--top-per-side', type=int,
+    parser.add_argument('--top-per-side', type=int, default=env_defaults.top_per_side,
                        help='Cap results per side before final sorting')
     parser.add_argument('--max-workers', type=int,
                        help='Override worker threads for parallel fetch')
-    parser.add_argument('--offline', action='store_true',
+    parser.add_argument('--offline', action='store_true', default=env_defaults.offline,
                        help='Avoid external HTTP where possible (use cache only)')
     parser.add_argument('--quotes', type=str,
                        help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT')
-    parser.add_argument('--risk-free-rate', type=float,
-                       help='Override annual risk-free rate (e.g., 0.03 for 3%)')
-    parser.add_argument('--analysis-days', type=int,
-                       help='Number of daily bars to pull (e.g., 365)')
+    parser.add_argument('--risk-free-rate', type=float, default=env_defaults.risk_free_rate,
+                       help=f"Override annual risk-free rate (default: {env_defaults.risk_free_rate})")
+    parser.add_argument('--analysis-days', type=int, default=env_defaults.analysis_days,
+                       help=f"Number of daily bars to pull (default: {env_defaults.analysis_days})")
+    parser.add_argument('--max-risk-level', type=risk_level_type, default=default_max_risk,
+                       help='Highest risk level to include (e.g., LOW, MEDIUM, HIGH)')
 
     args = parser.parse_args()
 
@@ -3421,10 +3500,11 @@ def main():
         offline=bool(args.offline),
         symbols=symbols_list,
         top_per_side=args.top_per_side,
-        max_workers=args.max_workers or CryptoFinderConfig.from_env().max_workers,
+        max_workers=args.max_workers if args.max_workers is not None else env_defaults.max_workers,
         quotes=quotes_list,
-        risk_free_rate=args.risk_free_rate if args.risk_free_rate is not None else CryptoFinderConfig.from_env().risk_free_rate,
-        analysis_days=args.analysis_days if args.analysis_days is not None else CryptoFinderConfig.from_env().analysis_days
+        risk_free_rate=args.risk_free_rate if args.risk_free_rate is not None else env_defaults.risk_free_rate,
+        analysis_days=args.analysis_days if args.analysis_days is not None else env_defaults.analysis_days,
+        max_risk_level=args.max_risk_level if args.max_risk_level is not None else env_defaults.max_risk_level
     )
     
     # Initialize the finder

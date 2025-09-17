@@ -9,6 +9,7 @@ A comprehensive Python program that analyzes cryptocurrencies to identify the be
 - **Technical Analysis**: RSI, MACD, Bollinger Bands, trend strength, volatility metrics
 - **Fundamental Analysis**: Market cap, volume analysis, ATH/ATL positioning (ATH/ATL sourced from CoinGecko)
 - **Risk Assessment**: Sharpe ratio, Sortino ratio, maximum drawdown, risk-adjusted returns
+- **Risk Filters**: Optional hard cap on acceptable risk level (e.g., include only `MEDIUM` or lower)
 - **Momentum Analysis**: Recent price performance and trend acceleration
 
 ### 📊 Scoring System
@@ -59,6 +60,9 @@ python long_term_crypto_finder.py --limit 30 --max-results 10
 # Only consider cryptocurrencies with market cap > $500M
 python long_term_crypto_finder.py --min-market-cap 500000000
 
+# Keep results at or below MEDIUM risk level
+python long_term_crypto_finder.py --max-risk-level MEDIUM
+
 # Output results in JSON format (includes position side and trading levels)
 python long_term_crypto_finder.py --output json
 ```
@@ -82,6 +86,7 @@ python long_term_crypto_finder.py --output json
 | `--quotes` | env | Preferred quote currencies, e.g., `USDC,USD,USDT` |
 | `--risk-free-rate` | env | Annual risk-free rate (e.g., `0.03` for 3%) |
 | `--analysis-days` | env | Lookback window for technical/risk metrics (e.g., `365`) |
+| `--max-risk-level` | env | Highest risk level to include (`LOW`, `MEDIUM_LOW`, `MEDIUM`, `MEDIUM_HIGH`, `HIGH`, `VERY_HIGH`) |
 
 ### Environment Variables
 - `CRYPTO_MAX_RESULTS`: Default for `--max-results` (default `20`)
@@ -94,6 +99,7 @@ python long_term_crypto_finder.py --output json
 - `CRYPTO_ATR_PERIOD`: ATR length (default `14`)
 - `CRYPTO_CB_CONCURRENCY`: Max in-flight Coinbase requests (default `3`)
 - `CRYPTO_MIN_MARKET_CAP`: Default filter for market cap (default `$100,000,000`)
+- `CRYPTO_MAX_RISK_LEVEL`: Maximum risk level to include (e.g., `MEDIUM`)
 
 See `CryptoFinderConfig.from_env()` for the authoritative list and defaults.
 
