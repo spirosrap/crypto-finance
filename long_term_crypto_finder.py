@@ -311,6 +311,25 @@ class CryptoMetrics:
     data_timestamp_utc: str = ""
 
 class LongTermCryptoFinder:
+    """Main class for finding long-term crypto opportunities with comprehensive risk analysis."""
+    
+    # Configuration constants for risk calculation
+    DEFAULT_TECH_WEIGHT = 0.45
+    DEFAULT_FUND_WEIGHT = 0.35
+    DEFAULT_MOM_WEIGHT = 0.20
+    DEFAULT_SIGMOID_K = 1.0
+    DEFAULT_RISK_LAMBDA = 1.2
+    DEFAULT_VOL_FLOOR_USD = 50000
+    DEFAULT_MCAP_FLOOR_USD = 1000000
+    
+    # Risk level thresholds
+    RISK_THRESHOLDS = {
+        'LOW': 0.25,
+        'MEDIUM_LOW': 0.40,
+        'MEDIUM': 0.55,
+        'MEDIUM_HIGH': 0.70,
+        'HIGH': 0.85
+    }
     """
     A comprehensive tool for finding long-term cryptocurrency investment opportunities using Coinbase API.
     """
@@ -604,78 +623,276 @@ class LongTermCryptoFinder:
         """Compute cross-sectional ranks and continuous risk haircut in-place for candidates."""
         if not analyzed_candidates:
             return
-        # Rank helpers
-        def _rank01(vals: List[float], higher_is_better: bool = True) -> List[float]:
-            n = len(vals)
-            if n <= 1:
-                return [0.5 for _ in vals]
+        
+        try:
+            # Calculate component rankings
+            r_tech, r_fund, r_mom = self._calculate_component_rankings(analyzed_candidates)
+            
+            # Calculate risk components
+            risk_vol, risk_dd, risk_sh, risk_liq = self._calculate_risk_components(analyzed_candidates)
+            
+            # Combine risks and apply haircut
+            risk_norm = self._normalize_risk_components(risk_vol, risk_dd, risk_sh, risk_liq)
+            haircut = self._calculate_risk_haircut(risk_norm)
+            
+            # Apply final scoring
+            self._apply_final_scoring(analyzed_candidates, r_tech, r_fund, r_mom, haircut, risk_norm)
+            
+        except Exception as e:
+            logger.error(f"Error in risk haircut calculation: {e}")
+            # Fallback: assign default scores
+            self._apply_fallback_scoring(analyzed_candidates)
+
+    def _calculate_component_rankings(self, candidates: List["CryptoMetrics"]) -> Tuple[List[float], List[float], List[float]]:
+        """Calculate normalized rankings for technical, fundamental, and momentum scores."""
+        tech_scores = [self._safe_float(c.technical_score) for c in candidates]
+        fund_scores = [self._safe_float(c.fundamental_score) for c in candidates]
+        mom_scores = [self._safe_float(c.momentum_score) for c in candidates]
+        
+        r_tech = self._rank01(tech_scores, higher_is_better=True)
+        r_fund = self._rank01(fund_scores, higher_is_better=True)
+        r_mom = self._rank01(mom_scores, higher_is_better=True)
+        
+        return r_tech, r_fund, r_mom
+
+    def _rank01(self, vals: List[float], higher_is_better: bool = True) -> List[float]:
+        """Convert values to normalized rankings between 0 and 1."""
+        n = len(vals)
+        if n <= 1:
+            return [0.5] * n
+            
+        try:
             arr = np.array(vals, dtype=float)
             arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            # Sort indices based on higher_is_better flag
             order = np.argsort(-arr if higher_is_better else arr)
             ranks = np.empty(n, dtype=float)
             ranks[order] = np.arange(1, n + 1, dtype=float)
+            
+            # Normalize to [0, 1]
             return list((ranks - 1.0) / max(1.0, n - 1.0))
+            
+        except Exception as e:
+            logger.warning(f"Error in ranking calculation: {e}")
+            return [0.5] * n
 
-        tech = [float(c.technical_score) for c in analyzed_candidates]
-        fund = [float(c.fundamental_score) for c in analyzed_candidates]
-        mom_vals = [float(c.momentum_score) for c in analyzed_candidates]
-        r_tech, r_fund, r_mom = _rank01(tech, True), _rank01(fund, True), _rank01(mom_vals, True)
+    def _calculate_risk_components(self, candidates: List["CryptoMetrics"]) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Calculate individual risk components: volatility, drawdown, sharpe, and liquidity."""
+        # Volatility risk
+        vol_data = np.array([abs(self._safe_float(c.volatility_30d)) for c in candidates], dtype=float)
+        vol_data = np.nan_to_num(vol_data, nan=0.0, posinf=0.0, neginf=0.0)
+        risk_vol = self._calculate_sigmoid_risk(vol_data, invert=False)
+        
+        # Drawdown risk
+        dd_data = np.array([abs(self._safe_float(c.max_drawdown)) for c in candidates], dtype=float)
+        dd_data = np.nan_to_num(dd_data, nan=0.0, posinf=0.0, neginf=0.0)
+        risk_dd = self._calculate_sigmoid_risk(dd_data, invert=False)
+        
+        # Sharpe risk (inverted - lower sharpe = higher risk)
+        sharpe_data = np.array([self._safe_float(c.sharpe_ratio) for c in candidates], dtype=float)
+        sharpe_data = np.nan_to_num(sharpe_data, nan=0.0, posinf=0.0, neginf=0.0)
+        risk_sh = self._calculate_sigmoid_risk(sharpe_data, invert=True)
+        
+        # Liquidity risk
+        risk_liq = self._calculate_liquidity_risk(candidates)
+        
+        return risk_vol, risk_dd, risk_sh, risk_liq
 
-        # Continuous risk via sigmoid(z) of vol, dd, and -sharpe, plus liquidity penalty
-        vol = np.array([float(abs(c.volatility_30d)) for c in analyzed_candidates], dtype=float)
-        dd = np.array([float(abs(c.max_drawdown)) for c in analyzed_candidates], dtype=float)
-        sharpe = np.array([float(c.sharpe_ratio) for c in analyzed_candidates], dtype=float)
-        vol = np.nan_to_num(vol, nan=0.0, posinf=0.0, neginf=0.0)
-        dd = np.nan_to_num(dd, nan=0.0, posinf=0.0, neginf=0.0)
-        sharpe = np.nan_to_num(sharpe, nan=0.0, posinf=0.0, neginf=0.0)
-        vol_mean, vol_std = float(np.nanmean(vol)), float(np.nanstd(vol))
-        dd_mean, dd_std = float(np.nanmean(dd)), float(np.nanstd(dd))
-        sh_mean, sh_std = float(np.nanmean(sharpe)), float(np.nanstd(sharpe))
-        vol_z = (vol - vol_mean) / (vol_std if vol_std > 0 else 1.0)
-        dd_z = (dd - dd_mean) / (dd_std if dd_std > 0 else 1.0)
-        sh_z = (sharpe - sh_mean) / (sh_std if sh_std > 0 else 1.0)
-        k = float(os.getenv('CRYPTO_RISK_SIGMOID_K', '1.0'))
-        sig = lambda x: 1.0 / (1.0 + np.exp(-k * x))
-        risk_vol = sig(vol_z)
-        risk_dd = sig(dd_z)
-        risk_sh = sig(-sh_z)
-        inv_vmc = []
-        vol_floor = float(os.getenv('CRYPTO_LIQ_VOL_FLOOR_USD', '50000'))
-        mc_floor = float(os.getenv('CRYPTO_LIQ_MCAP_FLOOR_USD', '1000000'))
-        for c in analyzed_candidates:
-            mc = float(c.market_cap or 0.0)
-            vol_usd = float(c.volume_24h or 0.0)
-            vmc = (max(vol_usd, vol_floor) / max(mc, mc_floor)) if (mc > 0 or vol_usd > 0) else 0.0
-            inv_vmc.append(1.0 / max(vmc, 1e-9))
-        inv_vmc = np.array(inv_vmc, dtype=float)
-        if inv_vmc.size:
-            inv_vmc = np.nan_to_num(inv_vmc, nan=0.0, posinf=float(np.nanmax(inv_vmc)) if np.any(np.isfinite(inv_vmc)) else 0.0, neginf=0.0)
-            inv_min, inv_max = float(np.nanmin(inv_vmc)), float(np.nanmax(inv_vmc))
-            risk_liq = (inv_vmc - inv_min) / (inv_max - inv_min) if inv_max > inv_min else np.zeros_like(inv_vmc)
-        else:
-            risk_liq = np.zeros_like(inv_vmc)
-        risk_norm = np.clip((risk_vol + risk_dd + risk_sh + risk_liq) / 4.0, 0.0, 1.0)
-        lam = float(os.getenv('CRYPTO_RISK_LAMBDA', '1.2'))
-        haircut = np.exp(-lam * risk_norm)
-
-        # Cross-sectional overall with separate momentum rank
-        new_overall = 100.0 * (0.45 * np.array(r_tech) + 0.35 * np.array(r_fund) + 0.20 * np.array(r_mom)) * haircut
-        for idx, c in enumerate(analyzed_candidates):
-            c.overall_score = float(max(0.0, min(100.0, new_overall[idx])))
-            r = float(np.clip(risk_norm[idx], 0.0, 1.0))
-            c.risk_score = r * 100.0
-            if r < 0.25:
-                c.risk_level = RiskLevel.LOW
-            elif r < 0.40:
-                c.risk_level = RiskLevel.MEDIUM_LOW
-            elif r < 0.55:
-                c.risk_level = RiskLevel.MEDIUM
-            elif r < 0.70:
-                c.risk_level = RiskLevel.MEDIUM_HIGH
-            elif r < 0.85:
-                c.risk_level = RiskLevel.HIGH
+    def _calculate_sigmoid_risk(self, data: np.ndarray, invert: bool = False) -> np.ndarray:
+        """Calculate sigmoid-based risk using z-score normalization."""
+        if data.size == 0:
+            return np.array([])
+            
+        try:
+            # Calculate z-scores
+            mean_val = np.nanmean(data)
+            std_val = np.nanstd(data)
+            
+            if std_val == 0:
+                z_scores = np.zeros_like(data)
             else:
-                c.risk_level = RiskLevel.VERY_HIGH
+                z_scores = (data - mean_val) / std_val
+            
+            # Apply sigmoid with configurable steepness
+            k = float(os.getenv('CRYPTO_RISK_SIGMOID_K', str(self.DEFAULT_SIGMOID_K)))
+            sigmoid_input = -z_scores if invert else z_scores
+            risk = 1.0 / (1.0 + np.exp(-k * sigmoid_input))
+            
+            return np.clip(risk, 0.0, 1.0)
+            
+        except Exception as e:
+            logger.warning(f"Error in sigmoid risk calculation: {e}")
+            return np.zeros_like(data)
+
+    def _calculate_liquidity_risk(self, candidates: List["CryptoMetrics"]) -> np.ndarray:
+        """Calculate liquidity risk based on volume-to-market-cap ratio."""
+        vol_floor = float(os.getenv('CRYPTO_LIQ_VOL_FLOOR_USD', str(self.DEFAULT_VOL_FLOOR_USD)))
+        mc_floor = float(os.getenv('CRYPTO_LIQ_MCAP_FLOOR_USD', str(self.DEFAULT_MCAP_FLOOR_USD)))
+        
+        inv_vmc_values = []
+        for c in candidates:
+            mc = self._safe_float(c.market_cap)
+            vol_usd = self._safe_float(c.volume_24h)
+            
+            if mc > 0 or vol_usd > 0:
+                vmc_ratio = max(vol_usd, vol_floor) / max(mc, mc_floor)
+                inv_vmc = 1.0 / max(vmc_ratio, 1e-9)
+            else:
+                inv_vmc = 0.0
+                
+            inv_vmc_values.append(inv_vmc)
+        
+        if not inv_vmc_values:
+            return np.array([])
+            
+        try:
+            inv_vmc_array = np.array(inv_vmc_values, dtype=float)
+            inv_vmc_array = np.nan_to_num(inv_vmc_array, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            if inv_vmc_array.size == 0:
+                return np.array([])
+            
+            # Handle infinite values more robustly
+            finite_mask = np.isfinite(inv_vmc_array)
+            if not np.any(finite_mask):
+                return np.zeros_like(inv_vmc_array)
+            
+            # Normalize to [0, 1]
+            min_val = np.min(inv_vmc_array[finite_mask])
+            max_val = np.max(inv_vmc_array[finite_mask])
+            
+            if max_val > min_val:
+                risk_liq = (inv_vmc_array - min_val) / (max_val - min_val)
+            else:
+                risk_liq = np.zeros_like(inv_vmc_array)
+                
+            return np.clip(risk_liq, 0.0, 1.0)
+            
+        except Exception as e:
+            logger.warning(f"Error in liquidity risk calculation: {e}")
+            return np.zeros(len(candidates))
+
+    def _normalize_risk_components(self, risk_vol: np.ndarray, risk_dd: np.ndarray, 
+                                 risk_sh: np.ndarray, risk_liq: np.ndarray) -> np.ndarray:
+        """Combine and normalize risk components."""
+        if risk_vol.size == 0:
+            return np.array([])
+            
+        try:
+            # Equal weight combination of risk components
+            combined_risk = (risk_vol + risk_dd + risk_sh + risk_liq) / 4.0
+            return np.clip(combined_risk, 0.0, 1.0)
+            
+        except Exception as e:
+            logger.warning(f"Error in risk normalization: {e}")
+            return np.zeros_like(risk_vol)
+
+    def _calculate_risk_haircut(self, risk_norm: np.ndarray) -> np.ndarray:
+        """Calculate risk haircut using exponential decay."""
+        if risk_norm.size == 0:
+            return np.array([])
+            
+        try:
+            lambda_val = float(os.getenv('CRYPTO_RISK_LAMBDA', str(self.DEFAULT_RISK_LAMBDA)))
+            haircut = np.exp(-lambda_val * risk_norm)
+            return np.clip(haircut, 0.0, 1.0)
+            
+        except Exception as e:
+            logger.warning(f"Error in haircut calculation: {e}")
+            return np.ones_like(risk_norm)
+
+    def _apply_final_scoring(self, candidates: List["CryptoMetrics"], r_tech: List[float], 
+                           r_fund: List[float], r_mom: List[float], haircut: np.ndarray, 
+                           risk_norm: np.ndarray) -> None:
+        """Apply final scoring with weights and risk adjustment."""
+        # Use validated parameters
+        params = self._validate_risk_parameters()
+        tech_weight = params['tech_weight']
+        fund_weight = params['fund_weight']
+        mom_weight = params['mom_weight']
+        
+        try:
+            # Calculate weighted score
+            weighted_score = (tech_weight * np.array(r_tech) + 
+                            fund_weight * np.array(r_fund) + 
+                            mom_weight * np.array(r_mom))
+            
+            # Apply risk haircut and scale to 0-100
+            final_scores = 100.0 * weighted_score * haircut
+            
+            # Assign scores and risk levels
+            for idx, candidate in enumerate(candidates):
+                candidate.overall_score = float(max(0.0, min(100.0, final_scores[idx])))
+                candidate.risk_score = float(np.clip(risk_norm[idx], 0.0, 1.0)) * 100.0
+                candidate.risk_level = self._determine_risk_level(risk_norm[idx])
+                
+        except Exception as e:
+            logger.error(f"Error in final scoring: {e}")
+            self._apply_fallback_scoring(candidates)
+
+    def _determine_risk_level(self, risk_value: float) -> RiskLevel:
+        """Determine risk level based on normalized risk value using class thresholds."""
+        risk_value = float(np.clip(risk_value, 0.0, 1.0))
+        
+        if risk_value < self.RISK_THRESHOLDS['LOW']:
+            return RiskLevel.LOW
+        elif risk_value < self.RISK_THRESHOLDS['MEDIUM_LOW']:
+            return RiskLevel.MEDIUM_LOW
+        elif risk_value < self.RISK_THRESHOLDS['MEDIUM']:
+            return RiskLevel.MEDIUM
+        elif risk_value < self.RISK_THRESHOLDS['MEDIUM_HIGH']:
+            return RiskLevel.MEDIUM_HIGH
+        elif risk_value < self.RISK_THRESHOLDS['HIGH']:
+            return RiskLevel.HIGH
+        else:
+            return RiskLevel.VERY_HIGH
+
+    def _apply_fallback_scoring(self, candidates: List["CryptoMetrics"]) -> None:
+        """Apply fallback scoring when main calculation fails."""
+        logger.warning("Applying fallback scoring due to calculation errors")
+        
+        for candidate in candidates:
+            candidate.overall_score = 50.0  # Neutral score
+            candidate.risk_score = 50.0     # Medium risk
+            candidate.risk_level = RiskLevel.MEDIUM
+
+    def _safe_float(self, value: Union[float, int, None]) -> float:
+        """Safely convert value to float with proper error handling."""
+        if value is None:
+            return 0.0
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _validate_risk_parameters(self) -> Dict[str, float]:
+        """Validate and return risk calculation parameters with bounds checking."""
+        params = {}
+        
+        # Validate weights sum to 1.0
+        tech_weight = self.DEFAULT_TECH_WEIGHT
+        fund_weight = self.DEFAULT_FUND_WEIGHT
+        mom_weight = self.DEFAULT_MOM_WEIGHT
+        
+        weight_sum = tech_weight + fund_weight + mom_weight
+        if abs(weight_sum - 1.0) > 1e-6:
+            logger.warning(f"Weights don't sum to 1.0: {weight_sum}, normalizing")
+            tech_weight /= weight_sum
+            fund_weight /= weight_sum
+            mom_weight /= weight_sum
+        
+        params['tech_weight'] = tech_weight
+        params['fund_weight'] = fund_weight
+        params['mom_weight'] = mom_weight
+        
+        # Validate other parameters
+        params['sigmoid_k'] = max(0.1, min(10.0, self.DEFAULT_SIGMOID_K))
+        params['risk_lambda'] = max(0.1, min(5.0, self.DEFAULT_RISK_LAMBDA))
+        params['vol_floor'] = max(1000, self.DEFAULT_VOL_FLOOR_USD)
+        params['mcap_floor'] = max(100000, self.DEFAULT_MCAP_FLOOR_USD)
+        
+        return params
     def _validate_crypto_data(self, data: Dict) -> bool:
         """Validate cryptocurrency data structure and values."""
         required_fields = ['product_id', 'symbol', 'name', 'current_price']
