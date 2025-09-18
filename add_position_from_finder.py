@@ -2,8 +2,9 @@
 """
 Add Perp Position From Finder Output
 
-Parses a single-asset text block produced by long_term_crypto_finder.py and
-prepares a perpetual order using the conventions in trade_btc_perp.py.
+Parses a single-asset text block produced by ``long_term_crypto_finder.py`` or
+``short_term_crypto_finder.py`` and prepares a perpetual order using the
+conventions in ``trade_btc_perp.py``.
 
 Default behavior is dry-run: prints a ready-to-run trade_btc_perp.py command
 and a summarized order plan. Pass --execute to actually place the order using
@@ -132,8 +133,12 @@ def split_blocks(text: str) -> List[str]:
 
     Falls back to a single block when no numbering is detected.
     """
-    # Normalize line endings
+    # Normalize line endings and strip tailing summary sections
     t = text.replace("\r\n", "\n").replace("\r", "\n")
+    marker = "Short-Line Summaries"
+    idx = t.find(marker)
+    if idx != -1:
+        t = t[:idx]
     # Find all header indices
     heads = [m.start() for m in re.finditer(r"(?m)^\s*\d+\.\s+\S+\s*\(", t)]
     if not heads:
@@ -154,7 +159,7 @@ def setup_cb() -> CoinbaseService:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Create perp position from long_term_crypto_finder text output")
+    ap = argparse.ArgumentParser(description="Create perp position from long- or short-term finder text output")
     ap.add_argument("--file", type=str, help="Path to finder output text; omit to read stdin")
     ap.add_argument("--portfolio-usd", type=float, required=True, help="Total portfolio value in USD")
     ap.add_argument("--leverage", type=float, default=5.0, help="Leverage 1-20 (default 5)")

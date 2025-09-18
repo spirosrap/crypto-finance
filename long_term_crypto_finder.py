@@ -147,7 +147,8 @@ import uuid
 
 def _setup_logging() -> logging.Logger:
     """Configure module-level logging without hijacking root handlers."""
-    base_logs_dir = Path('logs') / 'long_term_crypto_finder'
+    log_subdir = os.getenv('CRYPTO_FINDER_LOG_SUBDIR', 'long_term_crypto_finder').strip() or 'long_term_crypto_finder'
+    base_logs_dir = Path('logs') / log_subdir
     base_logs_dir.mkdir(parents=True, exist_ok=True)
 
     log_level_str = os.getenv('CRYPTO_FINDER_LOG_LEVEL', 'INFO').upper()
@@ -179,7 +180,8 @@ def _setup_logging() -> logging.Logger:
     file_handler.setFormatter(formatter)
     size_handler.setFormatter(formatter)
 
-    logger = logging.getLogger(__name__)
+    logger_name = os.getenv('CRYPTO_FINDER_LOGGER_NAME', __name__).strip() or __name__
+    logger = logging.getLogger(logger_name)
     logger.setLevel(level)
     logger.propagate = False
 
@@ -317,7 +319,9 @@ class CryptoMetrics:
 
 class LongTermCryptoFinder:
     """Main class for finding long-term crypto opportunities with comprehensive risk analysis."""
-    
+    REPORT_TITLE = "LONG-TERM CRYPTO OPPORTUNITIES ANALYSIS"
+    FINDER_LABEL = "Long-Term Crypto Finder"
+
     # Configuration constants for risk calculation
     DEFAULT_TECH_WEIGHT = 0.45
     DEFAULT_FUND_WEIGHT = 0.35
@@ -407,7 +411,8 @@ class LongTermCryptoFinder:
 
         self._max_risk_level = self._parse_risk_level(self.config.max_risk_level)
 
-        logger.info(f"Long-Term Crypto Finder initialized with Coinbase API")
+        finder_label = getattr(self, 'FINDER_LABEL', 'Long-Term Crypto Finder')
+        logger.info(f"{finder_label} initialized with Coinbase API")
         logger.info(f"Configuration: {self.config.to_dict()}")
 
         # Counters for diagnostics
@@ -3427,7 +3432,8 @@ class LongTermCryptoFinder:
             results: List of CryptoMetrics to display
         """
         print("\n" + "="*100)
-        print("LONG-TERM CRYPTO OPPORTUNITIES ANALYSIS")
+        title = getattr(self, 'REPORT_TITLE', 'LONG-TERM CRYPTO OPPORTUNITIES ANALYSIS')
+        print(title)
         print("="*100)
         # Use UTC for deterministic timestamps
         print(f"Generated on (UTC): {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}Z")

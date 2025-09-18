@@ -1,0 +1,170 @@
+# Short-Term Crypto Opportunity Finder
+
+A swing-trading companion to `long_term_crypto_finder.py` that zooms in on the
+next days-to-weeks horizon. It scans Coinbase markets, emphasises fast-moving
+technical clues, and produces both LONG and SHORT trade plans with tighter
+stops and closer profit targets.
+
+## Highlights
+
+### ⚡ Faster Technical Pulse
+- **Condensed Lookback**: Defaults to ~120 daily bars and recent hourly data
+  to spotlight momentum shifts.
+- **High-Frequency Indicators**: Shorter RSI (7), MACD (8/21/5), and ATR (7)
+  to respond quickly to volatility regime changes.
+- **Volume Confirmation**: Volume spike heuristics factor directly into the
+  technical composite score.
+- **Momentum Score**: Uses a 20–45 bar log-price regression to capture swing
+  acceleration.
+
+### 🧮 Scoring & Filters
+- **Overall Score (0–100)** per side, combining technical, momentum, and risk
+  signals after risk-haircutting.
+- **Side-Specific Technical Scores**: Separate logic for LONG vs. SHORT to
+  reward the right combination of RSI, MACD bias, Bollinger posture, local
+  trend slope, and volume ratio.
+- **Risk Controls**: Risk bands (`LOW` → `VERY_HIGH`), volatility awareness,
+  and min-score thresholds ensure crowded or weak setups can be excluded.
+
+### 🎯 Trade Planning
+- **Entry**: Current price snapshot.
+- **Stops**: 1.3× ATR baseline with swing-high/low and volatility clamps.
+- **Targets**: Default 2.2× risk multiple, blended with recent swing extremes.
+- **Sizing**: Reuses the shared ATR-based position sizing helper (respects
+  `CRYPTO_RISK_PER_TRADE`, `CRYPTO_POS_CAP_PCT`, etc.).
+- **Short-Line Summaries**: Each candidate ends with a concise one-liner for
+  quick triage.
+
+## Installation
+
+Install repo dependencies once:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+### Basic Run
+
+```bash
+python short_term_crypto_finder.py
+```
+
+Displays the top short-term opportunities (LONG and/or SHORT depending on
+filters) with trade levels and summary blurbs.
+
+### Focused Scans
+
+```bash
+# Evaluate 40 symbols, show best 12 setups overall
+python short_term_crypto_finder.py --limit 40 --max-results 12
+
+# Scan only SOL and AVAX pairs, long bias only
+python short_term_crypto_finder.py \
+  --symbols SOL,AVAX --side long --max-results 5
+
+# Cap risk tier at MEDIUM and dump JSON for automation
+python short_term_crypto_finder.py \
+  --max-risk-level MEDIUM --output json --save short_setups.json
+```
+
+### CLI Reference
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--limit` | 30 | Universe size to analyse before ranking |
+| `--min-market-cap` | env / ≥$50M | Minimum market cap filter |
+| `--max-results` | env | Number of setups to display |
+| `--output` | `console` | `console` or `json` |
+| `--side` | env (`both`) | Restrict to `long`, `short`, or `both` |
+| `--unique-by-symbol` | env | Keep only top side per symbol |
+| `--min-score` | env (≥20) | Drop results below this overall score |
+| `--symbols` | - | Comma-separated tickers to force-include |
+| `--top-per-side` | env (10) | Cap longs/shorts before merge |
+| `--save` | - | Persist output (`.json` or `.csv`) |
+| `--max-workers` | env | Override concurrency for data fetch |
+| `--offline` | env | Use cached data only when possible |
+| `--quotes` | env | Preferred quote currencies (e.g., `USDC,USD,USDT`) |
+| `--risk-free-rate` | env (~1%) | Annualised rate for Sharpe/Sortino |
+| `--analysis-days` | env (120) | Daily bars for swing analytics |
+| `--max-risk-level` | env | Highest allowed risk tier |
+
+## Environment Overrides
+
+Short-term settings read both the generic `CRYPTO_*` variables and the
+`SHORT_*` variants. Key overrides:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `SHORT_ANALYSIS_DAYS` | Daily lookback window | 120 |
+| `SHORT_MIN_MARKET_CAP` | Market-cap floor (USD) | max(`CRYPTO_MIN_MARKET_CAP`, 50M) |
+| `SHORT_MAX_RESULTS` | Default for `--max-results` | `CRYPTO_MAX_RESULTS` |
+| `SHORT_TOP_PER_SIDE` | Pre-cap per direction | 10 |
+| `SHORT_SIDE` | Default side selection | `both` |
+| `SHORT_MIN_SCORE` | Minimum overall score | 20.0 |
+| `SHORT_RISK_FREE_RATE` | Annual risk-free rate | 0.01 |
+| `SHORT_RSI_PERIOD` | RSI length | 7 |
+| `SHORT_ATR_PERIOD` | ATR length | 7 |
+| `SHORT_MACD_FAST` | MACD fast EMA | 8 |
+| `SHORT_MACD_SLOW` | MACD slow EMA | 21 |
+| `SHORT_MACD_SIGNAL` | MACD signal EMA | 5 |
+| `SHORT_BB_PERIOD` | Bollinger SMA length | 14 |
+| `SHORT_STOCH_PERIOD` | Stochastic length | 10 |
+| `SHORT_WILLIAMS_PERIOD` | Williams %R length | 10 |
+| `SHORT_CCI_PERIOD` | CCI length | 14 |
+| `SHORT_MAX_RISK_LEVEL` | Highest risk tier allowed | inherits / optional |
+| `SHORT_MAX_WORKERS` | Thread pool size | `CRYPTO_MAX_WORKERS` |
+| `SHORT_REQUEST_DELAY` | Global throttle seconds | `CRYPTO_REQUEST_DELAY` |
+
+All other shared risk controls (`CRYPTO_RISK_PER_TRADE`, `CRYPTO_POS_CAP_PCT`,
+etc.) apply identically to both finders.
+
+## Output Structure
+
+The console report mirrors the long-term finder with a short-term banner and
+per-asset cards containing:
+
+1. **Snapshot Metrics**: price, market cap/rank, 24h/7d/30d change, ATH/ATL,
+   volatility, Sharpe/Sortino, drawdown, RSI, MACD bias, Bollinger stance,
+   trend strength, scores, and risk classification.
+2. **Trading Levels**: entry, stop, target, risk:reward, and suggested
+   position size.
+3. **Short-Line Summary**: one-line punchlist (`score`, `RR`, `RSI`, MACD
+   nuance, risk tier, trend delta) for quick scanning or downstream parsing.
+
+Example excerpt:
+
+```
+================================================================================
+SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
+================================================================================
+Generated on (UTC): 2025-09-17 14:05:11Z
+Total opportunities listed: 8
+================================================================================
+
+1. SOL (Wrapped SOL) — SHORT
+--------------------------------------------------
+... [full metrics truncated] ...
+
+Short-Line Summaries
+--------------------------------------------------
+1. Summary: SOL short – score 68.02, 2.3× RR; RSI 66; bullish MACD fade; risk medium_low; trend -0.18%/d.
+2. Summary: AVAX short – score 66.41, 2.4× RR; RSI 64; bullish MACD fade; risk medium_low.
+```
+
+## Workflow Tips
+
+- Warm the HTTP and candle caches with the long-term finder, then run the
+  short-term finder in `--offline` mode for rapid iteration.
+- Tighten `SHORT_REQUEST_DELAY` cautiously; Coinbase 429s may require backing
+  off.
+- Combine with `add_position_from_finder.py` to create ready-to-send perp
+  orders (the parser now ignores the trailing summary block automatically).
+
+## See Also
+
+- [`long_term_crypto_finder.py`](long_term_crypto_finder.py)
+- [`README_LONG_TERM_CRYPTO_FINDER.md`](README_LONG_TERM_CRYPTO_FINDER.md)
+- [`add_position_from_finder.py`](add_position_from_finder.py)
+
