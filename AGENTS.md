@@ -72,7 +72,7 @@
 - Diagnostics: `market_analyzer.py`, `advanced_market_analyzer.py`, `continuous_market_monitor.py`.
 - Strategy runners: `run_backtests.py`, `run_all_commands.py`, `backtest_trading_bot.py`.
 - Monitoring scripts: `crypto_alert_monitor_*.py`, `trade_guardian.py`, `trade_regime_guardian.py`.
-- Visualization: helpers in `trading/visualization`, matplotlib scripts under the repository root (for example `plot_atr_histogram.py`).
+- Visualization: helpers in `trading/visualization.py`, matplotlib scripts under the repository root (for example `plot_atr_histogram.py`).
 - Additional context: review notebooks and summaries in `docs/` and prior analyses in `README_*.md` files.
 
 ## Communication and Delivery Expectations
