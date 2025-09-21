@@ -17,6 +17,7 @@ os.environ.setdefault("CRYPTO_FINDER_LOG_SUBDIR", "short_term_crypto_finder")
 os.environ.setdefault("CRYPTO_FINDER_LOGGER_NAME", "short_term_crypto_finder")
 
 import argparse
+import io
 import json
 import logging
 import sys
@@ -448,6 +449,17 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
 # -----------------------------------------------------------------------------
 
 
+PROFILE_PRESETS = {
+    "default": {},
+    "wide": {
+        "limit": 400,
+        "max_results": 20,
+        "max_workers": 12,
+        "analysis_days": 90,
+    },
+}
+
+
 def main() -> None:
     env_defaults = build_short_term_config()
 
@@ -468,13 +480,24 @@ def main() -> None:
         except argparse.ArgumentTypeError as exc:
             logger.warning(f"Ignoring invalid SHORT_MAX_RISK_LEVEL value: {exc}")
 
+    default_limit = _env_override("SHORT_DEFAULT_LIMIT", 30, int)
+    profile_default = os.getenv("SHORT_FINDER_PROFILE", "default")
+    if profile_default not in PROFILE_PRESETS:
+        profile_default = "default"
+
     parser = argparse.ArgumentParser(description='Find high-conviction short-term cryptocurrency trades')
-    parser.add_argument('--limit', type=int, default=30,
-                        help='Number of products to evaluate before ranking (default: 30)')
+    parser.add_argument('--profile', choices=sorted(PROFILE_PRESETS.keys()), default=profile_default,
+                        help=f"Preset bundle of frequently used parameters (default: {profile_default})")
+    parser.add_argument('--plain-output', type=Path,
+                        help='Write a formatted text report to this path (excludes log lines)')
+    parser.add_argument('--suppress-console-logs', action='store_true',
+                        help='Disable console log handler for cleaner stdout piping')
+    parser.add_argument('--limit', type=int, default=None,
+                        help=f"Number of products to evaluate before ranking (default: {default_limit}; profile may override)")
     parser.add_argument('--min-market-cap', type=int, default=env_defaults.min_market_cap,
                         help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})")
-    parser.add_argument('--max-results', type=int, default=env_defaults.max_results,
-                        help=f"Maximum number of setups to display (default: {env_defaults.max_results})")
+    parser.add_argument('--max-results', type=int, default=None,
+                        help=f"Maximum number of setups to display (default: {env_defaults.max_results}; profile may override)")
     parser.add_argument('--output', type=str, choices=['console', 'json'], default='console',
                         help='Output format (default: console)')
     parser.add_argument('--side', type=str, choices=['long', 'short', 'both'], default=env_defaults.side,
@@ -489,32 +512,49 @@ def main() -> None:
                         help='Comma-separated list of symbols to analyse (e.g., BTC,ETH,SOL)')
     parser.add_argument('--top-per-side', type=int, default=env_defaults.top_per_side,
                         help='Cap the number of long and short setups before final merge')
-    parser.add_argument('--max-workers', type=int,
-                        help='Override worker threads for API fetches')
+    parser.add_argument('--max-workers', type=int, default=None,
+                        help=f"Override worker threads for API fetches (default: {env_defaults.max_workers}; profile may override)")
     parser.add_argument('--offline', action='store_true', default=env_defaults.offline,
                         help='Use cache only; skip network requests where possible')
     parser.add_argument('--quotes', type=str,
                         help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT')
     parser.add_argument('--risk-free-rate', type=float, default=env_defaults.risk_free_rate,
                         help=f"Override annual risk-free rate (default: {env_defaults.risk_free_rate})")
-    parser.add_argument('--analysis-days', type=int, default=env_defaults.analysis_days,
-                        help=f"Number of daily bars for the swing window (default: {env_defaults.analysis_days})")
+    parser.add_argument('--analysis-days', type=int, default=None,
+                        help=f"Number of daily bars for the swing window (default: {env_defaults.analysis_days}; profile may override)")
     parser.add_argument('--max-risk-level', type=risk_level_type, default=default_max_risk,
                         help='Highest risk tier to allow (e.g., LOW, MEDIUM_LOW, MEDIUM)')
 
     args = parser.parse_args()
 
+    profile_overrides = PROFILE_PRESETS.get(args.profile, {})
+    final_limit = args.limit if args.limit is not None else profile_overrides.get('limit', default_limit)
+    final_max_results = (
+        args.max_results if args.max_results is not None else profile_overrides.get('max_results', env_defaults.max_results)
+    )
+    final_max_workers = (
+        args.max_workers if args.max_workers is not None else profile_overrides.get('max_workers', env_defaults.max_workers)
+    )
+    final_analysis_days = (
+        args.analysis_days if args.analysis_days is not None else profile_overrides.get('analysis_days', env_defaults.analysis_days)
+    )
+
+    if args.suppress_console_logs:
+        for handler in list(logger.handlers):
+            if isinstance(handler, logging.StreamHandler):
+                logger.removeHandler(handler)
+
     config = env_defaults
     config.min_market_cap = args.min_market_cap
-    config.max_results = args.max_results
+    config.max_results = final_max_results
     config.side = args.side
     config.unique_by_symbol = bool(args.unique_by_symbol)
     config.min_overall_score = float(args.min_score or 0.0)
     config.offline = bool(args.offline)
     config.top_per_side = args.top_per_side
-    config.max_workers = args.max_workers if args.max_workers is not None else config.max_workers
+    config.max_workers = final_max_workers
     config.risk_free_rate = args.risk_free_rate
-    config.analysis_days = args.analysis_days
+    config.analysis_days = final_analysis_days
     config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
 
     config.symbols = None
@@ -526,11 +566,19 @@ def main() -> None:
         config.quotes = [q.strip().upper() for q in args.quotes.split(',') if q.strip()]
 
     finder = ShortTermCryptoFinder(config=config)
-    results = finder.find_best_opportunities(limit=args.limit)
+    results = finder.find_best_opportunities(limit=final_limit)
 
     if not results:
         print("No short-term opportunities found. Adjust filters or broaden the symbol universe.")
         return
+
+    def save_plain_report(path: Path, content: str) -> None:
+        tmp_path = Path(f"{path}.tmp.{os.getpid()}.{int(datetime.now().timestamp()*1000)}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+        os.replace(tmp_path, path)
+        print(f"Saved {len(results)} results to {path}")
 
     if args.output == 'json' or (args.save and args.save.lower().endswith('.json')):
         json_results = []
@@ -588,8 +636,19 @@ def main() -> None:
                     indent=2,
                 )
             )
+        if args.plain_output:
+            buffer = io.StringIO()
+            finder.print_results(results, stream=buffer)
+            save_plain_report(args.plain_output, buffer.getvalue())
     else:
-        finder.print_results(results)
+        if args.plain_output:
+            buffer = io.StringIO()
+            finder.print_results(results, stream=buffer)
+            report_text = buffer.getvalue()
+            print(report_text, end='')
+            save_plain_report(args.plain_output, report_text)
+        else:
+            finder.print_results(results)
 
         if args.save and args.save.lower().endswith('.csv'):
             import csv

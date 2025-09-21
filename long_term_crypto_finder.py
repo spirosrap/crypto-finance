@@ -9,6 +9,7 @@ risk assessment, and market sentiment.
 Author: Crypto Finance Toolkit
 """
 
+import io
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -22,7 +23,7 @@ except Exception:  # Py<=3.10
     UTC = _tz.utc  # type: ignore
 import logging
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, TextIO, Tuple, Union
 import json
 import argparse
 from dataclasses import dataclass
@@ -3424,70 +3425,85 @@ class LongTermCryptoFinder:
         detail = "; ".join(filter(None, segments))
         return f"{index}. Summary: {crypto.symbol} {side_lower} – score {score_text}, {detail}."
 
-    def print_results(self, results: List[CryptoMetrics]):
-        """
-        Print formatted analysis results.
+    def print_results(self, results: List[CryptoMetrics], stream: Optional[TextIO] = None):
+        """Print formatted analysis results to the desired stream."""
 
-        Args:
-            results: List of CryptoMetrics to display
-        """
-        print("\n" + "="*100)
+        destination = stream or sys.stdout
+
+        def _write(text: str = "") -> None:
+            print(text, file=destination)
+
+        _write()
+        _write("=" * 100)
         title = getattr(self, 'REPORT_TITLE', 'LONG-TERM CRYPTO OPPORTUNITIES ANALYSIS')
-        print(title)
-        print("="*100)
+        _write(title)
+        _write("=" * 100)
         # Use UTC for deterministic timestamps
-        print(f"Generated on (UTC): {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}Z")
-        print(f"Total opportunities listed: {len(results)}")
-        print("="*100)
+        _write(f"Generated on (UTC): {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}Z")
+        _write(f"Total opportunities listed: {len(results)}")
+        _write("=" * 100)
 
         short_summaries: List[str] = []
 
         for i, crypto in enumerate(results, 1):
-            print(f"\n{i}. {crypto.symbol} ({crypto.name}) — {crypto.position_side}")
-            print("-" * 50)
+            _write()
+            _write(f"{i}. {crypto.symbol} ({crypto.name}) — {crypto.position_side}")
+            _write("-" * 50)
             if getattr(crypto, 'data_timestamp_utc', ''):
-                print(f"Data Timestamp (UTC): {crypto.data_timestamp_utc}")
-            print(f"Price: ${crypto.current_price:.6f}")
+                _write(f"Data Timestamp (UTC): {crypto.data_timestamp_utc}")
+            _write(f"Price: ${crypto.current_price:.6f}")
             rank_str = f"#{crypto.market_cap_rank}" if getattr(crypto, 'market_cap_rank', 0) else "N/A"
-            print(f"Market Cap: ${crypto.market_cap:,.0f} (Rank {rank_str})")
-            print(f"24h Volume: ${crypto.volume_24h:,.0f}")
-            print(f"24h Change: {crypto.price_change_24h:.2f}%")
-            print(f"7d Change: {crypto.price_change_7d:.2f}%")
-            print(f"30d Change: {crypto.price_change_30d:.2f}%")
-            print(f"ATH: ${crypto.ath_price:.2f} (Date: {crypto.ath_date or 'N/A'})")
-            print(f"ATL: ${crypto.atl_price:.6f} (Date: {crypto.atl_date or 'N/A'})")
-            print(f"Volatility (30d, ann.): {crypto.volatility_30d*100:.1f}%")
-            print(f"Sharpe Ratio: {crypto.sharpe_ratio:.2f}")
-            print(f"Sortino Ratio: {crypto.sortino_ratio:.2f}")
+            _write(f"Market Cap: ${crypto.market_cap:,.0f} (Rank {rank_str})")
+            _write(f"24h Volume: ${crypto.volume_24h:,.0f}")
+            _write(f"24h Change: {crypto.price_change_24h:.2f}%")
+            _write(f"7d Change: {crypto.price_change_7d:.2f}%")
+            _write(f"30d Change: {crypto.price_change_30d:.2f}%")
+            _write(f"ATH: ${crypto.ath_price:.2f} (Date: {crypto.ath_date or 'N/A'})")
+            _write(f"ATL: ${crypto.atl_price:.6f} (Date: {crypto.atl_date or 'N/A'})")
+            _write(f"Volatility (30d, ann.): {crypto.volatility_30d*100:.1f}%")
+            _write(f"Sharpe Ratio: {crypto.sharpe_ratio:.2f}")
+            _write(f"Sortino Ratio: {crypto.sortino_ratio:.2f}")
             # Display drawdown with its actual sign
-            print(f"Max Drawdown: {crypto.max_drawdown * 100:.2f}%")
-            print(f"RSI (14): {crypto.rsi_14:.1f}")
-            print(f"MACD Signal: {crypto.macd_signal}")
-            print(f"BB Position: {crypto.bb_position}")
-            print(f"Trend Strength: {crypto.trend_strength:.2f}% per day")
-            print(f"Momentum Score: {crypto.momentum_score:.1f}/100")
-            print(f"Fundamental Score: {crypto.fundamental_score:.1f}/100")
-            print(f"Technical Score: {crypto.technical_score:.1f}/100")
-            print(f"Risk Score: {crypto.risk_score:.1f}/100")
-            print(f"Risk Level: {crypto.risk_level.value}")
-            print(f"Overall Score: {crypto.overall_score:.2f}/100")
+            _write(f"Max Drawdown: {crypto.max_drawdown * 100:.2f}%")
+            _write(f"RSI (14): {crypto.rsi_14:.1f}")
+            _write(f"MACD Signal: {crypto.macd_signal}")
+            _write(f"BB Position: {crypto.bb_position}")
+            _write(f"Trend Strength: {crypto.trend_strength:.2f}% per day")
+            _write(f"Momentum Score: {crypto.momentum_score:.1f}/100")
+            _write(f"Fundamental Score: {crypto.fundamental_score:.1f}/100")
+            _write(f"Technical Score: {crypto.technical_score:.1f}/100")
+            _write(f"Risk Score: {crypto.risk_score:.1f}/100")
+            _write(f"Risk Level: {crypto.risk_level.value}")
+            _write(f"Overall Score: {crypto.overall_score:.2f}/100")
 
             # Trading Levels Section
-            print("")
-            print(f"💼 TRADING LEVELS ({crypto.position_side}):")
-            print(f"Entry Price: ${crypto.entry_price:.6f}")
-            print(f"Stop Loss: ${crypto.stop_loss_price:.6f}")
-            print(f"Take Profit: ${crypto.take_profit_price:.6f}")
-            print(f"Risk:Reward Ratio: {crypto.risk_reward_ratio:.1f}:1")
-            print(f"Recommended Position Size: {crypto.position_size_percentage:.1f}% of portfolio")
+            _write()
+            _write(f"💼 TRADING LEVELS ({crypto.position_side}):")
+            _write(f"Entry Price: ${crypto.entry_price:.6f}")
+            _write(f"Stop Loss: ${crypto.stop_loss_price:.6f}")
+            _write(f"Take Profit: ${crypto.take_profit_price:.6f}")
+            _write(f"Risk:Reward Ratio: {crypto.risk_reward_ratio:.1f}:1")
+            _write(f"Recommended Position Size: {crypto.position_size_percentage:.1f}% of portfolio")
 
             short_summaries.append(self._format_short_summary(crypto, i))
 
         if short_summaries:
-            print("\nShort-Line Summaries")
-            print("-" * 50)
+            _write()
+            _write("Short-Line Summaries")
+            _write("-" * 50)
             for line in short_summaries:
-                print(line)
+                _write(line)
+
+PROFILE_PRESETS = {
+    "default": {},
+    "wide": {
+        "limit": 400,
+        "max_results": 20,
+        "max_workers": 12,
+        "analysis_days": 90,
+    },
+}
+
 
 def main():
     """Main function to run the crypto opportunity finder."""
@@ -3510,13 +3526,24 @@ def main():
         except argparse.ArgumentTypeError as exc:
             logger.warning(f"Ignoring invalid CRYPTO_MAX_RISK_LEVEL value: {exc}")
 
+    default_limit = int(os.getenv('CRYPTO_DEFAULT_LIMIT', '50'))
+    profile_default = os.getenv('CRYPTO_FINDER_PROFILE', 'default')
+    if profile_default not in PROFILE_PRESETS:
+        profile_default = 'default'
+
     parser = argparse.ArgumentParser(description='Find the best long-term cryptocurrency opportunities')
-    parser.add_argument('--limit', type=int, default=50,
-                       help='Number of top cryptocurrencies to analyze (default: 50)')
+    parser.add_argument('--profile', choices=sorted(PROFILE_PRESETS.keys()), default=profile_default,
+                       help=f"Preset bundle of frequently used parameters (default: {profile_default})")
+    parser.add_argument('--plain-output', type=Path,
+                       help='Write a formatted text report to this path (excludes log lines)')
+    parser.add_argument('--suppress-console-logs', action='store_true',
+                       help='Disable console log handler for cleaner stdout piping')
+    parser.add_argument('--limit', type=int, default=None,
+                       help=f"Number of top cryptocurrencies to analyze (default: {default_limit}; profile may override)")
     parser.add_argument('--min-market-cap', type=int, default=env_defaults.min_market_cap,
                        help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})")
-    parser.add_argument('--max-results', type=int, default=env_defaults.max_results,
-                       help=f"Maximum number of results to display (default: {env_defaults.max_results})")
+    parser.add_argument('--max-results', type=int, default=None,
+                       help=f"Maximum number of results to display (default: {env_defaults.max_results}; profile may override)")
     parser.add_argument('--output', type=str, choices=['console', 'json'], default='console',
                        help='Output format (default: console)')
     parser.add_argument('--side', type=str, choices=['long', 'short', 'both'], default=env_defaults.side,
@@ -3531,20 +3558,37 @@ def main():
                        help='Comma-separated list of symbols to analyze (e.g., BTC,ETH,SOL)')
     parser.add_argument('--top-per-side', type=int, default=env_defaults.top_per_side,
                        help='Cap results per side before final sorting')
-    parser.add_argument('--max-workers', type=int,
-                       help='Override worker threads for parallel fetch')
+    parser.add_argument('--max-workers', type=int, default=None,
+                       help=f"Override worker threads for parallel fetch (default: {env_defaults.max_workers}; profile may override)")
     parser.add_argument('--offline', action='store_true', default=env_defaults.offline,
                        help='Avoid external HTTP where possible (use cache only)')
     parser.add_argument('--quotes', type=str,
                        help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT')
     parser.add_argument('--risk-free-rate', type=float, default=env_defaults.risk_free_rate,
                        help=f"Override annual risk-free rate (default: {env_defaults.risk_free_rate})")
-    parser.add_argument('--analysis-days', type=int, default=env_defaults.analysis_days,
-                       help=f"Number of daily bars to pull (default: {env_defaults.analysis_days})")
+    parser.add_argument('--analysis-days', type=int, default=None,
+                       help=f"Number of daily bars to pull (default: {env_defaults.analysis_days}; profile may override)")
     parser.add_argument('--max-risk-level', type=risk_level_type, default=default_max_risk,
                        help='Highest risk level to include (e.g., LOW, MEDIUM, HIGH)')
 
     args = parser.parse_args()
+
+    profile_overrides = PROFILE_PRESETS.get(args.profile, {})
+    final_limit = args.limit if args.limit is not None else profile_overrides.get('limit', default_limit)
+    final_max_results = (
+        args.max_results if args.max_results is not None else profile_overrides.get('max_results', env_defaults.max_results)
+    )
+    final_max_workers = (
+        args.max_workers if args.max_workers is not None else profile_overrides.get('max_workers', env_defaults.max_workers)
+    )
+    final_analysis_days = (
+        args.analysis_days if args.analysis_days is not None else profile_overrides.get('analysis_days', env_defaults.analysis_days)
+    )
+
+    if args.suppress_console_logs:
+        for handler in list(logger.handlers):
+            if isinstance(handler, logging.StreamHandler):
+                logger.removeHandler(handler)
 
     # Create configuration
     symbols_list = None
@@ -3556,29 +3600,37 @@ def main():
 
     config = CryptoFinderConfig(
         min_market_cap=args.min_market_cap,
-        max_results=args.max_results,
+        max_results=final_max_results,
         side=args.side,
         unique_by_symbol=bool(args.unique_by_symbol),
         min_overall_score=float(args.min_score or 0.0),
         offline=bool(args.offline),
         symbols=symbols_list,
         top_per_side=args.top_per_side,
-        max_workers=args.max_workers if args.max_workers is not None else env_defaults.max_workers,
+        max_workers=final_max_workers,
         quotes=quotes_list,
         risk_free_rate=args.risk_free_rate if args.risk_free_rate is not None else env_defaults.risk_free_rate,
-        analysis_days=args.analysis_days if args.analysis_days is not None else env_defaults.analysis_days,
+        analysis_days=final_analysis_days,
         max_risk_level=args.max_risk_level if args.max_risk_level is not None else env_defaults.max_risk_level
     )
-    
+
     # Initialize the finder
     finder = LongTermCryptoFinder(config=config)
 
     # Find opportunities
-    results = finder.find_best_opportunities(limit=args.limit)
+    results = finder.find_best_opportunities(limit=final_limit)
 
     if not results:
         print("No opportunities found. Please check your internet connection and try again.")
         return
+
+    def save_plain_report(path: Path, content: str) -> None:
+        tmp_path = Path(f"{path}.tmp.{os.getpid()}.{int(time.time()*1000)}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, 'w', encoding='utf-8') as handle:
+            handle.write(content)
+        os.replace(tmp_path, path)
+        print(f"Saved {len(results)} results to {path}")
 
     # Output results
     if args.output == 'json' or (args.save and args.save.lower().endswith('.json')):
@@ -3633,8 +3685,19 @@ def main():
                 'generated_utc': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%SZ'),
                 'results': json_results
             }, indent=2))
+        if args.plain_output:
+            buffer = io.StringIO()
+            finder.print_results(results, stream=buffer)
+            save_plain_report(args.plain_output, buffer.getvalue())
     else:
-        finder.print_results(results)
+        if args.plain_output:
+            buffer = io.StringIO()
+            finder.print_results(results, stream=buffer)
+            report_text = buffer.getvalue()
+            print(report_text, end='')
+            save_plain_report(args.plain_output, report_text)
+        else:
+            finder.print_results(results)
 
         # Optional CSV saving when not using --output json
         if args.save and args.save.lower().endswith('.csv'):
@@ -3695,9 +3758,8 @@ def main():
                     })
             os.replace(tmp_path, final_path)
             print(f"Saved {len(results)} results to {final_path}")
-        else:
-            if args.save:
-                print("Tip: use a .csv or .json extension in --save to write the file.")
+        elif args.save:
+            print("Tip: use a .csv or .json extension in --save to write the file.")
 if __name__ == "__main__":
     try:
         main()

@@ -67,15 +67,24 @@ python short_term_crypto_finder.py \
 # Cap risk tier at MEDIUM and dump JSON for automation
 python short_term_crypto_finder.py \
   --max-risk-level MEDIUM --output json --save short_setups.json
+
+# Run the "wide" preset and write a clean text report for external sharing
+python short_term_crypto_finder.py --profile wide --plain-output finder_short.txt --suppress-console-logs
+
+`--plain-output` mirrors the console view, and `--suppress-console-logs`
+removes the extra logging noise so you no longer need a `tee | grep` filter.
 ```
 
 ### CLI Reference
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--limit` | 30 | Universe size to analyse before ranking |
+| `--profile` | env (`SHORT_FINDER_PROFILE` or `default`) | Apply preset bundle (`default`, `wide`, …) |
+| `--plain-output` | - | Write the formatted console report (no log header) to disk |
+| `--suppress-console-logs` | false | Disable console logging for clean stdout piping |
+| `--limit` | 30 (`SHORT_DEFAULT_LIMIT` or profile) | Universe size to analyse before ranking |
 | `--min-market-cap` | env / ≥$50M | Minimum market cap filter |
-| `--max-results` | env | Number of setups to display |
+| `--max-results` | env/profile | Number of setups to display |
 | `--output` | `console` | `console` or `json` |
 | `--side` | env (`both`) | Restrict to `long`, `short`, or `both` |
 | `--unique-by-symbol` | env | Keep only top side per symbol |
@@ -83,11 +92,11 @@ python short_term_crypto_finder.py \
 | `--symbols` | - | Comma-separated tickers to force-include |
 | `--top-per-side` | env (10) | Cap longs/shorts before merge |
 | `--save` | - | Persist output (`.json` or `.csv`) |
-| `--max-workers` | env | Override concurrency for data fetch |
+| `--max-workers` | env/profile | Override concurrency for data fetch |
 | `--offline` | env | Use cached data only when possible |
 | `--quotes` | env | Preferred quote currencies (e.g., `USDC,USD,USDT`) |
 | `--risk-free-rate` | env (~1%) | Annualised rate for Sharpe/Sortino |
-| `--analysis-days` | env (120) | Daily bars for swing analytics |
+| `--analysis-days` | env/profile (120) | Daily bars for swing analytics |
 | `--max-risk-level` | env | Highest allowed risk tier |
 
 ## Environment Overrides
@@ -97,6 +106,8 @@ Short-term settings read both the generic `CRYPTO_*` variables and the
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
+| `SHORT_DEFAULT_LIMIT` | Default for `--limit` | 30 |
+| `SHORT_FINDER_PROFILE` | Default profile when `--profile` is omitted | `default` |
 | `SHORT_ANALYSIS_DAYS` | Daily lookback window | 120 |
 | `SHORT_MIN_MARKET_CAP` | Market-cap floor (USD) | max(`CRYPTO_MIN_MARKET_CAP`, 50M) |
 | `SHORT_MAX_RESULTS` | Default for `--max-results` | `CRYPTO_MAX_RESULTS` |
@@ -157,6 +168,8 @@ Short-Line Summaries
 
 - Warm the HTTP and candle caches with the long-term finder, then run the
   short-term finder in `--offline` mode for rapid iteration.
+- Use `--profile wide` (or set `SHORT_FINDER_PROFILE=wide`) to jump straight to
+  the 400-symbol scan with 12 workers and a 90-day window.
 - Tighten `SHORT_REQUEST_DELAY` cautiously; Coinbase 429s may require backing
   off.
 - Combine with `add_position_from_finder.py` to create ready-to-send perp
@@ -167,4 +180,3 @@ Short-Line Summaries
 - [`long_term_crypto_finder.py`](long_term_crypto_finder.py)
 - [`README_LONG_TERM_CRYPTO_FINDER.md`](README_LONG_TERM_CRYPTO_FINDER.md)
 - [`add_position_from_finder.py`](add_position_from_finder.py)
-

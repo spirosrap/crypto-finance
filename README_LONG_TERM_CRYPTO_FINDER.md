@@ -65,15 +65,25 @@ python long_term_crypto_finder.py --max-risk-level MEDIUM
 
 # Output results in JSON format (includes position side and trading levels)
 python long_term_crypto_finder.py --output json
+
+# Run the "wide" preset and capture a clean text report without log chatter
+python long_term_crypto_finder.py --profile wide --plain-output finder_long.txt --suppress-console-logs
+
+`--plain-output` writes the same formatted report you see in the console, while
+`--suppress-console-logs` removes the streaming log handler so you no longer
+need to pipe through `tee`/`grep` to obtain a clean summary file.
 ```
 
 ### Command Line Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--limit` | 50 | Number of top cryptocurrencies to analyze |
+| `--profile` | env (`CRYPTO_FINDER_PROFILE` or `default`) | Apply preset bundle of parameters (e.g., `default`, `wide`) |
+| `--plain-output` | - | Write the formatted console report (without log headers) to a file |
+| `--suppress-console-logs` | false | Disable console log handler for clean stdout piping |
+| `--limit` | 50 (`CRYPTO_DEFAULT_LIMIT` or profile) | Number of cryptocurrencies to analyze before ranking |
 | `--min-market-cap` | 100000000 | Minimum market cap in USD ($100M) |
-| `--max-results` | 20 | Maximum number of results to display |
+| `--max-results` | 20 (profile/env) | Maximum number of results to display |
 | `--output` | console | Output format: `console` or `json` |
 | `--side` | both | Evaluate `long`, `short`, or `both` |
 | `--unique-by-symbol` | false | Keep only the best side per symbol |
@@ -82,13 +92,15 @@ python long_term_crypto_finder.py --output json
 | `--top-per-side` | - | Cap results per side before final sort |
 | `--save` | - | Save results to path (`.json` or `.csv`) |
 | `--offline` | false | Avoid external HTTP where possible (use cache) |
-| `--max-workers` | env | Override parallel workers; defaults from env or CPU count |
+| `--max-workers` | env/profile | Override parallel workers; defaults from env/profile or CPU count |
 | `--quotes` | env | Preferred quote currencies, e.g., `USDC,USD,USDT` |
 | `--risk-free-rate` | env | Annual risk-free rate (e.g., `0.03` for 3%) |
-| `--analysis-days` | env | Lookback window for technical/risk metrics (e.g., `365`) |
+| `--analysis-days` | env/profile | Lookback window for technical/risk metrics (e.g., `365`) |
 | `--max-risk-level` | env | Highest risk level to include (`LOW`, `MEDIUM_LOW`, `MEDIUM`, `MEDIUM_HIGH`, `HIGH`, `VERY_HIGH`) |
 
 ### Environment Variables
+- `CRYPTO_DEFAULT_LIMIT`: Default for `--limit` (default `50`)
+- `CRYPTO_FINDER_PROFILE`: Default profile applied when `--profile` is omitted (default `default`)
 - `CRYPTO_MAX_RESULTS`: Default for `--max-results` (default `20`)
 - `CRYPTO_MAX_WORKERS`: Default worker threads for parallelism (default `4`)
 - `CRYPTO_REQUEST_DELAY`: Global throttle between outbound requests in seconds (default `0.5`)
@@ -128,9 +140,12 @@ export CRYPTO_CB_CONCURRENCY=8
 export CRYPTO_CACHE_TTL=3600
 
 python long_term_crypto_finder.py --limit 400 --max-results 20 --max-workers 12 --analysis-days 90
+# or simply: python long_term_crypto_finder.py --profile wide
 ```
 
 - Prefer `--max-workers` between 8–16 on modern CPUs; lower if you hit 429s.
+- Set `CRYPTO_FINDER_PROFILE=wide` (and optionally `CRYPTO_DEFAULT_LIMIT`) when
+  you want every run to use the larger scan without repeating flags.
 - Reduce `CRYPTO_REQUEST_DELAY` gradually; increase it if you see rate limits.
 - Reduce `--analysis-days` (e.g., 365 → 90) to cut compute for technical metrics.
 
