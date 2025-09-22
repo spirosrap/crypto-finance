@@ -3624,13 +3624,14 @@ def main():
         print("No opportunities found. Please check your internet connection and try again.")
         return
 
-    def save_plain_report(path: Path, content: str) -> None:
+    def save_plain_report(path: Path, content: str, notify: bool = True, status_stream: TextIO = sys.stdout) -> None:
         tmp_path = Path(f"{path}.tmp.{os.getpid()}.{int(time.time()*1000)}")
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(tmp_path, 'w', encoding='utf-8') as handle:
             handle.write(content)
         os.replace(tmp_path, path)
-        print(f"Saved {len(results)} results to {path}")
+        if notify:
+            print(f"Saved {len(results)} results to {path}", file=status_stream)
 
     # Output results
     if args.output == 'json' or (args.save and args.save.lower().endswith('.json')):
@@ -3677,7 +3678,10 @@ def main():
         if args.save and args.save.lower().endswith('.json'):
             # Atomic JSON save
             finder._atomic_write_json(Path(args.save), json_results)
-            print(f"Saved {len(json_results)} results to {args.save}")
+            if args.output == 'json':
+                print(f"Saved {len(json_results)} results to {args.save}", file=sys.stderr)
+            else:
+                print(f"Saved {len(json_results)} results to {args.save}")
         if args.output == 'json':
             print(json.dumps({
                 'version': '1.0',
@@ -3688,7 +3692,12 @@ def main():
         if args.plain_output:
             buffer = io.StringIO()
             finder.print_results(results, stream=buffer)
-            save_plain_report(args.plain_output, buffer.getvalue())
+            save_plain_report(
+                args.plain_output,
+                buffer.getvalue(),
+                notify=args.output != 'json',
+                status_stream=sys.stderr if args.output == 'json' else sys.stdout
+            )
     else:
         if args.plain_output:
             buffer = io.StringIO()
