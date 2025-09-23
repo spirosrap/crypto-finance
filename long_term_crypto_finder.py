@@ -69,6 +69,8 @@ class CryptoFinderConfig:
     top_per_side: Optional[int] = None  # when set, cap results per side
     quotes: Optional[List[str]] = None  # preferred quote currencies, e.g., ["USDC","USD","USDT"]
     max_risk_level: Optional[str] = None  # highest risk level to include (e.g., "MEDIUM")
+    risk_reward_weight: float = 0.15  # influence of risk/reward alignment
+    trend_weight: float = 0.10  # influence of trend alignment
     
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -85,13 +87,28 @@ class CryptoFinderConfig:
         max_risk_level_env = os.getenv('CRYPTO_MAX_RISK_LEVEL')
         max_risk_level = max_risk_level_env.strip() if max_risk_level_env else None
 
+        def _float_env(name: str, default: float) -> float:
+            raw = os.getenv(name)
+            if raw is None:
+                return default
+            try:
+                return float(raw)
+            except ValueError:
+                logging.getLogger(__name__).warning(
+                    "Invalid float value '%s' for %s; using default %.3f",
+                    raw,
+                    name,
+                    default,
+                )
+                return default
+
         return cls(
             min_market_cap=int(os.getenv('CRYPTO_MIN_MARKET_CAP', '100000000')),
             max_results=int(os.getenv('CRYPTO_MAX_RESULTS', '20')),
             max_workers=int(os.getenv('CRYPTO_MAX_WORKERS', '4')),
             request_delay=float(os.getenv('CRYPTO_REQUEST_DELAY', '0.5')),
             cache_ttl=int(os.getenv('CRYPTO_CACHE_TTL', '300')),
-            risk_free_rate=float(os.getenv('CRYPTO_RISK_FREE_RATE', '0.03')),
+            risk_free_rate=_float_env('CRYPTO_RISK_FREE_RATE', 0.03),
             analysis_days=int(os.getenv('CRYPTO_ANALYSIS_DAYS', '365')),
             rsi_period=int(os.getenv('CRYPTO_RSI_PERIOD', '14')),
             atr_period=int(os.getenv('CRYPTO_ATR_PERIOD', '14')),
@@ -105,12 +122,14 @@ class CryptoFinderConfig:
             macd_signal=int(os.getenv('CRYPTO_MACD_SIGNAL', '9')),
             side=os.getenv('CRYPTO_SIDE', 'both').lower(),
             unique_by_symbol=os.getenv('CRYPTO_UNIQUE_BY_SYMBOL', '0') in ('1', 'true', 'True'),
-            min_overall_score=float(os.getenv('CRYPTO_MIN_SCORE', '0')),
+            min_overall_score=_float_env('CRYPTO_MIN_SCORE', 0.0),
             offline=os.getenv('CRYPTO_OFFLINE', '0') in ('1', 'true', 'True'),
             symbols=symbols_list,
-            top_per_side=int(os.getenv('CRYPTO_TOP_PER_SIDE')) if os.getenv('CRYPTO_TOP_PER_SIDE') else None
-            ,quotes=quotes_list
-            ,max_risk_level=max_risk_level
+            top_per_side=int(os.getenv('CRYPTO_TOP_PER_SIDE')) if os.getenv('CRYPTO_TOP_PER_SIDE') else None,
+            quotes=quotes_list,
+            max_risk_level=max_risk_level,
+            risk_reward_weight=_float_env('CRYPTO_RR_WEIGHT', 0.15),
+            trend_weight=_float_env('CRYPTO_TREND_WEIGHT', 0.10),
         )
 
     def to_dict(self) -> Dict:
@@ -139,7 +158,9 @@ class CryptoFinderConfig:
             'top_per_side': self.top_per_side,
             'quotes': self.quotes,
             'offline': self.offline,
-            'max_risk_level': self.max_risk_level.upper() if isinstance(self.max_risk_level, str) else self.max_risk_level
+            'max_risk_level': self.max_risk_level.upper() if isinstance(self.max_risk_level, str) else self.max_risk_level,
+            'risk_reward_weight': self.risk_reward_weight,
+            'trend_weight': self.trend_weight,
         }
 
 # Configure enhanced logging with file rotation
@@ -331,6 +352,11 @@ class LongTermCryptoFinder:
     DEFAULT_RISK_LAMBDA = 1.2
     DEFAULT_VOL_FLOOR_USD = 50000
     DEFAULT_MCAP_FLOOR_USD = 1000000
+    DEFAULT_RR_WEIGHT = 0.15
+    DEFAULT_TREND_WEIGHT = 0.10
+    DEFAULT_RR_SIGMOID_CENTER = 2.0
+    DEFAULT_RR_SIGMOID_K = 1.1
+    DEFAULT_TREND_ALIGN_SCALE = 1.5  # percent per day
     
     # Risk level thresholds
     RISK_THRESHOLDS = {
@@ -411,6 +437,14 @@ class LongTermCryptoFinder:
             self.side = 'both'
 
         self._max_risk_level = self._parse_risk_level(self.config.max_risk_level)
+
+        # Weight overrides for setup quality adjustments (clamped to reasonable bounds)
+        self.risk_reward_weight = float(
+            np.clip(getattr(self.config, 'risk_reward_weight', self.DEFAULT_RR_WEIGHT), 0.0, 0.5)
+        )
+        self.trend_weight = float(
+            np.clip(getattr(self.config, 'trend_weight', self.DEFAULT_TREND_WEIGHT), 0.0, 0.5)
+        )
 
         finder_label = getattr(self, 'FINDER_LABEL', 'Long-Term Crypto Finder')
         logger.info(f"{finder_label} initialized with Coinbase API")
@@ -815,6 +849,47 @@ class LongTermCryptoFinder:
             logger.warning(f"Error in haircut calculation: {e}")
             return np.ones_like(risk_norm)
 
+    def _normalize_setup_components(
+        self, candidates: List["CryptoMetrics"]
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Normalize risk/reward and trend-alignment components for scoring adjustments."""
+        if not candidates:
+            return np.array([], dtype=float), np.array([], dtype=float)
+
+        try:
+            rr_values = np.array(
+                [self._safe_float(getattr(c, 'risk_reward_ratio', 0.0)) for c in candidates],
+                dtype=float,
+            )
+            rr_values = np.nan_to_num(rr_values, nan=0.0, posinf=10.0, neginf=0.0)
+
+            rr_center = float(os.getenv('CRYPTO_RR_SIGMOID_CENTER', str(self.DEFAULT_RR_SIGMOID_CENTER)))
+            rr_center = float(np.clip(rr_center, 0.5, 5.0))
+            rr_k = float(os.getenv('CRYPTO_RR_SIGMOID_K', str(self.DEFAULT_RR_SIGMOID_K)))
+            rr_k = float(np.clip(rr_k, 0.1, 5.0))
+            rr_norm = 1.0 / (1.0 + np.exp(-rr_k * (rr_values - rr_center)))
+
+            trend_bias: List[float] = []
+            for candidate in candidates:
+                raw_trend = self._safe_float(getattr(candidate, 'trend_strength', 0.0))
+                side = (getattr(candidate, 'position_side', 'LONG') or 'LONG').upper()
+                direction = 1.0 if side == 'LONG' else -1.0
+                trend_bias.append(direction * raw_trend)
+
+            trend_array = np.array(trend_bias, dtype=float)
+            trend_array = np.nan_to_num(trend_array, nan=0.0, posinf=0.0, neginf=0.0)
+
+            trend_scale = float(os.getenv('CRYPTO_TREND_ALIGN_SCALE', str(self.DEFAULT_TREND_ALIGN_SCALE)))
+            trend_scale = float(max(0.1, trend_scale))
+            trend_norm = 0.5 + 0.5 * np.tanh(trend_array / trend_scale)
+
+            return np.clip(rr_norm, 0.0, 1.0), np.clip(trend_norm, 0.0, 1.0)
+
+        except Exception as exc:
+            logger.warning(f"Error normalizing setup components: {exc}")
+            neutral = np.full(len(candidates), 0.5, dtype=float)
+            return neutral.copy(), neutral
+
     def _apply_final_scoring(self, candidates: List["CryptoMetrics"], r_tech: List[float], 
                            r_fund: List[float], r_mom: List[float], haircut: np.ndarray, 
                            risk_norm: np.ndarray) -> None:
@@ -827,18 +902,37 @@ class LongTermCryptoFinder:
         
         try:
             # Calculate weighted score
-            weighted_score = (tech_weight * np.array(r_tech) + 
-                            fund_weight * np.array(r_fund) + 
-                            mom_weight * np.array(r_mom))
-            
-            # Apply risk haircut and scale to 0-100
-            final_scores = 100.0 * weighted_score * haircut
-            
+            weighted_score = (
+                tech_weight * np.array(r_tech, dtype=float)
+                + fund_weight * np.array(r_fund, dtype=float)
+                + mom_weight * np.array(r_mom, dtype=float)
+            )
+            weighted_score = np.nan_to_num(weighted_score, nan=0.0, posinf=0.0, neginf=0.0)
+
+            effective_haircut = haircut if haircut.size else np.ones_like(weighted_score)
+            base_score = weighted_score * effective_haircut
+
+            rr_norm, trend_norm = self._normalize_setup_components(candidates)
+            setup_adjustment = np.zeros_like(base_score)
+
+            if rr_norm.size:
+                setup_adjustment += self.risk_reward_weight * (rr_norm - 0.5)
+            if trend_norm.size:
+                setup_adjustment += self.trend_weight * (trend_norm - 0.5)
+
+            enhanced_score = np.clip(base_score + setup_adjustment, 0.0, 1.0)
+            final_scores = 100.0 * enhanced_score
+
             # Assign scores and risk levels
             for idx, candidate in enumerate(candidates):
                 candidate.overall_score = float(max(0.0, min(100.0, final_scores[idx])))
                 candidate.risk_score = float(np.clip(risk_norm[idx], 0.0, 1.0)) * 100.0
                 candidate.risk_level = self._determine_risk_level(risk_norm[idx])
+                if rr_norm.size:
+                    setattr(candidate, 'risk_reward_bias', float(np.clip(rr_norm[idx], 0.0, 1.0)))
+                if trend_norm.size:
+                    setattr(candidate, 'trend_alignment', float(np.clip(trend_norm[idx], 0.0, 1.0)))
+                setattr(candidate, 'score_adjustment_setup', float(setup_adjustment[idx]))
                 
         except Exception as e:
             logger.error(f"Error in final scoring: {e}")

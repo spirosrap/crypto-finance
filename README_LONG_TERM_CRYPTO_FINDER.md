@@ -18,6 +18,7 @@ A comprehensive Python program that analyzes cryptocurrencies to identify the be
 - **Technical Score (SHORT)**: Inverted bias — RSI overbought favored, MACD bearish, BB overbought, negative trend strength, and short momentum derived from `100 - long_momentum`.
 - **Fundamental Score**: Based on market metrics and positioning (shared across sides).
 - **Risk Score**: Comprehensive risk assessment with risk level classification (shared across sides).
+- **Setup Quality Boost**: The final rank now rewards favourable risk:reward ratios and side-aware trend alignment before clamping to 0–100. Adjust the weighting via `CRYPTO_RR_WEIGHT` and `CRYPTO_TREND_WEIGHT` if you need a more or less aggressive bias.
 
 ### 🎯 Key Metrics Evaluated
 - **Volatility (30-day)**: Price stability assessment
@@ -112,6 +113,11 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 - `CRYPTO_CB_CONCURRENCY`: Max in-flight Coinbase requests (default `3`)
 - `CRYPTO_MIN_MARKET_CAP`: Default filter for market cap (default `$100,000,000`)
 - `CRYPTO_MAX_RISK_LEVEL`: Maximum risk level to include (e.g., `MEDIUM`)
+- `CRYPTO_RR_WEIGHT`: Weight applied to risk/reward bias during final scoring (default `0.15`)
+- `CRYPTO_TREND_WEIGHT`: Weight applied to trend-alignment bias during final scoring (default `0.10`)
+- `CRYPTO_RR_SIGMOID_CENTER`: Risk/reward value treated as neutral (default `2.0`)
+- `CRYPTO_RR_SIGMOID_K`: Steepness of the risk/reward sigmoid curve (default `1.1`)
+- `CRYPTO_TREND_ALIGN_SCALE`: Percent-per-day range where trend alignment saturates (default `1.5`)
 
 See `CryptoFinderConfig.from_env()` for the authoritative list and defaults.
 
