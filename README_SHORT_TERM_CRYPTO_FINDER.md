@@ -12,8 +12,11 @@ stops and closer profit targets.
   to spotlight momentum shifts.
 - **High-Frequency Indicators**: Shorter RSI (7), MACD (8/21/5), and ATR (7)
   to respond quickly to volatility regime changes.
-- **Volume Confirmation**: Volume spike heuristics factor directly into the
-  technical composite score.
+- **Volume Confirmation**: Volume spike heuristics and rolling 3-vs-15 day
+  volume thrust sit inside the technical composite score.
+- **Impulse & Breakout Context**: Fresh 3/10/21-day return differentials,
+  breakout/breakdown distance, and ADX strength reward genuine momentum
+  accelerations instead of stagnant mean reversion.
 - **Momentum Score**: Uses a 20–45 bar log-price regression to capture swing
   acceleration.
 
@@ -22,7 +25,7 @@ stops and closer profit targets.
   signals after risk-haircutting.
 - **Side-Specific Technical Scores**: Separate logic for LONG vs. SHORT to
   reward the right combination of RSI, MACD bias, Bollinger posture, local
-  trend slope, and volume ratio.
+  trend slope, ADX strength, volume ratio/thrust, and impulse follow-through.
 - **Risk Controls**: Risk bands (`LOW` → `VERY_HIGH`), volatility awareness,
   and min-score thresholds ensure crowded or weak setups can be excluded.
 
@@ -138,7 +141,8 @@ per-asset cards containing:
 
 1. **Snapshot Metrics**: price, market cap/rank, 24h/7d/30d change, ATH/ATL,
    volatility, Sharpe/Sortino, drawdown, RSI, MACD bias, Bollinger stance,
-   trend strength, scores, and risk classification.
+   trend strength, ADX, impulse/continuation, recent breakout distance,
+   scores, and risk classification.
 2. **Trading Levels**: entry, stop, target, risk:reward, and suggested
    position size.
 3. **Short-Line Summary**: one-line punchlist (`score`, `RR`, `RSI`, MACD

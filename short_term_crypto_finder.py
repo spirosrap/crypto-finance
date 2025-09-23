@@ -164,6 +164,79 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         super().__init__(config=cfg)
         logger.info("Short-term finder configured: %s", cfg.to_dict())
 
+    def calculate_technical_indicators(self, df: pd.DataFrame) -> Dict:  # type: ignore[override]
+        """Augment base indicators with short-horizon impulse context."""
+
+        metrics = super().calculate_technical_indicators(df)
+
+        try:
+            if df.empty:
+                metrics.setdefault('volume_thrust_3_15', 1.0)
+                metrics.setdefault('impulse_3v10', 0.0)
+                metrics.setdefault('continuation_10v21', 0.0)
+                metrics.setdefault('return_3d', 0.0)
+                metrics.setdefault('return_10d', 0.0)
+                metrics.setdefault('return_21d', 0.0)
+                metrics.setdefault('up_day_ratio_7', 0.5)
+                metrics.setdefault('breakout_distance_5d', 0.0)
+                metrics.setdefault('breakdown_distance_5d', 0.0)
+                return metrics
+
+            prices = df['price'].astype(float)
+            volumes = df['volume'].astype(float)
+
+            def _pct_change(window: int) -> float:
+                if len(prices) < window + 1:
+                    return 0.0
+                past_price = float(prices.iloc[-(window + 1)])
+                current_price = float(prices.iloc[-1])
+                if past_price <= 0:
+                    return 0.0
+                return (current_price / past_price) - 1.0
+
+            return_3d = _pct_change(3)
+            return_10d = _pct_change(10) if len(prices) >= 11 else return_3d
+            return_21d = _pct_change(21) if len(prices) >= 22 else return_10d
+
+            impulse = return_3d - 0.5 * return_10d
+            continuation = return_10d - 0.5 * return_21d
+
+            short_vol = float(volumes.tail(3).mean()) if len(volumes) else 0.0
+            mid_vol = float(volumes.tail(15).mean()) if len(volumes) else short_vol
+            volume_thrust = 1.0
+            if mid_vol > 0:
+                volume_thrust = float(np.clip(short_vol / mid_vol, 0.1, 10.0))
+
+            up_moves = prices.pct_change().tail(6)
+            up_ratio = float((up_moves > 0).sum()) / max(len(up_moves), 1)
+
+            current_price = float(prices.iloc[-1])
+            recent_high = float(df['high'].tail(5).max()) if len(df) >= 5 else float(df['high'].iloc[-1])
+            recent_low = float(df['low'].tail(5).min()) if len(df) >= 5 else float(df['low'].iloc[-1])
+
+            breakout_distance = 0.0
+            if recent_high > 0:
+                breakout_distance = float(np.clip(current_price / recent_high - 1.0, -1.0, 1.0))
+
+            breakdown_distance = 0.0
+            if current_price > 0 and recent_low > 0:
+                breakdown_distance = float(np.clip(recent_low / current_price - 1.0, -1.0, 1.0))
+
+            metrics['return_3d'] = return_3d
+            metrics['return_10d'] = return_10d
+            metrics['return_21d'] = return_21d
+            metrics['impulse_3v10'] = impulse
+            metrics['continuation_10v21'] = continuation
+            metrics['volume_thrust_3_15'] = volume_thrust
+            metrics['up_day_ratio_7'] = float(np.clip(up_ratio, 0.0, 1.0))
+            metrics['breakout_distance_5d'] = breakout_distance
+            metrics['breakdown_distance_5d'] = breakdown_distance
+
+        except Exception as exc:
+            logger.warning("Failed to enrich short-term indicators: %s", exc)
+
+        return metrics
+
     # ------------------------------------------------------------------
     # Momentum: use 20-45 day slope for quicker signal capture
     # ------------------------------------------------------------------
@@ -210,11 +283,11 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
                 rsi_score = 78
             elif rsi < 42:
                 rsi_score = 92
-            elif rsi <= 65:
+            elif rsi <= 68:
                 rsi_score = 65
             else:
-                rsi_score = 45
-            score += rsi_score * 0.25
+                rsi_score = 48
+            score += rsi_score * 0.20
 
             macd = technical_metrics.get('macd_signal', 'NEUTRAL')
             if macd == 'BULLISH':
@@ -223,7 +296,7 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
                 macd_score = 60
             else:
                 macd_score = 40
-            score += macd_score * 0.15
+            score += macd_score * 0.12
 
             bb = technical_metrics.get('bb_position', 'NEUTRAL')
             if bb == 'OVERSOLD':
@@ -232,35 +305,53 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
                 bb_score = 60
             else:
                 bb_score = 45
-            score += bb_score * 0.15
+            score += bb_score * 0.12
 
             trend = float(technical_metrics.get('trend_strength', 0.0))
-            if trend > 0.8:
-                trend_score = 88
-            elif trend > 0.2:
-                trend_score = 72
-            elif trend > -0.1:
-                trend_score = 55
+            if trend > 0.9:
+                trend_score = 90
+            elif trend > 0.25:
+                trend_score = 76
+            elif trend > -0.05:
+                trend_score = 58
             else:
-                trend_score = 35
-            score += trend_score * 0.15
+                trend_score = 38
+            score += trend_score * 0.12
+
+            adx = float(technical_metrics.get('adx', 0.0))
+            adx_score = 55.0 + 35.0 * np.tanh((adx - 22.0) / 12.0)
+            score += adx_score * 0.08
 
             vol_ratio = float(technical_metrics.get('volume_ratio', 1.0))
             if vol_ratio >= 1.8:
                 volume_score = 90
-            elif vol_ratio >= 1.3:
+            elif vol_ratio >= 1.25:
                 volume_score = 75
-            elif vol_ratio >= 1.0:
-                volume_score = 60
+            elif vol_ratio >= 0.95:
+                volume_score = 58
             else:
-                volume_score = 45
-            score += volume_score * 0.10
+                volume_score = 40
+            score += volume_score * 0.08
 
-            score += np.clip(momentum_score, 0.0, 100.0) * 0.20
+            volume_thrust = float(technical_metrics.get('volume_thrust_3_15', 1.0) or 1.0)
+            vol_thrust_score = 55.0 + 35.0 * np.tanh((volume_thrust - 1.0) / 0.5)
+            score += vol_thrust_score * 0.04
+
+            impulse_val = float(technical_metrics.get('impulse_3v10', 0.0) or 0.0)
+            continuation_val = float(technical_metrics.get('continuation_10v21', 0.0) or 0.0)
+            impulse_combo = impulse_val + 0.5 * continuation_val
+            impulse_score = 55.0 + 35.0 * np.tanh(impulse_combo / 0.05)
+            score += impulse_score * 0.06
+
+            score += np.clip(momentum_score, 0.0, 100.0) * 0.18
 
             if technical_metrics.get('macd_cross'):
                 hist = float(technical_metrics.get('macd_hist', 0.0) or 0.0)
                 score += 4 if hist > 0 else -4
+
+            breakout_bonus = float(technical_metrics.get('breakout_distance_5d', 0.0) or 0.0)
+            if breakout_bonus > 0:
+                score += float(np.clip(breakout_bonus * 400.0, 0.0, 6.0))
 
             return float(np.clip(score, 0.0, 100.0))
         except Exception as exc:
@@ -272,58 +363,75 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             score = 0.0
 
             rsi = float(technical_metrics.get('rsi_14', 50.0))
-            if rsi >= 68:
-                rsi_score = 92
+            if rsi >= 70:
+                rsi_score = 94
             elif rsi >= 55:
-                rsi_score = 75
+                rsi_score = 76
             elif rsi >= 40:
                 rsi_score = 58
             else:
                 rsi_score = 40
-            score += rsi_score * 0.25
+            score += rsi_score * 0.20
 
             macd = technical_metrics.get('macd_signal', 'NEUTRAL')
             if macd == 'BEARISH':
-                macd_score = 85
+                macd_score = 88
             elif macd == 'NEUTRAL':
                 macd_score = 60
             else:
-                macd_score = 40
-            score += macd_score * 0.15
+                macd_score = 42
+            score += macd_score * 0.12
 
             bb = technical_metrics.get('bb_position', 'NEUTRAL')
             if bb == 'OVERBOUGHT':
-                bb_score = 88
+                bb_score = 90
             elif bb == 'NEUTRAL':
                 bb_score = 60
             else:
                 bb_score = 45
-            score += bb_score * 0.15
+            score += bb_score * 0.12
 
             trend = float(technical_metrics.get('trend_strength', 0.0))
-            if trend < -0.8:
-                trend_score = 88
-            elif trend < -0.2:
+            if trend < -0.9:
+                trend_score = 90
+            elif trend < -0.25:
                 trend_score = 74
-            elif trend < 0.1:
-                trend_score = 55
+            elif trend < 0.05:
+                trend_score = 56
             else:
                 trend_score = 35
-            score += trend_score * 0.15
+            score += trend_score * 0.12
+
+            adx = float(technical_metrics.get('adx', 0.0))
+            adx_score = 55.0 + 35.0 * np.tanh((adx - 22.0) / 12.0)
+            score += adx_score * 0.08
 
             vol_ratio = float(technical_metrics.get('volume_ratio', 1.0))
             if vol_ratio >= 1.8:
                 volume_score = 88
-            elif vol_ratio >= 1.3:
+            elif vol_ratio >= 1.25:
                 volume_score = 72
-            elif vol_ratio >= 1.0:
+            elif vol_ratio >= 0.95:
                 volume_score = 55
             else:
-                volume_score = 45
-            score += volume_score * 0.10
+                volume_score = 42
+            score += volume_score * 0.08
+
+            volume_thrust = float(technical_metrics.get('volume_thrust_3_15', 1.0) or 1.0)
+            vol_thrust_score = 55.0 + 35.0 * np.tanh((volume_thrust - 1.0) / 0.5)
+            score += vol_thrust_score * 0.04
+
+            impulse_val = float(technical_metrics.get('impulse_3v10', 0.0) or 0.0)
+            continuation_val = float(technical_metrics.get('continuation_10v21', 0.0) or 0.0)
+            impulse_combo = -(impulse_val + 0.5 * continuation_val)
+            impulse_score = 55.0 + 35.0 * np.tanh(impulse_combo / 0.05)
+            breakdown_bonus = float(technical_metrics.get('breakdown_distance_5d', 0.0) or 0.0)
+            if breakdown_bonus > 0:
+                impulse_score += float(np.clip(breakdown_bonus * 400.0, 0.0, 6.0))
+            score += impulse_score * 0.06
 
             short_momentum = np.clip(100.0 - momentum_score_long, 0.0, 100.0)
-            score += short_momentum * 0.20
+            score += short_momentum * 0.18
 
             if technical_metrics.get('macd_cross'):
                 hist = float(technical_metrics.get('macd_hist', 0.0) or 0.0)
