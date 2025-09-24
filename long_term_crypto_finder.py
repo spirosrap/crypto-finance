@@ -48,6 +48,7 @@ class CryptoFinderConfig:
     max_workers: int = 4
     request_delay: float = 0.5  # seconds
     cache_ttl: int = 300  # 5 minutes
+    force_refresh_candles: bool = False  # bypass candle caches when true
     risk_free_rate: float = 0.03  # 3% annual
     analysis_days: int = 365
     rsi_period: int = 14
@@ -108,6 +109,7 @@ class CryptoFinderConfig:
             max_workers=int(os.getenv('CRYPTO_MAX_WORKERS', '4')),
             request_delay=float(os.getenv('CRYPTO_REQUEST_DELAY', '0.5')),
             cache_ttl=int(os.getenv('CRYPTO_CACHE_TTL', '300')),
+            force_refresh_candles=os.getenv('CRYPTO_FORCE_REFRESH_CANDLES', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
             risk_free_rate=_float_env('CRYPTO_RISK_FREE_RATE', 0.03),
             analysis_days=int(os.getenv('CRYPTO_ANALYSIS_DAYS', '365')),
             rsi_period=int(os.getenv('CRYPTO_RSI_PERIOD', '14')),
@@ -140,6 +142,7 @@ class CryptoFinderConfig:
             'max_workers': self.max_workers,
             'request_delay': self.request_delay,
             'cache_ttl': self.cache_ttl,
+            'force_refresh_candles': self.force_refresh_candles,
             'risk_free_rate': self.risk_free_rate,
             'analysis_days': self.analysis_days,
             'rsi_period': self.rsi_period,
@@ -388,6 +391,12 @@ class LongTermCryptoFinder:
         # Initialize Coinbase service
         self.coinbase_service = CoinbaseService(self.api_key, self.api_secret)
         self.historical_data = HistoricalData(self.coinbase_service.client)
+        self.historical_data.set_force_refresh(bool(self.config.force_refresh_candles))
+        if getattr(self.config, 'force_refresh_candles', False):
+            try:
+                self._cached_candles.cache_clear()  # type: ignore[attr-defined]
+            except AttributeError:
+                pass
 
         # HTTP session with retries + backoff
         self._sess = requests.Session()
@@ -1597,7 +1606,8 @@ class LongTermCryptoFinder:
                     product_id,
                     start_time,
                     current_time,
-                    "ONE_HOUR"
+                    "ONE_HOUR",
+                    force_refresh=self.config.force_refresh_candles,
                 )
 
             if not candles or len(candles) == 0:
@@ -2012,7 +2022,13 @@ class LongTermCryptoFinder:
             # Throttle Coinbase historical fetches to avoid burst rate limits
             self._throttle()
             with self._cb_sem:
-                data = self.historical_data.get_historical_data(product_id, start_time, end_time, granularity)
+                data = self.historical_data.get_historical_data(
+                    product_id,
+                    start_time,
+                    end_time,
+                    granularity,
+                    force_refresh=self.config.force_refresh_candles,
+                )
             return tuple(data or [])
         except Exception as e:
             logger.warning(f"Cached candles retrieval failed for {product_id}: {e}")

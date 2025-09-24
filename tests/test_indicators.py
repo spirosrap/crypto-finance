@@ -181,7 +181,7 @@ class TestIndicators(unittest.TestCase):
     def test_lru_candles(self):
         calls = {'n': 0}
         # Patch underlying historical_data.get_historical_data
-        def fake_get(product_id, start, end, gran):
+        def fake_get(product_id, start, end, gran, **kwargs):
             calls['n'] += 1
             return [{'start': int(start.timestamp()), 'open': 1, 'high': 2, 'low': 0.5, 'close': 1.5, 'volume': 10}]
         self.finder.historical_data.get_historical_data = fake_get  # type: ignore

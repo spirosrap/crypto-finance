@@ -124,6 +124,7 @@ def build_short_term_config() -> CryptoFinderConfig:
         int,
     )
     cfg.risk_free_rate = _env_override("SHORT_RISK_FREE_RATE", 0.01, float)
+    cfg.force_refresh_candles = _env_flag("SHORT_FORCE_REFRESH_CANDLES", True)
 
     # Faster indicator defaults
     cfg.rsi_period = _env_override("SHORT_RSI_PERIOD", 7, int)
@@ -624,6 +625,9 @@ def main() -> None:
                         help=f"Override worker threads for API fetches (default: {env_defaults.max_workers}; profile may override)")
     parser.add_argument('--offline', action='store_true', default=env_defaults.offline,
                         help='Use cache only; skip network requests where possible')
+    parser.add_argument('--force-refresh', action=argparse.BooleanOptionalAction,
+                        default=env_defaults.force_refresh_candles,
+                        help='Force fresh candle downloads instead of using cache (default: %(default)s)')
     parser.add_argument('--quotes', type=str,
                         help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT')
     parser.add_argument('--risk-free-rate', type=float, default=env_defaults.risk_free_rate,
@@ -664,6 +668,11 @@ def main() -> None:
     config.risk_free_rate = args.risk_free_rate
     config.analysis_days = final_analysis_days
     config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
+    config.force_refresh_candles = bool(args.force_refresh)
+
+    if config.offline and config.force_refresh_candles:
+        logger.warning("Force refresh disabled because offline mode is enabled; using cached candles only.")
+        config.force_refresh_candles = False
 
     config.symbols = None
     if args.symbols:

@@ -21,13 +21,15 @@ CHUNK_SIZE_CANDLES = {
 }
 
 CACHE_DIR = "candle_data"
-CACHE_TTL = 3600  # Cache time-to-live in seconds (1 hour)
+DEFAULT_CACHE_TTL = 3600  # Cache time-to-live in seconds (1 hour)
 
 class HistoricalData:
     
-    def __init__(self, client: RESTClient):
+    def __init__(self, client: RESTClient, cache_ttl: int = DEFAULT_CACHE_TTL, force_refresh: bool = False):
         self.client = client
         self.logger = logging.getLogger(__name__)
+        self.cache_ttl = max(0, int(cache_ttl))
+        self.force_refresh = bool(force_refresh)
         self._init_cache()
 
     def _init_cache(self):
@@ -48,11 +50,16 @@ class HistoricalData:
             end_hour = end - (end % 3600)
         key_parts = f"{product_id}_{start_hour}_{end_hour}_{granularity}"
         cache_key = hashlib.md5(key_parts.encode()).hexdigest()
-        self.logger.debug(f"Generated cache key {cache_key} for {product_id} from {datetime.fromtimestamp(start)} to {datetime.fromtimestamp(end)}")
+        self.logger.debug(
+            f"Generated cache key {cache_key} for {product_id} from {datetime.fromtimestamp(start)} to {datetime.fromtimestamp(end)}"
+        )
         return cache_key
 
     def _get_cached_data(self, cache_key: str, end_timestamp: int) -> Optional[List[dict]]:
         """Retrieve cached data if it exists and is not expired."""
+        if self.force_refresh or self.cache_ttl <= 0:
+            self.logger.debug(f"Force refresh enabled; bypassing cache for {cache_key}")
+            return None
         cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
         
         if not os.path.exists(cache_file):
@@ -64,7 +71,7 @@ class HistoricalData:
                 cached_data = json.load(f)
 
             # Check if cache is expired
-            if time.time() - cached_data['timestamp'] > CACHE_TTL:
+            if time.time() - cached_data['timestamp'] > self.cache_ttl:
                 self.logger.debug(f"Cache expired: {cache_key}")
                 os.remove(cache_file)
                 return None
@@ -103,6 +110,9 @@ class HistoricalData:
 
     def _cache_data(self, cache_key: str, candles: List[dict]):
         """Cache the candle data to a file."""
+        if self.cache_ttl <= 0:
+            self.logger.debug("Cache TTL <= 0; skipping cache write")
+            return
         cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
         try:
             # Convert Candle objects to dictionaries if needed
@@ -119,7 +129,18 @@ class HistoricalData:
         except Exception as e:
             self.logger.error(f"Error writing to cache file: {e}")
 
-    def get_historical_data(self, product_id: str, start_date: datetime, end_date: datetime, granularity: str = "ONE_HOUR") -> List[dict]:
+    def set_force_refresh(self, value: bool) -> None:
+        """Toggle force-refresh behaviour for candle downloads."""
+        self.force_refresh = bool(value)
+
+    def get_historical_data(
+        self,
+        product_id: str,
+        start_date: datetime,
+        end_date: datetime,
+        granularity: str = "ONE_HOUR",
+        force_refresh: Optional[bool] = None,
+    ) -> List[dict]:
         all_candles = []
         current_start = start_date
         chunk_size_hours = CHUNK_SIZE_CANDLES.get(granularity, 300)  # Default to 300 hours for ONE_HOUR
@@ -131,6 +152,8 @@ class HistoricalData:
         # Track data sources for summary
         cached_ranges = []
         fetched_ranges = []
+
+        refresh = self.force_refresh if force_refresh is None else bool(force_refresh)
 
         while current_start < end_date:
             current_end = min(current_start + chunk_size, end_date)
@@ -144,7 +167,7 @@ class HistoricalData:
 
             # Try to get data from cache first
             cache_key = self._get_cache_key(product_id, start, end, granularity)
-            cached_candles = self._get_cached_data(cache_key, end)
+            cached_candles = None if refresh else self._get_cached_data(cache_key, end)
 
             if cached_candles is not None:
                 # Add only unseen candles
@@ -179,9 +202,9 @@ class HistoricalData:
                     
                     # Only cache if not in the current time period
                     current_time = int(time.time())
-                    if current_time - end >= 3600:  # Not within the last hour
+                    if (not refresh) and current_time - end >= 3600:  # Not within the last hour
                         self._cache_data(cache_key, candle_dicts)
-                    
+
                     all_candles.extend(new_candles)
                     fetched_ranges.append((time_range, len(new_candles)))
                     self.logger.debug(f"Fetched {len(new_candles)} new candles from API for {product_id}")
@@ -240,3 +263,4 @@ class HistoricalData:
             self.logger.error(f"Error clearing cache: {e}")
 
     # Additional methods related to historical data can be added here
+
