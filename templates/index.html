@@ -145,6 +145,103 @@
             
             <!-- Main Content -->
             <div class="col-md-9 main-content">
+                <div class="hero-section card mb-4 overflow-hidden position-relative">
+                    <div class="row g-0 align-items-center position-relative z-1">
+                        <div class="col-lg-7 p-4 p-lg-5">
+                            <div class="hero-eyebrow mb-2"><i class="fas fa-satellite-dish me-2"></i>Live AI Market Intelligence</div>
+                            <h1 class="hero-title mb-3">Stay Ahead Of Every Move</h1>
+                            <p class="hero-subtitle mb-4">Visualize momentum, liquidity, and risk in one unified view for <span class="hero-highlight">{{ config.product }}</span> pairs powered by <span class="hero-highlight">{{ models[config.model] }}</span>.</p>
+                            <div class="hero-pills d-flex flex-wrap gap-2">
+                                <span class="hero-pill"><i class="fas fa-wave-square me-2"></i>Order Flow Tracking</span>
+                                <span class="hero-pill"><i class="fas fa-brain me-2"></i>AI Signal Overlay</span>
+                                <span class="hero-pill"><i class="fas fa-stopwatch me-2"></i>{{ config.granularity.replace('_', ' ').title() }} Refresh</span>
+                            </div>
+                        </div>
+                        <div class="col-lg-5 p-4">
+                            <div class="hero-visual-frame mx-auto">
+                                <img src="{{ url_for('static', filename='images/hero-orbit.svg') }}" class="hero-visual img-fluid" alt="Abstract orbital market visualization">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="hero-glow hero-glow-1"></div>
+                    <div class="hero-glow hero-glow-2"></div>
+                </div>
+
+                <div class="row g-3 mb-4 visual-highlights">
+                    <div class="col-lg-4 col-md-6">
+                        <div class="visual-card">
+                            <div class="visual-card-header">
+                                <div class="visual-icon bg-gradient-blue"><i class="fas fa-circle-notch"></i></div>
+                                <div>
+                                    <h6 class="mb-1">Momentum Snapshot</h6>
+                                    <small class="text-muted">Intraday trend strength</small>
+                                </div>
+                            </div>
+                            <div class="visual-spark">
+                                <svg class="sparkline" viewBox="0 0 120 48" role="img" aria-label="Momentum sparkline" preserveAspectRatio="none">
+                                    <defs>
+                                        <linearGradient id="spark-gradient-momentum" x1="0%" y1="0%" x2="100%" y2="0%">
+                                            <stop offset="0%" stop-color="#53f3ff" />
+                                            <stop offset="100%" stop-color="#4b7bff" />
+                                        </linearGradient>
+                                    </defs>
+                                    <path d="M0 32 C 15 34 18 14 32 18 C 46 22 54 6 68 12 C 82 18 90 8 104 14 C 114 18 118 10 120 8 L120 48 L0 48 Z" fill="url(#spark-gradient-momentum)" opacity="0.18"></path>
+                                    <path d="M0 32 C 15 34 18 14 32 18 C 46 22 54 6 68 12 C 82 18 90 8 104 14 C 114 18 118 10 120 8" fill="none" stroke="url(#spark-gradient-momentum)" stroke-width="3" stroke-linecap="round"></path>
+                                </svg>
+                            </div>
+                            <p class="visual-description mb-0">Track how quickly price accelerates against the 24h baseline to refine breakout timing.</p>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-md-6">
+                        <div class="visual-card">
+                            <div class="visual-card-header">
+                                <div class="visual-icon bg-gradient-purple"><i class="fas fa-water"></i></div>
+                                <div>
+                                    <h6 class="mb-1">Liquidity Rivers</h6>
+                                    <small class="text-muted">Order book depth map</small>
+                                </div>
+                            </div>
+                            <div class="visual-spark">
+                                <svg class="sparkline" viewBox="0 0 120 48" role="img" aria-label="Liquidity sparkline" preserveAspectRatio="none">
+                                    <defs>
+                                        <linearGradient id="spark-gradient-liquidity" x1="0%" y1="0%" x2="100%" y2="100%">
+                                            <stop offset="0%" stop-color="#c084fc" />
+                                            <stop offset="100%" stop-color="#7b2ff7" />
+                                        </linearGradient>
+                                    </defs>
+                                    <path d="M0 40 C 10 36 20 34 30 28 C 40 22 48 30 58 24 C 68 18 82 20 92 14 C 102 8 112 10 120 6 L120 48 L0 48 Z" fill="url(#spark-gradient-liquidity)" opacity="0.2"></path>
+                                    <path d="M0 40 C 10 36 20 34 30 28 C 40 22 48 30 58 24 C 68 18 82 20 92 14 C 102 8 112 10 120 6" fill="none" stroke="url(#spark-gradient-liquidity)" stroke-width="3" stroke-linecap="round"></path>
+                                </svg>
+                            </div>
+                            <p class="visual-description mb-0">Spot liquidity pools before they move by visualizing stacked bid and ask pressure in real time.</p>
+                        </div>
+                    </div>
+                    <div class="col-lg-4 col-md-6">
+                        <div class="visual-card">
+                            <div class="visual-card-header">
+                                <div class="visual-icon bg-gradient-amber"><i class="fas fa-sun"></i></div>
+                                <div>
+                                    <h6 class="mb-1">Sentiment Pulse</h6>
+                                    <small class="text-muted">News & social drift</small>
+                                </div>
+                            </div>
+                            <div class="visual-spark">
+                                <svg class="sparkline" viewBox="0 0 120 48" role="img" aria-label="Sentiment sparkline" preserveAspectRatio="none">
+                                    <defs>
+                                        <linearGradient id="spark-gradient-sentiment" x1="0%" y1="0%" x2="100%" y2="0%">
+                                            <stop offset="0%" stop-color="#ffb347" />
+                                            <stop offset="100%" stop-color="#ff6b6b" />
+                                        </linearGradient>
+                                    </defs>
+                                    <path d="M0 36 C 12 30 20 28 32 22 C 46 14 54 26 68 20 C 82 14 92 26 104 18 C 112 12 118 22 120 24 L120 48 L0 48 Z" fill="url(#spark-gradient-sentiment)" opacity="0.18"></path>
+                                    <path d="M0 36 C 12 30 20 28 32 22 C 46 14 54 26 68 20 C 82 14 92 26 104 18 C 112 12 118 22 120 24" fill="none" stroke="url(#spark-gradient-sentiment)" stroke-width="3" stroke-linecap="round"></path>
+                                </svg>
+                            </div>
+                            <p class="visual-description mb-0">Blend news tone and community chatter to gauge when momentum aligns with narrative shifts.</p>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Dashboard Summary Stats -->
                 <div class="row mb-4 mt-3">
                     <div class="col-md-3">

@@ -455,6 +455,191 @@ h1, h2, h3, h4, h5, h6 {
     margin-bottom: 15px;
 }
 
+/* Hero Section */
+.hero-section {
+    background: radial-gradient(circle at top right, rgba(76, 110, 245, 0.25), transparent 45%),
+                linear-gradient(135deg, rgba(16, 24, 39, 0.98), rgba(27, 36, 61, 0.95));
+    border: 1px solid rgba(95, 120, 210, 0.25);
+    border-radius: 16px;
+    box-shadow: 0 25px 45px rgba(10, 14, 40, 0.45);
+    position: relative;
+    overflow: hidden;
+}
+
+.hero-section .row {
+    position: relative;
+    z-index: 2;
+}
+
+.hero-eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #8fa5ff;
+}
+
+.hero-title {
+    font-size: 36px;
+    font-weight: 700;
+    color: #f5f8ff;
+    letter-spacing: 0.6px;
+}
+
+.hero-subtitle {
+    color: #cbd3ff;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.hero-highlight {
+    color: #6ad7ff;
+    font-weight: 600;
+}
+
+.hero-pills {
+    display: flex;
+    align-items: center;
+}
+
+.hero-pill {
+    background: linear-gradient(120deg, rgba(97, 139, 255, 0.35), rgba(80, 214, 255, 0.35));
+    border: 1px solid rgba(124, 165, 255, 0.4);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: #e5ecff;
+    display: inline-flex;
+    align-items: center;
+    backdrop-filter: blur(6px);
+}
+
+.hero-pill i {
+    font-size: 13px;
+}
+
+.hero-visual-frame {
+    background: radial-gradient(circle at 30% 20%, rgba(80, 214, 255, 0.35), transparent 55%),
+                rgba(16, 20, 35, 0.6);
+    border: 1px solid rgba(134, 153, 255, 0.35);
+    border-radius: 18px;
+    padding: 24px;
+    max-width: 320px;
+    position: relative;
+    overflow: hidden;
+}
+
+.hero-visual {
+    display: block;
+    width: 100%;
+    height: auto;
+    filter: drop-shadow(0 18px 25px rgba(0, 0, 0, 0.55));
+}
+
+.hero-glow {
+    position: absolute;
+    width: 340px;
+    height: 340px;
+    border-radius: 50%;
+    filter: blur(120px);
+    opacity: 0.65;
+    pointer-events: none;
+}
+
+.hero-glow-1 {
+    background: rgba(67, 110, 255, 0.55);
+    top: -140px;
+    right: -120px;
+}
+
+.hero-glow-2 {
+    background: rgba(95, 236, 255, 0.45);
+    bottom: -180px;
+    left: -140px;
+}
+
+/* Visual Highlight Cards */
+.visual-highlights {
+    position: relative;
+    z-index: 1;
+}
+
+.visual-card {
+    background: rgba(30, 35, 55, 0.85);
+    border-radius: 14px;
+    padding: 18px;
+    border: 1px solid rgba(117, 137, 199, 0.18);
+    box-shadow: 0 18px 28px rgba(8, 12, 28, 0.35);
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.visual-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(83, 160, 255, 0.08), transparent 60%);
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+
+.visual-card:hover {
+    transform: translateY(-6px);
+    box-shadow: 0 22px 35px rgba(10, 16, 40, 0.45);
+}
+
+.visual-card:hover::before {
+    opacity: 1;
+}
+
+.visual-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.visual-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 18px;
+    box-shadow: 0 10px 18px rgba(0, 0, 0, 0.35);
+}
+
+.bg-gradient-blue {
+    background: linear-gradient(135deg, #4ac0ff, #5b63ff);
+}
+
+.bg-gradient-purple {
+    background: linear-gradient(135deg, #c084fc, #7b2ff7);
+}
+
+.bg-gradient-amber {
+    background: linear-gradient(135deg, #ffb347, #ff6b6b);
+}
+
+.visual-spark {
+    height: 70px;
+    margin-bottom: 12px;
+}
+
+.sparkline {
+    width: 100%;
+    height: 100%;
+}
+
+.visual-description {
+    color: #d3dcff;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
 /* Responsive Adjustments */
 @media (max-width: 768px) {
     .sidebar {
@@ -470,4 +655,13 @@ h1, h2, h3, h4, h5, h6 {
     .row {
         height: auto;
     }
-} 
+
+    .hero-title {
+        font-size: 28px;
+    }
+
+    .hero-visual-frame {
+        max-width: 260px;
+        margin-top: 20px;
+    }
+}

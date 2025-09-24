@@ -1,0 +1,41 @@
+<svg width="360" height="260" viewBox="0 0 360 260" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="heroOrbitTitle heroOrbitDesc">
+  <title id="heroOrbitTitle">Stylized orbital crypto visualization</title>
+  <desc id="heroOrbitDesc">Concentric rings and nodes representing networked crypto market flows.</desc>
+  <defs>
+    <linearGradient id="orbit-gradient" x1="40" y1="40" x2="320" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5BC0FF" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#6D5BFF" stop-opacity="0.6"/>
+    </linearGradient>
+    <radialGradient id="core-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(180 130) rotate(90) scale(120 160)">
+      <stop stop-color="#4BE6FF" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#04071A" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="0" y="0" width="360" height="260" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="360" height="260" rx="28" fill="#0D1325"/>
+  <rect width="360" height="260" rx="28" fill="url(#core-glow)"/>
+  <g filter="url(#shadow)">
+    <ellipse cx="180" cy="130" rx="122" ry="78" stroke="url(#orbit-gradient)" stroke-width="1.4" stroke-dasharray="6 12" opacity="0.8"/>
+    <ellipse cx="180" cy="130" rx="96" ry="60" stroke="url(#orbit-gradient)" stroke-width="1.6" opacity="0.65"/>
+    <ellipse cx="180" cy="130" rx="64" ry="40" stroke="url(#orbit-gradient)" stroke-width="2" opacity="0.9"/>
+    <path d="M56 122C80 86 132 72 184 90C236 108 284 98 312 74" stroke="#5BC0FF" stroke-opacity="0.5" stroke-width="1.6" stroke-linecap="round" stroke-dasharray="10 14"/>
+    <path d="M68 158C96 188 148 206 200 194C252 182 282 144 298 114" stroke="#B987FF" stroke-opacity="0.45" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="14 18"/>
+    <circle cx="180" cy="130" r="22" fill="#09112B" stroke="#6EE4FF" stroke-width="2.2"/>
+    <circle cx="180" cy="130" r="10" fill="#6EE4FF"/>
+    <circle cx="92" cy="108" r="8" fill="#5BC0FF" fill-opacity="0.6" stroke="#B9F0FF" stroke-width="1.4"/>
+    <circle cx="280" cy="98" r="7" fill="#7C63FF" fill-opacity="0.6" stroke="#DED4FF" stroke-width="1.2"/>
+    <circle cx="108" cy="184" r="9" fill="#FFB86C" fill-opacity="0.65" stroke="#FFE0B5" stroke-width="1.4"/>
+    <circle cx="258" cy="178" r="11" fill="#6EE4FF" fill-opacity="0.6" stroke="#CBF7FF" stroke-width="1.6"/>
+    <circle cx="224" cy="58" r="6" fill="#FF6B6B" fill-opacity="0.6" stroke="#FFD3D3" stroke-width="1.2"/>
+  </g>
+  <g opacity="0.38">
+    <path d="M44 60C92 32 152 24 208 38C264 52 310 90 332 130" stroke="#27345C" stroke-width="1.1" stroke-linecap="round"/>
+    <path d="M38 188C74 226 130 246 182 244C234 242 294 218 328 180" stroke="#27345C" stroke-width="1.1" stroke-linecap="round"/>
+  </g>
+  <g>
+    <text x="180" y="222" text-anchor="middle" font-family="'Segoe UI', Tahoma, sans-serif" font-size="14" fill="#9AA8FF">Dynamic Signal Mesh</text>
+    <text x="180" y="240" text-anchor="middle" font-family="'Roboto Mono', monospace" font-size="11" fill="#6EE4FF">Live · Synced · Adaptive</text>
+  </g>
+</svg>
