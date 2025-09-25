@@ -93,3 +93,8 @@
 ### Signature Check (say aloud before first trade)
 "I will risk 0.5% per idea, stop at 1.5% daily loss or 3 losers, and never move a stop away."
 
+## 12. Finder Cadence (Short vs Long Horizons)
+- **Long-Term Finder**: built on 365-day lookback with 60–90 bar momentum and 3R+/ATH targets; plan to hold winners for multi-week swings (≈6–24 weeks) unless stop/target or thesis change triggers an exit.
+- **Short-Term Finder**: uses daily candles plus 3/10/21-day pulses and 1.3× ATR stops; expect holds of 3–15 trading days. Runs rely on the current daily candle, so reruns intraday introduce noise until the UTC session closes.
+- **Daily Rotation Guardrails**: it is acceptable to close a short-term idea inside a day and replace it with fresher momentum, provided (a) the updated scan shows a lower score/risk reclassification or better risk-reward elsewhere, (b) the instrument remains liquid (tight spread, stable depth), and (c) costs (spread + fees) stay within plan. Avoid churning purely because the list reshuffled.
+- **Refresh Rhythm**: anchor one scan just after the Coinbase daily bar (≈00:00 UTC); optional midday check is fine for fast conditions. Document every forced exit reason in `trade_logs/` and respect existing stop/target discipline when holding between refreshes.
