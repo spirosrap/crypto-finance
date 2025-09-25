@@ -135,7 +135,17 @@ class CoinbaseService:
                 }
         return prices
 
-    def place_order(self, product_id: str, side: str, size: float, order_type: str = "MARKET", price: float = None, time_in_force: str = "IOC"):
+    def place_order(
+        self,
+        product_id: str,
+        side: str,
+        size: float,
+        order_type: str = "MARKET",
+        price: float | None = None,
+        time_in_force: str = "IOC",
+        leverage: float | None = None,
+        margin_type: str | None = None,
+    ):
         """
         Place an order with the specified parameters.
         
@@ -155,20 +165,25 @@ class CoinbaseService:
             is_perpetual = "-PERP-" in product_id
             
             if is_perpetual:
-                # For perpetual futures, use create_market_order_perp
                 if order_type.upper() == "MARKET":
-                    order_config = {
-                        "market_market_ioc": {
-                            "base_size": str(size)
-                        }
-                    }
-                    
-                    self.logger.info(f"Placing perpetual {side} market order for {size} {product_id}")
-                    market_order = self.client.create_order(
+                    price_inc, quote_inc, base_inc = self._get_product_increments(product_id)
+                    base_size = self._format_base_size(size, base_inc)
+
+                    self.logger.info(
+                        "Placing perpetual %s market order for %s %s leverage=%s margin_type=%s",
+                        side,
+                        base_size,
+                        product_id,
+                        leverage,
+                        margin_type or ("CROSS" if leverage else None),
+                    )
+                    market_order = self.client.market_order(
                         client_order_id=client_order_id,
                         product_id=product_id,
                         side=side.upper(),
-                        order_configuration=order_config
+                        base_size=base_size,
+                        leverage=str(leverage) if leverage else None,
+                        margin_type=margin_type or ("CROSS" if leverage else None),
                     )
                     self.logger.info(f"Perpetual market order response: {market_order}")
                     return market_order
