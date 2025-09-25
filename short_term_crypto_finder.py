@@ -142,6 +142,15 @@ def build_short_term_config() -> CryptoFinderConfig:
     if max_risk_env:
         cfg.max_risk_level = max_risk_env.strip().upper()
 
+    cfg.use_openai_scoring = _env_flag("SHORT_USE_OPENAI_SCORING", bool(cfg.use_openai_scoring))
+    openai_model_override = os.getenv("SHORT_OPENAI_MODEL")
+    if openai_model_override:
+        cfg.openai_model = openai_model_override.strip()
+    cfg.openai_weight = _env_override("SHORT_OPENAI_WEIGHT", cfg.openai_weight, float)
+    cfg.openai_max_candidates = _env_override("SHORT_OPENAI_MAX_CANDIDATES", cfg.openai_max_candidates, int)
+    cfg.openai_temperature = _env_override("SHORT_OPENAI_TEMPERATURE", cfg.openai_temperature, float)
+    cfg.openai_sleep_seconds = _env_override("SHORT_OPENAI_SLEEP_SECONDS", cfg.openai_sleep_seconds, float)
+
     return cfg
 
 
@@ -636,6 +645,24 @@ def main() -> None:
                         help=f"Number of daily bars for the swing window (default: {env_defaults.analysis_days}; profile may override)")
     parser.add_argument('--max-risk-level', type=risk_level_type, default=default_max_risk,
                         help='Highest risk tier to allow (e.g., LOW, MEDIUM_LOW, MEDIUM)')
+    parser.add_argument('--use-openai-scoring', action=argparse.BooleanOptionalAction,
+                        default=env_defaults.use_openai_scoring,
+                        help='Blend scores with OpenAI model output (default: %(default)s; override env/CRYPTO_* if set)')
+    parser.add_argument('--openai-weight', type=float, default=None,
+                        help=f"Blend weight for OpenAI score (0-1); default {env_defaults.openai_weight}")
+    parser.add_argument('--openai-model', type=str, default=None,
+                        help=f"Override OpenAI model name (default: {env_defaults.openai_model})")
+    parser.add_argument('--openai-max-candidates', type=int, default=None,
+                        help=f"Limit number of candidates sent to OpenAI (default: {env_defaults.openai_max_candidates})")
+    st_openai_temp_default = (
+        env_defaults.openai_temperature
+        if env_defaults.openai_temperature is not None
+        else 'model default'
+    )
+    parser.add_argument('--openai-temperature', type=float, default=None,
+                        help=f"Temperature for OpenAI call (default: {st_openai_temp_default})")
+    parser.add_argument('--openai-sleep-seconds', type=float, default=None,
+                        help=f"Optional pause between OpenAI calls (default: {env_defaults.openai_sleep_seconds})")
 
     args = parser.parse_args()
 
@@ -669,6 +696,17 @@ def main() -> None:
     config.analysis_days = final_analysis_days
     config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
     config.force_refresh_candles = bool(args.force_refresh)
+    config.use_openai_scoring = bool(args.use_openai_scoring)
+    if args.openai_weight is not None:
+        config.openai_weight = float(args.openai_weight)
+    if args.openai_model:
+        config.openai_model = args.openai_model
+    if args.openai_max_candidates is not None:
+        config.openai_max_candidates = int(args.openai_max_candidates)
+    if args.openai_temperature is not None:
+        config.openai_temperature = float(args.openai_temperature)
+    if args.openai_sleep_seconds is not None:
+        config.openai_sleep_seconds = float(args.openai_sleep_seconds)
 
     if config.offline and config.force_refresh_candles:
         logger.warning("Force refresh disabled because offline mode is enabled; using cached candles only.")

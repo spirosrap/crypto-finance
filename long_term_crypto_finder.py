@@ -38,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 from coinbaseservice import CoinbaseService
 from historicaldata import HistoricalData
+from llm_scoring import LLMScorer, build_llm_payload
 
 # Configuration management
 @dataclass
@@ -72,7 +73,13 @@ class CryptoFinderConfig:
     max_risk_level: Optional[str] = None  # highest risk level to include (e.g., "MEDIUM")
     risk_reward_weight: float = 0.15  # influence of risk/reward alignment
     trend_weight: float = 0.10  # influence of trend alignment
-    
+    use_openai_scoring: bool = False
+    openai_model: str = "gpt-5-mini"
+    openai_weight: float = 0.25
+    openai_max_candidates: int = 12
+    openai_temperature: Optional[float] = None
+    openai_sleep_seconds: float = 0.0
+
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
         """Create configuration from environment variables."""
@@ -103,6 +110,20 @@ class CryptoFinderConfig:
                 )
                 return default
 
+        def _optional_float_env(name: str) -> Optional[float]:
+            raw = os.getenv(name)
+            if raw is None or raw == "":
+                return None
+            try:
+                return float(raw)
+            except ValueError:
+                logging.getLogger(__name__).warning(
+                    "Invalid float value '%s' for %s; ignoring override",
+                    raw,
+                    name,
+                )
+                return None
+
         return cls(
             min_market_cap=int(os.getenv('CRYPTO_MIN_MARKET_CAP', '100000000')),
             max_results=int(os.getenv('CRYPTO_MAX_RESULTS', '20')),
@@ -132,6 +153,12 @@ class CryptoFinderConfig:
             max_risk_level=max_risk_level,
             risk_reward_weight=_float_env('CRYPTO_RR_WEIGHT', 0.15),
             trend_weight=_float_env('CRYPTO_TREND_WEIGHT', 0.10),
+            use_openai_scoring=os.getenv('CRYPTO_USE_OPENAI_SCORING', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
+            openai_model=os.getenv('CRYPTO_OPENAI_MODEL', 'gpt-5-mini'),
+            openai_weight=_float_env('CRYPTO_OPENAI_WEIGHT', 0.25),
+            openai_max_candidates=int(os.getenv('CRYPTO_OPENAI_MAX_CANDIDATES', '12') or '12'),
+            openai_temperature=_optional_float_env('CRYPTO_OPENAI_TEMPERATURE'),
+            openai_sleep_seconds=_float_env('CRYPTO_OPENAI_SLEEP_SECONDS', 0.0),
         )
 
     def to_dict(self) -> Dict:
@@ -164,6 +191,12 @@ class CryptoFinderConfig:
             'max_risk_level': self.max_risk_level.upper() if isinstance(self.max_risk_level, str) else self.max_risk_level,
             'risk_reward_weight': self.risk_reward_weight,
             'trend_weight': self.trend_weight,
+            'use_openai_scoring': self.use_openai_scoring,
+            'openai_model': self.openai_model,
+            'openai_weight': self.openai_weight,
+            'openai_max_candidates': self.openai_max_candidates,
+            'openai_temperature': self.openai_temperature,
+            'openai_sleep_seconds': self.openai_sleep_seconds,
         }
 
 # Configure enhanced logging with file rotation
@@ -341,6 +374,10 @@ class CryptoMetrics:
     position_size_percentage: float
     # Data timestamp for integrity
     data_timestamp_utc: str = ""
+    llm_score: float = 0.0
+    llm_confidence: str = ""
+    llm_reason: str = ""
+    llm_adjustment: float = 0.0
 
 class LongTermCryptoFinder:
     """Main class for finding long-term crypto opportunities with comprehensive risk analysis."""
@@ -454,6 +491,33 @@ class LongTermCryptoFinder:
         self.trend_weight = float(
             np.clip(getattr(self.config, 'trend_weight', self.DEFAULT_TREND_WEIGHT), 0.0, 0.5)
         )
+
+        self.llm_scorer: Optional[LLMScorer] = None
+        if getattr(self.config, 'use_openai_scoring', False):
+            try:
+                llm_weight = float(np.clip(getattr(self.config, 'openai_weight', 0.25), 0.0, 1.0))
+                llm_max_candidates = int(max(1, getattr(self.config, 'openai_max_candidates', 12) or 12))
+
+                llm_temp_raw = getattr(self.config, 'openai_temperature', None)
+                llm_temperature: Optional[float]
+                if llm_temp_raw is None:
+                    llm_temperature = None
+                else:
+                    llm_temperature = float(max(0.0, llm_temp_raw))
+
+                llm_sleep = float(max(0.0, getattr(self.config, 'openai_sleep_seconds', 0.0)))
+                self.llm_scorer = LLMScorer(
+                    model=getattr(self.config, 'openai_model', 'gpt-5-mini') or 'gpt-5-mini',
+                    weight=llm_weight,
+                    max_candidates=llm_max_candidates,
+                    temperature=llm_temperature,
+                    sleep_seconds=llm_sleep,
+                )
+                if not getattr(self.llm_scorer, 'enabled', False):
+                    self.llm_scorer = None
+            except Exception as exc:
+                logger.warning("Disabling OpenAI scoring due to initialisation error: %s", exc)
+                self.llm_scorer = None
 
         finder_label = getattr(self, 'FINDER_LABEL', 'Long-Term Crypto Finder')
         logger.info(f"{finder_label} initialized with Coinbase API")
@@ -946,6 +1010,60 @@ class LongTermCryptoFinder:
         except Exception as e:
             logger.error(f"Error in final scoring: {e}")
             self._apply_fallback_scoring(candidates)
+
+    def _refine_scores_with_llm(self, candidates: List["CryptoMetrics"]) -> int:
+        """Optionally refine top candidate scores using an OpenAI model."""
+        if not candidates or not getattr(self, 'llm_scorer', None):
+            return 0
+
+        try:
+            ranked = sorted(
+                candidates,
+                key=lambda c: getattr(c, 'overall_score', 0.0),
+                reverse=True,
+            )
+
+            subset = []
+            seen: set[str] = set()
+            for candidate in ranked:
+                candidate_id = f"{candidate.symbol}:{getattr(candidate, 'position_side', 'LONG')}"
+                if candidate_id in seen:
+                    continue
+                payload = build_llm_payload(candidate)
+                payload['base_score'] = float(getattr(candidate, 'overall_score', 0.0))
+                payload['risk_level'] = getattr(candidate.risk_level, 'value', '')
+                subset.append((candidate_id, candidate, payload))
+                seen.add(candidate_id)
+                if len(subset) >= self.llm_scorer.max_candidates:
+                    break
+
+            if not subset:
+                return 0
+
+            payloads = [payload for _, _, payload in subset]
+            results = self.llm_scorer.score_candidates(payloads)  # type: ignore[union-attr]
+            if not results:
+                return 0
+
+            adjusted = 0
+            for candidate_id, candidate, _payload in subset:
+                outcome = results.get(candidate_id)
+                if not outcome:
+                    continue
+                orig_score = float(getattr(candidate, 'overall_score', 0.0))
+                llm_score = float(outcome.get('llm_score', orig_score))
+                combined = self.llm_scorer.combine_scores(orig_score, llm_score)
+                setattr(candidate, 'overall_score_pre_llm', orig_score)
+                candidate.llm_score = llm_score
+                candidate.llm_confidence = str(outcome.get('confidence', ''))
+                candidate.llm_reason = str(outcome.get('reason', ''))
+                candidate.llm_adjustment = combined - orig_score
+                candidate.overall_score = combined
+                adjusted += 1
+            return adjusted
+        except Exception as exc:  # pragma: no cover - defensive catch-all
+            logger.warning(f"OpenAI scoring step skipped due to error: {exc}")
+            return 0
 
     def _determine_risk_level(self, risk_value: float) -> RiskLevel:
         """Determine risk level based on normalized risk value using class thresholds."""
@@ -3437,6 +3555,9 @@ class LongTermCryptoFinder:
         # Cross-sectional ranks and continuous risk re-scaling
         if analyzed_candidates:
             self._apply_risk_haircut(analyzed_candidates)
+            llm_adjusted = self._refine_scores_with_llm(analyzed_candidates)
+            if llm_adjusted:
+                logger.info("OpenAI scoring refined %s candidates", llm_adjusted)
 
         # Filter by minimum score if requested (apply after rank-based recompute)
         min_score = float(self.config.min_overall_score or 0)
@@ -3585,6 +3706,12 @@ class LongTermCryptoFinder:
             _write(f"Risk Score: {crypto.risk_score:.1f}/100")
             _write(f"Risk Level: {crypto.risk_level.value}")
             _write(f"Overall Score: {crypto.overall_score:.2f}/100")
+            if getattr(crypto, 'llm_score', 0.0):
+                conf = getattr(crypto, 'llm_confidence', '') or 'N/A'
+                _write(f"LLM Score: {crypto.llm_score:.2f}/100 (confidence: {conf})")
+                reason = getattr(crypto, 'llm_reason', '')
+                if reason:
+                    _write(f"LLM Insight: {reason}")
 
             # Trading Levels Section
             _write()
@@ -3680,6 +3807,24 @@ def main():
                        help=f"Number of daily bars to pull (default: {env_defaults.analysis_days}; profile may override)")
     parser.add_argument('--max-risk-level', type=risk_level_type, default=default_max_risk,
                        help='Highest risk level to include (e.g., LOW, MEDIUM, HIGH)')
+    parser.add_argument('--use-openai-scoring', action=argparse.BooleanOptionalAction,
+                        default=env_defaults.use_openai_scoring,
+                        help='Blend scores with OpenAI model output (default: %(default)s; override env/SHORT_* if set)')
+    parser.add_argument('--openai-weight', type=float, default=None,
+                        help='Blend weight for OpenAI score (0-1); defaults to env or 0.25 when --use-openai-scoring is enabled')
+    parser.add_argument('--openai-model', type=str, default=None,
+                        help=f"Override OpenAI model name (default: {env_defaults.openai_model})")
+    parser.add_argument('--openai-max-candidates', type=int, default=None,
+                        help=f"Limit number of candidates sent to OpenAI (default: {env_defaults.openai_max_candidates})")
+    openai_temp_default = (
+        env_defaults.openai_temperature
+        if env_defaults.openai_temperature is not None
+        else 'model default'
+    )
+    parser.add_argument('--openai-temperature', type=float, default=None,
+                        help=f"Temperature for OpenAI call (default: {openai_temp_default})")
+    parser.add_argument('--openai-sleep-seconds', type=float, default=None,
+                        help=f"Optional pause between OpenAI calls (default: {env_defaults.openai_sleep_seconds})")
 
     args = parser.parse_args()
 
@@ -3721,7 +3866,17 @@ def main():
         quotes=quotes_list,
         risk_free_rate=args.risk_free_rate if args.risk_free_rate is not None else env_defaults.risk_free_rate,
         analysis_days=final_analysis_days,
-        max_risk_level=args.max_risk_level if args.max_risk_level is not None else env_defaults.max_risk_level
+        max_risk_level=args.max_risk_level if args.max_risk_level is not None else env_defaults.max_risk_level,
+        use_openai_scoring=bool(args.use_openai_scoring),
+        openai_model=args.openai_model or env_defaults.openai_model,
+        openai_weight=(args.openai_weight if args.openai_weight is not None else env_defaults.openai_weight),
+        openai_max_candidates=(
+            args.openai_max_candidates if args.openai_max_candidates is not None else env_defaults.openai_max_candidates
+        ),
+        openai_temperature=(args.openai_temperature if args.openai_temperature is not None else env_defaults.openai_temperature),
+        openai_sleep_seconds=(
+            args.openai_sleep_seconds if args.openai_sleep_seconds is not None else env_defaults.openai_sleep_seconds
+        ),
     )
 
     # Initialize the finder

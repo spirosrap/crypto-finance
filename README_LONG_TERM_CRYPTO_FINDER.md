@@ -20,6 +20,12 @@ A comprehensive Python program that analyzes cryptocurrencies to identify the be
 - **Risk Score**: Comprehensive risk assessment with risk level classification (shared across sides).
 - **Setup Quality Boost**: The final rank now rewards favourable risk:reward ratios and side-aware trend alignment before clamping to 0–100. Adjust the weighting via `CRYPTO_RR_WEIGHT` and `CRYPTO_TREND_WEIGHT` if you need a more or less aggressive bias.
 
+### 🤖 LLM-Assisted Scoring (Optional)
+- **OpenAI Blend**: Enable `CRYPTO_USE_OPENAI_SCORING=1` (or `SHORT_USE_OPENAI_SCORING=1` for the short-term finder) to route the top-ranked setups through an OpenAI model for an additional qualitative score and rationale.
+- **Weighting**: Control the blend between the in-house composite score and the LLM output with `CRYPTO_OPENAI_WEIGHT` (default `0.25`). The combined score stays within 0–100.
+- **Model & Throughput**: Override the default model (`gpt-5-mini`) via `CRYPTO_OPENAI_MODEL`. Limit the number of candidates sent to the model with `CRYPTO_OPENAI_MAX_CANDIDATES` and throttle via `CRYPTO_OPENAI_SLEEP_SECONDS` if needed.
+- **Report Output**: When enabled, the console/plan output now includes the LLM score, confidence level, and its concise justification for each candidate.
+
 ### 🎯 Key Metrics Evaluated
 - **Volatility (30-day)**: Price stability assessment
 - **Sharpe/Sortino Ratios**: Risk-adjusted return metrics
@@ -98,6 +104,12 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--risk-free-rate` | env | Annual risk-free rate (e.g., `0.03` for 3%) |
 | `--analysis-days` | env/profile | Lookback window for technical/risk metrics (e.g., `365`) |
 | `--max-risk-level` | env | Highest risk level to include (`LOW`, `MEDIUM_LOW`, `MEDIUM`, `MEDIUM_HIGH`, `HIGH`, `VERY_HIGH`) |
+| `--use-openai-scoring/--no-use-openai-scoring` | env (`CRYPTO_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring without touching env vars |
+| `--openai-weight` | env (`CRYPTO_OPENAI_WEIGHT`) | Blend ratio between baseline and LLM score |
+| `--openai-model` | env (`CRYPTO_OPENAI_MODEL`) | Override OpenAI model identifier |
+| `--openai-max-candidates` | env (`CRYPTO_OPENAI_MAX_CANDIDATES`) | Cap number of candidates sent to the model |
+| `--openai-temperature` | env (`CRYPTO_OPENAI_TEMPERATURE`) | Set temperature for the OpenAI call (defaults to model standard) |
+| `--openai-sleep-seconds` | env (`CRYPTO_OPENAI_SLEEP_SECONDS`) | Insert a pause between OpenAI requests |
 
 ### Environment Variables
 - `CRYPTO_DEFAULT_LIMIT`: Default for `--limit` (default `50`)
@@ -118,6 +130,12 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 - `CRYPTO_RR_SIGMOID_CENTER`: Risk/reward value treated as neutral (default `2.0`)
 - `CRYPTO_RR_SIGMOID_K`: Steepness of the risk/reward sigmoid curve (default `1.1`)
 - `CRYPTO_TREND_ALIGN_SCALE`: Percent-per-day range where trend alignment saturates (default `1.5`)
+- `CRYPTO_USE_OPENAI_SCORING`: Set to `1`/`true` to enable OpenAI refinement of top candidates
+- `CRYPTO_OPENAI_MODEL`: Override the default OpenAI model name (default `gpt-5-mini`)
+- `CRYPTO_OPENAI_WEIGHT`: Blend factor between the baseline score and the LLM score (default `0.25`)
+- `CRYPTO_OPENAI_MAX_CANDIDATES`: Maximum number of candidates forwarded to the LLM (default `12`)
+- `CRYPTO_OPENAI_TEMPERATURE`: Temperature override for the OpenAI call (defaults to model standard when unset)
+- `CRYPTO_OPENAI_SLEEP_SECONDS`: Optional pause between sequential OpenAI requests
 
 See `CryptoFinderConfig.from_env()` for the authoritative list and defaults.
 

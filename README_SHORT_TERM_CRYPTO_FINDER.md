@@ -28,6 +28,9 @@ stops and closer profit targets.
   trend slope, ADX strength, volume ratio/thrust, and impulse follow-through.
 - **Risk Controls**: Risk bands (`LOW` → `VERY_HIGH`), volatility awareness,
   and min-score thresholds ensure crowded or weak setups can be excluded.
+- **Optional LLM Refinement**: When you set `SHORT_USE_OPENAI_SCORING=1`, the
+  top swing setups are re-scored by an OpenAI model (default `gpt-5-mini`),
+  blending a qualitative `llm_score` and rationale into the final rank.
 
 ### 🎯 Trade Planning
 - **Entry**: Current price snapshot.
@@ -101,6 +104,12 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 | `--risk-free-rate` | env (~1%) | Annualised rate for Sharpe/Sortino |
 | `--analysis-days` | env/profile (120) | Daily bars for swing analytics |
 | `--max-risk-level` | env | Highest allowed risk tier |
+| `--use-openai-scoring/--no-use-openai-scoring` | env (`SHORT_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring from the CLI |
+| `--openai-weight` | env (`SHORT_OPENAI_WEIGHT`) | Blend ratio between baseline and LLM score |
+| `--openai-model` | env (`SHORT_OPENAI_MODEL`) | Override OpenAI model identifier |
+| `--openai-max-candidates` | env (`SHORT_OPENAI_MAX_CANDIDATES`) | Cap number of candidates sent to the model |
+| `--openai-temperature` | env (`SHORT_OPENAI_TEMPERATURE`) | Set temperature for the OpenAI call (defaults to model standard) |
+| `--openai-sleep-seconds` | env (`SHORT_OPENAI_SLEEP_SECONDS`) | Pause between OpenAI calls |
 
 ## Environment Overrides
 
@@ -130,6 +139,12 @@ Short-term settings read both the generic `CRYPTO_*` variables and the
 | `SHORT_MAX_RISK_LEVEL` | Highest risk tier allowed | inherits / optional |
 | `SHORT_MAX_WORKERS` | Thread pool size | `CRYPTO_MAX_WORKERS` |
 | `SHORT_REQUEST_DELAY` | Global throttle seconds | `CRYPTO_REQUEST_DELAY` |
+| `SHORT_USE_OPENAI_SCORING` | Enable LLM refinement | `CRYPTO_USE_OPENAI_SCORING` |
+| `SHORT_OPENAI_MODEL` | Override OpenAI model | `CRYPTO_OPENAI_MODEL` |
+| `SHORT_OPENAI_WEIGHT` | Blend factor for LLM score | `CRYPTO_OPENAI_WEIGHT` |
+| `SHORT_OPENAI_MAX_CANDIDATES` | Cap candidates sent to LLM | `CRYPTO_OPENAI_MAX_CANDIDATES` |
+| `SHORT_OPENAI_TEMPERATURE` | Temperature override for OpenAI queries | `CRYPTO_OPENAI_TEMPERATURE` |
+| `SHORT_OPENAI_SLEEP_SECONDS` | Pause between OpenAI calls | `CRYPTO_OPENAI_SLEEP_SECONDS` |
 
 All other shared risk controls (`CRYPTO_RISK_PER_TRADE`, `CRYPTO_POS_CAP_PCT`,
 etc.) apply identically to both finders.
