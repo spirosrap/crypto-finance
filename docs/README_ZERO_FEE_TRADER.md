@@ -17,7 +17,7 @@ Intraday trading loop designed for the INTX perpetual venue where taker fees are
    export AUTO_ZERO_FEE_LEVERAGE=50
    python auto_zero_fee_trader.py --granularity ONE_MINUTE --poll 30 --live
    ```
-   Drop the environment overrides if you prefer the built-in defaults (see below). Live executions are also copied to `trade_logs/zero_fee_live_trades.csv` for audit.
+   Drop the environment overrides if you prefer the built-in defaults (see below). Live executions are logged to `trade_logs/zero_fee_live_trades.csv` (entries, exchange brackets, and exits) for audit.
 
 ## Architecture Overview
 
@@ -71,7 +71,7 @@ Any parameter is overridable via command-line flags where exposed (e.g., `--prod
 2. **Feature Engineering** – computes EMAs, z-score of returns, RSI, ATR, volume ratios; requires enough bars to satisfy the longest lookback window.
 3. **Signal Evaluation** – long setup requires uptrend EMAs, a pullback (price below fast EMA) or positive breakout, depressed RSI, and elevated volume. Short setup mirrors the logic. If multiple rationales fire, they are combined in the `rationale` string.
 4. **Risk & Cooldown** – the `RiskManager` ensures open notional stays below `AUTO_ZERO_FEE_MAX_EXPOSURE` and the number of active trades stays below `AUTO_ZERO_FEE_MAX_POSITIONS`. `CooldownTracker` blocks repeated entries on the same symbol+side until the cooldown expires.
-5. **Execution** – dry run writes entries to CSV; live mode submits IOC market orders with the configured leverage and cross margin. Size is quantized to Coinbase’s base increment. Stops/targets are checked on every pass; hitting either triggers a market close.
+5. **Execution** – dry run writes entries to CSV; live mode submits IOC market orders with the configured leverage and cross margin, then immediately posts exchange-native bracket orders using the same take-profit/stop levels the bot enforces locally. Size is quantized to Coinbase’s base increment. Stops/targets are checked on every pass; hitting either triggers a market close (which also clears the bracket orders).
 
 ## Testing & Validation
 
@@ -91,7 +91,8 @@ Any parameter is overridable via command-line flags where exposed (e.g., `--prod
 - **Funding & Margin** – cross leverage defaults to 50×. Keep sufficient USDC in the INTX portfolio; Coinbase enforces minimum base sizes (~0.001 BTC) and rejects orders below the threshold.
 - **Max Age** – positions are auto-liquidated after `AUTO_ZERO_FEE_MAX_MINUTES` (default 45). Tighten this if you want faster churn.
 - **Guardrails** – adjust stop/take-profit percentages, ATR multiple, and cooldown to match volatility regimes. For high-event windows (Fed, CPI, etc.) consider raising `AUTO_ZERO_FEE_MIN_VOL_RATIO` or disabling the bot.
-- **Logging** – execution logs flow to stdout and to `logs/short_term_crypto_finder/`. Paper trades append to `trade_logs/zero_fee_paper_trades.csv`; live fills are mirrored to `trade_logs/zero_fee_live_trades.csv`.
+- **Logging** – execution logs flow to stdout and to `logs/short_term_crypto_finder/`. Paper trades append to `trade_logs/zero_fee_paper_trades.csv`; live fills (entries, bracket placements, exits) are mirrored to `trade_logs/zero_fee_live_trades.csv`.
+- **Bracket Orders** – every live entry posts a Coinbase bracket (stop + take-profit). If the API rejects the bracket, the bot logs a warning and continues enforcing stops locally; investigate `trade_logs/zero_fee_live_trades.csv` (event=`bracket`) for the failure reason.
 - **Failsafes** – if the process dies, stops/targets are no longer enforced. Run inside `tmux` or systemd and set alerting around PnL and margin usage.
 
 ## Troubleshooting

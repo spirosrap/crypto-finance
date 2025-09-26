@@ -440,7 +440,7 @@ class ExecutionEngine:
     def enter(self, decision: SignalDecision) -> Optional[Position]:  # pragma: no cover - interface
         raise NotImplementedError
 
-    def exit(self, position: Position, reason: str) -> None:  # pragma: no cover - interface
+    def exit(self, position: Position, reason: str) -> bool:  # pragma: no cover - interface
         raise NotImplementedError
 
 
@@ -472,8 +472,16 @@ class PaperExecutionEngine(ExecutionEngine):
             leverage=decision.leverage,
         )
 
-    def exit(self, position: Position, reason: str) -> None:
-        LOGGER.info("[PAPER EXIT] %s %s size=%.6f price=%.2f reason=%s", position.side.upper(), position.product_id, position.size, position.entry_price, reason)
+    def exit(self, position: Position, reason: str) -> bool:
+        LOGGER.info(
+            "[PAPER EXIT] %s %s size=%.6f price=%.2f reason=%s",
+            position.side.upper(),
+            position.product_id,
+            position.size,
+            position.entry_price,
+            reason,
+        )
+        return True
 
 
 class CoinbaseExecutionEngine(ExecutionEngine):
@@ -485,27 +493,124 @@ class CoinbaseExecutionEngine(ExecutionEngine):
         if not self._log_file.exists():
             header = (
                 "timestamp,product_id,side,price,size,stop_loss,take_profit," \
-                "rationale,leverage,order_id\n"
+                "rationale,leverage,order_id,event,reason\n"
             )
             self._log_file.write_text(header)
 
-    def _record_trade(self, decision: SignalDecision, response: Optional[dict]) -> None:
+    @staticmethod
+    def _extract_order_id(response: Optional[dict]) -> str:
+        if not isinstance(response, dict):
+            return ""
+        for key in ("order_id", "id", "orderId", "client_order_id", "clientOrderId"):
+            if key in response:
+                return str(response[key])
+        return ""
+
+    def _write_live_log(
+        self,
+        *,
+        product_id: str,
+        side: str,
+        price: float,
+        size: float,
+        stop_loss: float,
+        take_profit: float,
+        rationale: str,
+        leverage: float,
+        order_id: str,
+        event: str,
+        reason: str = "",
+    ) -> None:
         try:
             timestamp = datetime.now(UTC).isoformat()
-            order_id: str = ""
-            if isinstance(response, dict):
-                for key in ("order_id", "id", "orderId", "client_order_id", "clientOrderId"):
-                    if key in response:
-                        order_id = str(response[key])
-                        break
             line = (
-                f"{timestamp},{decision.product_id},{decision.side},{decision.entry_price:.2f},{decision.size:.6f},"
-                f"{decision.stop_loss:.2f},{decision.take_profit:.2f},{decision.rationale},{decision.leverage:.2f},{order_id}\n"
+                f"{timestamp},{product_id},{side},{price:.2f},{size:.6f},"
+                f"{stop_loss:.2f},{take_profit:.2f},{rationale},{leverage:.2f},{order_id},{event},{reason}\n"
             )
             with self._log_file.open("a") as fh:
                 fh.write(line)
         except Exception:  # pragma: no cover - logging best-effort only
             LOGGER.exception("Failed to record live trade to %s", self._log_file)
+
+    def _record_trade(self, decision: SignalDecision, response: Optional[dict]) -> str:
+        order_id = self._extract_order_id(response)
+        self._write_live_log(
+            product_id=decision.product_id,
+            side=decision.side,
+            price=decision.entry_price,
+            size=decision.size,
+            stop_loss=decision.stop_loss,
+            take_profit=decision.take_profit,
+            rationale=decision.rationale,
+            leverage=decision.leverage,
+            order_id=order_id,
+            event="entry",
+        )
+        return order_id
+
+    def _record_exit(self, position: Position, response: Optional[dict], reason: str) -> None:
+        order_id = self._extract_order_id(response)
+        self._write_live_log(
+            product_id=position.product_id,
+            side=position.side,
+            price=position.entry_price,
+            size=position.size,
+            stop_loss=position.stop_loss,
+            take_profit=position.take_profit,
+            rationale="",
+            leverage=position.leverage,
+            order_id=order_id,
+            event="exit",
+            reason=reason,
+        )
+
+    def _record_bracket(self, position: Position, order_id: str, result: dict) -> None:
+        outcome = "success" if result.get("status") == "success" else result.get("error", "error")
+        self._write_live_log(
+            product_id=position.product_id,
+            side=position.side,
+            price=position.entry_price,
+            size=position.size,
+            stop_loss=position.stop_loss,
+            take_profit=position.take_profit,
+            rationale="",
+            leverage=position.leverage,
+            order_id=order_id,
+            event="bracket",
+            reason=outcome,
+        )
+
+    def _maybe_place_brackets(self, decision: SignalDecision, position: Position, order_id: str) -> None:
+        if not order_id:
+            LOGGER.warning("Cannot place bracket orders without an order_id")
+            return
+        try:
+            leverage_arg = str(decision.leverage) if decision.leverage else None
+            result = self.service.place_bracket_after_fill(
+                product_id=decision.product_id,
+                order_id=order_id,
+                size=decision.size,
+                take_profit_price=decision.take_profit,
+                stop_loss_price=decision.stop_loss,
+                leverage=leverage_arg,
+            )
+            if isinstance(result, dict) and result.get("status") == "success":
+                LOGGER.info(
+                    "Placed bracket orders for %s order_id=%s tp=%s sl=%s",
+                    decision.product_id,
+                    order_id,
+                    result.get("tp_price"),
+                    result.get("sl_price"),
+                )
+            else:
+                LOGGER.warning("Bracket placement warning for %s: %s", decision.product_id, result)
+            if isinstance(result, dict):
+                self._record_bracket(position, order_id, result)
+            else:
+                self._record_bracket(position, order_id, {"error": str(result)})
+        except Exception as exc:  # pragma: no cover - network/API errors
+            LOGGER.exception("Failed to place bracket orders for %s: %s", decision.product_id, exc)
+            self._record_bracket(position, order_id, {"error": str(exc)})
 
     def enter(self, decision: SignalDecision) -> Optional[Position]:  # pragma: no cover - requires live trading
         response = self.service.place_order(
@@ -517,8 +622,8 @@ class CoinbaseExecutionEngine(ExecutionEngine):
             margin_type="CROSS" if decision.leverage and decision.leverage > 1 else None,
         )
         LOGGER.info("Placed live order: %s", response)
-        self._record_trade(decision, response if isinstance(response, dict) else None)
-        return Position(
+        order_id = self._record_trade(decision, response if isinstance(response, dict) else None)
+        position = Position(
             product_id=decision.product_id,
             side=decision.side,
             size=decision.size,
@@ -528,8 +633,10 @@ class CoinbaseExecutionEngine(ExecutionEngine):
             take_profit=decision.take_profit,
             leverage=decision.leverage,
         )
+        self._maybe_place_brackets(decision, position, order_id)
+        return position
 
-    def exit(self, position: Position, reason: str) -> None:  # pragma: no cover - requires live trading
+    def exit(self, position: Position, reason: str) -> bool:  # pragma: no cover - requires live trading
         side = "SELL" if position.side == "buy" else "BUY"
         response = self.service.place_order(
             product_id=position.product_id,
@@ -539,7 +646,20 @@ class CoinbaseExecutionEngine(ExecutionEngine):
             leverage=position.leverage,
             margin_type="CROSS" if position.leverage and position.leverage > 1 else None,
         )
+        if response is None:
+            LOGGER.error(
+                "Failed to close %s %s size=%.6f leverage=%.2f reason=%s",
+                side,
+                position.product_id,
+                position.size,
+                position.leverage,
+                reason,
+            )
+            return False
+
         LOGGER.info("Closed live position: %s reason=%s", response, reason)
+        self._record_exit(position, response if isinstance(response, dict) else None, reason)
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -615,8 +735,22 @@ class ZeroFeePerpTrader:
     def _prune_positions(self) -> None:
         alive: List[Position] = []
         for pos in self.positions:
-            if pos.age_minutes() > self.config.max_position_minutes:
-                self.execution.exit(pos, reason="max_age")
+            age = pos.age_minutes()
+            if age >= self.config.max_position_minutes:
+                LOGGER.info(
+                    "Closing %s %s for max_age %.2f>=%.2f",
+                    pos.side,
+                    pos.product_id,
+                    age,
+                    self.config.max_position_minutes,
+                )
+                if not self.execution.exit(pos, reason="max_age"):
+                    LOGGER.warning(
+                        "Exit failed for %s %s (max_age). Will retry next loop.",
+                        pos.side,
+                        pos.product_id,
+                    )
+                    alive.append(pos)
                 continue
             alive.append(pos)
         self.positions = alive
@@ -642,7 +776,14 @@ class ZeroFeePerpTrader:
                 elif low <= pos.take_profit:
                     exit_reason = "target_hit"
             if exit_reason:
-                self.execution.exit(pos, exit_reason)
+                if not self.execution.exit(pos, exit_reason):
+                    LOGGER.warning(
+                        "Exit failed for %s %s (reason=%s). Will retry.",
+                        pos.side,
+                        pos.product_id,
+                        exit_reason,
+                    )
+                    updated_positions.append(pos)
             else:
                 updated_positions.append(pos)
         self.positions = updated_positions

@@ -147,10 +147,15 @@ class TestTraderIntegration(unittest.TestCase):
         class StubService:
             def __init__(self):
                 self.calls = []
+                self.bracket_calls = []
 
             def place_order(self, **kwargs):
                 self.calls.append(kwargs)
                 return {"order_id": "test-order"}
+
+            def place_bracket_after_fill(self, **kwargs):
+                self.bracket_calls.append(kwargs)
+                return {"status": "success", "tp_price": "40002.00", "sl_price": "39800.00"}
 
         decision = SignalDecision(
             product_id="BTC-PERP-INTX",
@@ -165,24 +170,73 @@ class TestTraderIntegration(unittest.TestCase):
 
         with TemporaryDirectory() as tmpdir:
             log_dir = Path(tmpdir)
-            engine = CoinbaseExecutionEngine(StubService(), log_dir)
+            service = StubService()
+            engine = CoinbaseExecutionEngine(service, log_dir)
             position = engine.enter(decision)
             self.assertIsNotNone(position)
+
+            self.assertTrue(engine.exit(position, "max_age"))
+
+            self.assertEqual(len(service.bracket_calls), 1)
+            bracket_kwargs = service.bracket_calls[0]
+            self.assertEqual(bracket_kwargs["order_id"], "test-order")
+            self.assertEqual(bracket_kwargs["product_id"], "BTC-PERP-INTX")
+            self.assertEqual(bracket_kwargs["size"], 0.01)
 
             log_file = log_dir / "zero_fee_live_trades.csv"
             self.assertTrue(log_file.exists())
             lines = log_file.read_text().strip().splitlines()
-            self.assertGreaterEqual(len(lines), 2)
-            header = lines[0]
-            row = lines[-1]
+            self.assertGreaterEqual(len(lines), 4)
+            header, entry_row, bracket_row, exit_row = lines[0], lines[1], lines[2], lines[-1]
             self.assertEqual(
                 header,
-                "timestamp,product_id,side,price,size,stop_loss,take_profit,rationale,leverage,order_id",
+                "timestamp,product_id,side,price,size,stop_loss,take_profit,rationale,leverage,order_id,event,reason",
             )
-            fields = row.split(",")
-            self.assertEqual(fields[1], "BTC-PERP-INTX")
-            self.assertEqual(fields[2], "buy")
-            self.assertEqual(fields[-1], "test-order")
+            entry_fields = entry_row.split(",")
+            bracket_fields = bracket_row.split(",")
+            exit_fields = exit_row.split(",")
+            self.assertEqual(entry_fields[1], "BTC-PERP-INTX")
+            self.assertEqual(entry_fields[2], "buy")
+            self.assertEqual(entry_fields[9], "test-order")
+            self.assertEqual(entry_fields[10], "entry")
+            self.assertEqual(bracket_fields[1], "BTC-PERP-INTX")
+            self.assertEqual(bracket_fields[10], "bracket")
+            self.assertEqual(bracket_fields[11], "success")
+            self.assertEqual(exit_fields[1], "BTC-PERP-INTX")
+            self.assertEqual(exit_fields[2], "buy")
+            self.assertEqual(exit_fields[10], "exit")
+            self.assertEqual(exit_fields[11], "max_age")
+
+    def test_max_age_triggers_exit(self):
+        class RecordingExecution(PaperExecutionEngine):
+            def __init__(self, log_dir: Path):
+                super().__init__(log_dir)
+                self.exit_calls: list[tuple[str, str]] = []
+
+            def exit(self, position, reason):  # type: ignore[override]
+                self.exit_calls.append((position.product_id, reason))
+                return super().exit(position, reason)
+
+        df = make_df(200)
+        df.iloc[-1, df.columns.get_loc("low")] = df.iloc[-1, df.columns.get_loc("close")] - 20
+        df.iloc[-1, df.columns.get_loc("high")] = df.iloc[-1, df.columns.get_loc("close")] + 20
+        cfg = IntradayTraderConfig()
+        cfg.product_ids = ["BTC-PERP-INTX"]
+        cfg.cooldown_seconds = 0
+        cfg.dry_run = True
+        cfg.min_volume_ratio = 1.0
+        cfg.rsi_buy_threshold = 60.0
+        cfg.lookback_bars = 150
+        cfg.ema_fast = 5
+        cfg.ema_slow = 11
+        cfg.ema_trend = 21
+        cfg.max_position_minutes = 0
+        service = DummyService(df)
+        execution = RecordingExecution(cfg.log_dir)
+        trader = ZeroFeePerpTrader(config=cfg, service=service, execution=execution)
+        trader.run_once()
+        trader.run_once()  # second pass should prune immediately due to max_age=0
+        self.assertTrue(any(reason == "max_age" for _, reason in execution.exit_calls))
 
 
 if __name__ == "__main__":
