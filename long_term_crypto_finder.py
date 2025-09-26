@@ -79,6 +79,8 @@ class CryptoFinderConfig:
     openai_max_candidates: int = 12
     openai_temperature: Optional[float] = None
     openai_sleep_seconds: float = 0.0
+    report_position_notional: float = 1000.0
+    report_leverage: float = 50.0
 
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -159,6 +161,8 @@ class CryptoFinderConfig:
             openai_max_candidates=int(os.getenv('CRYPTO_OPENAI_MAX_CANDIDATES', '12') or '12'),
             openai_temperature=_optional_float_env('CRYPTO_OPENAI_TEMPERATURE'),
             openai_sleep_seconds=_float_env('CRYPTO_OPENAI_SLEEP_SECONDS', 0.0),
+            report_position_notional=_float_env('CRYPTO_REPORT_NOTIONAL', 1000.0),
+            report_leverage=_float_env('CRYPTO_REPORT_LEVERAGE', 50.0),
         )
 
     def to_dict(self) -> Dict:
@@ -197,6 +201,8 @@ class CryptoFinderConfig:
             'openai_max_candidates': self.openai_max_candidates,
             'openai_temperature': self.openai_temperature,
             'openai_sleep_seconds': self.openai_sleep_seconds,
+            'report_position_notional': self.report_position_notional,
+            'report_leverage': self.report_leverage,
         }
 
 # Configure enhanced logging with file rotation
@@ -3656,6 +3662,64 @@ class LongTermCryptoFinder:
         detail = "; ".join(filter(None, segments))
         return f"{index}. Summary: {crypto.symbol} {side_lower} – score {score_text}, {detail}."
 
+    def _compute_position_pnl(self, crypto: CryptoMetrics) -> Optional[Dict[str, float]]:
+        """Return dollarised TP/SL projections for a standardised position size."""
+
+        try:
+            notional = float(getattr(self.config, 'report_position_notional', 1000.0))
+        except Exception:
+            notional = 1000.0
+
+        try:
+            leverage = float(getattr(self.config, 'report_leverage', 50.0))
+        except Exception:
+            leverage = 50.0
+
+        if not np.isfinite(notional) or notional <= 0:
+            return None
+
+        entry_price = float(getattr(crypto, 'entry_price', float('nan')))
+        take_profit_price = float(getattr(crypto, 'take_profit_price', float('nan')))
+        stop_loss_price = float(getattr(crypto, 'stop_loss_price', float('nan')))
+
+        if not np.isfinite(entry_price) or entry_price <= 0:
+            return None
+        if not np.isfinite(take_profit_price) or not np.isfinite(stop_loss_price):
+            return None
+
+        side = (getattr(crypto, 'position_side', 'LONG') or 'LONG').upper()
+        side_factor = -1.0 if side == 'SHORT' else 1.0
+
+        tp_return = side_factor * ((take_profit_price / entry_price) - 1.0)
+        sl_return = side_factor * ((stop_loss_price / entry_price) - 1.0)
+
+        if not np.isfinite(tp_return) or not np.isfinite(sl_return):
+            return None
+
+        tp_pnl = notional * tp_return
+        sl_pnl = notional * sl_return
+
+        if not np.isfinite(tp_pnl) or not np.isfinite(sl_pnl):
+            return None
+
+        effective_leverage = leverage if leverage and leverage > 0 else 1.0
+        margin_required = notional / effective_leverage
+
+        quantity = notional / entry_price
+
+        return {
+            'notional': notional,
+            'leverage': effective_leverage,
+            'margin': margin_required,
+            'tp_pnl': tp_pnl,
+            'sl_pnl': sl_pnl,
+            'tp_return': tp_return,
+            'sl_return': sl_return,
+            'quantity': quantity,
+            'tp_price_move': side_factor * (take_profit_price - entry_price),
+            'sl_price_move': side_factor * (stop_loss_price - entry_price),
+        }
+
     def print_results(self, results: List[CryptoMetrics], stream: Optional[TextIO] = None):
         """Print formatted analysis results to the desired stream."""
 
@@ -3721,6 +3785,19 @@ class LongTermCryptoFinder:
             _write(f"Take Profit: ${crypto.take_profit_price:.6f}")
             _write(f"Risk:Reward Ratio: {crypto.risk_reward_ratio:.1f}:1")
             _write(f"Recommended Position Size: {crypto.position_size_percentage:.1f}% of portfolio")
+
+            pnl_profile = self._compute_position_pnl(crypto)
+            if pnl_profile:
+                leverage_text = f"{pnl_profile['leverage']:.1f}x" if pnl_profile['leverage'] != 1 else "1x"
+                _write(
+                    f"Std. Position Notional: ${pnl_profile['notional']:,.2f} at {leverage_text} leverage (margin ${pnl_profile['margin']:,.2f})"
+                )
+                _write(
+                    f"Potential TP P&L: ${pnl_profile['tp_pnl']:,.2f} ({pnl_profile['tp_return']*100:.2f}%)"
+                )
+                _write(
+                    f"Potential SL P&L: ${pnl_profile['sl_pnl']:,.2f} ({pnl_profile['sl_return']*100:.2f}%)"
+                )
 
             short_summaries.append(self._format_short_summary(crypto, i))
 
@@ -3903,6 +3980,7 @@ def main():
         # Convert results to dictionaries for JSON serialization
         json_results = []
         for crypto in results:
+            pnl_profile = finder._compute_position_pnl(crypto)
             crypto_dict = {
                 'symbol': crypto.symbol,
                 'name': crypto.name,
@@ -3937,7 +4015,14 @@ def main():
                 'take_profit_price': _finite(crypto.take_profit_price),
                 'risk_reward_ratio': _finite(crypto.risk_reward_ratio),
                 'position_size_percentage': _finite(crypto.position_size_percentage),
-                'data_timestamp_utc': getattr(crypto, 'data_timestamp_utc', '')
+                'data_timestamp_utc': getattr(crypto, 'data_timestamp_utc', ''),
+                'position_notional_usd': _finite(pnl_profile['notional'], 0.0) if pnl_profile else 0.0,
+                'position_leverage': _finite(pnl_profile['leverage'], 0.0) if pnl_profile else 0.0,
+                'position_margin_usd': _finite(pnl_profile['margin'], 0.0) if pnl_profile else 0.0,
+                'take_profit_pnl_usd': _finite(pnl_profile['tp_pnl'], 0.0) if pnl_profile else 0.0,
+                'stop_loss_pnl_usd': _finite(pnl_profile['sl_pnl'], 0.0) if pnl_profile else 0.0,
+                'take_profit_return_pct': _finite(pnl_profile['tp_return'] * 100.0, 0.0) if pnl_profile else 0.0,
+                'stop_loss_return_pct': _finite(pnl_profile['sl_return'] * 100.0, 0.0) if pnl_profile else 0.0,
             }
             json_results.append(crypto_dict)
         if args.save and args.save.lower().endswith('.json'):
@@ -3984,7 +4069,9 @@ def main():
                 'macd_signal', 'bb_position', 'trend_strength', 'momentum_score', 'fundamental_score',
                 'technical_score', 'risk_score', 'overall_score', 'risk_level',
                 'entry_price', 'stop_loss_price', 'take_profit_price', 'risk_reward_ratio',
-                'position_size_percentage', 'data_timestamp_utc'
+                'position_size_percentage', 'data_timestamp_utc', 'position_notional_usd',
+                'position_leverage', 'position_margin_usd', 'take_profit_pnl_usd',
+                'stop_loss_pnl_usd', 'take_profit_return_pct', 'stop_loss_return_pct'
             ]
             # Atomic CSV save: write to temp and replace
             tmp_path = Path(args.save + f".tmp.{os.getpid()}.{int(time.time()*1000)}")
@@ -3994,6 +4081,7 @@ def main():
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
                 for crypto in results:
+                    pnl_profile = finder._compute_position_pnl(crypto)
                     writer.writerow({
                         'symbol': crypto.symbol,
                         'name': crypto.name,
@@ -4028,7 +4116,14 @@ def main():
                         'take_profit_price': crypto.take_profit_price,
                         'risk_reward_ratio': crypto.risk_reward_ratio,
                         'position_size_percentage': crypto.position_size_percentage,
-                        'data_timestamp_utc': getattr(crypto, 'data_timestamp_utc', '')
+                        'data_timestamp_utc': getattr(crypto, 'data_timestamp_utc', ''),
+                        'position_notional_usd': pnl_profile['notional'] if pnl_profile else 0.0,
+                        'position_leverage': pnl_profile['leverage'] if pnl_profile else 0.0,
+                        'position_margin_usd': pnl_profile['margin'] if pnl_profile else 0.0,
+                        'take_profit_pnl_usd': pnl_profile['tp_pnl'] if pnl_profile else 0.0,
+                        'stop_loss_pnl_usd': pnl_profile['sl_pnl'] if pnl_profile else 0.0,
+                        'take_profit_return_pct': pnl_profile['tp_return'] * 100.0 if pnl_profile else 0.0,
+                        'stop_loss_return_pct': pnl_profile['sl_return'] * 100.0 if pnl_profile else 0.0,
                     })
             os.replace(tmp_path, final_path)
             print(f"Saved {len(results)} results to {final_path}")

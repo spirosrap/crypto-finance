@@ -150,6 +150,8 @@ def build_short_term_config() -> CryptoFinderConfig:
     cfg.openai_max_candidates = _env_override("SHORT_OPENAI_MAX_CANDIDATES", cfg.openai_max_candidates, int)
     cfg.openai_temperature = _env_override("SHORT_OPENAI_TEMPERATURE", cfg.openai_temperature, float)
     cfg.openai_sleep_seconds = _env_override("SHORT_OPENAI_SLEEP_SECONDS", cfg.openai_sleep_seconds, float)
+    cfg.report_position_notional = _env_override("SHORT_REPORT_NOTIONAL", cfg.report_position_notional, float)
+    cfg.report_leverage = _env_override("SHORT_REPORT_LEVERAGE", cfg.report_leverage, float)
 
     return cfg
 
@@ -739,6 +741,7 @@ def main() -> None:
     if args.output == 'json' or (args.save and args.save.lower().endswith('.json')):
         json_results = []
         for crypto in results:
+            pnl_profile = finder._compute_position_pnl(crypto)
             json_results.append({
                 'symbol': crypto.symbol,
                 'name': crypto.name,
@@ -774,6 +777,13 @@ def main() -> None:
                 'risk_reward_ratio': _finite(crypto.risk_reward_ratio),
                 'position_size_percentage': _finite(crypto.position_size_percentage),
                 'data_timestamp_utc': getattr(crypto, 'data_timestamp_utc', ''),
+                'position_notional_usd': _finite(pnl_profile['notional'], 0.0) if pnl_profile else 0.0,
+                'position_leverage': _finite(pnl_profile['leverage'], 0.0) if pnl_profile else 0.0,
+                'position_margin_usd': _finite(pnl_profile['margin'], 0.0) if pnl_profile else 0.0,
+                'take_profit_pnl_usd': _finite(pnl_profile['tp_pnl'], 0.0) if pnl_profile else 0.0,
+                'stop_loss_pnl_usd': _finite(pnl_profile['sl_pnl'], 0.0) if pnl_profile else 0.0,
+                'take_profit_return_pct': _finite(pnl_profile['tp_return'] * 100.0, 0.0) if pnl_profile else 0.0,
+                'stop_loss_return_pct': _finite(pnl_profile['sl_return'] * 100.0, 0.0) if pnl_profile else 0.0,
             })
 
         if args.save and args.save.lower().endswith('.json'):
@@ -825,7 +835,9 @@ def main() -> None:
                 'macd_signal', 'bb_position', 'trend_strength', 'momentum_score', 'fundamental_score',
                 'technical_score', 'risk_score', 'overall_score', 'risk_level',
                 'entry_price', 'stop_loss_price', 'take_profit_price', 'risk_reward_ratio',
-                'position_size_percentage', 'data_timestamp_utc'
+                'position_size_percentage', 'data_timestamp_utc', 'position_notional_usd',
+                'position_leverage', 'position_margin_usd', 'take_profit_pnl_usd',
+                'stop_loss_pnl_usd', 'take_profit_return_pct', 'stop_loss_return_pct'
             ]
 
             tmp_path = Path(args.save + f".tmp.{os.getpid()}.{int(datetime.now().timestamp()*1000)}")
@@ -836,6 +848,7 @@ def main() -> None:
                 writer = csv.DictWriter(handle, fieldnames=fieldnames)
                 writer.writeheader()
                 for crypto in results:
+                    pnl_profile = finder._compute_position_pnl(crypto)
                     writer.writerow({
                         'symbol': crypto.symbol,
                         'name': crypto.name,
@@ -871,6 +884,13 @@ def main() -> None:
                         'risk_reward_ratio': crypto.risk_reward_ratio,
                         'position_size_percentage': crypto.position_size_percentage,
                         'data_timestamp_utc': getattr(crypto, 'data_timestamp_utc', ''),
+                        'position_notional_usd': pnl_profile['notional'] if pnl_profile else 0.0,
+                        'position_leverage': pnl_profile['leverage'] if pnl_profile else 0.0,
+                        'position_margin_usd': pnl_profile['margin'] if pnl_profile else 0.0,
+                        'take_profit_pnl_usd': pnl_profile['tp_pnl'] if pnl_profile else 0.0,
+                        'stop_loss_pnl_usd': pnl_profile['sl_pnl'] if pnl_profile else 0.0,
+                        'take_profit_return_pct': pnl_profile['tp_return'] * 100.0 if pnl_profile else 0.0,
+                        'stop_loss_return_pct': pnl_profile['sl_return'] * 100.0 if pnl_profile else 0.0,
                     })
             os.replace(tmp_path, final_path)
             print(f"Saved {len(results)} results to {final_path}")
