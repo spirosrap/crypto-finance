@@ -1,0 +1,9 @@
+timestamp,product_id,side,price,size,stop_loss,take_profit,rationale,leverage,order_id,event,reason
+2025-09-26T15:21:32.345394+00:00,BTC-PERP-INTX,buy,109173.00,0.001832,108954.65,109555.11,trend_up_pullback,momentum_breakout,10.00,,entry,
+2025-09-26T15:25:01.847531+00:00,BTC-PERP-INTX,buy,109165.00,0.000229,108946.67,109547.08,momentum_breakout,ema_accelerating,5.00,,entry,
+2025-09-26T15:31:04.196031+00:00,BTC-PERP-INTX,buy,109384.20,0.002286,109165.43,109767.04,momentum_breakout,50.00,,entry,
+2025-09-26T15:35:05.111465+00:00,BTC-PERP-INTX,buy,109353.10,0.002286,109134.39,109735.84,momentum_breakout,ema_accelerating,50.00,,entry,
+2025-09-26T15:39:14.057032+00:00,BTC-PERP-INTX,sell,109199.20,0.002289,109417.60,108817.00,momentum_breakdown,50.00,c10f53d6-be00-49b0-ab1c-244e9d4efc49,entry,
+2025-09-26T15:39:15.593964+00:00,BTC-PERP-INTX,sell,109199.20,0.002289,109417.60,108817.00,,50.00,c10f53d6-be00-49b0-ab1c-244e9d4efc49,bracket,Failed to place bracket order
+2025-09-26T15:41:25.553013+00:00,BTC-PERP-INTX,buy,109348.20,0.002286,109129.50,109730.92,momentum_breakout,50.00,47fd05cf-3a11-46c4-a3fa-933797eaa2ce,entry,
+2025-09-26T15:41:27.231532+00:00,BTC-PERP-INTX,buy,109348.20,0.002286,109129.50,109730.92,,50.00,47fd05cf-3a11-46c4-a3fa-933797eaa2ce,bracket,success

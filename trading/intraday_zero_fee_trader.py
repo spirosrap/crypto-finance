@@ -499,11 +499,31 @@ class CoinbaseExecutionEngine(ExecutionEngine):
 
     @staticmethod
     def _extract_order_id(response: Optional[dict]) -> str:
-        if not isinstance(response, dict):
+        if response is None:
             return ""
+
+        def _lookup(container: object, key: str):
+            if isinstance(container, dict) and key in container:
+                return container[key]
+            if hasattr(container, key):
+                return getattr(container, key)
+            if hasattr(container, "__dict__"):
+                data = getattr(container, "__dict__") or {}
+                if key in data:
+                    return data[key]
+            return None
+
         for key in ("order_id", "id", "orderId", "client_order_id", "clientOrderId"):
-            if key in response:
-                return str(response[key])
+            value = _lookup(response, key)
+            if value:
+                return str(value)
+
+        success_response = _lookup(response, "success_response")
+        if success_response:
+            for key in ("order_id", "id", "orderId", "client_order_id", "clientOrderId"):
+                value = _lookup(success_response, key)
+                if value:
+                    return str(value)
         return ""
 
     def _write_live_log(
@@ -622,7 +642,7 @@ class CoinbaseExecutionEngine(ExecutionEngine):
             margin_type="CROSS" if decision.leverage and decision.leverage > 1 else None,
         )
         LOGGER.info("Placed live order: %s", response)
-        order_id = self._record_trade(decision, response if isinstance(response, dict) else None)
+        order_id = self._record_trade(decision, response)
         position = Position(
             product_id=decision.product_id,
             side=decision.side,
