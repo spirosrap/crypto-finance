@@ -477,8 +477,35 @@ class PaperExecutionEngine(ExecutionEngine):
 
 
 class CoinbaseExecutionEngine(ExecutionEngine):
-    def __init__(self, service: CoinbaseService):
+    def __init__(self, service: CoinbaseService, log_dir: Path):
         self.service = service
+        self.log_dir = log_dir
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._log_file = self.log_dir / "zero_fee_live_trades.csv"
+        if not self._log_file.exists():
+            header = (
+                "timestamp,product_id,side,price,size,stop_loss,take_profit," \
+                "rationale,leverage,order_id\n"
+            )
+            self._log_file.write_text(header)
+
+    def _record_trade(self, decision: SignalDecision, response: Optional[dict]) -> None:
+        try:
+            timestamp = datetime.now(UTC).isoformat()
+            order_id: str = ""
+            if isinstance(response, dict):
+                for key in ("order_id", "id", "orderId", "client_order_id", "clientOrderId"):
+                    if key in response:
+                        order_id = str(response[key])
+                        break
+            line = (
+                f"{timestamp},{decision.product_id},{decision.side},{decision.entry_price:.2f},{decision.size:.6f},"
+                f"{decision.stop_loss:.2f},{decision.take_profit:.2f},{decision.rationale},{decision.leverage:.2f},{order_id}\n"
+            )
+            with self._log_file.open("a") as fh:
+                fh.write(line)
+        except Exception:  # pragma: no cover - logging best-effort only
+            LOGGER.exception("Failed to record live trade to %s", self._log_file)
 
     def enter(self, decision: SignalDecision) -> Optional[Position]:  # pragma: no cover - requires live trading
         response = self.service.place_order(
@@ -490,6 +517,7 @@ class CoinbaseExecutionEngine(ExecutionEngine):
             margin_type="CROSS" if decision.leverage and decision.leverage > 1 else None,
         )
         LOGGER.info("Placed live order: %s", response)
+        self._record_trade(decision, response if isinstance(response, dict) else None)
         return Position(
             product_id=decision.product_id,
             side=decision.side,
@@ -522,6 +550,7 @@ class CoinbaseExecutionEngine(ExecutionEngine):
 class ZeroFeePerpTrader:
     def __init__(self, config: IntradayTraderConfig, execution: Optional[ExecutionEngine] = None, service: Optional[CoinbaseService] = None):
         self.config = config
+        self.config.log_dir.mkdir(parents=True, exist_ok=True)
         self.service = service or self._build_service()
         self.execution = execution or self._default_execution()
         self.signal_engine = SignalEngine(config)
@@ -543,7 +572,7 @@ class ZeroFeePerpTrader:
         if self.config.dry_run:
             LOGGER.info("Using paper execution engine (dry run)")
             return PaperExecutionEngine(self.config.log_dir)
-        return CoinbaseExecutionEngine(self.service)
+        return CoinbaseExecutionEngine(self.service, self.config.log_dir)
 
     # ----------------------------
     # Data fetch & preprocessing

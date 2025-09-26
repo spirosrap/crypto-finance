@@ -17,7 +17,7 @@ Intraday trading loop designed for the INTX perpetual venue where taker fees are
    export AUTO_ZERO_FEE_LEVERAGE=50
    python auto_zero_fee_trader.py --granularity ONE_MINUTE --poll 30 --live
    ```
-   Drop the environment overrides if you prefer the built-in defaults (see below).
+   Drop the environment overrides if you prefer the built-in defaults (see below). Live executions are also copied to `trade_logs/zero_fee_live_trades.csv` for audit.
 
 ## Architecture Overview
 
@@ -91,7 +91,7 @@ Any parameter is overridable via command-line flags where exposed (e.g., `--prod
 - **Funding & Margin** – cross leverage defaults to 50×. Keep sufficient USDC in the INTX portfolio; Coinbase enforces minimum base sizes (~0.001 BTC) and rejects orders below the threshold.
 - **Max Age** – positions are auto-liquidated after `AUTO_ZERO_FEE_MAX_MINUTES` (default 45). Tighten this if you want faster churn.
 - **Guardrails** – adjust stop/take-profit percentages, ATR multiple, and cooldown to match volatility regimes. For high-event windows (Fed, CPI, etc.) consider raising `AUTO_ZERO_FEE_MIN_VOL_RATIO` or disabling the bot.
-- **Logging** – execution logs flow to stdout and to `logs/short_term_crypto_finder/`. Paper trades append to `trade_logs/zero_fee_paper_trades.csv`.
+- **Logging** – execution logs flow to stdout and to `logs/short_term_crypto_finder/`. Paper trades append to `trade_logs/zero_fee_paper_trades.csv`; live fills are mirrored to `trade_logs/zero_fee_live_trades.csv`.
 - **Failsafes** – if the process dies, stops/targets are no longer enforced. Run inside `tmux` or systemd and set alerting around PnL and margin usage.
 
 ## Troubleshooting

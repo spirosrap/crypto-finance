@@ -1,17 +1,21 @@
 import unittest
 from datetime import datetime, timedelta, UTC
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import pandas as pd
 
 from trading.intraday_zero_fee_trader import (
+    CoinbaseExecutionEngine,
     IntradayTraderConfig,
     PaperExecutionEngine,
+    SignalDecision,
     SignalEngine,
+    ZeroFeePerpTrader,
     build_feature_frame,
     compute_atr,
     compute_rsi,
-    ZeroFeePerpTrader,
 )
 
 
@@ -138,6 +142,47 @@ class TestTraderIntegration(unittest.TestCase):
         trader = ZeroFeePerpTrader(config=cfg, service=service, execution=PaperExecutionEngine(cfg.log_dir))
         trader.run_once()
         self.assertGreaterEqual(len(trader.positions), 1)
+
+    def test_live_execution_logs_to_csv(self):
+        class StubService:
+            def __init__(self):
+                self.calls = []
+
+            def place_order(self, **kwargs):
+                self.calls.append(kwargs)
+                return {"order_id": "test-order"}
+
+        decision = SignalDecision(
+            product_id="BTC-PERP-INTX",
+            side="buy",
+            size=0.01,
+            entry_price=40000.0,
+            stop_loss=39800.0,
+            take_profit=40200.0,
+            rationale="unit-test",
+            leverage=25.0,
+        )
+
+        with TemporaryDirectory() as tmpdir:
+            log_dir = Path(tmpdir)
+            engine = CoinbaseExecutionEngine(StubService(), log_dir)
+            position = engine.enter(decision)
+            self.assertIsNotNone(position)
+
+            log_file = log_dir / "zero_fee_live_trades.csv"
+            self.assertTrue(log_file.exists())
+            lines = log_file.read_text().strip().splitlines()
+            self.assertGreaterEqual(len(lines), 2)
+            header = lines[0]
+            row = lines[-1]
+            self.assertEqual(
+                header,
+                "timestamp,product_id,side,price,size,stop_loss,take_profit,rationale,leverage,order_id",
+            )
+            fields = row.split(",")
+            self.assertEqual(fields[1], "BTC-PERP-INTX")
+            self.assertEqual(fields[2], "buy")
+            self.assertEqual(fields[-1], "test-order")
 
 
 if __name__ == "__main__":
