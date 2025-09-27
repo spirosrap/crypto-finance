@@ -1,3 +1,6 @@
 timestamp,product_id,side,price,size,stop_loss,take_profit,rationale,leverage,order_id
 2025-09-26T12:29:11.177187+00:00,ADA-PERP-INTX,sell,0.76,1635.697461,0.77,0.76,trend_down_snapback,50.00,
 2025-09-26T12:30:04.683253+00:00,APT-PERP-INTX,sell,3.94,316.856781,3.95,3.93,trend_down_snapback,50.00,
+2025-09-27T10:34:52.725690+00:00,APT-PERP-INTX,sell,4.09,305.922663,4.09,4.07,trend_down_snapback,50.00,b362b865-66bd-41b2-9102-72daadafe845,entry,
+2025-09-27T10:34:54.103118+00:00,APT-PERP-INTX,sell,4.09,305.922663,4.09,4.07,,50.00,b362b865-66bd-41b2-9102-72daadafe845,bracket,success
+2025-09-27T10:36:39.503863+00:00,APT-PERP-INTX,sell,4.09,305.922663,4.09,4.07,,50.00,,exit,stop_hit
