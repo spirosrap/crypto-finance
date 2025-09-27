@@ -143,6 +143,7 @@ class IntradayTraderConfig:
     dry_run: bool = True
     log_dir: Path = Path("trade_logs")
     state_dir: Path = Path("cache/zero_fee_trader")
+    use_exchange_brackets: bool = False
 
     @classmethod
     def from_env(cls) -> "IntradayTraderConfig":
@@ -171,6 +172,7 @@ class IntradayTraderConfig:
         leverage = _env_float("AUTO_ZERO_FEE_LEVERAGE", 50.0)
         max_position_minutes = _env_int("AUTO_ZERO_FEE_MAX_MINUTES", 45)
         dry_run = not _env_bool("AUTO_ZERO_FEE_LIVE", False)
+        use_exchange_brackets = _env_bool("AUTO_ZERO_FEE_USE_BRACKETS", False)
 
         cfg = cls(
             product_ids=product_ids,
@@ -198,6 +200,7 @@ class IntradayTraderConfig:
             leverage=leverage,
             max_position_minutes=max_position_minutes,
             dry_run=dry_run,
+            use_exchange_brackets=use_exchange_brackets,
         )
         cfg.log_dir = Path(os.getenv("AUTO_ZERO_FEE_LOG_DIR", str(cfg.log_dir)))
         cfg.state_dir = Path(os.getenv("AUTO_ZERO_FEE_STATE_DIR", str(cfg.state_dir)))
@@ -485,9 +488,10 @@ class PaperExecutionEngine(ExecutionEngine):
 
 
 class CoinbaseExecutionEngine(ExecutionEngine):
-    def __init__(self, service: CoinbaseService, log_dir: Path):
+    def __init__(self, service: CoinbaseService, log_dir: Path, config: Optional[IntradayTraderConfig] = None):
         self.service = service
         self.log_dir = log_dir
+        self.config = config
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._log_file = self.log_dir / "zero_fee_live_trades.csv"
         if not self._log_file.exists():
@@ -653,7 +657,8 @@ class CoinbaseExecutionEngine(ExecutionEngine):
             take_profit=decision.take_profit,
             leverage=decision.leverage,
         )
-        self._maybe_place_brackets(decision, position, order_id)
+        if self.config and self.config.use_exchange_brackets:
+            self._maybe_place_brackets(decision, position, order_id)
         return position
 
     def exit(self, position: Position, reason: str) -> bool:  # pragma: no cover - requires live trading
@@ -693,6 +698,8 @@ class ZeroFeePerpTrader:
         self.config.log_dir.mkdir(parents=True, exist_ok=True)
         self.service = service or self._build_service()
         self.execution = execution or self._default_execution()
+        if isinstance(self.execution, CoinbaseExecutionEngine) and getattr(self.execution, "config", None) is None:
+            self.execution.config = self.config
         self.signal_engine = SignalEngine(config)
         self.risk_manager = RiskManager(config)
         self.cooldown = CooldownTracker(config.cooldown_seconds)
@@ -712,7 +719,7 @@ class ZeroFeePerpTrader:
         if self.config.dry_run:
             LOGGER.info("Using paper execution engine (dry run)")
             return PaperExecutionEngine(self.config.log_dir)
-        return CoinbaseExecutionEngine(self.service, self.config.log_dir)
+        return CoinbaseExecutionEngine(self.service, self.config.log_dir, self.config)
 
     # ----------------------------
     # Data fetch & preprocessing
@@ -775,26 +782,34 @@ class ZeroFeePerpTrader:
             alive.append(pos)
         self.positions = alive
 
-    def _check_stops(self, product_id: str, features: pd.DataFrame) -> None:
-        last = features.iloc[-1]
-        high = float(last.get("high", last["close"]))
-        low = float(last.get("low", last["close"]))
+    def _evaluate_exit_reason(self, position: Position, high: float, low: float, close: float) -> Optional[str]:
+        if position.side == "buy":
+            if low <= position.stop_loss:
+                return "stop_hit"
+            if close <= position.stop_loss:
+                return "stop_hit_close"
+            if high >= position.take_profit:
+                return "target_hit"
+            if close >= position.take_profit:
+                return "target_hit_close"
+        else:
+            if high >= position.stop_loss:
+                return "stop_hit"
+            if close >= position.stop_loss:
+                return "stop_hit_close"
+            if low <= position.take_profit:
+                return "target_hit"
+            if close <= position.take_profit:
+                return "target_hit_close"
+        return None
+
+    def _enforce_stops(self, product_id: str, high: float, low: float, close: float) -> None:
         updated_positions: List[Position] = []
         for pos in self.positions:
             if pos.product_id != product_id:
                 updated_positions.append(pos)
                 continue
-            exit_reason: Optional[str] = None
-            if pos.side == "buy":
-                if low <= pos.stop_loss:
-                    exit_reason = "stop_hit"
-                elif high >= pos.take_profit:
-                    exit_reason = "target_hit"
-            else:
-                if high >= pos.stop_loss:
-                    exit_reason = "stop_hit"
-                elif low <= pos.take_profit:
-                    exit_reason = "target_hit"
+            exit_reason = self._evaluate_exit_reason(pos, high, low, close)
             if exit_reason:
                 if not self.execution.exit(pos, exit_reason):
                     LOGGER.warning(
@@ -808,6 +823,15 @@ class ZeroFeePerpTrader:
                 updated_positions.append(pos)
         self.positions = updated_positions
 
+    def _check_stops(self, product_id: str, features: pd.DataFrame) -> None:
+        if features.empty:
+            return
+        last = features.iloc[-1]
+        close = float(last["close"])
+        high = float(last.get("high", close))
+        low = float(last.get("low", close))
+        self._enforce_stops(product_id, high, low, close)
+
     # ----------------------------
     # Main loop
     # ----------------------------
@@ -820,10 +844,15 @@ class ZeroFeePerpTrader:
             except Exception as exc:  # pragma: no cover - network heavy
                 LOGGER.error("Failed to fetch candles for %s: %s", product_id, exc)
                 continue
+            last_row = df.iloc[-1]
+            fallback_close = float(last_row["close"])
+            fallback_high = float(last_row.get("high", fallback_close))
+            fallback_low = float(last_row.get("low", fallback_close))
             try:
                 features = build_feature_frame(df, self.config)
             except Exception as exc:
                 LOGGER.error("Failed to build features for %s: %s", product_id, exc)
+                self._enforce_stops(product_id, fallback_high, fallback_low, fallback_close)
                 continue
             self._check_stops(product_id, features)
             decision = self.signal_engine.evaluate(product_id, features)

@@ -171,7 +171,9 @@ class TestTraderIntegration(unittest.TestCase):
         with TemporaryDirectory() as tmpdir:
             log_dir = Path(tmpdir)
             service = StubService()
-            engine = CoinbaseExecutionEngine(service, log_dir)
+            cfg = IntradayTraderConfig()
+            cfg.use_exchange_brackets = True
+            engine = CoinbaseExecutionEngine(service, log_dir, cfg)
             position = engine.enter(decision)
             self.assertIsNotNone(position)
 
