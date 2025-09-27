@@ -24,7 +24,7 @@ import sys
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from typing import Dict, List, Optional, TextIO
+from typing import Callable, Dict, List, Optional, Set, TextIO
 
 import numpy as np
 import pandas as pd
@@ -580,18 +580,234 @@ PROFILE_PRESETS = {
 }
 
 
+def _positive_int(value: str) -> int:
+    """Argparse type that enforces a strictly positive integer."""
+
+    try:
+        converted = int(value)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - argparse already handles TypeError
+        raise argparse.ArgumentTypeError(f"Expected integer, received '{value}'") from exc
+
+    if converted <= 0:
+        raise argparse.ArgumentTypeError("Value must be a positive integer")
+
+    return converted
+
+
+def make_risk_level_validator(valid_levels: Set[str]) -> Callable[[str], str]:
+    """Create an argparse-compatible validator for risk level strings."""
+
+    normalized_levels = {level.strip().upper() for level in valid_levels}
+
+    def _validator(value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in normalized_levels:
+            choices = ', '.join(sorted(normalized_levels))
+            raise argparse.ArgumentTypeError(
+                f"Invalid risk level '{value}'. Choose from: {choices}."
+            )
+        return normalized
+
+    return _validator
+
+
+def build_cli_parser(
+    env_defaults: CryptoFinderConfig,
+    default_limit: int,
+    profile_default: str,
+    default_max_risk: Optional[str],
+    risk_level_type: Callable[[str], str],
+    profile_presets: Optional[Dict[str, Dict[str, int]]] = None,
+) -> argparse.ArgumentParser:
+    """Return the CLI parser with defaults injected for easier testing."""
+
+    presets = profile_presets or PROFILE_PRESETS
+    parser = argparse.ArgumentParser(
+        description='Find high-conviction short-term cryptocurrency trades'
+    )
+    parser.add_argument(
+        '--profile',
+        choices=sorted(presets.keys()),
+        default=profile_default,
+        help=f"Preset bundle of frequently used parameters (default: {profile_default})",
+    )
+    parser.add_argument(
+        '--plain-output',
+        type=Path,
+        help='Write a formatted text report to this path (excludes log lines)',
+    )
+    parser.add_argument(
+        '--suppress-console-logs',
+        action='store_true',
+        help='Disable console log handler for cleaner stdout piping',
+    )
+    parser.add_argument(
+        '--limit',
+        type=_positive_int,
+        default=None,
+        help=(
+            "Number of products to evaluate before ranking "
+            f"(default: {default_limit}; profile may override)"
+        ),
+    )
+    parser.add_argument(
+        '--min-market-cap',
+        type=_positive_int,
+        default=env_defaults.min_market_cap,
+        help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})",
+    )
+    parser.add_argument(
+        '--max-results',
+        type=_positive_int,
+        default=None,
+        help=(
+            "Maximum number of setups to display "
+            f"(default: {env_defaults.max_results}; profile may override)"
+        ),
+    )
+    parser.add_argument(
+        '--output',
+        type=str,
+        choices=['console', 'json'],
+        default='console',
+        help='Output format (default: console)',
+    )
+    parser.add_argument(
+        '--side',
+        type=str,
+        choices=['long', 'short', 'both'],
+        default=env_defaults.side,
+        help=f"Which trade direction(s) to include (default: {env_defaults.side})",
+    )
+    parser.add_argument(
+        '--unique-by-symbol',
+        action=argparse.BooleanOptionalAction,
+        default=env_defaults.unique_by_symbol,
+        help='Keep only the best direction per symbol',
+    )
+    parser.add_argument(
+        '--min-score',
+        type=float,
+        default=env_defaults.min_overall_score,
+        help=f"Discard setups below this overall score (default: {env_defaults.min_overall_score})",
+    )
+    parser.add_argument(
+        '--save',
+        type=str,
+        help='Optional path (.json or .csv) to persist results',
+    )
+    parser.add_argument(
+        '--symbols',
+        type=str,
+        help='Comma-separated list of symbols to analyse (e.g., BTC,ETH,SOL)',
+    )
+    parser.add_argument(
+        '--top-per-side',
+        type=_positive_int,
+        default=env_defaults.top_per_side,
+        help='Cap the number of long and short setups before final merge',
+    )
+    parser.add_argument(
+        '--max-workers',
+        type=_positive_int,
+        default=None,
+        help=(
+            "Override worker threads for API fetches "
+            f"(default: {env_defaults.max_workers}; profile may override)"
+        ),
+    )
+    parser.add_argument(
+        '--offline',
+        action=argparse.BooleanOptionalAction,
+        default=env_defaults.offline,
+        help='Use cache only; skip network requests where possible',
+    )
+    parser.add_argument(
+        '--force-refresh',
+        action=argparse.BooleanOptionalAction,
+        default=env_defaults.force_refresh_candles,
+        help='Force fresh candle downloads instead of using cache (default: %(default)s)',
+    )
+    parser.add_argument(
+        '--quotes',
+        type=str,
+        help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT',
+    )
+    parser.add_argument(
+        '--risk-free-rate',
+        type=float,
+        default=env_defaults.risk_free_rate,
+        help=f"Override annual risk-free rate (default: {env_defaults.risk_free_rate})",
+    )
+    parser.add_argument(
+        '--analysis-days',
+        type=_positive_int,
+        default=None,
+        help=(
+            "Number of daily bars for the swing window "
+            f"(default: {env_defaults.analysis_days}; profile may override)"
+        ),
+    )
+    max_risk_help = 'Highest risk tier to allow (e.g., LOW, MEDIUM_LOW, MEDIUM)'
+    if default_max_risk:
+        max_risk_help += f" (default: {default_max_risk})"
+    parser.add_argument(
+        '--max-risk-level',
+        type=risk_level_type,
+        default=default_max_risk,
+        help=max_risk_help,
+    )
+    parser.add_argument(
+        '--use-openai-scoring',
+        action=argparse.BooleanOptionalAction,
+        default=env_defaults.use_openai_scoring,
+        help='Blend scores with OpenAI model output (default: %(default)s; override env/CRYPTO_* if set)',
+    )
+    parser.add_argument(
+        '--openai-weight',
+        type=float,
+        default=None,
+        help=f"Blend weight for OpenAI score (0-1); default {env_defaults.openai_weight}",
+    )
+    parser.add_argument(
+        '--openai-model',
+        type=str,
+        default=None,
+        help=f"Override OpenAI model name (default: {env_defaults.openai_model})",
+    )
+    parser.add_argument(
+        '--openai-max-candidates',
+        type=_positive_int,
+        default=None,
+        help=f"Limit number of candidates sent to OpenAI (default: {env_defaults.openai_max_candidates})",
+    )
+
+    st_openai_temp_default = (
+        env_defaults.openai_temperature
+        if env_defaults.openai_temperature is not None
+        else 'model default'
+    )
+    parser.add_argument(
+        '--openai-temperature',
+        type=float,
+        default=None,
+        help=f"Temperature for OpenAI call (default: {st_openai_temp_default})",
+    )
+    parser.add_argument(
+        '--openai-sleep-seconds',
+        type=float,
+        default=None,
+        help=f"Optional pause between OpenAI calls (default: {env_defaults.openai_sleep_seconds})",
+    )
+
+    return parser
+
+
 def main() -> None:
     env_defaults = build_short_term_config()
 
     valid_risk_levels = {level.name for level in RiskLevel}
-
-    def risk_level_type(value: str) -> str:
-        normalized = value.strip().upper()
-        if normalized not in valid_risk_levels:
-            raise argparse.ArgumentTypeError(
-                f"Invalid risk level '{value}'. Choose from: {', '.join(sorted(valid_risk_levels))}."
-            )
-        return normalized
+    risk_level_type = make_risk_level_validator(valid_risk_levels)
 
     default_max_risk: Optional[str] = None
     if env_defaults.max_risk_level:
@@ -605,67 +821,13 @@ def main() -> None:
     if profile_default not in PROFILE_PRESETS:
         profile_default = "default"
 
-    parser = argparse.ArgumentParser(description='Find high-conviction short-term cryptocurrency trades')
-    parser.add_argument('--profile', choices=sorted(PROFILE_PRESETS.keys()), default=profile_default,
-                        help=f"Preset bundle of frequently used parameters (default: {profile_default})")
-    parser.add_argument('--plain-output', type=Path,
-                        help='Write a formatted text report to this path (excludes log lines)')
-    parser.add_argument('--suppress-console-logs', action='store_true',
-                        help='Disable console log handler for cleaner stdout piping')
-    parser.add_argument('--limit', type=int, default=None,
-                        help=f"Number of products to evaluate before ranking (default: {default_limit}; profile may override)")
-    parser.add_argument('--min-market-cap', type=int, default=env_defaults.min_market_cap,
-                        help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})")
-    parser.add_argument('--max-results', type=int, default=None,
-                        help=f"Maximum number of setups to display (default: {env_defaults.max_results}; profile may override)")
-    parser.add_argument('--output', type=str, choices=['console', 'json'], default='console',
-                        help='Output format (default: console)')
-    parser.add_argument('--side', type=str, choices=['long', 'short', 'both'], default=env_defaults.side,
-                        help=f"Which trade direction(s) to include (default: {env_defaults.side})")
-    parser.add_argument('--unique-by-symbol', action='store_true', default=env_defaults.unique_by_symbol,
-                        help='Keep only the best direction per symbol')
-    parser.add_argument('--min-score', type=float, default=env_defaults.min_overall_score,
-                        help=f"Discard setups below this overall score (default: {env_defaults.min_overall_score})")
-    parser.add_argument('--save', type=str,
-                        help='Optional path (.json or .csv) to persist results')
-    parser.add_argument('--symbols', type=str,
-                        help='Comma-separated list of symbols to analyse (e.g., BTC,ETH,SOL)')
-    parser.add_argument('--top-per-side', type=int, default=env_defaults.top_per_side,
-                        help='Cap the number of long and short setups before final merge')
-    parser.add_argument('--max-workers', type=int, default=None,
-                        help=f"Override worker threads for API fetches (default: {env_defaults.max_workers}; profile may override)")
-    parser.add_argument('--offline', action='store_true', default=env_defaults.offline,
-                        help='Use cache only; skip network requests where possible')
-    parser.add_argument('--force-refresh', action=argparse.BooleanOptionalAction,
-                        default=env_defaults.force_refresh_candles,
-                        help='Force fresh candle downloads instead of using cache (default: %(default)s)')
-    parser.add_argument('--quotes', type=str,
-                        help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT')
-    parser.add_argument('--risk-free-rate', type=float, default=env_defaults.risk_free_rate,
-                        help=f"Override annual risk-free rate (default: {env_defaults.risk_free_rate})")
-    parser.add_argument('--analysis-days', type=int, default=None,
-                        help=f"Number of daily bars for the swing window (default: {env_defaults.analysis_days}; profile may override)")
-    parser.add_argument('--max-risk-level', type=risk_level_type, default=default_max_risk,
-                        help='Highest risk tier to allow (e.g., LOW, MEDIUM_LOW, MEDIUM)')
-    parser.add_argument('--use-openai-scoring', action=argparse.BooleanOptionalAction,
-                        default=env_defaults.use_openai_scoring,
-                        help='Blend scores with OpenAI model output (default: %(default)s; override env/CRYPTO_* if set)')
-    parser.add_argument('--openai-weight', type=float, default=None,
-                        help=f"Blend weight for OpenAI score (0-1); default {env_defaults.openai_weight}")
-    parser.add_argument('--openai-model', type=str, default=None,
-                        help=f"Override OpenAI model name (default: {env_defaults.openai_model})")
-    parser.add_argument('--openai-max-candidates', type=int, default=None,
-                        help=f"Limit number of candidates sent to OpenAI (default: {env_defaults.openai_max_candidates})")
-    st_openai_temp_default = (
-        env_defaults.openai_temperature
-        if env_defaults.openai_temperature is not None
-        else 'model default'
+    parser = build_cli_parser(
+        env_defaults,
+        default_limit=default_limit,
+        profile_default=profile_default,
+        default_max_risk=default_max_risk,
+        risk_level_type=risk_level_type,
     )
-    parser.add_argument('--openai-temperature', type=float, default=None,
-                        help=f"Temperature for OpenAI call (default: {st_openai_temp_default})")
-    parser.add_argument('--openai-sleep-seconds', type=float, default=None,
-                        help=f"Optional pause between OpenAI calls (default: {env_defaults.openai_sleep_seconds})")
-
     args = parser.parse_args()
 
     profile_overrides = PROFILE_PRESETS.get(args.profile, {})
@@ -689,16 +851,16 @@ def main() -> None:
     config.min_market_cap = args.min_market_cap
     config.max_results = final_max_results
     config.side = args.side
-    config.unique_by_symbol = bool(args.unique_by_symbol)
+    config.unique_by_symbol = args.unique_by_symbol
     config.min_overall_score = float(args.min_score or 0.0)
-    config.offline = bool(args.offline)
+    config.offline = args.offline
     config.top_per_side = args.top_per_side
     config.max_workers = final_max_workers
     config.risk_free_rate = args.risk_free_rate
     config.analysis_days = final_analysis_days
     config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
-    config.force_refresh_candles = bool(args.force_refresh)
-    config.use_openai_scoring = bool(args.use_openai_scoring)
+    config.force_refresh_candles = args.force_refresh
+    config.use_openai_scoring = args.use_openai_scoring
     if args.openai_weight is not None:
         config.openai_weight = float(args.openai_weight)
     if args.openai_model:

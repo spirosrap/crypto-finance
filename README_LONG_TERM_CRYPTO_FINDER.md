@@ -88,21 +88,22 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--profile` | env (`CRYPTO_FINDER_PROFILE` or `default`) | Apply preset bundle of parameters (e.g., `default`, `wide`) |
 | `--plain-output` | - | Write the formatted console report (without log headers) to a file |
 | `--suppress-console-logs` | false | Disable console log handler for clean stdout piping |
-| `--limit` | 50 (`CRYPTO_DEFAULT_LIMIT` or profile) | Number of cryptocurrencies to analyze before ranking |
-| `--min-market-cap` | 100000000 | Minimum market cap in USD ($100M) |
-| `--max-results` | 20 (profile/env) | Maximum number of results to display |
+| `--limit` | 50 (`CRYPTO_DEFAULT_LIMIT` or profile) | Number of cryptocurrencies to analyze before ranking (must be >0) |
+| `--min-market-cap` | 100000000 | Minimum market cap in USD ($100M, must be >0) |
+| `--max-results` | 20 (profile/env) | Maximum number of results to display (must be >0) |
 | `--output` | console | Output format: `console` or `json` |
 | `--side` | both | Evaluate `long`, `short`, or `both` |
-| `--unique-by-symbol` | false | Keep only the best side per symbol |
+| `--unique-by-symbol` / `--no-unique-by-symbol` | false | Keep only the best side per symbol |
 | `--min-score` | 0.0 | Minimum overall score to include |
 | `--symbols` | - | Comma-separated symbols (e.g., `BTC,ETH,SOL`) |
-| `--top-per-side` | - | Cap results per side before final sort |
+| `--top-per-side` | - | Cap results per side before final sort (must be >0 when provided) |
 | `--save` | - | Save results to path (`.json` or `.csv`) |
-| `--offline` | false | Avoid external HTTP where possible (use cache) |
-| `--max-workers` | env/profile | Override parallel workers; defaults from env/profile or CPU count |
+| `--offline` / `--no-offline` | false | Avoid external HTTP where possible (use cache) |
+| `--force-refresh` / `--no-force-refresh` | env (`CRYPTO_FORCE_REFRESH_CANDLES`) | Force fresh candle downloads instead of using cache |
+| `--max-workers` | env/profile | Override parallel workers; defaults from env/profile or CPU count (must be >0 when provided) |
 | `--quotes` | env | Preferred quote currencies, e.g., `USDC,USD,USDT` |
 | `--risk-free-rate` | env | Annual risk-free rate (e.g., `0.03` for 3%) |
-| `--analysis-days` | env/profile | Lookback window for technical/risk metrics (e.g., `365`) |
+| `--analysis-days` | env/profile | Lookback window for technical/risk metrics (e.g., `365`, must be >0 when provided) |
 | `--max-risk-level` | env | Highest risk level to include (`LOW`, `MEDIUM_LOW`, `MEDIUM`, `MEDIUM_HIGH`, `HIGH`, `VERY_HIGH`) |
 | `--use-openai-scoring/--no-use-openai-scoring` | env (`CRYPTO_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring without touching env vars |
 | `--openai-weight` | env (`CRYPTO_OPENAI_WEIGHT`) | Blend ratio between baseline and LLM score |
@@ -110,6 +111,8 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--openai-max-candidates` | env (`CRYPTO_OPENAI_MAX_CANDIDATES`) | Cap number of candidates sent to the model |
 | `--openai-temperature` | env (`CRYPTO_OPENAI_TEMPERATURE`) | Set temperature for the OpenAI call (defaults to model standard) |
 | `--openai-sleep-seconds` | env (`CRYPTO_OPENAI_SLEEP_SECONDS`) | Insert a pause between OpenAI requests |
+
+> The CLI now validates that count-style parameters (`--limit`, `--max-results`, `--top-per-side`, `--analysis-days`, etc.) are strictly positive, so typos like `--limit 0` fail fast instead of running an empty analysis.
 
 ### Environment Variables
 - `CRYPTO_DEFAULT_LIMIT`: Default for `--limit` (default `50`)

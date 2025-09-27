@@ -88,21 +88,22 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 | `--profile` | env (`SHORT_FINDER_PROFILE` or `default`) | Apply preset bundle (`default`, `wide`, …) |
 | `--plain-output` | - | Write the formatted console report (no log header) to disk |
 | `--suppress-console-logs` | false | Disable console logging for clean stdout piping |
-| `--limit` | 30 (`SHORT_DEFAULT_LIMIT` or profile) | Universe size to analyse before ranking |
-| `--min-market-cap` | env / ≥$50M | Minimum market cap filter |
-| `--max-results` | env/profile | Number of setups to display |
+| `--limit` | 30 (`SHORT_DEFAULT_LIMIT` or profile) | Universe size to analyse before ranking (must be >0) |
+| `--min-market-cap` | env / ≥$50M | Minimum market cap filter (must be >0) |
+| `--max-results` | env/profile | Number of setups to display (must be >0 when provided) |
 | `--output` | `console` | `console` or `json` |
 | `--side` | env (`both`) | Restrict to `long`, `short`, or `both` |
-| `--unique-by-symbol` | env | Keep only top side per symbol |
+| `--unique-by-symbol` / `--no-unique-by-symbol` | env | Keep only top side per symbol |
 | `--min-score` | env (≥20) | Drop results below this overall score |
 | `--symbols` | - | Comma-separated tickers to force-include |
 | `--top-per-side` | env (10) | Cap longs/shorts before merge |
 | `--save` | - | Persist output (`.json` or `.csv`) |
-| `--max-workers` | env/profile | Override concurrency for data fetch |
-| `--offline` | env | Use cached data only when possible |
+| `--max-workers` | env/profile | Override concurrency for data fetch (must be >0 when provided) |
+| `--offline` / `--no-offline` | env | Use cached data only when possible |
+| `--force-refresh` / `--no-force-refresh` | env (`SHORT_FORCE_REFRESH_CANDLES`) | Force fresh candle downloads instead of cache |
 | `--quotes` | env | Preferred quote currencies (e.g., `USDC,USD,USDT`) |
 | `--risk-free-rate` | env (~1%) | Annualised rate for Sharpe/Sortino |
-| `--analysis-days` | env/profile (120) | Daily bars for swing analytics |
+| `--analysis-days` | env/profile (120) | Daily bars for swing analytics (must be >0 when provided) |
 | `--max-risk-level` | env | Highest allowed risk tier |
 | `--use-openai-scoring/--no-use-openai-scoring` | env (`SHORT_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring from the CLI |
 | `--openai-weight` | env (`SHORT_OPENAI_WEIGHT`) | Blend ratio between baseline and LLM score |
@@ -110,6 +111,8 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 | `--openai-max-candidates` | env (`SHORT_OPENAI_MAX_CANDIDATES`) | Cap number of candidates sent to the model |
 | `--openai-temperature` | env (`SHORT_OPENAI_TEMPERATURE`) | Set temperature for the OpenAI call (defaults to model standard) |
 | `--openai-sleep-seconds` | env (`SHORT_OPENAI_SLEEP_SECONDS`) | Pause between OpenAI calls |
+
+> Numeric count arguments (`--limit`, `--max-results`, `--top-per-side`, `--analysis-days`, etc.) now fail fast if a non-positive value is supplied, keeping runs from silently accepting invalid thresholds.
 
 ## Environment Overrides
 

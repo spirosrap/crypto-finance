@@ -1,3 +1,5 @@
+import contextlib
+import io
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -6,6 +8,8 @@ from long_term_crypto_finder import (
     CryptoMetrics,
     LongTermCryptoFinder,
     RiskLevel,
+    build_cli_parser,
+    make_risk_level_validator,
 )
 
 
@@ -94,6 +98,56 @@ class LongTermCryptoFinderRiskFilterTests(unittest.TestCase):
         finder = LongTermCryptoFinder(config=config)
 
         self.assertIsNone(finder._max_risk_level)
+
+
+class LongTermFinderCLITests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.env_defaults = CryptoFinderConfig()
+        self.env_defaults.unique_by_symbol = True
+        self.env_defaults.offline = False
+        valid_levels = {level.name for level in RiskLevel}
+        risk_level_type = make_risk_level_validator(valid_levels)
+        self.parser = build_cli_parser(
+            env_defaults=self.env_defaults,
+            default_limit=50,
+            profile_default='default',
+            default_max_risk='MEDIUM',
+            risk_level_type=risk_level_type,
+        )
+
+    def test_boolean_optional_unique_by_symbol_toggle(self) -> None:
+        args = self.parser.parse_args(['--no-unique-by-symbol'])
+        self.assertFalse(args.unique_by_symbol)
+
+        args_default = self.parser.parse_args([])
+        self.assertTrue(args_default.unique_by_symbol)
+
+    def test_boolean_optional_offline_toggle(self) -> None:
+        args_enable = self.parser.parse_args(['--offline'])
+        self.assertTrue(args_enable.offline)
+
+        args_disable = self.parser.parse_args(['--no-offline'])
+        self.assertFalse(args_disable.offline)
+
+    def test_force_refresh_toggle(self) -> None:
+        args_force = self.parser.parse_args(['--force-refresh'])
+        self.assertTrue(args_force.force_refresh)
+
+        args_default = self.parser.parse_args([])
+        self.assertFalse(args_default.force_refresh)
+
+    def test_positive_int_validation_for_limit(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.parser.parse_args(['--limit', '0'])
+
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.parser.parse_args(['--limit', '-10'])
+
+    def test_max_risk_level_default_applied(self) -> None:
+        args = self.parser.parse_args([])
+        self.assertEqual(args.max_risk_level, 'MEDIUM')
 
 
 if __name__ == '__main__':

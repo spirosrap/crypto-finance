@@ -23,7 +23,7 @@ except Exception:  # Py<=3.10
     UTC = _tz.utc  # type: ignore
 import logging
 import time
-from typing import Dict, List, Optional, TextIO, Tuple, Union
+from typing import Callable, Dict, List, Optional, Set, TextIO, Tuple, Union
 import json
 import argparse
 from dataclasses import dataclass
@@ -3819,19 +3819,234 @@ PROFILE_PRESETS = {
 }
 
 
+def _positive_int(value: str) -> int:
+    """Argparse type that enforces a strictly positive integer."""
+
+    try:
+        converted = int(value)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - argparse manages TypeError
+        raise argparse.ArgumentTypeError(f"Expected integer, received '{value}'") from exc
+
+    if converted <= 0:
+        raise argparse.ArgumentTypeError("Value must be a positive integer")
+
+    return converted
+
+
+def make_risk_level_validator(valid_levels: Set[str]) -> Callable[[str], str]:
+    """Return a validator that normalises and checks risk level choices."""
+
+    normalized_levels = {level.strip().upper() for level in valid_levels}
+
+    def _validator(value: str) -> str:
+        normalised = value.strip().upper()
+        if normalised not in normalized_levels:
+            choices = ', '.join(sorted(normalized_levels))
+            raise argparse.ArgumentTypeError(
+                f"Invalid risk level '{value}'. Choose from: {choices}."
+            )
+        return normalised
+
+    return _validator
+
+
+def build_cli_parser(
+    env_defaults: CryptoFinderConfig,
+    default_limit: int,
+    profile_default: str,
+    default_max_risk: Optional[str],
+    risk_level_type: Callable[[str], str],
+    profile_presets: Optional[Dict[str, Dict[str, int]]] = None,
+) -> argparse.ArgumentParser:
+    """Construct the CLI parser so tests can reuse it with injected defaults."""
+
+    presets = profile_presets or PROFILE_PRESETS
+    parser = argparse.ArgumentParser(
+        description='Find the best long-term cryptocurrency opportunities'
+    )
+    parser.add_argument(
+        '--profile',
+        choices=sorted(presets.keys()),
+        default=profile_default,
+        help=f"Preset bundle of frequently used parameters (default: {profile_default})",
+    )
+    parser.add_argument(
+        '--plain-output',
+        type=Path,
+        help='Write a formatted text report to this path (excludes log lines)',
+    )
+    parser.add_argument(
+        '--suppress-console-logs',
+        action='store_true',
+        help='Disable console log handler for cleaner stdout piping',
+    )
+    parser.add_argument(
+        '--limit',
+        type=_positive_int,
+        default=None,
+        help=(
+            "Number of top cryptocurrencies to analyze "
+            f"(default: {default_limit}; profile may override)"
+        ),
+    )
+    parser.add_argument(
+        '--min-market-cap',
+        type=_positive_int,
+        default=env_defaults.min_market_cap,
+        help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})",
+    )
+    parser.add_argument(
+        '--max-results',
+        type=_positive_int,
+        default=None,
+        help=(
+            "Maximum number of results to display "
+            f"(default: {env_defaults.max_results}; profile may override)"
+        ),
+    )
+    parser.add_argument(
+        '--output',
+        type=str,
+        choices=['console', 'json'],
+        default='console',
+        help='Output format (default: console)',
+    )
+    parser.add_argument(
+        '--side',
+        type=str,
+        choices=['long', 'short', 'both'],
+        default=env_defaults.side,
+        help=f"Which side(s) to evaluate (default: {env_defaults.side})",
+    )
+    parser.add_argument(
+        '--unique-by-symbol',
+        action=argparse.BooleanOptionalAction,
+        default=env_defaults.unique_by_symbol,
+        help='Keep only the best side per symbol',
+    )
+    parser.add_argument(
+        '--min-score',
+        type=float,
+        default=env_defaults.min_overall_score,
+        help=f"Filter out candidates below this overall score (default: {env_defaults.min_overall_score})",
+    )
+    parser.add_argument(
+        '--save',
+        type=str,
+        help='Optional path to save results (json or csv)',
+    )
+    parser.add_argument(
+        '--symbols',
+        type=str,
+        help='Comma-separated list of symbols to analyze (e.g., BTC,ETH,SOL)',
+    )
+    parser.add_argument(
+        '--top-per-side',
+        type=_positive_int,
+        default=env_defaults.top_per_side,
+        help='Cap results per side before final sorting',
+    )
+    parser.add_argument(
+        '--max-workers',
+        type=_positive_int,
+        default=None,
+        help=(
+            "Override worker threads for parallel fetch "
+            f"(default: {env_defaults.max_workers}; profile may override)"
+        ),
+    )
+    parser.add_argument(
+        '--offline',
+        action=argparse.BooleanOptionalAction,
+        default=env_defaults.offline,
+        help='Avoid external HTTP where possible (use cache only)',
+    )
+    parser.add_argument(
+        '--force-refresh',
+        action=argparse.BooleanOptionalAction,
+        default=env_defaults.force_refresh_candles,
+        help='Force fresh candle downloads instead of using cache (default: %(default)s)',
+    )
+    parser.add_argument(
+        '--quotes',
+        type=str,
+        help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT',
+    )
+    parser.add_argument(
+        '--risk-free-rate',
+        type=float,
+        default=env_defaults.risk_free_rate,
+        help=f"Override annual risk-free rate (default: {env_defaults.risk_free_rate})",
+    )
+    parser.add_argument(
+        '--analysis-days',
+        type=_positive_int,
+        default=None,
+        help=(
+            "Number of daily bars to pull "
+            f"(default: {env_defaults.analysis_days}; profile may override)"
+        ),
+    )
+    max_risk_help = 'Highest risk level to include (e.g., LOW, MEDIUM, HIGH)'
+    if default_max_risk:
+        max_risk_help += f" (default: {default_max_risk})"
+    parser.add_argument(
+        '--max-risk-level',
+        type=risk_level_type,
+        default=default_max_risk,
+        help=max_risk_help,
+    )
+    parser.add_argument(
+        '--use-openai-scoring',
+        action=argparse.BooleanOptionalAction,
+        default=env_defaults.use_openai_scoring,
+        help='Blend scores with OpenAI model output (default: %(default)s; override env/CRYPTO_* if set)',
+    )
+    parser.add_argument(
+        '--openai-weight',
+        type=float,
+        default=None,
+        help='Blend weight for OpenAI score (0-1); defaults to env or 0.25 when enabled',
+    )
+    parser.add_argument(
+        '--openai-model',
+        type=str,
+        default=None,
+        help=f"Override OpenAI model name (default: {env_defaults.openai_model})",
+    )
+    parser.add_argument(
+        '--openai-max-candidates',
+        type=_positive_int,
+        default=None,
+        help=f"Limit number of candidates sent to OpenAI (default: {env_defaults.openai_max_candidates})",
+    )
+    openai_temp_default = (
+        env_defaults.openai_temperature
+        if env_defaults.openai_temperature is not None
+        else 'model default'
+    )
+    parser.add_argument(
+        '--openai-temperature',
+        type=float,
+        default=None,
+        help=f"Temperature for OpenAI call (default: {openai_temp_default})",
+    )
+    parser.add_argument(
+        '--openai-sleep-seconds',
+        type=float,
+        default=None,
+        help=f"Optional pause between OpenAI calls (default: {env_defaults.openai_sleep_seconds})",
+    )
+
+    return parser
+
+
 def main():
     """Main function to run the crypto opportunity finder."""
     env_defaults = CryptoFinderConfig.from_env()
 
     valid_risk_levels = {level.name for level in RiskLevel}
-
-    def risk_level_type(value: str) -> str:
-        normalized = value.strip().upper()
-        if normalized not in valid_risk_levels:
-            raise argparse.ArgumentTypeError(
-                f"Invalid risk level '{value}'. Choose from: {', '.join(sorted(valid_risk_levels))}."
-            )
-        return normalized
+    risk_level_type = make_risk_level_validator(valid_risk_levels)
 
     default_max_risk: Optional[str] = None
     if env_defaults.max_risk_level:
@@ -3845,64 +4060,13 @@ def main():
     if profile_default not in PROFILE_PRESETS:
         profile_default = 'default'
 
-    parser = argparse.ArgumentParser(description='Find the best long-term cryptocurrency opportunities')
-    parser.add_argument('--profile', choices=sorted(PROFILE_PRESETS.keys()), default=profile_default,
-                       help=f"Preset bundle of frequently used parameters (default: {profile_default})")
-    parser.add_argument('--plain-output', type=Path,
-                       help='Write a formatted text report to this path (excludes log lines)')
-    parser.add_argument('--suppress-console-logs', action='store_true',
-                       help='Disable console log handler for cleaner stdout piping')
-    parser.add_argument('--limit', type=int, default=None,
-                       help=f"Number of top cryptocurrencies to analyze (default: {default_limit}; profile may override)")
-    parser.add_argument('--min-market-cap', type=int, default=env_defaults.min_market_cap,
-                       help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})")
-    parser.add_argument('--max-results', type=int, default=None,
-                       help=f"Maximum number of results to display (default: {env_defaults.max_results}; profile may override)")
-    parser.add_argument('--output', type=str, choices=['console', 'json'], default='console',
-                       help='Output format (default: console)')
-    parser.add_argument('--side', type=str, choices=['long', 'short', 'both'], default=env_defaults.side,
-                       help=f"Which side(s) to evaluate (default: {env_defaults.side})")
-    parser.add_argument('--unique-by-symbol', action='store_true', default=env_defaults.unique_by_symbol,
-                       help='Keep only the best side per symbol')
-    parser.add_argument('--min-score', type=float, default=env_defaults.min_overall_score,
-                       help=f"Filter out candidates below this overall score (default: {env_defaults.min_overall_score})")
-    parser.add_argument('--save', type=str,
-                       help='Optional path to save results (json or csv)')
-    parser.add_argument('--symbols', type=str,
-                       help='Comma-separated list of symbols to analyze (e.g., BTC,ETH,SOL)')
-    parser.add_argument('--top-per-side', type=int, default=env_defaults.top_per_side,
-                       help='Cap results per side before final sorting')
-    parser.add_argument('--max-workers', type=int, default=None,
-                       help=f"Override worker threads for parallel fetch (default: {env_defaults.max_workers}; profile may override)")
-    parser.add_argument('--offline', action='store_true', default=env_defaults.offline,
-                       help='Avoid external HTTP where possible (use cache only)')
-    parser.add_argument('--quotes', type=str,
-                       help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT')
-    parser.add_argument('--risk-free-rate', type=float, default=env_defaults.risk_free_rate,
-                       help=f"Override annual risk-free rate (default: {env_defaults.risk_free_rate})")
-    parser.add_argument('--analysis-days', type=int, default=None,
-                       help=f"Number of daily bars to pull (default: {env_defaults.analysis_days}; profile may override)")
-    parser.add_argument('--max-risk-level', type=risk_level_type, default=default_max_risk,
-                       help='Highest risk level to include (e.g., LOW, MEDIUM, HIGH)')
-    parser.add_argument('--use-openai-scoring', action=argparse.BooleanOptionalAction,
-                        default=env_defaults.use_openai_scoring,
-                        help='Blend scores with OpenAI model output (default: %(default)s; override env/SHORT_* if set)')
-    parser.add_argument('--openai-weight', type=float, default=None,
-                        help='Blend weight for OpenAI score (0-1); defaults to env or 0.25 when --use-openai-scoring is enabled')
-    parser.add_argument('--openai-model', type=str, default=None,
-                        help=f"Override OpenAI model name (default: {env_defaults.openai_model})")
-    parser.add_argument('--openai-max-candidates', type=int, default=None,
-                        help=f"Limit number of candidates sent to OpenAI (default: {env_defaults.openai_max_candidates})")
-    openai_temp_default = (
-        env_defaults.openai_temperature
-        if env_defaults.openai_temperature is not None
-        else 'model default'
+    parser = build_cli_parser(
+        env_defaults,
+        default_limit=default_limit,
+        profile_default=profile_default,
+        default_max_risk=default_max_risk,
+        risk_level_type=risk_level_type,
     )
-    parser.add_argument('--openai-temperature', type=float, default=None,
-                        help=f"Temperature for OpenAI call (default: {openai_temp_default})")
-    parser.add_argument('--openai-sleep-seconds', type=float, default=None,
-                        help=f"Optional pause between OpenAI calls (default: {env_defaults.openai_sleep_seconds})")
-
     args = parser.parse_args()
 
     profile_overrides = PROFILE_PRESETS.get(args.profile, {})
@@ -3922,39 +4086,42 @@ def main():
             if isinstance(handler, logging.StreamHandler):
                 logger.removeHandler(handler)
 
-    # Create configuration
-    symbols_list = None
-    if args.symbols:
-        symbols_list = [s.strip().upper() for s in args.symbols.split(',') if s.strip()]
-    quotes_list = None
-    if args.quotes:
-        quotes_list = [q.strip().upper() for q in args.quotes.split(',') if q.strip()]
+    config = env_defaults
+    config.min_market_cap = args.min_market_cap
+    config.max_results = final_max_results
+    config.side = args.side
+    config.unique_by_symbol = args.unique_by_symbol
+    config.min_overall_score = float(args.min_score or 0.0)
+    config.offline = args.offline
+    config.top_per_side = args.top_per_side
+    config.max_workers = final_max_workers
+    config.risk_free_rate = args.risk_free_rate
+    config.analysis_days = final_analysis_days
+    config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
+    config.force_refresh_candles = args.force_refresh
+    config.use_openai_scoring = args.use_openai_scoring
+    if args.openai_weight is not None:
+        config.openai_weight = float(args.openai_weight)
+    if args.openai_model:
+        config.openai_model = args.openai_model
+    if args.openai_max_candidates is not None:
+        config.openai_max_candidates = int(args.openai_max_candidates)
+    if args.openai_temperature is not None:
+        config.openai_temperature = float(args.openai_temperature)
+    if args.openai_sleep_seconds is not None:
+        config.openai_sleep_seconds = float(args.openai_sleep_seconds)
 
-    config = CryptoFinderConfig(
-        min_market_cap=args.min_market_cap,
-        max_results=final_max_results,
-        side=args.side,
-        unique_by_symbol=bool(args.unique_by_symbol),
-        min_overall_score=float(args.min_score or 0.0),
-        offline=bool(args.offline),
-        symbols=symbols_list,
-        top_per_side=args.top_per_side,
-        max_workers=final_max_workers,
-        quotes=quotes_list,
-        risk_free_rate=args.risk_free_rate if args.risk_free_rate is not None else env_defaults.risk_free_rate,
-        analysis_days=final_analysis_days,
-        max_risk_level=args.max_risk_level if args.max_risk_level is not None else env_defaults.max_risk_level,
-        use_openai_scoring=bool(args.use_openai_scoring),
-        openai_model=args.openai_model or env_defaults.openai_model,
-        openai_weight=(args.openai_weight if args.openai_weight is not None else env_defaults.openai_weight),
-        openai_max_candidates=(
-            args.openai_max_candidates if args.openai_max_candidates is not None else env_defaults.openai_max_candidates
-        ),
-        openai_temperature=(args.openai_temperature if args.openai_temperature is not None else env_defaults.openai_temperature),
-        openai_sleep_seconds=(
-            args.openai_sleep_seconds if args.openai_sleep_seconds is not None else env_defaults.openai_sleep_seconds
-        ),
-    )
+    if config.offline and config.force_refresh_candles:
+        logger.warning("Force refresh disabled because offline mode is enabled; using cached candles only.")
+        config.force_refresh_candles = False
+
+    config.symbols = None
+    if args.symbols:
+        config.symbols = [s.strip().upper() for s in args.symbols.split(',') if s.strip()]
+
+    config.quotes = None
+    if args.quotes:
+        config.quotes = [q.strip().upper() for q in args.quotes.split(',') if q.strip()]
 
     # Initialize the finder
     finder = LongTermCryptoFinder(config=config)
