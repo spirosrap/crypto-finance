@@ -41,6 +41,19 @@ class ShortTermCryptoFinderTests(unittest.TestCase):
             'volume': volumes,
         }, index=dates)
 
+    def test_intraday_columns_are_propagated(self) -> None:
+        enriched = self.df.copy()
+        enriched['intraday_return_6h'] = np.linspace(0.0, 0.03, len(enriched))
+        enriched['intraday_return_24h'] = np.linspace(-0.01, 0.05, len(enriched))
+        enriched['intraday_volatility_6h'] = 0.02
+        enriched['intraday_volatility_24h'] = 0.03
+        enriched['intraday_volume_24h'] = 15000
+
+        metrics = self.finder.calculate_technical_indicators(enriched)
+
+        self.assertIn('intraday_return_6h', metrics)
+        self.assertIn('intraday_volume_ratio', metrics)
+
     def test_indicator_enrichment_adds_impulse_metrics(self) -> None:
         metrics = self.finder.calculate_technical_indicators(self.df)
 
@@ -80,6 +93,24 @@ class ShortTermCryptoFinderTests(unittest.TestCase):
         bullish_score = self.finder._calculate_technical_score_short(bullish_metrics, momentum_score_long=40.0)
 
         self.assertGreater(bearish_score, bullish_score)
+
+    def test_derive_intraday_metrics_uses_recent_samples(self) -> None:
+        index = pd.date_range('2025-01-01', periods=48, freq='h', tz='UTC')
+        data = pd.DataFrame(
+            {
+                'open': np.linspace(100, 120, len(index)),
+                'high': np.linspace(101, 121, len(index)),
+                'low': np.linspace(99, 119, len(index)),
+                'close': np.linspace(100, 122, len(index)),
+                'volume': np.linspace(1000, 2000, len(index)),
+            },
+            index=index,
+        )
+
+        metrics = ShortTermCryptoFinder._derive_intraday_metrics(data, candle_hours=1.0)
+
+        self.assertIn('intraday_return_24h', metrics)
+        self.assertGreater(metrics['intraday_volume_24h'], 0.0)
 
 
 class ShortTermFinderCLITests(unittest.TestCase):
@@ -133,6 +164,16 @@ class ShortTermFinderCLITests(unittest.TestCase):
     def test_max_risk_level_default_applied(self) -> None:
         args = self.parser.parse_args([])
         self.assertEqual(args.max_risk_level, 'MEDIUM')
+
+    def test_intraday_arguments_parse(self) -> None:
+        args = self.parser.parse_args([
+            '--intraday-lookback-days', '10',
+            '--intraday-granularity', 'six_hour',
+            '--intraday-resample', '2H',
+        ])
+        self.assertEqual(args.intraday_lookback_days, 10)
+        self.assertEqual(args.intraday_granularity, 'six_hour')
+        self.assertEqual(args.intraday_resample, '2H')
 
 
 if __name__ == '__main__':

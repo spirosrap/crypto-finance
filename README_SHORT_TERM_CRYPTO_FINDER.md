@@ -30,6 +30,8 @@ stops and closer profit targets.
   and min-score thresholds ensure crowded or weak setups can be excluded.
 - **Liquidity Guard Rails**: Optional 24h USD volume and volume/market-cap
   filters prevent thin markets from surfacing, keeping fills realistic.
+- **Intraday Awareness**: Configurable hourly (or faster) Coinbase candles add
+  intraday momentum, volatility, and volume surges to the daily backbone.
 - **Optional LLM Refinement**: When you set `SHORT_USE_OPENAI_SCORING=1`, the
   top swing setups are re-scored by an OpenAI model (default `gpt-5-mini`),
   blending a qualitative `llm_score` and rationale into the final rank.
@@ -107,6 +109,9 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 | `--quotes` | env | Preferred quote currencies (e.g., `USDC,USD,USDT`) |
 | `--risk-free-rate` | env (~1%) | Annualised rate for Sharpe/Sortino |
 | `--analysis-days` | env/profile (120) | Daily bars for swing analytics (must be >0 when provided) |
+| `--intraday-lookback-days` | env (14) | History window (days) for intraday candles feeding hourly metrics |
+| `--intraday-granularity` | env (`ONE_HOUR`) | Coinbase candle granularity for intraday fetches |
+| `--intraday-resample` | env (`4H`) | Pandas resample alias used when aggregating intraday stats |
 | `--min-vmc-ratio` | env | Minimum volume-to-market-cap ratio (e.g., `0.03` for 3%) |
 | `--max-risk-level` | env | Highest allowed risk tier |
 | `--use-openai-scoring/--no-use-openai-scoring` | env (`SHORT_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring from the CLI |
@@ -130,6 +135,9 @@ Short-term settings read both the generic `CRYPTO_*` variables and the
 | `SHORT_ANALYSIS_DAYS` | Daily lookback window | 120 |
 | `SHORT_MIN_MARKET_CAP` | Market-cap floor (USD) | max(`CRYPTO_MIN_MARKET_CAP`, 50M) |
 | `SHORT_MAX_RESULTS` | Default for `--max-results` | `CRYPTO_MAX_RESULTS` |
+| `SHORT_INTRADAY_LOOKBACK_DAYS` | Intraday lookback (days) | inherits `CRYPTO_INTRADAY_LOOKBACK_DAYS` / 14 |
+| `SHORT_INTRADAY_GRANULARITY` | Intraday Coinbase granularity | inherits `CRYPTO_INTRADAY_GRANULARITY` / `ONE_HOUR` |
+| `SHORT_INTRADAY_RESAMPLE` | Resample alias for intraday features | inherits `CRYPTO_INTRADAY_RESAMPLE` / `4H` |
 | `SHORT_MIN_VOLUME_24H` | Minimum 24h USD volume | inherits `CRYPTO_MIN_VOLUME_24H` / 0 |
 | `SHORT_MIN_VMC_RATIO` | Minimum volume-to-market-cap ratio | inherits `CRYPTO_MIN_VMC_RATIO` / 0 |
 | `SHORT_TOP_PER_SIDE` | Pre-cap per direction | 10 |

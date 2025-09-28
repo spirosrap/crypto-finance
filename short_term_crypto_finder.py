@@ -21,7 +21,7 @@ import io
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, TextIO
@@ -37,6 +37,21 @@ from long_term_crypto_finder import (
     UTC,
     _finite,
 )
+
+
+GRANULARITY_TO_HOURS = {
+    'ONE_MINUTE': 1.0 / 60.0,
+    'FIVE_MINUTE': 5.0 / 60.0,
+    'TEN_MINUTE': 10.0 / 60.0,
+    'FIFTEEN_MINUTE': 15.0 / 60.0,
+    'THIRTY_MINUTE': 0.5,
+    'ONE_HOUR': 1.0,
+    'TWO_HOUR': 2.0,
+    'THREE_HOUR': 3.0,
+    'FOUR_HOUR': 4.0,
+    'SIX_HOUR': 6.0,
+    'ONE_DAY': 24.0,
+}
 
 
 # -----------------------------------------------------------------------------
@@ -131,6 +146,24 @@ def build_short_term_config() -> CryptoFinderConfig:
         cfg.min_volume_market_cap_ratio,
         float,
     )
+    cfg.intraday_granularity = _env_override(
+        "SHORT_INTRADAY_GRANULARITY",
+        cfg.intraday_granularity,
+        str,
+    ).upper()
+    cfg.intraday_lookback_days = max(
+        3,
+        _env_override(
+            "SHORT_INTRADAY_LOOKBACK_DAYS",
+            max(cfg.intraday_lookback_days, 7),
+            int,
+        ),
+    )
+    cfg.intraday_resample = _env_override(
+        "SHORT_INTRADAY_RESAMPLE",
+        cfg.intraday_resample,
+        str,
+    ).upper()
 
     # Faster indicator defaults
     cfg.rsi_period = _env_override("SHORT_RSI_PERIOD", 7, int)
@@ -181,6 +214,145 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         cfg = config or build_short_term_config()
         super().__init__(config=cfg)
         logger.info("Short-term finder configured: %s", cfg.to_dict())
+
+    # ------------------------------------------------------------------
+    # Intraday enrichment helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _granularity_hours(granularity: str) -> float:
+        return float(GRANULARITY_TO_HOURS.get(granularity.upper(), 1.0))
+
+    @staticmethod
+    def _window_return(series: pd.Series, bars: int) -> float:
+        if bars <= 0 or len(series) < 2:
+            return 0.0
+        if len(series) <= bars:
+            prev = float(series.iloc[0])
+        else:
+            prev = float(series.iloc[-(bars + 1)])
+        last = float(series.iloc[-1])
+        if prev <= 0 or last <= 0:
+            return 0.0
+        return (last / prev) - 1.0
+
+    @staticmethod
+    def _derive_intraday_metrics(df: pd.DataFrame, candle_hours: float) -> Dict[str, float]:
+        if df.empty:
+            return {}
+
+        candle_hours = max(candle_hours, 1e-6)
+        returns = df['close'].pct_change().dropna()
+        bars_per_6h = max(int(round(6.0 / candle_hours)), 1)
+        bars_per_24h = max(int(round(24.0 / candle_hours)), bars_per_6h)
+
+        vol6 = float(np.std(returns.tail(bars_per_6h), ddof=0)) if len(returns) >= 1 else 0.0
+        vol24 = float(np.std(returns.tail(bars_per_24h), ddof=0)) if len(returns) >= 1 else vol6
+
+        metrics = {
+            'intraday_return_6h': ShortTermCryptoFinder._window_return(df['close'], bars_per_6h),
+            'intraday_return_24h': ShortTermCryptoFinder._window_return(df['close'], bars_per_24h),
+            'intraday_volatility_6h': vol6,
+            'intraday_volatility_24h': vol24,
+            'intraday_volume_24h': float(df['volume'].tail(bars_per_24h).sum()),
+        }
+
+        return metrics
+
+    def _fetch_intraday_candles(self, product_id: str) -> Optional[pd.DataFrame]:
+        granularity = getattr(self.config, 'intraday_granularity', 'ONE_HOUR') or 'ONE_HOUR'
+        lookback_days = max(1, int(getattr(self.config, 'intraday_lookback_days', 14)))
+
+        end_time = datetime.now(UTC)
+        start_time = end_time - timedelta(days=lookback_days)
+
+        candles = list(
+            self._cached_candles(
+                product_id,
+                granularity,
+                start_time.isoformat(),
+                end_time.isoformat(),
+            )
+        )
+
+        if not candles:
+            return None
+
+        rows: List[Dict[str, float]] = []
+        for candle in candles:
+            ts = self._normalize_ts(candle.get('start') or candle.get('time'))
+            if not ts:
+                continue
+            rows.append(
+                {
+                    'timestamp': datetime.fromtimestamp(ts, UTC),
+                    'open': float(candle.get('open', 0.0)),
+                    'high': float(candle.get('high', 0.0)),
+                    'low': float(candle.get('low', 0.0)),
+                    'close': float(candle.get('close', 0.0)),
+                    'volume': float(candle.get('volume', 0.0)),
+                }
+            )
+
+        if not rows:
+            return None
+
+        intraday_df = pd.DataFrame(rows)
+        intraday_df.sort_values('timestamp', inplace=True)
+        intraday_df.set_index('timestamp', inplace=True)
+
+        resample_rule = str(getattr(self.config, 'intraday_resample', '') or '').strip()
+        if resample_rule:
+            try:
+                resampled = intraday_df.resample(resample_rule).agg({
+                    'open': 'first',
+                    'high': 'max',
+                    'low': 'min',
+                    'close': 'last',
+                    'volume': 'sum',
+                }).dropna()
+                if not resampled.empty and len(resampled) >= 3:
+                    intraday_df = resampled
+            except Exception as exc:
+                logger.debug("Intraday resample %s failed for %s: %s", resample_rule, product_id, exc)
+
+        return intraday_df
+
+    def _load_intraday_summary(self, product_id: str) -> Dict[str, float]:
+        try:
+            intraday_df = self._fetch_intraday_candles(product_id)
+            if intraday_df is None or intraday_df.empty:
+                return {}
+
+            candle_hours = self._granularity_hours(getattr(self.config, 'intraday_granularity', 'ONE_HOUR'))
+            if len(intraday_df.index) >= 2:
+                last_delta = (intraday_df.index[-1] - intraday_df.index[-2]).total_seconds() / 3600.0
+                if last_delta > 0:
+                    candle_hours = max(candle_hours, last_delta)
+            summary = self._derive_intraday_metrics(intraday_df, candle_hours)
+            if not summary:
+                return {}
+            return summary
+        except Exception as exc:
+            logger.debug("Failed to load intraday summary for %s: %s", product_id, exc)
+            return {}
+
+    def get_historical_data(self, product_id: str, days: int = 120) -> Optional[pd.DataFrame]:  # type: ignore[override]
+        base_df = super().get_historical_data(product_id, days)
+        if base_df is None or base_df.empty:
+            return base_df
+
+        summary = self._load_intraday_summary(product_id)
+        if not summary:
+            return base_df
+
+        df = base_df.copy()
+        for key, value in summary.items():
+            df[key] = np.nan
+            df.iloc[-1, df.columns.get_loc(key)] = value
+            df[key] = df[key].ffill()
+
+        return df
 
     def calculate_technical_indicators(self, df: pd.DataFrame) -> Dict:  # type: ignore[override]
         """Augment base indicators with short-horizon impulse context."""
@@ -249,6 +421,22 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             metrics['up_day_ratio_7'] = float(np.clip(up_ratio, 0.0, 1.0))
             metrics['breakout_distance_5d'] = breakout_distance
             metrics['breakdown_distance_5d'] = breakdown_distance
+
+            if 'intraday_return_6h' in df.columns:
+                metrics['intraday_return_6h'] = float(df['intraday_return_6h'].iloc[-1] or 0.0)
+            if 'intraday_return_24h' in df.columns:
+                metrics['intraday_return_24h'] = float(df['intraday_return_24h'].iloc[-1] or 0.0)
+            if 'intraday_volatility_6h' in df.columns:
+                metrics['intraday_volatility_6h'] = float(df['intraday_volatility_6h'].iloc[-1] or 0.0)
+            if 'intraday_volatility_24h' in df.columns:
+                metrics['intraday_volatility_24h'] = float(df['intraday_volatility_24h'].iloc[-1] or 0.0)
+            intraday_volume_sum = float(df['intraday_volume_24h'].iloc[-1]) if 'intraday_volume_24h' in df.columns else 0.0
+            if intraday_volume_sum > 0.0:
+                metrics['intraday_volume_24h'] = intraday_volume_sum
+                last_daily_volume = float(df['volume'].iloc[-1] or 0.0)
+                if last_daily_volume > 0:
+                    ratio = intraday_volume_sum / last_daily_volume
+                    metrics['intraday_volume_ratio'] = float(np.clip(ratio, 0.0, 12.0))
 
         except Exception as exc:
             logger.warning("Failed to enrich short-term indicators: %s", exc)
@@ -363,6 +551,21 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
 
             score += np.clip(momentum_score, 0.0, 100.0) * 0.18
 
+            intraday_ret6 = float(technical_metrics.get('intraday_return_6h', 0.0) or 0.0)
+            score += float(np.clip(5.0 * np.tanh(intraday_ret6 / 0.015), -5.0, 5.0))
+
+            intraday_ret24 = float(technical_metrics.get('intraday_return_24h', 0.0) or 0.0)
+            score += float(np.clip(4.0 * np.tanh(intraday_ret24 / 0.03), -4.0, 4.0))
+
+            intraday_vol6 = float(technical_metrics.get('intraday_volatility_6h', 0.0) or 0.0)
+            if intraday_vol6 > 0:
+                vol_target = 0.02
+                vol_score = 3.5 * np.tanh((vol_target - intraday_vol6) / 0.015)
+                score += float(vol_score)
+
+            intraday_volume_ratio = float(technical_metrics.get('intraday_volume_ratio', 1.0) or 1.0)
+            score += float(np.clip(4.5 * np.tanh((intraday_volume_ratio - 1.0) / 0.35), -5.0, 5.0))
+
             if technical_metrics.get('macd_cross'):
                 hist = float(technical_metrics.get('macd_hist', 0.0) or 0.0)
                 score += 4 if hist > 0 else -4
@@ -450,6 +653,21 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
 
             short_momentum = np.clip(100.0 - momentum_score_long, 0.0, 100.0)
             score += short_momentum * 0.18
+
+            intraday_ret6 = float(technical_metrics.get('intraday_return_6h', 0.0) or 0.0)
+            score += float(np.clip(5.0 * np.tanh((-intraday_ret6) / 0.015), -5.0, 5.0))
+
+            intraday_ret24 = float(technical_metrics.get('intraday_return_24h', 0.0) or 0.0)
+            score += float(np.clip(4.0 * np.tanh((-intraday_ret24) / 0.03), -4.0, 4.0))
+
+            intraday_vol6 = float(technical_metrics.get('intraday_volatility_6h', 0.0) or 0.0)
+            if intraday_vol6 > 0:
+                vol_target = 0.02
+                vol_score = 3.5 * np.tanh((intraday_vol6 - vol_target) / 0.015)
+                score += float(vol_score)
+
+            intraday_volume_ratio = float(technical_metrics.get('intraday_volume_ratio', 1.0) or 1.0)
+            score += float(np.clip(4.5 * np.tanh((intraday_volume_ratio - 1.0) / 0.35), -5.0, 5.0))
 
             if technical_metrics.get('macd_cross'):
                 hist = float(technical_metrics.get('macd_hist', 0.0) or 0.0)
@@ -778,6 +996,33 @@ def build_cli_parser(
         ),
     )
     parser.add_argument(
+        '--intraday-lookback-days',
+        type=_positive_int,
+        default=env_defaults.intraday_lookback_days,
+        help=(
+            "Intraday history window (days) for hourly analytics "
+            f"(default: {env_defaults.intraday_lookback_days})"
+        ),
+    )
+    parser.add_argument(
+        '--intraday-granularity',
+        type=str,
+        default=env_defaults.intraday_granularity,
+        help=(
+            "Coinbase candle granularity for intraday features (e.g., ONE_HOUR, THIRTY_MINUTE) "
+            f"(default: {env_defaults.intraday_granularity})"
+        ),
+    )
+    parser.add_argument(
+        '--intraday-resample',
+        type=str,
+        default=env_defaults.intraday_resample,
+        help=(
+            "Resample rule for derived intraday metrics (pandas offset alias) "
+            f"(default: {env_defaults.intraday_resample})"
+        ),
+    )
+    parser.add_argument(
         '--min-vmc-ratio',
         type=_positive_float,
         default=env_defaults.min_volume_market_cap_ratio,
@@ -896,6 +1141,9 @@ def main() -> None:
     config.max_workers = final_max_workers
     config.risk_free_rate = args.risk_free_rate
     config.analysis_days = final_analysis_days
+    config.intraday_lookback_days = args.intraday_lookback_days
+    config.intraday_granularity = args.intraday_granularity.upper()
+    config.intraday_resample = args.intraday_resample.upper()
     config.min_volume_24h = args.min_volume
     config.min_volume_market_cap_ratio = args.min_vmc_ratio
     config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level

@@ -52,6 +52,9 @@ class CryptoFinderConfig:
     force_refresh_candles: bool = False  # bypass candle caches when true
     risk_free_rate: float = 0.03  # 3% annual
     analysis_days: int = 365
+    intraday_granularity: str = "ONE_HOUR"
+    intraday_lookback_days: int = 14
+    intraday_resample: str = "4H"
     min_volume_24h: float = 0.0
     min_volume_market_cap_ratio: float = 0.0
     rsi_period: int = 14
@@ -137,6 +140,9 @@ class CryptoFinderConfig:
             force_refresh_candles=os.getenv('CRYPTO_FORCE_REFRESH_CANDLES', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
             risk_free_rate=_float_env('CRYPTO_RISK_FREE_RATE', 0.03),
             analysis_days=int(os.getenv('CRYPTO_ANALYSIS_DAYS', '365')),
+            intraday_granularity=os.getenv('CRYPTO_INTRADAY_GRANULARITY', 'ONE_HOUR'),
+            intraday_lookback_days=int(os.getenv('CRYPTO_INTRADAY_LOOKBACK_DAYS', '14') or '14'),
+            intraday_resample=os.getenv('CRYPTO_INTRADAY_RESAMPLE', '4H'),
             min_volume_24h=_float_env('CRYPTO_MIN_VOLUME_24H', 0.0),
             min_volume_market_cap_ratio=_float_env('CRYPTO_MIN_VMC_RATIO', 0.0),
             rsi_period=int(os.getenv('CRYPTO_RSI_PERIOD', '14')),
@@ -180,6 +186,9 @@ class CryptoFinderConfig:
             'force_refresh_candles': self.force_refresh_candles,
             'risk_free_rate': self.risk_free_rate,
             'analysis_days': self.analysis_days,
+            'intraday_granularity': self.intraday_granularity,
+            'intraday_lookback_days': self.intraday_lookback_days,
+            'intraday_resample': self.intraday_resample,
             'min_volume_24h': self.min_volume_24h,
             'min_volume_market_cap_ratio': self.min_volume_market_cap_ratio,
             'rsi_period': self.rsi_period,
