@@ -1,7 +1,7 @@
 coinbase-advanced-py>=1.8.2
 numpy>=1.24,<2.0
 pandas>=2.3.2
-pandas-ta>=0.3.14b0,<0.4.0
+pandas-ta @ https://github.com/twopirllc/pandas-ta/archive/refs/tags/v0.3.14b0.tar.gz
 TA-Lib>=0.6.7
 nltk>=3.9.1
 scikit-learn>=1.6.1
