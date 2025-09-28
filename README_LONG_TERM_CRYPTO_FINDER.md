@@ -10,6 +10,8 @@ A comprehensive Python program that analyzes cryptocurrencies to identify the be
 - **Fundamental Analysis**: Market cap, volume analysis, ATH/ATL positioning (ATH/ATL sourced from CoinGecko)
 - **Risk Assessment**: Sharpe ratio, Sortino ratio, maximum drawdown, risk-adjusted returns
 - **Risk Filters**: Optional hard cap on acceptable risk level (e.g., include only `MEDIUM` or lower)
+- **Liquidity Guard Rails**: Minimum 24h USD volume and volume/market-cap ratio
+  filters keep thin or synthetic markets from surfacing in results.
 - **Momentum Analysis**: Recent price performance and trend acceleration
 
 ### 📊 Scoring System
@@ -90,6 +92,7 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--suppress-console-logs` | false | Disable console log handler for clean stdout piping |
 | `--limit` | 50 (`CRYPTO_DEFAULT_LIMIT` or profile) | Number of cryptocurrencies to analyze before ranking (must be >0) |
 | `--min-market-cap` | 100000000 | Minimum market cap in USD ($100M, must be >0) |
+| `--min-volume` | env | Minimum 24h USD volume (must be >0 when provided) |
 | `--max-results` | 20 (profile/env) | Maximum number of results to display (must be >0) |
 | `--output` | console | Output format: `console` or `json` |
 | `--side` | both | Evaluate `long`, `short`, or `both` |
@@ -104,6 +107,7 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--quotes` | env | Preferred quote currencies, e.g., `USDC,USD,USDT` |
 | `--risk-free-rate` | env | Annual risk-free rate (e.g., `0.03` for 3%) |
 | `--analysis-days` | env/profile | Lookback window for technical/risk metrics (e.g., `365`, must be >0 when provided) |
+| `--min-vmc-ratio` | env | Minimum volume-to-market-cap ratio (e.g., `0.03` for 3%) |
 | `--max-risk-level` | env | Highest risk level to include (`LOW`, `MEDIUM_LOW`, `MEDIUM`, `MEDIUM_HIGH`, `HIGH`, `VERY_HIGH`) |
 | `--use-openai-scoring/--no-use-openai-scoring` | env (`CRYPTO_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring without touching env vars |
 | `--openai-weight` | env (`CRYPTO_OPENAI_WEIGHT`) | Blend ratio between baseline and LLM score |
@@ -123,6 +127,8 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 - `CRYPTO_CACHE_TTL`: Seconds to retain HTTP cache (default `300`)
 - `CRYPTO_RISK_FREE_RATE`: Annual risk-free rate used in Sharpe/Sortino (default `0.03`)
 - `CRYPTO_ANALYSIS_DAYS`: Lookback window for historical analysis (default `365`)
+- `CRYPTO_MIN_VOLUME_24H`: Minimum 24h USD volume filter (default `0` → disabled)
+- `CRYPTO_MIN_VMC_RATIO`: Minimum volume-to-market-cap ratio filter (default `0` → disabled)
 - `CRYPTO_RSI_PERIOD`: RSI length (default `14`)
 - `CRYPTO_ATR_PERIOD`: ATR length (default `14`)
 - `CRYPTO_CB_CONCURRENCY`: Max in-flight Coinbase requests (default `3`)

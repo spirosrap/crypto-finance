@@ -99,6 +99,40 @@ class LongTermCryptoFinderRiskFilterTests(unittest.TestCase):
 
         self.assertIsNone(finder._max_risk_level)
 
+    def test_liquidity_filter_removes_illiquid_assets(self):
+        config = CryptoFinderConfig(
+            min_volume_24h=5_000_000,
+            min_volume_market_cap_ratio=0.02,
+            offline=True,
+        )
+        finder = LongTermCryptoFinder(config=config)
+
+        candidates = [
+            {
+                'symbol': 'LIQ',
+                'volume_24h': 12_000_000,
+                'market_cap': 100_000_000,
+                'market_cap_is_real': True,
+            },
+            {
+                'symbol': 'LOWVOL',
+                'volume_24h': 1_000_000,
+                'market_cap': 200_000_000,
+                'market_cap_is_real': True,
+            },
+            {
+                'symbol': 'LOWRATIO',
+                'volume_24h': 12_000_000,
+                'market_cap': 1_000_000_000,
+                'market_cap_is_real': True,
+            },
+        ]
+
+        filtered = finder._filter_by_liquidity(candidates)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]['symbol'], 'LIQ')
+
 
 class LongTermFinderCLITests(unittest.TestCase):
     def setUp(self) -> None:
@@ -136,6 +170,11 @@ class LongTermFinderCLITests(unittest.TestCase):
         args_default = self.parser.parse_args([])
         self.assertFalse(args_default.force_refresh)
 
+    def test_min_volume_arguments_parse(self) -> None:
+        args = self.parser.parse_args(['--min-volume', '1000000', '--min-vmc-ratio', '0.05'])
+        self.assertEqual(args.min_volume, 1_000_000.0)
+        self.assertAlmostEqual(args.min_vmc_ratio, 0.05)
+
     def test_positive_int_validation_for_limit(self) -> None:
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
@@ -144,6 +183,11 @@ class LongTermFinderCLITests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 self.parser.parse_args(['--limit', '-10'])
+
+    def test_positive_float_validation_for_min_volume(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.parser.parse_args(['--min-volume', '0'])
 
     def test_max_risk_level_default_applied(self) -> None:
         args = self.parser.parse_args([])

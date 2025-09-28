@@ -52,6 +52,8 @@ class CryptoFinderConfig:
     force_refresh_candles: bool = False  # bypass candle caches when true
     risk_free_rate: float = 0.03  # 3% annual
     analysis_days: int = 365
+    min_volume_24h: float = 0.0
+    min_volume_market_cap_ratio: float = 0.0
     rsi_period: int = 14
     atr_period: int = 14
     stochastic_period: int = 14
@@ -135,6 +137,8 @@ class CryptoFinderConfig:
             force_refresh_candles=os.getenv('CRYPTO_FORCE_REFRESH_CANDLES', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
             risk_free_rate=_float_env('CRYPTO_RISK_FREE_RATE', 0.03),
             analysis_days=int(os.getenv('CRYPTO_ANALYSIS_DAYS', '365')),
+            min_volume_24h=_float_env('CRYPTO_MIN_VOLUME_24H', 0.0),
+            min_volume_market_cap_ratio=_float_env('CRYPTO_MIN_VMC_RATIO', 0.0),
             rsi_period=int(os.getenv('CRYPTO_RSI_PERIOD', '14')),
             atr_period=int(os.getenv('CRYPTO_ATR_PERIOD', '14')),
             stochastic_period=int(os.getenv('CRYPTO_STOCHASTIC_PERIOD', '14')),
@@ -176,6 +180,8 @@ class CryptoFinderConfig:
             'force_refresh_candles': self.force_refresh_candles,
             'risk_free_rate': self.risk_free_rate,
             'analysis_days': self.analysis_days,
+            'min_volume_24h': self.min_volume_24h,
+            'min_volume_market_cap_ratio': self.min_volume_market_cap_ratio,
             'rsi_period': self.rsi_period,
             'atr_period': self.atr_period,
             'stochastic_period': self.stochastic_period,
@@ -1840,6 +1846,67 @@ class LongTermCryptoFinder:
             logger.error(f"Failed to process {product_id}: {str(e)}")
             return None
 
+    def _filter_by_liquidity(self, candidates: List[Dict]) -> List[Dict]:
+        """Filter candidates by minimum 24h volume and volume/market-cap ratio."""
+
+        min_volume = float(getattr(self.config, 'min_volume_24h', 0.0) or 0.0)
+        min_ratio = float(getattr(self.config, 'min_volume_market_cap_ratio', 0.0) or 0.0)
+
+        if min_volume <= 0 and min_ratio <= 0:
+            return candidates
+
+        allow_est_mc = os.getenv('CRYPTO_ALLOW_EST_MC', '0') in ('1', 'true', 'True')
+
+        kept: List[Dict] = []
+        dropped_low_volume = 0
+        dropped_low_ratio = 0
+        dropped_missing_mc = 0
+
+        for record in candidates:
+            try:
+                volume_usd = float(record.get('volume_24h') or 0.0)
+            except Exception:
+                volume_usd = 0.0
+
+            if min_volume > 0 and volume_usd < min_volume:
+                dropped_low_volume += 1
+                continue
+
+            if min_ratio > 0:
+                try:
+                    market_cap = float(record.get('market_cap') or 0.0)
+                except Exception:
+                    market_cap = 0.0
+
+                has_real_mc = bool(record.get('market_cap_is_real', False))
+                if market_cap <= 0 or not np.isfinite(market_cap):
+                    dropped_missing_mc += 1
+                    continue
+
+                if not has_real_mc and not allow_est_mc:
+                    dropped_missing_mc += 1
+                    continue
+
+                ratio = volume_usd / market_cap if market_cap > 0 else 0.0
+                if ratio < min_ratio:
+                    dropped_low_ratio += 1
+                    continue
+
+            kept.append(record)
+
+        logger.info(
+            "Applied liquidity filter (min_volume=%s, min_vmc_ratio=%s): kept %s/%s (dropped_low_vol=%s, dropped_low_ratio=%s, dropped_missing_mc=%s)",
+            f"${min_volume:,.0f}" if min_volume > 0 else 'n/a',
+            min_ratio if min_ratio > 0 else 'n/a',
+            len(kept),
+            len(candidates),
+            dropped_low_volume,
+            dropped_low_ratio,
+            dropped_missing_mc,
+        )
+
+        return kept
+
     @handle_errors(default_return=[], log_errors=True)
     def get_cryptocurrencies_to_analyze(self, limit: Optional[int] = None, symbols: Optional[List[str]] = None) -> List[Dict]:
         """
@@ -1978,6 +2045,8 @@ class LongTermCryptoFinder:
                 f"Applied market cap filter (real >= ${min_mc:,.0f}, est >= ${min_est_mc:,.0f} if allowed): "
                 f"{len(crypto_data)}/{pre_filter_count} remaining; drops — no_mc:{dropped_no_mc}, real_below:{dropped_below_real}, est_below:{dropped_below_est}"
             )
+
+        crypto_data = self._filter_by_liquidity(crypto_data)
 
         # Log liquidity volume fallback rate (CG -> candles)
         try:
@@ -3833,6 +3902,20 @@ def _positive_int(value: str) -> int:
     return converted
 
 
+def _positive_float(value: str) -> float:
+    """Argparse type that enforces a positive float."""
+
+    try:
+        converted = float(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(f"Expected number, received '{value}'") from exc
+
+    if converted <= 0:
+        raise argparse.ArgumentTypeError("Value must be a positive number")
+
+    return converted
+
+
 def make_risk_level_validator(valid_levels: Set[str]) -> Callable[[str], str]:
     """Return a validator that normalises and checks risk level choices."""
 
@@ -3894,6 +3977,15 @@ def build_cli_parser(
         type=_positive_int,
         default=env_defaults.min_market_cap,
         help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})",
+    )
+    parser.add_argument(
+        '--min-volume',
+        type=_positive_float,
+        default=env_defaults.min_volume_24h,
+        help=(
+            "Minimum 24h USD volume required (default: "
+            f"${env_defaults.min_volume_24h:,.0f})"
+        ),
     )
     parser.add_argument(
         '--max-results',
@@ -3985,6 +4077,15 @@ def build_cli_parser(
         help=(
             "Number of daily bars to pull "
             f"(default: {env_defaults.analysis_days}; profile may override)"
+        ),
+    )
+    parser.add_argument(
+        '--min-vmc-ratio',
+        type=_positive_float,
+        default=env_defaults.min_volume_market_cap_ratio,
+        help=(
+            "Minimum volume-to-market-cap ratio (e.g., 0.03 for 3%) "
+            f"(default: {env_defaults.min_volume_market_cap_ratio})"
         ),
     )
     max_risk_help = 'Highest risk level to include (e.g., LOW, MEDIUM, HIGH)'
@@ -4097,6 +4198,8 @@ def main():
     config.max_workers = final_max_workers
     config.risk_free_rate = args.risk_free_rate
     config.analysis_days = final_analysis_days
+    config.min_volume_24h = args.min_volume
+    config.min_volume_market_cap_ratio = args.min_vmc_ratio
     config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
     config.force_refresh_candles = args.force_refresh
     config.use_openai_scoring = args.use_openai_scoring

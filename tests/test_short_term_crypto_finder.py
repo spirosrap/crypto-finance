@@ -120,6 +120,16 @@ class ShortTermFinderCLITests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 self.parser.parse_args(['--limit', '-5'])
 
+    def test_min_volume_arguments_parse(self) -> None:
+        args = self.parser.parse_args(['--min-volume', '7500000', '--min-vmc-ratio', '0.04'])
+        self.assertEqual(args.min_volume, 7_500_000.0)
+        self.assertAlmostEqual(args.min_vmc_ratio, 0.04)
+
+    def test_positive_float_validation_for_min_volume(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.parser.parse_args(['--min-volume', '0'])
+
     def test_max_risk_level_default_applied(self) -> None:
         args = self.parser.parse_args([])
         self.assertEqual(args.max_risk_level, 'MEDIUM')

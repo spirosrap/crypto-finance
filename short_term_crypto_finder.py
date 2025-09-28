@@ -125,6 +125,12 @@ def build_short_term_config() -> CryptoFinderConfig:
     )
     cfg.risk_free_rate = _env_override("SHORT_RISK_FREE_RATE", 0.01, float)
     cfg.force_refresh_candles = _env_flag("SHORT_FORCE_REFRESH_CANDLES", True)
+    cfg.min_volume_24h = _env_override("SHORT_MIN_VOLUME_24H", cfg.min_volume_24h, float)
+    cfg.min_volume_market_cap_ratio = _env_override(
+        "SHORT_MIN_VMC_RATIO",
+        cfg.min_volume_market_cap_ratio,
+        float,
+    )
 
     # Faster indicator defaults
     cfg.rsi_period = _env_override("SHORT_RSI_PERIOD", 7, int)
@@ -594,6 +600,20 @@ def _positive_int(value: str) -> int:
     return converted
 
 
+def _positive_float(value: str) -> float:
+    """Argparse type that ensures a positive float."""
+
+    try:
+        converted = float(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(f"Expected number, received '{value}'") from exc
+
+    if converted <= 0:
+        raise argparse.ArgumentTypeError("Value must be a positive number")
+
+    return converted
+
+
 def make_risk_level_validator(valid_levels: Set[str]) -> Callable[[str], str]:
     """Create an argparse-compatible validator for risk level strings."""
 
@@ -655,6 +675,15 @@ def build_cli_parser(
         type=_positive_int,
         default=env_defaults.min_market_cap,
         help=f"Minimum market cap in USD (default: ${env_defaults.min_market_cap:,})",
+    )
+    parser.add_argument(
+        '--min-volume',
+        type=_positive_float,
+        default=env_defaults.min_volume_24h,
+        help=(
+            "Minimum 24h USD volume required (default: "
+            f"${env_defaults.min_volume_24h:,.0f})"
+        ),
     )
     parser.add_argument(
         '--max-results',
@@ -746,6 +775,15 @@ def build_cli_parser(
         help=(
             "Number of daily bars for the swing window "
             f"(default: {env_defaults.analysis_days}; profile may override)"
+        ),
+    )
+    parser.add_argument(
+        '--min-vmc-ratio',
+        type=_positive_float,
+        default=env_defaults.min_volume_market_cap_ratio,
+        help=(
+            "Minimum volume-to-market-cap ratio (e.g., 0.03 for 3%) "
+            f"(default: {env_defaults.min_volume_market_cap_ratio})"
         ),
     )
     max_risk_help = 'Highest risk tier to allow (e.g., LOW, MEDIUM_LOW, MEDIUM)'
@@ -858,6 +896,8 @@ def main() -> None:
     config.max_workers = final_max_workers
     config.risk_free_rate = args.risk_free_rate
     config.analysis_days = final_analysis_days
+    config.min_volume_24h = args.min_volume
+    config.min_volume_market_cap_ratio = args.min_vmc_ratio
     config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
     config.force_refresh_candles = args.force_refresh
     config.use_openai_scoring = args.use_openai_scoring

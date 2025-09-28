@@ -28,6 +28,8 @@ stops and closer profit targets.
   trend slope, ADX strength, volume ratio/thrust, and impulse follow-through.
 - **Risk Controls**: Risk bands (`LOW` → `VERY_HIGH`), volatility awareness,
   and min-score thresholds ensure crowded or weak setups can be excluded.
+- **Liquidity Guard Rails**: Optional 24h USD volume and volume/market-cap
+  filters prevent thin markets from surfacing, keeping fills realistic.
 - **Optional LLM Refinement**: When you set `SHORT_USE_OPENAI_SCORING=1`, the
   top swing setups are re-scored by an OpenAI model (default `gpt-5-mini`),
   blending a qualitative `llm_score` and rationale into the final rank.
@@ -90,6 +92,7 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 | `--suppress-console-logs` | false | Disable console logging for clean stdout piping |
 | `--limit` | 30 (`SHORT_DEFAULT_LIMIT` or profile) | Universe size to analyse before ranking (must be >0) |
 | `--min-market-cap` | env / ≥$50M | Minimum market cap filter (must be >0) |
+| `--min-volume` | env | Minimum 24h USD volume (must be >0 when provided) |
 | `--max-results` | env/profile | Number of setups to display (must be >0 when provided) |
 | `--output` | `console` | `console` or `json` |
 | `--side` | env (`both`) | Restrict to `long`, `short`, or `both` |
@@ -104,6 +107,7 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 | `--quotes` | env | Preferred quote currencies (e.g., `USDC,USD,USDT`) |
 | `--risk-free-rate` | env (~1%) | Annualised rate for Sharpe/Sortino |
 | `--analysis-days` | env/profile (120) | Daily bars for swing analytics (must be >0 when provided) |
+| `--min-vmc-ratio` | env | Minimum volume-to-market-cap ratio (e.g., `0.03` for 3%) |
 | `--max-risk-level` | env | Highest allowed risk tier |
 | `--use-openai-scoring/--no-use-openai-scoring` | env (`SHORT_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring from the CLI |
 | `--openai-weight` | env (`SHORT_OPENAI_WEIGHT`) | Blend ratio between baseline and LLM score |
@@ -126,6 +130,8 @@ Short-term settings read both the generic `CRYPTO_*` variables and the
 | `SHORT_ANALYSIS_DAYS` | Daily lookback window | 120 |
 | `SHORT_MIN_MARKET_CAP` | Market-cap floor (USD) | max(`CRYPTO_MIN_MARKET_CAP`, 50M) |
 | `SHORT_MAX_RESULTS` | Default for `--max-results` | `CRYPTO_MAX_RESULTS` |
+| `SHORT_MIN_VOLUME_24H` | Minimum 24h USD volume | inherits `CRYPTO_MIN_VOLUME_24H` / 0 |
+| `SHORT_MIN_VMC_RATIO` | Minimum volume-to-market-cap ratio | inherits `CRYPTO_MIN_VMC_RATIO` / 0 |
 | `SHORT_TOP_PER_SIDE` | Pre-cap per direction | 10 |
 | `SHORT_SIDE` | Default side selection | `both` |
 | `SHORT_MIN_SCORE` | Minimum overall score | 20.0 |
