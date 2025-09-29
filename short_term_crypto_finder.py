@@ -304,7 +304,8 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         resample_rule = str(getattr(self.config, 'intraday_resample', '') or '').strip()
         if resample_rule:
             try:
-                resampled = intraday_df.resample(resample_rule).agg({
+                rule_for_pd = resample_rule.lower()
+                resampled = intraday_df.resample(rule_for_pd).agg({
                     'open': 'first',
                     'high': 'max',
                     'low': 'min',
