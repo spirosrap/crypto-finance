@@ -479,6 +479,8 @@ def main():
                       help='Limit price in USD (if not provided, a market order will be placed)')
     parser.add_argument('--no-confirm', action='store_true',
                       help='Skip order confirmation')
+    parser.add_argument('--expiry', type=str, choices=['12h', '24h', '30d'], default='30d',
+                      help='Expiry horizon for GTD bracket orders (default: 30d)')
     # New arguments for placing bracket orders after fill
     parser.add_argument('--place-bracket', action='store_true',
                       help='Place bracket orders for an already filled limit order')
@@ -523,7 +525,8 @@ def main():
                 size=args.size,
                 take_profit_price=args.tp,
                 stop_loss_price=args.sl,
-                leverage=str(args.leverage) if args.leverage else None
+                leverage=str(args.leverage) if args.leverage else None,
+                expiry=args.expiry
             )
             
             if "error" in result:
@@ -600,6 +603,7 @@ def main():
         print(f"Current Price: ${current_price}")
         print(f"Take Profit Price: ${tp_str}")
         print(f"Stop Loss Price: ${sl_str}")
+        print(f"GTD Expiry: {args.expiry}")
         
         # Calculate and display potential profit/loss in dollars
         if args.side == 'BUY':
@@ -638,7 +642,8 @@ def main():
                 entry_price=limit_str,
                 take_profit_price=tp_str,
                 stop_loss_price=sl_str,
-                leverage=str(args.leverage)
+                leverage=str(args.leverage),
+                expiry=args.expiry
             )
             
             if "error" in result:
@@ -666,7 +671,8 @@ def main():
                 size=size,
                 take_profit_price=tp_str,
                 stop_loss_price=sl_str,
-                leverage=str(args.leverage)
+                leverage=str(args.leverage),
+                expiry=args.expiry
             )
             
             if monitor_result['status'] == 'success':
@@ -677,7 +683,7 @@ def main():
                 print(f"\n{monitor_result['message']}")
                 if monitor_result['status'] == 'timeout':
                     print("\nTo place take profit and stop loss orders after fill, run:")
-                    print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {rounded_tp} --sl {rounded_sl} --leverage {args.leverage}")
+                    print(f"python trade_btc_perp.py --place-bracket --order-id {result['order_id']} --product {args.product} --size {size} --tp {rounded_tp} --sl {rounded_sl} --leverage {args.leverage} --expiry {args.expiry}")
                 elif monitor_result['status'] == 'error':
                     print(f"Error: {monitor_result.get('error', 'Unknown error')}")
             
@@ -688,7 +694,8 @@ def main():
                 size=size,
                 take_profit_price=rounded_tp,
                 stop_loss_price=rounded_sl,
-                leverage=str(args.leverage)
+                leverage=str(args.leverage),
+                expiry=args.expiry
             )
             
             if "error" in result:

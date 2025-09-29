@@ -21,6 +21,22 @@ class CoinbaseService:
         self.logger = logging.getLogger(__name__)
 
     # --- Internal helpers for precision/formatting ---
+    def _compute_end_time(self, expiry: str | None) -> str:
+        """Compute GTD end_time in ISO8601Z based on expiry string.
+
+        Supported values: '12h', '24h', '30d' (default).
+        """
+        try:
+            if expiry == '12h':
+                delta = timedelta(hours=12)
+            elif expiry == '24h':
+                delta = timedelta(hours=24)
+            else:
+                # Default 30 days
+                delta = timedelta(days=30)
+        except Exception:
+            delta = timedelta(days=30)
+        return (datetime.utcnow() + delta).isoformat() + "Z"
     def _get_product_increments(self, product_id: str) -> Tuple[float, float, float]:
         """Return (price_increment, quote_increment, base_increment) as floats.
 
@@ -374,7 +390,7 @@ class CoinbaseService:
 
     def place_market_order_with_targets(self, product_id: str, side: str, size: float, 
                                       take_profit_price: float | str, stop_loss_price: float | str,
-                                      leverage: str = None) -> dict:
+                                      leverage: str = None, expiry: str | None = None) -> dict:
         """
         Place a market order followed by a bracket order for take profit and stop loss.
         """
@@ -467,8 +483,8 @@ class CoinbaseService:
             # Generate client_order_id for bracket order
             bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
-            # Set end time to 30 days from now for GTD orders
-            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+            # Set end time based on requested expiry (default 30d)
+            end_time = self._compute_end_time(expiry)
             
             # Place bracket order - use opposite side of market order
             bracket_side = "SELL" if side.upper() == "BUY" else "BUY"
@@ -569,7 +585,7 @@ class CoinbaseService:
 
     def place_limit_order_with_targets(self, product_id: str, side: str, size: float, 
                                      entry_price: float | str, take_profit_price: float | str, 
-                                     stop_loss_price: float | str, leverage: str = None) -> dict:
+                                     stop_loss_price: float | str, leverage: str = None, expiry: str | None = None) -> dict:
         """
         Place a limit order first, then monitor for fill before placing take profit and stop loss orders.
         
@@ -665,7 +681,8 @@ class CoinbaseService:
                 "entry_price": entry_price_str,
                 "tp_price": tp_limit,
                 "sl_price": sl_stop,
-                "message": "Limit order placed. Once filled, you can place take profit and stop loss orders using place_bracket_after_fill method."
+                "message": "Limit order placed. Once filled, you can place take profit and stop loss orders using place_bracket_after_fill method.",
+                "expiry": expiry or "30d"
             }
                 
         except Exception as e:
@@ -674,7 +691,7 @@ class CoinbaseService:
 
     def place_bracket_after_fill(self, product_id: str, order_id: str, size: float,
                                take_profit_price: float | str, stop_loss_price: float | str,
-                               leverage: str = None) -> dict:
+                               leverage: str = None, expiry: str | None = None) -> dict:
         """
         Place bracket orders (take profit and stop loss) after a limit order has been filled.
         
@@ -714,8 +731,8 @@ class CoinbaseService:
             # Generate client_order_id for bracket order
             bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
             
-            # Set end time to 30 days from now for GTD orders
-            end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+            # Set end time based on requested expiry (default 30d)
+            end_time = self._compute_end_time(expiry)
             
             # Place bracket order - use opposite side of the filled limit order
             bracket_side = "SELL" if side == "BUY" else "BUY"
@@ -1086,7 +1103,7 @@ class CoinbaseService:
 
     def monitor_limit_order_and_place_bracket(self, product_id: str, order_id: str, size: float,
                                           take_profit_price: float, stop_loss_price: float,
-                                          leverage: str = None, max_wait_time: int = 3600) -> dict:
+                                          leverage: str = None, max_wait_time: int = 3600, expiry: str | None = None) -> dict:
         """
         Monitor a limit order until it's filled, then place bracket orders.
         
@@ -1132,8 +1149,8 @@ class CoinbaseService:
                     # Generate client_order_id for bracket order
                     bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
                     
-                    # Set end time to 30 days from now for GTD orders
-                    end_time = (datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+                    # Set end time based on requested expiry (default 30d)
+                    end_time = self._compute_end_time(expiry)
                     
                     # Place bracket order - use opposite side of the filled limit order
                     bracket_side = "SELL" if side == "BUY" else "BUY"

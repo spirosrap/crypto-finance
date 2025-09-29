@@ -166,6 +166,7 @@ def main() -> None:
     ap.add_argument("--product-form", type=str, choices=["PERP-INTX", "INTX-PERP"], default="PERP-INTX", help="Perp suffix format to display")
     ap.add_argument("--order", type=str, choices=["market", "limit"], default="market", help="Order type")
     ap.add_argument("--execute", action="store_true", help="Actually place the order (otherwise dry-run)")
+    ap.add_argument("--expiry", type=str, choices=["12h", "24h", "30d"], default="30d", help="GTD expiry for bracket orders")
 
     args = ap.parse_args()
 
@@ -223,6 +224,7 @@ def main() -> None:
         ]
         if limit_str is not None:
             cmd += ["--limit", limit_str]
+        cmd += ["--expiry", args.expiry]
 
         commands.append(cmd)
         api_pids.append(api_pid)
@@ -234,7 +236,7 @@ def main() -> None:
         entry_disp = f"{parsed.entry:.{decimals}f}"
         summaries.append(
             f"Symbol: {parsed.symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
-            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}"
+            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}  Expiry: {args.expiry}"
         )
 
     print("\n=== Parsed Finder Signals ===")
@@ -266,6 +268,7 @@ def main() -> None:
                     take_profit_price=tps[i],
                     stop_loss_price=sls[i],
                     leverage=leverage_str,
+                    expiry=args.expiry,
                 )
                 if isinstance(res, dict) and "error" in res:
                     print(f"\n[{api_pid}] Error placing limit order: {res['error']}")
@@ -279,6 +282,7 @@ def main() -> None:
                     take_profit_price=tps[i],
                     stop_loss_price=sls[i],
                     leverage=leverage_str,
+                    expiry=args.expiry,
                 )
                 if isinstance(res, dict) and "error" in res:
                     print(f"\n[{api_pid}] Error placing market order: {res['error']}")
