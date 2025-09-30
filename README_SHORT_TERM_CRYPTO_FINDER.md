@@ -211,6 +211,30 @@ Short-Line Summaries
 - Combine with `add_position_from_finder.py` to create ready-to-send perp
   orders (the parser now ignores the trailing summary block automatically).
 
+### Top-5 Selection Helper
+
+If you want to automatically pick only the strongest candidates for execution, use `add_top5_from_finder.py` on the plain text output:
+
+Selection logic:
+- best 2 LONGs by score
+- best 2 SHORTs by score
+- next best remaining by score (any side)
+
+Examples:
+
+```bash
+# Generate plain text and select top-5 (2L/2S + next best), dry run
+python short_term_crypto_finder.py --profile wide --plain-output finder_short.txt --suppress-console-logs
+python add_top5_from_finder.py --file finder_short.txt --portfolio-usd 25000 --leverage 5 --order limit --expiry 12h
+
+# Execute immediately with market orders and 24h GTD expiry for brackets
+python add_top5_from_finder.py --file finder_short.txt --portfolio-usd 25000 --leverage 5 --order market --expiry 24h --execute
+```
+
+Notes:
+- `--expiry` threads through to GTD bracket orders (choices: `12h`, `24h`, `30d`; default `30d`).
+- If fewer than 2 per side are available, the script selects whatever exists and still caps total to 5.
+
 ## See Also
 
 - [`long_term_crypto_finder.py`](long_term_crypto_finder.py)
