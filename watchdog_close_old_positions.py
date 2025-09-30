@@ -37,9 +37,32 @@ def setup_logging(verbose: bool = False) -> None:
 
 def _get_portfolio_uuid(cb: CoinbaseService) -> Optional[str]:
     ports = cb.client.get_portfolios()
-    for p in ports.get('portfolios', []):
-        if p.get('type') == 'INTX':
-            return p.get('uuid')
+    # Normalize to iterable of portfolio entries
+    portfolios_list = None
+    if isinstance(ports, dict):
+        portfolios_list = ports.get('portfolios', [])
+    else:
+        # Try attribute access
+        plist = getattr(ports, 'portfolios', None)
+        if plist is not None:
+            portfolios_list = plist
+        else:
+            # Fall back to __dict__ if present
+            try:
+                ports_dict = vars(ports)
+                portfolios_list = ports_dict.get('portfolios', [])
+            except Exception:
+                portfolios_list = []
+
+    for p in portfolios_list or []:
+        if isinstance(p, dict):
+            p_type = p.get('type')
+            p_uuid = p.get('uuid')
+        else:
+            p_type = getattr(p, 'type', None)
+            p_uuid = getattr(p, 'uuid', None)
+        if p_type == 'INTX' and p_uuid:
+            return p_uuid
     return None
 
 
@@ -157,11 +180,18 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
     positions = []
     if isinstance(portfolio, dict):
         breakdown = portfolio.get('breakdown', {})
-        positions = breakdown.get('perp_positions', [])
+        # breakdown can be dict or object
+        if isinstance(breakdown, dict):
+            positions = breakdown.get('perp_positions', [])
+        else:
+            positions = getattr(breakdown, 'perp_positions', []) or []
     else:
         breakdown = getattr(portfolio, 'breakdown', None)
         if breakdown is not None:
-            positions = getattr(breakdown, 'perp_positions', []) or []
+            if isinstance(breakdown, dict):
+                positions = breakdown.get('perp_positions', [])
+            else:
+                positions = getattr(breakdown, 'perp_positions', []) or []
 
     if not positions:
         logger.info("No perpetual positions found")
