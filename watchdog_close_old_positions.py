@@ -120,6 +120,34 @@ def _to_datetime(order: Any) -> Optional[datetime]:
     return None
 
 
+def _format_duration_hms(td: timedelta) -> str:
+    """Return a human-readable string like '5 hours, 3 minutes, 10 seconds'.
+
+    Always includes hours, minutes, and seconds (with pluralization), even if zero.
+    """
+    total_seconds = int(td.total_seconds())
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+
+    if hours == 1:
+        hours_str = "1 hour"
+    else:
+        hours_str = f"{hours} hours"
+
+    if minutes == 1:
+        minutes_str = "1 minute"
+    else:
+        minutes_str = f"{minutes} minutes"
+
+    if seconds == 1:
+        seconds_str = "1 second"
+    else:
+        seconds_str = f"{seconds} seconds"
+
+    return ", ".join([hours_str, minutes_str, seconds_str])
+
+
 def _orders_for_product(cb: CoinbaseService, portfolio_uuid: str, product_id: str, limit: int = 200) -> list[Any]:
     logger = logging.getLogger(__name__)
     try:
@@ -330,8 +358,8 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
             # Clamp negative to zero
             if remaining.total_seconds() < 0:
                 remaining = timedelta(seconds=0)
-            # Format as HH:MM:SS
-            remaining_str = str(remaining).split('.')[0]
+            # Format as human-readable H/M/S
+            remaining_str = _format_duration_hms(remaining)
             logger.info(f"Position {symbol} time remaining to {max_age_hours}h threshold: {remaining_str} (opened {opened_at.isoformat()}Z)")
 
 
