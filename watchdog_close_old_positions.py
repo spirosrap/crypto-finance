@@ -301,7 +301,8 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
         logger.info("No perpetual positions found")
         return
 
-    cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+    now_utc = datetime.utcnow()
+    cutoff = now_utc - timedelta(hours=max_age_hours)
     logger.info(f"Closing positions opened before {cutoff.isoformat()}Z")
 
     for pos in positions:
@@ -323,7 +324,15 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
             logger.info(f"Position {symbol} opened at {opened_at.isoformat()}Z exceeds {max_age_hours}h; closing...")
             _close_position(cb, symbol, net_size, position_side, leverage)
         else:
-            logger.debug(f"Position {symbol} age OK (opened {opened_at.isoformat()}Z)")
+            # Report time remaining until threshold
+            deadline = opened_at + timedelta(hours=max_age_hours)
+            remaining = deadline - now_utc
+            # Clamp negative to zero
+            if remaining.total_seconds() < 0:
+                remaining = timedelta(seconds=0)
+            # Format as HH:MM:SS
+            remaining_str = str(remaining).split('.')[0]
+            logger.info(f"Position {symbol} time remaining to {max_age_hours}h threshold: {remaining_str} (opened {opened_at.isoformat()}Z)")
 
 
 def main() -> None:
