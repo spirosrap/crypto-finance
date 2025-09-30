@@ -107,6 +107,110 @@ def _extract_position_open_time(pos: Any) -> Optional[datetime]:
     return None
 
 
+def _to_datetime(order: Any) -> Optional[datetime]:
+    # Prefer completion_time, fallback to created_time
+    def g(obj: Any, key: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+    for key in ('completion_time', 'created_time'):
+        dt = _parse_iso8601(g(order, key))
+        if dt:
+            return dt
+    return None
+
+
+def _orders_for_product(cb: CoinbaseService, portfolio_uuid: str, product_id: str, limit: int = 200) -> list[Any]:
+    logger = logging.getLogger(__name__)
+    try:
+        orders = cb.client.list_orders(
+            portfolio_uuid=portfolio_uuid,
+            product_id=product_id,
+            order_status="FILLED",
+            limit=limit,
+        )
+        if isinstance(orders, dict):
+            return orders.get('orders', []) or []
+        if hasattr(orders, 'orders'):
+            return getattr(orders, 'orders') or []
+        if hasattr(orders, '__dict__'):
+            return getattr(orders, '__dict__', {}).get('orders', []) or []
+    except Exception as e:
+        logger.warning(f"Failed to fetch orders for {product_id}: {e}")
+    return []
+
+
+def _infer_open_time_from_orders(cb: CoinbaseService, portfolio_uuid: str, product_id: str, expected_net: float, position_side: str) -> Optional[datetime]:
+    """Infer current position open time by replaying filled orders chronologically.
+
+    Maintains a running net base size; returns the timestamp when the position last
+    crossed from 0 to non-zero (start of current holding). If inference fails,
+    returns None.
+    """
+    orders = _orders_for_product(cb, portfolio_uuid, product_id, limit=500)
+    if not orders:
+        return None
+
+    # Sort ascending by time
+    def order_time(o: Any) -> float:
+        dt = _to_datetime(o)
+        return dt.timestamp() if dt else 0.0
+
+    orders_sorted = sorted(orders, key=order_time)
+
+    def g(obj: Any, key: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    running = 0.0
+    open_start: Optional[datetime] = None
+
+    for o in orders_sorted:
+        side = (g(o, 'side') or '').upper()
+        # base_size may appear as filled_size or base_size
+        try:
+            base_size = float(g(o, 'filled_size') or g(o, 'base_size') or 0.0)
+        except Exception:
+            base_size = 0.0
+        if base_size <= 0:
+            continue
+        delta = base_size if side == 'BUY' else -base_size
+
+        prev_running = running
+        running = running + delta
+        # Detect zero -> non-zero transition as start of current holding window
+        if prev_running == 0.0 and running != 0.0:
+            open_start = _to_datetime(o)
+        # Detect non-zero -> zero transition resets window
+        if running == 0.0:
+            open_start = None
+
+    # Validate expected direction and magnitude loosely; tolerate rounding
+    try:
+        if abs(abs(running) - abs(expected_net)) <= max(0.0001, 0.02 * abs(expected_net)):
+            return open_start
+    except Exception:
+        pass
+
+    # Fallback heuristic: accumulate orders of the current position side from newest backward
+    want_side = 'SELL' if position_side == 'FUTURES_POSITION_SIDE_SHORT' else 'BUY'
+    acc = 0.0
+    for o in sorted(orders_sorted, key=order_time, reverse=True):
+        side = (g(o, 'side') or '').upper()
+        try:
+            base_size = float(g(o, 'filled_size') or g(o, 'base_size') or 0.0)
+        except Exception:
+            base_size = 0.0
+        if side != want_side or base_size <= 0:
+            continue
+        acc += base_size
+        ts = _to_datetime(o)
+        if acc >= abs(expected_net):
+            return ts
+    return None
+
+
 def _extract_symbol_and_size(pos: Any) -> tuple[Optional[str], float, str, str]:
     symbol = None
     size = 0.0
@@ -209,8 +313,11 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
 
         opened_at = _extract_position_open_time(pos)
         if not opened_at:
-            logger.warning(f"No open/entry timestamp found for {symbol}; skipping")
-            continue
+            # Try inference from order history
+            opened_at = _infer_open_time_from_orders(cb, portfolio_uuid, symbol, net_size, position_side)
+            if not opened_at:
+                logger.warning(f"No open/entry timestamp found for {symbol}; skipping")
+                continue
 
         if opened_at <= cutoff:
             logger.info(f"Position {symbol} opened at {opened_at.isoformat()}Z exceeds {max_age_hours}h; closing...")
