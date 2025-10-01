@@ -235,6 +235,49 @@ Notes:
 - `--expiry` threads through to GTD bracket orders (choices: `12h`, `24h`, `30d`; default `30d`).
 - If fewer than 2 per side are available, the script selects whatever exists and still caps total to 5.
 
+### Position Age Watchdog (auto-close stale perp positions)
+
+After you place positions from the short-term finder (for example via `add_top5_from_finder.py`), you can enforce a maximum holding window for INTX perpetuals using `watchdog_close_old_positions.py`. It scans your INTX portfolio and market-closes any open perp position older than a configured age.
+
+Purpose:
+- Keep the book fresh by auto-closing positions that have lingered past your short-term horizon
+- Prevent forgotten small residuals from accumulating overnight/weekend
+
+Usage:
+```bash
+# Close positions older than 24h (one-shot)
+python watchdog_close_old_positions.py --max-age-hours 24
+
+# Run continuously every 5 minutes
+python watchdog_close_old_positions.py --max-age-hours 24 --interval-seconds 300
+
+# Only act on a specific product
+python watchdog_close_old_positions.py --max-age-hours 12 --product BTC-PERP-INTX
+
+# Enable verbose logs
+python watchdog_close_old_positions.py --max-age-hours 24 --verbose
+```
+
+Options:
+- `--max-age-hours` (int, default 24): Age threshold; positions opened before now−N hours are closed
+- `--product` (str, optional): Only check/close this product id (e.g., `BTC-PERP-INTX`)
+- `--interval-seconds` (int, default 0): If >0, run continuously with this interval between scans
+- `--verbose`: Enable debug logging
+
+How it works:
+- Looks up your INTX portfolio and fetches current perp positions
+- Determines each position's open time from common fields; if missing, infers it by replaying filled orders to find when net size last moved from 0 to non‑zero
+- Cancels any open orders for a product before attempting to close its position
+- Sends a market IOC order on the opposite side for the net size (uses CROSS margin; preserves reported `leverage`)
+
+Safety notes:
+- Uses market IOC; expect small slippage versus limit exits
+- Requires valid INTX API credentials (`API_KEY_PERPS`, `API_SECRET_PERPS` in `config.py`)
+- Only acts on non‑zero net perp positions; if none found, it exits quietly
+- Set `--interval-seconds` to keep enforcing the policy throughout the day
+
+File: `watchdog_close_old_positions.py`
+
 ## See Also
 
 - [`long_term_crypto_finder.py`](long_term_crypto_finder.py)
