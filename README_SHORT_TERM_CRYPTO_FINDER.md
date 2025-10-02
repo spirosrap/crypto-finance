@@ -101,7 +101,7 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 | `--unique-by-symbol` / `--no-unique-by-symbol` | env | Keep only top side per symbol |
 | `--min-score` | env (≥20) | Drop results below this overall score |
 | `--symbols` | - | Comma-separated tickers to force-include |
-| `--top-per-side` | env (10) | Cap longs/shorts before merge |
+| `--top-per-side` | env (10) | Cap longs/shorts before merge; pairing `--top-per-side 5` with other constraints may surface fewer than 5 long and 5 short candidates when conditions are tight |
 | `--save` | - | Persist output (`.json` or `.csv`) |
 | `--max-workers` | env/profile | Override concurrency for data fetch (must be >0 when provided) |
 | `--offline` / `--no-offline` | env | Use cached data only when possible |
