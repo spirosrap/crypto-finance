@@ -85,6 +85,10 @@ python short_term_crypto_finder.py --profile wide --plain-output finder_short.tx
 removes the extra logging noise so you no longer need a `tee | grep` filter.
 ```
 
+Even when other constraints shrink the candidate list—say only `3S + 1L` or
+`2S + 1L` qualify—you should still consider executing the surfaced trades
+instead of waiting for a full five-per-side roster.
+
 ### CLI Reference
 
 | Option | Default | Description |
