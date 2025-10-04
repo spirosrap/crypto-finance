@@ -81,9 +81,21 @@ python short_term_crypto_finder.py \
 # Run the "wide" preset and write a clean text report for external sharing
 python short_term_crypto_finder.py --profile wide --plain-output finder_short.txt --suppress-console-logs
 
+# Preview available profiles (and the default marker) without running a scan
+python short_term_crypto_finder.py --list-profiles
+
+# Run the focused LLM preset for tighter swing candidates and saved report
+python short_term_crypto_finder.py --profile focused_llm --plain-output finder_short.txt
+
 `--plain-output` mirrors the console view, and `--suppress-console-logs`
 removes the extra logging noise so you no longer need a `tee | grep` filter.
 ```
+
+### Preset Profiles
+
+- `default`: Mirrors environment defaults (or `SHORT_*` overrides) without extra changes.
+- `wide`: Evaluates a broader universe (`limit` 400) with more workers for faster bulk scans.
+- `focused_llm`: Concentrates on liquidity-plus momentum swings (`limit` 200, `top_per_side` 5, OpenAI scoring enabled, ≥$5M 24h volume, ≥3% volume/market-cap ratio, 20-day intraday lookback, `unique_by_symbol`, `max_risk_level` MEDIUM); pair with `--plain-output` to persist the run.
 
 Even when other constraints shrink the candidate list—say only `3S + 1L` or
 `2S + 1L` qualify—you should still consider executing the surfaced trades
@@ -94,6 +106,7 @@ instead of waiting for a full five-per-side roster.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--profile` | env (`SHORT_FINDER_PROFILE` or `default`) | Apply preset bundle (`default`, `wide`, …) |
+| `--list-profiles` | - | Print available profiles (marks the default) and exit |
 | `--plain-output` | - | Write the formatted console report (no log header) to disk |
 | `--suppress-console-logs` | false | Disable console logging for clean stdout piping |
 | `--limit` | 30 (`SHORT_DEFAULT_LIMIT` or profile) | Universe size to analyse before ranking (must be >0) |

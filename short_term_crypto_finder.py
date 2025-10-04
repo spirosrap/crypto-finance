@@ -24,7 +24,7 @@ import sys
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, TextIO
+from typing import Any, Callable, Dict, List, Optional, Set, TextIO
 
 import numpy as np
 import pandas as pd
@@ -802,7 +802,45 @@ PROFILE_PRESETS = {
         "max_workers": 12,
         "analysis_days": 90,
     },
+    "focused_llm": {
+        "limit": 200,
+        "top_per_side": 5,
+        "use_openai_scoring": True,
+        "min_volume_24h": 5_000_000,
+        "min_volume_market_cap_ratio": 0.03,
+        "intraday_lookback_days": 20,
+        "unique_by_symbol": True,
+        "max_risk_level": "MEDIUM",
+    },
 }
+
+
+def _print_profile_presets(
+    presets: Dict[str, Dict[str, Any]],
+    default_profile: str,
+    stream: TextIO = sys.stdout,
+) -> None:
+    """Display profile presets in a concise, human-friendly format."""
+
+    header = f"Available profiles (default: {default_profile})"
+    print(header, file=stream)
+
+    if not presets:
+        print("  (no presets defined)", file=stream)
+        return
+
+    default_marker = default_profile.strip().lower()
+
+    for name in sorted(presets):
+        overrides = presets[name]
+        marker = "*" if name.strip().lower() == default_marker else "-"
+        if overrides:
+            entries = ", ".join(f"{key}={value}" for key, value in sorted(overrides.items()))
+        else:
+            entries = "(inherits environment defaults)"
+        print(f" {marker} {name}: {entries}", file=stream)
+
+    print(" * marks the default profile.", file=stream)
 
 
 def _positive_int(value: str) -> int:
@@ -856,7 +894,7 @@ def build_cli_parser(
     profile_default: str,
     default_max_risk: Optional[str],
     risk_level_type: Callable[[str], str],
-    profile_presets: Optional[Dict[str, Dict[str, int]]] = None,
+    profile_presets: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> argparse.ArgumentParser:
     """Return the CLI parser with defaults injected for easier testing."""
 
@@ -869,6 +907,11 @@ def build_cli_parser(
         choices=sorted(presets.keys()),
         default=profile_default,
         help=f"Preset bundle of frequently used parameters (default: {profile_default})",
+    )
+    parser.add_argument(
+        '--list-profiles',
+        action='store_true',
+        help='Show available profile presets and exit',
     )
     parser.add_argument(
         '--plain-output',
@@ -1102,8 +1145,11 @@ def main() -> None:
 
     default_limit = _env_override("SHORT_DEFAULT_LIMIT", 30, int)
     profile_default = os.getenv("SHORT_FINDER_PROFILE", "default")
-    if profile_default not in PROFILE_PRESETS:
+    profile_presets: Dict[str, Dict[str, Any]] = PROFILE_PRESETS
+    if profile_default not in profile_presets:
         profile_default = "default"
+
+    raw_args = sys.argv[1:]
 
     parser = build_cli_parser(
         env_defaults,
@@ -1111,10 +1157,21 @@ def main() -> None:
         profile_default=profile_default,
         default_max_risk=default_max_risk,
         risk_level_type=risk_level_type,
+        profile_presets=profile_presets,
     )
     args = parser.parse_args()
 
-    profile_overrides = PROFILE_PRESETS.get(args.profile, {})
+    if args.list_profiles:
+        _print_profile_presets(profile_presets, profile_default)
+        return
+
+    explicit_flags = {
+        token.split('=', 1)[0]
+        for token in raw_args
+        if token.startswith('--')
+    }
+
+    profile_overrides = profile_presets.get(args.profile, {})
     final_limit = args.limit if args.limit is not None else profile_overrides.get('limit', default_limit)
     final_max_results = (
         args.max_results if args.max_results is not None else profile_overrides.get('max_results', env_defaults.max_results)
@@ -1135,21 +1192,54 @@ def main() -> None:
     config.min_market_cap = args.min_market_cap
     config.max_results = final_max_results
     config.side = args.side
-    config.unique_by_symbol = args.unique_by_symbol
     config.min_overall_score = float(args.min_score or 0.0)
     config.offline = args.offline
-    config.top_per_side = args.top_per_side
+    top_per_side = args.top_per_side
+    if '--top-per-side' not in explicit_flags and 'top_per_side' in profile_overrides:
+        top_per_side = int(profile_overrides['top_per_side'])
+    config.top_per_side = top_per_side
     config.max_workers = final_max_workers
     config.risk_free_rate = args.risk_free_rate
     config.analysis_days = final_analysis_days
-    config.intraday_lookback_days = args.intraday_lookback_days
+    intraday_lookback = args.intraday_lookback_days
+    if '--intraday-lookback-days' not in explicit_flags and 'intraday_lookback_days' in profile_overrides:
+        intraday_lookback = int(profile_overrides['intraday_lookback_days'])
+    config.intraday_lookback_days = intraday_lookback
     config.intraday_granularity = args.intraday_granularity.upper()
     config.intraday_resample = args.intraday_resample.upper()
-    config.min_volume_24h = args.min_volume
-    config.min_volume_market_cap_ratio = args.min_vmc_ratio
-    config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
+    min_volume = args.min_volume
+    if '--min-volume' not in explicit_flags and 'min_volume_24h' in profile_overrides:
+        min_volume = float(profile_overrides['min_volume_24h'])
+    config.min_volume_24h = min_volume
+
+    min_vmc_ratio = args.min_vmc_ratio
+    if '--min-vmc-ratio' not in explicit_flags and 'min_volume_market_cap_ratio' in profile_overrides:
+        min_vmc_ratio = float(profile_overrides['min_volume_market_cap_ratio'])
+    config.min_volume_market_cap_ratio = min_vmc_ratio
+
+    if '--max-risk-level' in explicit_flags:
+        config.max_risk_level = args.max_risk_level
+    elif 'max_risk_level' in profile_overrides:
+        try:
+            config.max_risk_level = risk_level_type(str(profile_overrides['max_risk_level']))
+        except argparse.ArgumentTypeError as exc:
+            logger.warning("Ignoring invalid max_risk_level preset for %s: %s", args.profile, exc)
+    else:
+        config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
+
     config.force_refresh_candles = args.force_refresh
-    config.use_openai_scoring = args.use_openai_scoring
+
+    unique_flag_set = '--unique-by-symbol' in explicit_flags or '--no-unique-by-symbol' in explicit_flags
+    if not unique_flag_set and 'unique_by_symbol' in profile_overrides:
+        config.unique_by_symbol = bool(profile_overrides['unique_by_symbol'])
+    else:
+        config.unique_by_symbol = args.unique_by_symbol
+
+    openai_flag_set = '--use-openai-scoring' in explicit_flags or '--no-use-openai-scoring' in explicit_flags
+    if not openai_flag_set and 'use_openai_scoring' in profile_overrides:
+        config.use_openai_scoring = bool(profile_overrides['use_openai_scoring'])
+    else:
+        config.use_openai_scoring = args.use_openai_scoring
     if args.openai_weight is not None:
         config.openai_weight = float(args.openai_weight)
     if args.openai_model:
