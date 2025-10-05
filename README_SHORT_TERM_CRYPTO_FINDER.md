@@ -96,6 +96,7 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 - `default`: Mirrors environment defaults (or `SHORT_*` overrides) without extra changes.
 - `wide`: Evaluates a broader universe (`limit` 400) with more workers for faster bulk scans.
 - `focused_llm`: Concentrates on liquidity-plus momentum swings (`limit` 200, `top_per_side` 5, OpenAI scoring enabled, ≥$5M 24h volume, ≥3% volume/market-cap ratio, 20-day intraday lookback, `unique_by_symbol`, `max_risk_level` MEDIUM); pair with `--plain-output` to persist the run.
+- `focused_llm_100`: Mirrors `focused_llm` but trims the universe (`limit` 100) for faster refreshes while keeping the same OpenAI-assisted filters and risk guardrails.
 
 Even when other constraints shrink the candidate list—say only `3S + 1L` or
 `2S + 1L` qualify—you should still consider executing the surfaced trades

@@ -812,6 +812,16 @@ PROFILE_PRESETS = {
         "unique_by_symbol": True,
         "max_risk_level": "MEDIUM",
     },
+    "focused_llm_100": {
+        "limit": 100,
+        "top_per_side": 5,
+        "use_openai_scoring": True,
+        "min_volume_24h": 5_000_000,
+        "min_volume_market_cap_ratio": 0.03,
+        "intraday_lookback_days": 20,
+        "unique_by_symbol": True,
+        "max_risk_level": "MEDIUM",
+    },
 }
 
 
