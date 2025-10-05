@@ -298,6 +298,32 @@ Safety notes:
 
 File: `watchdog_close_old_positions.py`
 
+### TP/SL Fill Logger (capture bracket completions)
+
+Use `watchdog_log_tp_sl.py` to poll recent INTX fills, detect when a bracket
+take-profit or stop-loss closes a position, and mirror the outcome to
+`trade_logs/watchdog_closed_positions.csv` alongside time-stop exits.
+
+```
+# One-shot processing of the latest 500 fills (skips historical cycles on first run)
+python watchdog_log_tp_sl.py
+
+# Process every minute and backfill existing closed cycles the first time it runs
+python watchdog_log_tp_sl.py --bootstrap-existing --interval-seconds 60 --limit 800
+
+# Verbose logging for debugging
+python watchdog_log_tp_sl.py --verbose
+```
+
+Details:
+- Requires the same INTX API credentials as the age watchdog.
+- Maintains a checkpoint in `trade_logs/watchdog_tp_sl_checkpoint.json` to avoid re-logging old cycles.
+- Classifies exits by realised PnL sign (take profit vs stop loss) and applies the same breakeven threshold as the age watchdog via `$WATCHDOG_BREAKEVEN_ABS`.
+- Shares the CSV schema with the age watchdog so expectancy and excursion analysis stay centralised.
+- By default, the first run seeds the checkpoint without writing historical rows; use `--bootstrap-existing` if you want to import the most recent closed cycles immediately.
+
+File: `watchdog_log_tp_sl.py`
+
 ## See Also
 
 - [`long_term_crypto_finder.py`](long_term_crypto_finder.py)
