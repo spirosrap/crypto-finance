@@ -329,6 +329,37 @@ def _record_position_close(record: Dict[str, str]) -> None:
         writer.writerow(record)
 
 
+def _order_close_success(result: Any) -> bool:
+    if result is None:
+        return True
+    if isinstance(result, dict):
+        if 'success' in result:
+            return bool(result['success'])
+        if result.get('failure_reason'):
+            return False
+        if result.get('order_id') or result.get('order_configuration'):
+            return True
+        return True
+
+    success_attr = _get_value(result, 'success')
+    if success_attr is not None:
+        try:
+            return bool(success_attr)
+        except Exception:
+            return True
+
+    failure_reason = _get_value(result, 'failure_reason')
+    if failure_reason:
+        return False
+
+    status = _get_value(result, 'status')
+    if isinstance(status, str) and status.upper() in {'FILLED', 'OPEN', 'PENDING'}:
+        return True
+
+    # Default to success if API didn't provide an explicit failure flag
+    return True
+
+
 def _get_portfolio_uuid(cb: CoinbaseService) -> Optional[str]:
     ports = cb.client.get_portfolios()
     # Normalize to iterable of portfolio entries
@@ -583,10 +614,10 @@ def _close_position(cb: CoinbaseService, product_id: str, net_size: float, posit
             leverage=leverage,
             margin_type="CROSS"
         )
-        if isinstance(result, dict) and result.get('success', True):
+        if _order_close_success(result):
             logger.info(f"Closed {product_id} position via {side} {close_size}")
             return True
-        logger.error(f"Close order result for {product_id}: {result}")
+        logger.error(f"Close order did not report success for {product_id}: {result}")
         return False
     except Exception as e:
         logger.error(f"Error closing position for {product_id}: {e}")

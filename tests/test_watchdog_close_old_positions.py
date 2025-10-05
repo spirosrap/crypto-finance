@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 
 class WatchdogCloseOldPositionsTests(unittest.TestCase):
@@ -131,6 +132,18 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(pnl, 0.5)
         self.assertEqual(exit_price, 101.0)
         self.assertEqual(reason, 'take_profit')
+
+    def test_order_close_success_handles_dict(self) -> None:
+        result = {'success': True, 'order_id': 'abc'}
+        self.assertTrue(self.module._order_close_success(result))
+
+    def test_order_close_success_handles_object(self) -> None:
+        result = SimpleNamespace(success=True, order_id='abc')
+        self.assertTrue(self.module._order_close_success(result))
+
+    def test_order_close_success_detects_failure(self) -> None:
+        result = {'success': False, 'failure_reason': 'margin'}
+        self.assertFalse(self.module._order_close_success(result))
 
 
 if __name__ == '__main__':
