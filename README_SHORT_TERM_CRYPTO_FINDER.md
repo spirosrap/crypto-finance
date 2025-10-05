@@ -324,6 +324,32 @@ Details:
 
 File: `watchdog_log_tp_sl.py`
 
+### Performance Snapshot (expectancy & drawdowns)
+
+After your watchdogs populate `trade_logs/watchdog_closed_positions.csv`, run
+`watchdog_stats.py` to compute win rate, expectancy, max drawdown %, and average
+R multiples across the logged trades.
+
+```
+# Full history with default average-loss risk basis
+python watchdog_stats.py
+
+# Focus on the most recent 50 trades
+python watchdog_stats.py --last 50
+
+# Use a fixed $75 risk per trade for R multiples
+python watchdog_stats.py --r-basis fixed --risk-dollar 75
+
+# Emit structured output for dashboards / scripts
+python watchdog_stats.py --json
+```
+
+Metrics are derived from the `profit_loss` column (already breakeven-adjusted by
+the watchdogs). `closure_reason=expired_breakeven` rows are treated as zero PnL
+to keep expectancy realistic.
+
+File: `watchdog_stats.py`
+
 ## See Also
 
 - [`long_term_crypto_finder.py`](long_term_crypto_finder.py)
