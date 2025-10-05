@@ -45,6 +45,8 @@ LOG_HEADERS = [
     'exit_price',
     'profit_loss',
     'profit_loss_pct',
+    'mae',
+    'mfe',
     'duration_seconds',
 ]
 
@@ -67,6 +69,18 @@ def _ensure_log_file() -> Path:
             writer = csv.DictWriter(handle, fieldnames=LOG_HEADERS)
             writer.writeheader()
     return path
+
+
+def _breakeven_threshold() -> float:
+    raw = os.environ.get('WATCHDOG_BREAKEVEN_ABS', '1.0')
+    try:
+        threshold = abs(float(raw))
+        return threshold
+    except (TypeError, ValueError):
+        logging.getLogger(__name__).warning(
+            "Invalid WATCHDOG_BREAKEVEN_ABS=%r; defaulting to 1.0", raw
+        )
+        return 1.0
 
 
 def _get_value(obj: Any, key: str) -> Any:
@@ -106,6 +120,15 @@ def _coerce_numeric(value: Any) -> Optional[float]:
     return None
 
 
+def _gather_containers(pos: Any) -> list[Any]:
+    containers = [pos]
+    for key in ('position_pnl', 'metadata', 'details', 'stats', 'metrics', 'extras'):
+        value = _get_value(pos, key)
+        if value is not None:
+            containers.append(value)
+    return containers
+
+
 def _extract_entry_price(pos: Any) -> Optional[float]:
     for key in ('vwap', 'entry_price', 'average_entry', 'avg_entry_price'):
         value = _get_value(pos, key)
@@ -132,6 +155,39 @@ def _extract_unrealized_pnl(pos: Any, net_size: float, entry_price: Optional[flo
     if entry_price is not None and mark_price is not None:
         return net_size * (mark_price - entry_price)
     return None
+
+
+def _extract_excursions(pos: Any) -> tuple[Optional[float], Optional[float]]:
+    containers = _gather_containers(pos)
+    mae: Optional[float] = None
+    mfe: Optional[float] = None
+
+    mae_keys = (
+        'max_unrealized_loss',
+        'max_adverse_excursion',
+        'mae',
+        'max_drawdown',
+        'worst_unrealized_pnl',
+    )
+    mfe_keys = (
+        'max_unrealized_pnl',
+        'max_favorable_excursion',
+        'mfe',
+        'best_unrealized_pnl',
+        'peak_unrealized_pnl',
+    )
+
+    for container in containers:
+        for key in mae_keys:
+            value = _coerce_numeric(_get_value(container, key))
+            if value is not None:
+                mae = value if mae is None else min(mae, value)
+        for key in mfe_keys:
+            value = _coerce_numeric(_get_value(container, key))
+            if value is not None:
+                mfe = value if mfe is None else max(mfe, value)
+
+    return mae, mfe
 
 
 def _calculate_pnl(net_size: float, entry_price: Optional[float], exit_price: Optional[float]) -> Optional[float]:
@@ -188,6 +244,30 @@ def _determine_closure_reason(pos: Any, fallback: str = 'expired') -> str:
     return fallback
 
 
+def _apply_breakeven_adjustment(
+    closure_reason: str,
+    pnl: Optional[float],
+    entry_price: Optional[float],
+    exit_price: Optional[float],
+    net_size: float,
+) -> tuple[Optional[float], Optional[float], str]:
+    if pnl is None:
+        return pnl, exit_price, closure_reason
+
+    reason_normalized = (closure_reason or '').lower()
+    if 'expired' not in reason_normalized:
+        return pnl, exit_price, closure_reason
+
+    threshold = _breakeven_threshold()
+    if abs(pnl) > threshold:
+        return pnl, exit_price, closure_reason
+
+    adjusted_reason = 'expired_breakeven'
+    adjusted_exit = entry_price if entry_price is not None else exit_price
+    adjusted_pnl = 0.0
+    return adjusted_pnl, adjusted_exit, adjusted_reason
+
+
 def _format_datetime(dt: datetime) -> str:
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
@@ -205,6 +285,8 @@ def _create_closure_record(
     exit_price: Optional[float],
     pnl: Optional[float],
     closure_reason: str,
+    mae: Optional[float],
+    mfe: Optional[float],
 ) -> Dict[str, str]:
     if pnl is None:
         pnl = _calculate_pnl(net_size, entry_price, exit_price)
@@ -233,6 +315,8 @@ def _create_closure_record(
         'exit_price': _format_float(exit_price, 6),
         'profit_loss': _format_float(pnl, 2),
         'profit_loss_pct': _format_float(pnl_pct, 4),
+        'mae': _format_float(mae, 2),
+        'mfe': _format_float(mfe, 2),
         'duration_seconds': str(duration_seconds) if duration_seconds is not None else '',
     }
     return record
@@ -563,7 +647,18 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
             entry_price = _extract_entry_price(pos)
             mark_price = _extract_mark_price(pos)
             unrealized_pnl = _extract_unrealized_pnl(pos, net_size, entry_price, mark_price)
+            mae, mfe = _extract_excursions(pos)
             closure_reason = _determine_closure_reason(pos, fallback='expired')
+            pnl_for_record = unrealized_pnl
+            if pnl_for_record is None:
+                pnl_for_record = _calculate_pnl(net_size, entry_price, mark_price)
+            pnl_for_record, mark_price, closure_reason = _apply_breakeven_adjustment(
+                closure_reason,
+                pnl_for_record,
+                entry_price,
+                mark_price,
+                net_size,
+            )
             closed = _close_position(cb, symbol, net_size, position_side, leverage)
             if closed:
                 close_time = datetime.utcnow()
@@ -576,8 +671,10 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
                     close_time=close_time,
                     entry_price=entry_price,
                     exit_price=mark_price,
-                    pnl=unrealized_pnl,
+                    pnl=pnl_for_record,
                     closure_reason=closure_reason,
+                    mae=mae,
+                    mfe=mfe,
                 )
                 _record_position_close(record)
                 logger.info(f"Recorded closure for {symbol} to {_log_file_path()}")

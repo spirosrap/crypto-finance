@@ -30,6 +30,8 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
             exit_price=110.0,
             pnl=None,
             closure_reason='expired',
+            mae=-7.5,
+            mfe=15.25,
         )
 
         self.assertEqual(record['position_side'], 'LONG')
@@ -38,6 +40,8 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(record['duration_seconds'], str(int(timedelta(hours=24).total_seconds())))
         self.assertEqual(record['entry_price'], '100')
         self.assertEqual(record['exit_price'], '110')
+        self.assertEqual(record['mae'], '-7.5')
+        self.assertEqual(record['mfe'], '15.25')
 
     def test_create_closure_record_short(self) -> None:
         opened_at = datetime(2025, 10, 4, 12, 0, 0)
@@ -53,12 +57,16 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
             exit_price=90.0,
             pnl=None,
             closure_reason='stop_loss',
+            mae=-25.0,
+            mfe=12.0,
         )
 
         self.assertEqual(record['position_side'], 'SHORT')
         self.assertEqual(record['profit_loss'], '20')
         self.assertEqual(record['profit_loss_pct'], '10')
         self.assertEqual(record['leverage'], '3')
+        self.assertEqual(record['mae'], '-25')
+        self.assertEqual(record['mfe'], '12')
 
     def test_record_position_close_appends_csv(self) -> None:
         opened_at = datetime(2025, 10, 5, 0, 0, 0)
@@ -74,6 +82,8 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
             exit_price=48.0,
             pnl=None,
             closure_reason='expired',
+            mae=-8.75,
+            mfe=5.0,
         )
 
         self.module._record_position_close(record)
@@ -87,6 +97,40 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]['product_id'], 'SOL-PERP-INTX')
         self.assertEqual(rows[0]['profit_loss'], record['profit_loss'])
+        self.assertEqual(rows[0]['mae'], record['mae'])
+        self.assertEqual(rows[0]['mfe'], record['mfe'])
+
+    def test_breakeven_adjustment_for_expired_position(self) -> None:
+        os.environ['WATCHDOG_BREAKEVEN_ABS'] = '0.75'
+        self.addCleanup(lambda: os.environ.pop('WATCHDOG_BREAKEVEN_ABS', None))
+
+        pnl, exit_price, reason = self.module._apply_breakeven_adjustment(
+            closure_reason='expired',
+            pnl=0.5,
+            entry_price=100.0,
+            exit_price=99.0,
+            net_size=1.0,
+        )
+
+        self.assertEqual(pnl, 0.0)
+        self.assertEqual(exit_price, 100.0)
+        self.assertEqual(reason, 'expired_breakeven')
+
+    def test_breakeven_adjustment_ignores_take_profit(self) -> None:
+        os.environ['WATCHDOG_BREAKEVEN_ABS'] = '0.75'
+        self.addCleanup(lambda: os.environ.pop('WATCHDOG_BREAKEVEN_ABS', None))
+
+        pnl, exit_price, reason = self.module._apply_breakeven_adjustment(
+            closure_reason='take_profit',
+            pnl=0.5,
+            entry_price=100.0,
+            exit_price=101.0,
+            net_size=1.0,
+        )
+
+        self.assertEqual(pnl, 0.5)
+        self.assertEqual(exit_price, 101.0)
+        self.assertEqual(reason, 'take_profit')
 
 
 if __name__ == '__main__':

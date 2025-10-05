@@ -287,6 +287,8 @@ How it works:
 - Determines each position's open time from common fields; if missing, infers it by replaying filled orders to find when net size last moved from 0 to non‑zero
 - Cancels any open orders for a product before attempting to close its position
 - Sends a market IOC order on the opposite side for the net size (uses CROSS margin; preserves reported `leverage`)
+- Writes every successful closure to `trade_logs/watchdog_closed_positions.csv`, capturing entry/exit prices, realized PnL, hold duration, and excursion stats (MAE/MFE) so you can audit risk handling later
+- Treats expired positions with |PnL| ≤ `$WATCHDOG_BREAKEVEN_ABS` (default `1.0`) as breakeven, setting PnL to zero and tagging the row `expired_breakeven` to keep expectancy calculations realistic for time-stop exits
 
 Safety notes:
 - Uses market IOC; expect small slippage versus limit exits
