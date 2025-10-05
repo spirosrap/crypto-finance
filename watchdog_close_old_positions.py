@@ -21,18 +21,228 @@ Notes:
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
+import os
 import time
-from datetime import datetime, timedelta
-from typing import Any, Optional
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
 
 
+LOG_HEADERS = [
+    'closed_at',
+    'product_id',
+    'position_side',
+    'net_size',
+    'leverage',
+    'opened_at',
+    'closure_reason',
+    'entry_price',
+    'exit_price',
+    'profit_loss',
+    'profit_loss_pct',
+    'duration_seconds',
+]
+
+
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+def _log_file_path() -> Path:
+    base_dir = os.environ.get('WATCHDOG_LOG_DIR', 'trade_logs')
+    return Path(base_dir).expanduser() / 'watchdog_closed_positions.csv'
+
+
+def _ensure_log_file() -> Path:
+    path = _log_file_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        with path.open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=LOG_HEADERS)
+            writer.writeheader()
+    return path
+
+
+def _get_value(obj: Any, key: str) -> Any:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _coerce_numeric(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    if isinstance(value, dict):
+        for key in ('rawCurrency', 'userNativeCurrency', 'value', 'amount'):
+            nested = value.get(key)
+            result = _coerce_numeric(nested)
+            if result is not None:
+                return result
+        return None
+    try:
+        attrs = vars(value)
+    except TypeError:
+        attrs = None
+    if attrs:
+        return _coerce_numeric(attrs)
+    return None
+
+
+def _extract_entry_price(pos: Any) -> Optional[float]:
+    for key in ('vwap', 'entry_price', 'average_entry', 'avg_entry_price'):
+        value = _get_value(pos, key)
+        numeric = _coerce_numeric(value)
+        if numeric is not None:
+            return numeric
+    return None
+
+
+def _extract_mark_price(pos: Any) -> Optional[float]:
+    for key in ('mark_price', 'current_price', 'price', 'last_price'):
+        value = _get_value(pos, key)
+        numeric = _coerce_numeric(value)
+        if numeric is not None:
+            return numeric
+    return None
+
+
+def _extract_unrealized_pnl(pos: Any, net_size: float, entry_price: Optional[float], mark_price: Optional[float]) -> Optional[float]:
+    value = _get_value(pos, 'unrealized_pnl')
+    pnl = _coerce_numeric(value)
+    if pnl is not None:
+        return pnl
+    if entry_price is not None and mark_price is not None:
+        return net_size * (mark_price - entry_price)
+    return None
+
+
+def _calculate_pnl(net_size: float, entry_price: Optional[float], exit_price: Optional[float]) -> Optional[float]:
+    if entry_price is None or exit_price is None or net_size == 0:
+        return None
+    return net_size * (exit_price - entry_price)
+
+
+def _calculate_pnl_pct(net_size: float, entry_price: Optional[float], exit_price: Optional[float]) -> Optional[float]:
+    if entry_price is None or entry_price == 0 or exit_price is None or net_size == 0:
+        return None
+    direction = 1.0 if net_size > 0 else -1.0
+    return direction * ((exit_price - entry_price) / entry_price) * 100.0
+
+
+def _normalize_side(position_side: str, net_size: float) -> str:
+    if position_side:
+        upper = position_side.upper()
+        if 'SHORT' in upper:
+            return 'SHORT'
+        if 'LONG' in upper:
+            return 'LONG'
+    return 'LONG' if net_size >= 0 else 'SHORT'
+
+
+def _format_float(value: Optional[float], precision: int) -> str:
+    if value is None:
+        return ''
+    formatted = f"{value:.{precision}f}"
+    if '.' in formatted:
+        formatted = formatted.rstrip('0').rstrip('.')
+    if formatted in ('-0', '-0.0', '0.0'):
+        return '0'
+    return formatted
+
+
+def _determine_closure_reason(pos: Any, fallback: str = 'expired') -> str:
+    candidates = []
+    for key in ('exit_reason', 'close_reason', 'closure_reason'):
+        candidates.append(_get_value(pos, key))
+    for parent in ('position_pnl', 'metadata', 'details'):
+        container = _get_value(pos, parent)
+        if container:
+            candidates.append(_get_value(container, 'exit_reason'))
+            candidates.append(_get_value(container, 'close_reason'))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        text = str(candidate).lower()
+        if 'take' in text or 'tp' in text:
+            return 'take_profit'
+        if 'stop' in text or 'sl' in text:
+            return 'stop_loss'
+    return fallback
+
+
+def _format_datetime(dt: datetime) -> str:
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt.replace(microsecond=0).isoformat() + 'Z'
+
+
+def _create_closure_record(
+    product_id: str,
+    position_side: str,
+    net_size: float,
+    leverage: str,
+    opened_at: Optional[datetime],
+    close_time: datetime,
+    entry_price: Optional[float],
+    exit_price: Optional[float],
+    pnl: Optional[float],
+    closure_reason: str,
+) -> Dict[str, str]:
+    if pnl is None:
+        pnl = _calculate_pnl(net_size, entry_price, exit_price)
+    if exit_price is None and pnl is not None and entry_price is not None and net_size != 0:
+        exit_price = entry_price + (pnl / net_size)
+    pnl_pct = _calculate_pnl_pct(net_size, entry_price, exit_price)
+
+    opened_str = ''
+    if opened_at is not None:
+        opened_str = _format_datetime(opened_at)
+
+    closed_str = _format_datetime(close_time)
+    duration_seconds: Optional[int] = None
+    if opened_at is not None:
+        duration_seconds = int((close_time - opened_at).total_seconds())
+
+    record: Dict[str, str] = {
+        'closed_at': closed_str,
+        'product_id': product_id,
+        'position_side': _normalize_side(position_side, net_size),
+        'net_size': _format_float(net_size, 8),
+        'leverage': leverage or '',
+        'opened_at': opened_str,
+        'closure_reason': closure_reason,
+        'entry_price': _format_float(entry_price, 6),
+        'exit_price': _format_float(exit_price, 6),
+        'profit_loss': _format_float(pnl, 2),
+        'profit_loss_pct': _format_float(pnl_pct, 4),
+        'duration_seconds': str(duration_seconds) if duration_seconds is not None else '',
+    }
+    return record
+
+
+def _record_position_close(record: Dict[str, str]) -> None:
+    path = _ensure_log_file()
+    with path.open('a', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=LOG_HEADERS)
+        writer.writerow(record)
 
 
 def _get_portfolio_uuid(cb: CoinbaseService) -> Optional[str]:
@@ -349,8 +559,28 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
                 continue
 
         if opened_at <= cutoff:
-            logger.info(f"Position {symbol} opened at {opened_at.isoformat()}Z exceeds {max_age_hours}h; closing...")
-            _close_position(cb, symbol, net_size, position_side, leverage)
+            logger.info(f"Position {symbol} opened at {_format_datetime(opened_at)} exceeds {max_age_hours}h; closing...")
+            entry_price = _extract_entry_price(pos)
+            mark_price = _extract_mark_price(pos)
+            unrealized_pnl = _extract_unrealized_pnl(pos, net_size, entry_price, mark_price)
+            closure_reason = _determine_closure_reason(pos, fallback='expired')
+            closed = _close_position(cb, symbol, net_size, position_side, leverage)
+            if closed:
+                close_time = datetime.utcnow()
+                record = _create_closure_record(
+                    product_id=symbol,
+                    position_side=position_side,
+                    net_size=net_size,
+                    leverage=leverage,
+                    opened_at=opened_at,
+                    close_time=close_time,
+                    entry_price=entry_price,
+                    exit_price=mark_price,
+                    pnl=unrealized_pnl,
+                    closure_reason=closure_reason,
+                )
+                _record_position_close(record)
+                logger.info(f"Recorded closure for {symbol} to {_log_file_path()}")
         else:
             # Report time remaining until threshold
             deadline = opened_at + timedelta(hours=max_age_hours)
@@ -360,7 +590,9 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
                 remaining = timedelta(seconds=0)
             # Format as human-readable H/M/S
             remaining_str = _format_duration_hms(remaining)
-            logger.info(f"Position {symbol} time remaining to {max_age_hours}h threshold: {remaining_str} (opened {opened_at.isoformat()}Z)")
+            logger.info(
+                f"Position {symbol} time remaining to {max_age_hours}h threshold: {remaining_str} (opened {_format_datetime(opened_at)})"
+            )
 
 
 def main() -> None:
@@ -386,5 +618,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

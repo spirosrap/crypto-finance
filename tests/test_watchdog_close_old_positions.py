@@ -1,0 +1,93 @@
+import csv
+import importlib
+import os
+import tempfile
+import unittest
+from datetime import datetime, timedelta
+
+
+class WatchdogCloseOldPositionsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.addCleanup(lambda: os.environ.pop('WATCHDOG_LOG_DIR', None))
+        os.environ['WATCHDOG_LOG_DIR'] = self.temp_dir.name
+        import watchdog_close_old_positions
+
+        self.module = importlib.reload(watchdog_close_old_positions)
+
+    def test_create_closure_record_long(self) -> None:
+        opened_at = datetime(2025, 10, 4, 12, 0, 0)
+        close_time = opened_at + timedelta(hours=24)
+        record = self.module._create_closure_record(
+            product_id='BTC-PERP-INTX',
+            position_side='FUTURES_POSITION_SIDE_LONG',
+            net_size=0.5,
+            leverage='5',
+            opened_at=opened_at,
+            close_time=close_time,
+            entry_price=100.0,
+            exit_price=110.0,
+            pnl=None,
+            closure_reason='expired',
+        )
+
+        self.assertEqual(record['position_side'], 'LONG')
+        self.assertEqual(record['profit_loss'], '5')
+        self.assertEqual(record['profit_loss_pct'], '10')
+        self.assertEqual(record['duration_seconds'], str(int(timedelta(hours=24).total_seconds())))
+        self.assertEqual(record['entry_price'], '100')
+        self.assertEqual(record['exit_price'], '110')
+
+    def test_create_closure_record_short(self) -> None:
+        opened_at = datetime(2025, 10, 4, 12, 0, 0)
+        close_time = opened_at + timedelta(hours=6)
+        record = self.module._create_closure_record(
+            product_id='ETH-PERP-INTX',
+            position_side='FUTURES_POSITION_SIDE_SHORT',
+            net_size=-2.0,
+            leverage='3',
+            opened_at=opened_at,
+            close_time=close_time,
+            entry_price=100.0,
+            exit_price=90.0,
+            pnl=None,
+            closure_reason='stop_loss',
+        )
+
+        self.assertEqual(record['position_side'], 'SHORT')
+        self.assertEqual(record['profit_loss'], '20')
+        self.assertEqual(record['profit_loss_pct'], '10')
+        self.assertEqual(record['leverage'], '3')
+
+    def test_record_position_close_appends_csv(self) -> None:
+        opened_at = datetime(2025, 10, 5, 0, 0, 0)
+        close_time = opened_at + timedelta(hours=1)
+        record = self.module._create_closure_record(
+            product_id='SOL-PERP-INTX',
+            position_side='LONG',
+            net_size=1.25,
+            leverage='2',
+            opened_at=opened_at,
+            close_time=close_time,
+            entry_price=50.0,
+            exit_price=48.0,
+            pnl=None,
+            closure_reason='expired',
+        )
+
+        self.module._record_position_close(record)
+
+        log_path = self.module._log_file_path()
+        self.assertTrue(log_path.exists())
+
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['product_id'], 'SOL-PERP-INTX')
+        self.assertEqual(rows[0]['profit_loss'], record['profit_loss'])
+
+
+if __name__ == '__main__':
+    unittest.main()
