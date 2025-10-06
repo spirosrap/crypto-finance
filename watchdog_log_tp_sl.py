@@ -19,7 +19,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Deque, Dict, Iterable, List, Optional
+from typing import Any, Callable, Deque, Dict, Iterable, List, Optional
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
@@ -28,6 +28,7 @@ from fills_pnl import fetch_fills
 from watchdog_close_old_positions import (
     _breakeven_threshold,
     _create_closure_record,
+    compute_mae_mfe_from_history,
     _record_position_close,
     setup_logging,
 )
@@ -293,11 +294,32 @@ def _detect_cycles(fills: List[Fill]) -> List[Cycle]:
     return cycles
 
 
-def _cycle_to_record(cycle: Cycle, pn_threshold: float) -> Dict[str, str]:
+def _cycle_to_record(
+    cycle: Cycle,
+    pn_threshold: float,
+    mae_mfe_fetcher: Optional[Callable[..., tuple[Optional[float], Optional[float]]]] = None,
+) -> Dict[str, str]:
     entry_price = cycle.entry_value / cycle.entry_qty if cycle.entry_qty else None
     exit_price = cycle.exit_value / cycle.exit_qty if cycle.exit_qty else None
     net_size = cycle.entry_qty if cycle.side == 'LONG' else -cycle.entry_qty
     reason = _classify_reason(cycle.side, cycle.realized_pnl, pn_threshold)
+    mae = None
+    mfe = None
+
+    if mae_mfe_fetcher:
+        try:
+            mae, mfe = mae_mfe_fetcher(
+                product_id=cycle.product_id,
+                net_size=net_size,
+                entry_price=entry_price,
+                open_time=cycle.start_time,
+                close_time=cycle.end_time,
+                exit_price=exit_price,
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Failed to derive MAE/MFE for %s: %s", cycle.product_id, exc
+            )
     record = _create_closure_record(
         product_id=cycle.product_id,
         position_side=cycle.side,
@@ -309,8 +331,8 @@ def _cycle_to_record(cycle: Cycle, pn_threshold: float) -> Dict[str, str]:
         exit_price=exit_price,
         pnl=cycle.realized_pnl,
         closure_reason=reason,
-        mae=None,
-        mfe=None,
+        mae=mae,
+        mfe=mfe,
     )
     return record
 
@@ -352,8 +374,11 @@ def _run_once(limit: int, bootstrap_existing: bool) -> None:
             logger.debug("No new cycles beyond checkpoint")
         return
 
+    def _mae_mfe_fetcher(**kwargs: Any) -> tuple[Optional[float], Optional[float]]:
+        return compute_mae_mfe_from_history(cb=cb, **kwargs)
+
     for cycle in new_cycles:
-        record = _cycle_to_record(cycle, threshold)
+        record = _cycle_to_record(cycle, threshold, mae_mfe_fetcher=_mae_mfe_fetcher)
         _record_position_close(record)
         logger.info(
             "Recorded TP/SL closure for %s at %s (reason=%s, pnl=%s)",
@@ -394,4 +419,3 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
-

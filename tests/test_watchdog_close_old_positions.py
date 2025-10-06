@@ -3,7 +3,7 @@ import importlib
 import os
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 
@@ -144,6 +144,79 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
     def test_order_close_success_detects_failure(self) -> None:
         result = {'success': False, 'failure_reason': 'margin'}
         self.assertFalse(self.module._order_close_success(result))
+
+    def test_compute_mae_mfe_from_history_long(self) -> None:
+        opened_at = datetime(2025, 10, 4, 0, 0, 0, tzinfo=timezone.utc)
+        close_time = opened_at + timedelta(hours=6)
+
+        candles = [
+            {'low': '95', 'high': '105'},
+            {'low': 98, 'high': 120},
+        ]
+
+        cb = SimpleNamespace(
+            historical_data=SimpleNamespace(
+                get_historical_data=lambda *args, **kwargs: candles
+            )
+        )
+
+        mae, mfe = self.module.compute_mae_mfe_from_history(
+            cb=cb,
+            product_id='BTC-PERP-INTX',
+            net_size=2.0,
+            entry_price=100.0,
+            open_time=opened_at,
+            close_time=close_time,
+        )
+
+        self.assertAlmostEqual(mae, -10.0)
+        self.assertAlmostEqual(mfe, 40.0)
+
+    def test_compute_mae_mfe_from_history_short(self) -> None:
+        opened_at = datetime(2025, 10, 4, 0, 0, 0)
+        close_time = opened_at + timedelta(hours=2)
+
+        candles = [
+            {'low': 45, 'high': 52},
+            {'low': 47, 'high': 55},
+        ]
+
+        cb = SimpleNamespace(
+            historical_data=SimpleNamespace(
+                get_historical_data=lambda *args, **kwargs: candles
+            )
+        )
+
+        mae, mfe = self.module.compute_mae_mfe_from_history(
+            cb=cb,
+            product_id='ETH-PERP-INTX',
+            net_size=-3.0,
+            entry_price=50.0,
+            open_time=opened_at,
+            close_time=close_time,
+        )
+
+        self.assertAlmostEqual(mae, -15.0)
+        self.assertAlmostEqual(mfe, 15.0)
+
+    def test_compute_mae_mfe_handles_empty_candles(self) -> None:
+        cb = SimpleNamespace(
+            historical_data=SimpleNamespace(
+                get_historical_data=lambda *args, **kwargs: []
+            )
+        )
+
+        mae, mfe = self.module.compute_mae_mfe_from_history(
+            cb=cb,
+            product_id='SOL-PERP-INTX',
+            net_size=1.0,
+            entry_price=25.0,
+            open_time=datetime(2025, 10, 4, 0, 0, 0),
+            close_time=datetime(2025, 10, 4, 1, 0, 0),
+        )
+
+        self.assertIsNone(mae)
+        self.assertIsNone(mfe)
 
 
 if __name__ == '__main__':

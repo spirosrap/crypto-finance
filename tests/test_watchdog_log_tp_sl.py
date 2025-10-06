@@ -57,6 +57,25 @@ class WatchdogLogTpSlTests(unittest.TestCase):
         record_breakeven = _cycle_to_record(cycle, 40.0)
         self.assertEqual(record_breakeven['closure_reason'], 'expired_breakeven')
 
+    def test_cycle_to_record_injects_mae_mfe(self) -> None:
+        cycle = _process_product_fills([
+            Fill('DOGE-PERP-INTX', 'BUY', 1000.0, 0.1, 0.0, datetime(2025, 10, 5, 4, 0, tzinfo=UTC), '51'),
+            Fill('DOGE-PERP-INTX', 'SELL', 1000.0, 0.105, 0.0, datetime(2025, 10, 5, 4, 30, tzinfo=UTC), '52'),
+        ])[0]
+
+        captured: Dict[str, Any] = {}
+
+        def fake_fetcher(**kwargs):
+            captured.update(kwargs)
+            return -12.34, 45.67
+
+        record = _cycle_to_record(cycle, 1.0, mae_mfe_fetcher=fake_fetcher)
+        self.assertEqual(captured['product_id'], 'DOGE-PERP-INTX')
+        self.assertAlmostEqual(captured['net_size'], 1000.0)
+        self.assertAlmostEqual(captured['entry_price'], 0.1)
+        self.assertEqual(record['mae'], '-12.34')
+        self.assertEqual(record['mfe'], '45.67')
+
     def test_checkpoint_filter(self) -> None:
         cycle = _process_product_fills([
             Fill('ADA-PERP-INTX', 'BUY', 1.0, 0.3, 0.0, datetime(2025, 10, 5, 3, 0, tzinfo=UTC), '31'),

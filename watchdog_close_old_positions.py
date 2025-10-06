@@ -190,6 +190,81 @@ def _extract_excursions(pos: Any) -> tuple[Optional[float], Optional[float]]:
     return mae, mfe
 
 
+def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def compute_mae_mfe_from_history(
+    cb: CoinbaseService,
+    product_id: str,
+    net_size: float,
+    entry_price: Optional[float],
+    open_time: Optional[datetime],
+    close_time: datetime,
+    exit_price: Optional[float] = None,
+    granularity: str = 'ONE_MINUTE',
+) -> tuple[Optional[float], Optional[float]]:
+    """Derive MAE/MFE PnL excursions using historical candles.
+
+    Returns tuple of (mae, mfe) quoted in the same units as trade PnL.
+    """
+
+    logger = logging.getLogger(__name__)
+
+    if net_size == 0 or entry_price is None:
+        return None, None
+
+    start = _as_utc(open_time)
+    end = _as_utc(close_time)
+    if start is None or end is None:
+        return None, None
+
+    # Add small buffer to capture immediate pre/post trade ticks
+    start -= timedelta(minutes=1)
+    end += timedelta(minutes=1)
+    if end <= start:
+        end = start + timedelta(minutes=1)
+
+    mae: Optional[float] = None
+    mfe: Optional[float] = None
+
+    try:
+        candles = cb.historical_data.get_historical_data(
+            product_id,
+            start,
+            end,
+            granularity,
+        )
+    except Exception as exc:
+        logger.warning("Failed to fetch candles for %s: %s", product_id, exc)
+        candles = []
+
+    for candle in candles or []:
+        if isinstance(candle, dict):
+            low = _coerce_numeric(candle.get('low'))
+            high = _coerce_numeric(candle.get('high'))
+        else:
+            low = _coerce_numeric(getattr(candle, 'low', None))
+            high = _coerce_numeric(getattr(candle, 'high', None))
+        for price in (low, high):
+            if price is None:
+                continue
+            pnl = net_size * (price - entry_price)
+            mae = pnl if mae is None or pnl < mae else mae
+            mfe = pnl if mfe is None or pnl > mfe else mfe
+
+    if exit_price is not None:
+        pnl = net_size * (exit_price - entry_price)
+        mae = pnl if mae is None or pnl < mae else mae
+        mfe = pnl if mfe is None or pnl > mfe else mfe
+
+    return mae, mfe
+
+
 def _calculate_pnl(net_size: float, entry_price: Optional[float], exit_price: Optional[float]) -> Optional[float]:
     if entry_price is None or exit_price is None or net_size == 0:
         return None
@@ -693,6 +768,19 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
             closed = _close_position(cb, symbol, net_size, position_side, leverage)
             if closed:
                 close_time = datetime.utcnow()
+                hist_mae, hist_mfe = compute_mae_mfe_from_history(
+                    cb=cb,
+                    product_id=symbol,
+                    net_size=net_size,
+                    entry_price=entry_price,
+                    open_time=opened_at,
+                    close_time=close_time,
+                    exit_price=mark_price,
+                )
+                if mae is None:
+                    mae = hist_mae
+                if mfe is None:
+                    mfe = hist_mfe
                 record = _create_closure_record(
                     product_id=symbol,
                     position_side=position_side,
