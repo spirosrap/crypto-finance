@@ -18,6 +18,8 @@ Notes/assumptions:
     when `closure_reason` is `expired_breakeven`).
   - Trades without numeric PnL are ignored.
   - If there are no losing trades and no fixed risk provided, Average R is not available.
+  - Provide `--ending-equity` to infer the starting equity as ending equity minus
+    cumulative PnL for the selected trades; otherwise supply `--starting-equity`.
 """
 
 from __future__ import annotations
@@ -46,6 +48,8 @@ class StatsResult:
     max_drawdown_pct: float
     average_r: Optional[float]
     expectancy_r: Optional[float]
+    starting_equity_used: float
+    ending_equity: Optional[float]
 
 
 def _safe_numeric(series: pd.Series) -> pd.Series:
@@ -95,6 +99,7 @@ def compute_metrics(
     r_basis: str = "avg_loss",
     fixed_risk: Optional[float] = None,
     starting_equity: float = 1000.0,
+    ending_equity: Optional[float] = None,
 ) -> StatsResult:
     pnls = _safe_numeric(df.get("profit_loss"))
     if isinstance(df, pd.DataFrame) and ("closure_reason" in df.columns):
@@ -112,8 +117,21 @@ def compute_metrics(
     pnls = pnls.where(~be_mask, 0.0)
 
     total = int(len(pnls))
+
+    ending_equity_val = float(ending_equity) if ending_equity is not None else None
+    resolved_start_equity = float(starting_equity)
+    if ending_equity_val is not None:
+        resolved_start_equity = ending_equity_val - float(pnls.sum())
+        if resolved_start_equity <= 0:
+            raise ValueError(
+                "Computed starting equity from ending equity is <= 0. Check the selected trades or provide --starting-equity explicitly."
+            )
+
+    if resolved_start_equity <= 0:
+        raise ValueError("starting_equity must be positive")
+
     if total == 0:
-        return StatsResult(0, 0, 0, 0, 0.0, 0.0, 0.0, None, None)
+        return StatsResult(0, 0, 0, 0, 0.0, 0.0, 0.0, None, None, resolved_start_equity, ending_equity_val)
 
     wins_mask = pnls > 0
     losses_mask = pnls < 0
@@ -125,7 +143,7 @@ def compute_metrics(
     expectancy_currency = float(pnls.mean())
 
     # Drawdown percent from cumulative equity curve with baseline capital
-    _, max_dd_pct = _equity_curve_and_max_dd_pct(pnls.to_numpy(), starting_equity)
+    _, max_dd_pct = _equity_curve_and_max_dd_pct(pnls.to_numpy(), resolved_start_equity)
 
     # Average R via derived risk denominator
     denom = _derive_r_denominator(pnls[losses_mask].to_numpy(), r_basis, fixed_risk)
@@ -149,6 +167,8 @@ def compute_metrics(
         max_drawdown_pct=max_dd_pct,
         average_r=average_r,
         expectancy_r=expectancy_r,
+        starting_equity_used=resolved_start_equity,
+        ending_equity=ending_equity_val,
     )
 
 
@@ -184,6 +204,8 @@ def main() -> None:
                     help="How to define 1R. avg_loss=mean loss size; median_loss=median loss size; fixed=--risk-dollar")
     ap.add_argument("--risk-dollar", type=float, default=None, help="Fixed dollar risk per trade when r-basis=fixed")
     ap.add_argument("--starting-equity", type=float, default=1000.0, help="Starting equity for drawdown calc (default 1000)")
+    ap.add_argument("--ending-equity", type=float, default=None,
+                    help="Optional ending equity; if provided, starting equity is inferred as ending equity minus cumulative PnL")
     ap.add_argument("--last", type=int, default=0, help="Only analyze the most recent N trades (by closed_at if present)")
     ap.add_argument("--json", action="store_true", help="Output metrics as JSON instead of pretty text")
 
@@ -191,7 +213,16 @@ def main() -> None:
     df = _load_csv(Path(args.csv))
     if int(args.last or 0) > 0:
         df = _select_last_trades(df, int(args.last))
-    res = compute_metrics(df, r_basis=str(args.r_basis), fixed_risk=args.risk_dollar, starting_equity=float(args.starting_equity))
+    try:
+        res = compute_metrics(
+            df,
+            r_basis=str(args.r_basis),
+            fixed_risk=args.risk_dollar,
+            starting_equity=float(args.starting_equity),
+            ending_equity=(None if args.ending_equity is None else float(args.ending_equity)),
+        )
+    except ValueError as exc:
+        ap.error(str(exc))
 
     if args.json:
         print(json.dumps({
@@ -206,7 +237,9 @@ def main() -> None:
             "expectancy_r": (None if res.expectancy_r is None else round(res.expectancy_r, 6)),
             "r_basis": args.r_basis,
             "risk_dollar": args.risk_dollar,
-            "csv": str(Path(args.csv))
+            "csv": str(Path(args.csv)),
+            "starting_equity_used": round(res.starting_equity_used, 6),
+            "ending_equity": (None if res.ending_equity is None else round(res.ending_equity, 6)),
         }, indent=2))
         return
 
@@ -216,7 +249,11 @@ def main() -> None:
     print(f"Trades: {res.total_trades}  Wins: {res.wins}  Losses: {res.losses}  Breakevens: {res.breakevens}")
     print(f"Win Rate: {res.win_rate_pct:.2f}%")
     print(f"Expectancy ($/trade): {res.expectancy_currency:.2f}")
-    print(f"Max Drawdown: {res.max_drawdown_pct:.2f}% (start=${float(args.starting_equity):.2f})")
+    start_label = res.starting_equity_used
+    if res.ending_equity is not None:
+        print(f"Max Drawdown: {res.max_drawdown_pct:.2f}% (inferred start=${start_label:.2f}, end=${res.ending_equity:.2f})")
+    else:
+        print(f"Max Drawdown: {res.max_drawdown_pct:.2f}% (start=${start_label:.2f})")
     if res.average_r is None:
         print(f"Average R: n/a (no losses or no risk basis)")
     else:
@@ -225,4 +262,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

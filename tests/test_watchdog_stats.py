@@ -22,6 +22,7 @@ class WatchdogStatsTests(unittest.TestCase):
         self.assertAlmostEqual(res.expectancy_currency, 35.0)
         self.assertAlmostEqual(res.win_rate_pct, 40.0)
         self.assertIsNotNone(res.average_r)
+        self.assertAlmostEqual(res.starting_equity_used, 1000.0)
 
     def test_average_r_median_basis(self) -> None:
         df = pd.DataFrame({
@@ -50,6 +51,25 @@ class WatchdogStatsTests(unittest.TestCase):
     def test_r_denominator_handles_no_losses(self) -> None:
         denom = _derive_r_denominator(pd.Series([], dtype=float).to_numpy(), 'avg_loss', None)
         self.assertIsNone(denom)
+
+    def test_compute_metrics_infers_starting_equity_from_ending(self) -> None:
+        df = pd.DataFrame({
+            'profit_loss': [100, -60, 40],
+            'closure_reason': ['take_profit', 'stop_loss', 'take_profit'],
+        })
+
+        res = compute_metrics(df, ending_equity=250.0)
+
+        # Sum PnL = 80 so inferred starting equity should be 170
+        self.assertAlmostEqual(res.starting_equity_used, 170.0)
+        self.assertAlmostEqual(res.ending_equity or 0.0, 250.0)
+        self.assertLess(res.max_drawdown_pct, 0.0)
+
+    def test_compute_metrics_rejects_non_positive_inferred_start(self) -> None:
+        df = pd.DataFrame({'profit_loss': [50]})
+
+        with self.assertRaises(ValueError):
+            compute_metrics(df, ending_equity=40.0)
 
 
 if __name__ == '__main__':

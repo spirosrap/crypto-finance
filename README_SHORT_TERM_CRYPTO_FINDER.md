@@ -337,6 +337,9 @@ python watchdog_stats.py
 # Focus on the most recent 50 trades
 python watchdog_stats.py --last 50
 
+# Infer starting equity from a known ending balance (for example $200 now)
+python watchdog_stats.py --last 50 --ending-equity 200
+
 # Use a fixed $75 risk per trade for R multiples
 python watchdog_stats.py --r-basis fixed --risk-dollar 75
 
@@ -347,6 +350,11 @@ python watchdog_stats.py --json
 Metrics are derived from the `profit_loss` column (already breakeven-adjusted by
 the watchdogs). `closure_reason=expired_breakeven` rows are treated as zero PnL
 to keep expectancy realistic.
+
+If your account balance changed during the window, supply `--ending-equity` so
+the script infers the starting balance as `ending_equity - cumulative_profit_loss`
+for the selected trades. Otherwise, pass `--starting-equity` with the known
+opening figure.
 
 File: `watchdog_stats.py`
 
