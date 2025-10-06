@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import datetime, timezone, timedelta
+from typing import Any, Dict
 
 from watchdog_log_tp_sl import (
     Fill,
