@@ -27,7 +27,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
@@ -118,6 +118,260 @@ def _coerce_numeric(value: Any) -> Optional[float]:
     if attrs:
         return _coerce_numeric(attrs)
     return None
+
+
+def _extract_avg_filled_price(container: Any) -> Optional[float]:
+    """Best-effort extraction of an average fill price from order/fill payloads."""
+
+    price_keys = (
+        'average_filled_price',
+        'avg_filled_price',
+        'average_price',
+        'avg_price',
+        'price',
+        'fill_price',
+        'execution_price',
+    )
+    for key in price_keys:
+        price = _coerce_numeric(_get_value(container, key))
+        if price is not None:
+            return price
+
+    filled_value = _coerce_numeric(_get_value(container, 'filled_value'))
+    filled_size = _coerce_numeric(_get_value(container, 'filled_size'))
+    if filled_value is not None and filled_size not in (None, 0):
+        try:
+            return float(filled_value) / float(filled_size)
+        except ZeroDivisionError:
+            return None
+
+    return None
+
+
+def _extract_order_id(container: Any) -> Optional[str]:
+    """Pull a string order identifier from API responses if available."""
+
+    candidates = (
+        'order_id',
+        'orderId',
+        'orderID',
+        'id',
+    )
+    for key in candidates:
+        value = _get_value(container, key)
+        if value:
+            return str(value)
+
+    nested = _get_value(container, 'order')
+    if nested:
+        return _extract_order_id(nested)
+    return None
+
+
+def _extract_fills_from_response(resp: Any) -> List[Dict[str, Any]]:
+    """Normalize fills response structures into a list of dicts."""
+
+    if resp is None:
+        return []
+
+    raw: List[Any]
+    if isinstance(resp, dict):
+        if 'fills' in resp:
+            raw = resp.get('fills') or []
+        elif 'data' in resp and isinstance(resp['data'], list):
+            raw = resp['data']
+        else:
+            raw = []
+    elif hasattr(resp, 'fills'):
+        raw = getattr(resp, 'fills') or []
+    elif isinstance(resp, list):
+        raw = resp
+    else:
+        raw = []
+
+    fills: List[Dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            fills.append(item)
+        else:
+            try:
+                fills.append(vars(item))
+            except TypeError:
+                fills.append({})
+    return fills
+
+
+def _extract_fill_size(fill: Dict[str, Any]) -> Optional[float]:
+    size_keys = (
+        'filled_size',
+        'size',
+        'base_size',
+        'quantity',
+        'base_quantity',
+    )
+    for key in size_keys:
+        value = _coerce_numeric(fill.get(key))
+        if value is not None:
+            return float(value)
+    return None
+
+
+def _fill_time(fill: Dict[str, Any]) -> Optional[datetime]:
+    time_keys = (
+        'trade_time',
+        'time',
+        'created_time',
+        'ts',
+        'completion_time',
+    )
+    for key in time_keys:
+        value = fill.get(key)
+        if not value:
+            continue
+        dt = _parse_iso8601(value)
+        if dt is not None:
+            return dt
+        # Accept epoch seconds
+        try:
+            return datetime.fromtimestamp(float(value))
+        except Exception:
+            continue
+    return None
+
+
+def _average_fill_price(fills: List[Dict[str, Any]], target_size: Optional[float] = None) -> Optional[float]:
+    if not fills:
+        return None
+
+    total_value = 0.0
+    total_size = 0.0
+
+    for fill in fills:
+        price = _extract_avg_filled_price(fill)
+        size = _extract_fill_size(fill)
+        if price is None or size is None or size == 0:
+            continue
+        abs_size = abs(float(size))
+        total_value += float(price) * abs_size
+        total_size += abs_size
+        if target_size is not None and total_size >= abs(target_size) - 1e-9:
+            break
+
+    if total_size > 0:
+        return total_value / total_size
+
+    # Fallback: return first parsable price
+    for fill in fills:
+        price = _extract_avg_filled_price(fill)
+        if price is not None:
+            return float(price)
+
+    return None
+
+
+def _lookup_order_fill_price(cb: CoinbaseService, order_id: Optional[str], product_id: str) -> Optional[float]:
+    """Attempt to recover the executed price for a close order via follow-up API calls."""
+
+    logger = logging.getLogger(__name__)
+
+    # Try fetching the order details directly first
+    if order_id:
+        try:
+            order_details = cb.client.get_order(order_id=order_id)
+            price = _extract_avg_filled_price(order_details)
+            if price is not None:
+                return price
+        except TypeError:
+            # Some SDKs require keyword variations; ignore and fall back
+            pass
+        except Exception as exc:
+            logger.debug("get_order failed for %s: %s", order_id, exc)
+
+    fills_fn = getattr(cb.client, 'list_fills', None) or getattr(cb.client, 'get_fills', None)
+    if fills_fn is None:
+        return None
+
+    fills_resp = None
+    try:
+        if order_id is not None:
+            fills_resp = fills_fn(order_id=order_id, product_id=product_id, limit=50)
+        else:
+            fills_resp = fills_fn(product_id=product_id, limit=50)
+    except TypeError:
+        try:
+            if order_id is not None:
+                fills_resp = fills_fn(order_id=order_id)
+            else:
+                fills_resp = fills_fn(limit=50)
+        except Exception as exc:
+            logger.debug("list_fills fallback failed: %s", exc)
+            fills_resp = None
+    except Exception as exc:
+        logger.debug("list_fills failed: %s", exc)
+
+    fills = _extract_fills_from_response(fills_resp)
+    if not fills:
+        return None
+
+    def _match_fill(fill: Dict[str, Any]) -> bool:
+        if order_id:
+            fid = str(fill.get('order_id') or fill.get('orderId') or fill.get('orderID') or '')
+            if fid == order_id:
+                return True
+        pid = fill.get('product_id') or fill.get('productId') or fill.get('symbol')
+        return pid == product_id
+
+    matched_fills = [fill for fill in fills if _match_fill(fill)]
+    price = _average_fill_price(matched_fills, target_size=None)
+    if price is not None:
+        return price
+
+    return _average_fill_price(fills, target_size=None)
+
+
+def _lookup_recent_fill_price(
+    cb: CoinbaseService,
+    product_id: str,
+    close_time: datetime,
+    target_size: Optional[float],
+    lookback_seconds: int = 600,
+) -> Optional[float]:
+    fills_fn = getattr(cb.client, 'list_fills', None) or getattr(cb.client, 'get_fills', None)
+    if fills_fn is None:
+        return None
+
+    try:
+        fills_resp = fills_fn(product_id=product_id, limit=200)
+    except TypeError:
+        try:
+            fills_resp = fills_fn(limit=200)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+    fills = _extract_fills_from_response(fills_resp)
+    if not fills:
+        return None
+
+    window_start = close_time - timedelta(seconds=lookback_seconds)
+    window_end = close_time + timedelta(seconds=lookback_seconds)
+
+    matched: List[Dict[str, Any]] = []
+    for fill in fills:
+        pid = fill.get('product_id') or fill.get('productId') or fill.get('symbol')
+        if pid != product_id:
+            continue
+        dt = _fill_time(fill)
+        if dt is None:
+            continue
+        if window_start <= dt <= window_end:
+            matched.append(fill)
+
+    if not matched:
+        return None
+
+    return _average_fill_price(matched, target_size=target_size)
 
 
 def _gather_containers(pos: Any) -> list[Any]:
@@ -404,6 +658,24 @@ def _record_position_close(record: Dict[str, str]) -> None:
         writer.writerow(record)
 
 
+def _parse_log_float(value: str) -> Optional[float]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _parse_log_datetime(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    return _parse_iso8601(value)
+
+
 def _order_close_success(result: Any) -> bool:
     if result is None:
         return True
@@ -568,6 +840,115 @@ def _orders_for_product(cb: CoinbaseService, portfolio_uuid: str, product_id: st
     return []
 
 
+def _backfill_last_entries(cb: CoinbaseService, count: int) -> None:
+    logger = logging.getLogger(__name__)
+    csv_path = _ensure_log_file()
+    if not csv_path.exists():
+        logger.info("No log file found to backfill")
+        return
+
+    with csv_path.open(newline='') as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+
+    if not rows:
+        logger.info("Log file is empty; nothing to backfill")
+        return
+
+    start_index = max(len(rows) - count, 0)
+    updated = False
+
+    for idx in range(start_index, len(rows)):
+        row = rows[idx]
+        product_id = row.get('product_id') or ''
+        if not product_id:
+            continue
+
+        net_size = _parse_log_float(row.get('net_size', ''))
+        entry_price = _parse_log_float(row.get('entry_price', ''))
+        if net_size is None or entry_price is None:
+            continue
+
+        close_time = _parse_log_datetime(row.get('closed_at', ''))
+        open_time = _parse_log_datetime(row.get('opened_at', ''))
+        if close_time is None:
+            continue
+
+        current_pnl = _parse_log_float(row.get('profit_loss', ''))
+        reason = row.get('closure_reason') or 'expired'
+
+        # Skip rows that already have non-zero pnl unless reason flagged as breakeven
+        if reason != 'expired_breakeven' and current_pnl not in (None, 0.0):
+            continue
+
+        target_size = abs(net_size)
+        exit_price = _lookup_recent_fill_price(cb, product_id, close_time, target_size)
+        if exit_price is None:
+            logger.info(
+                "Backfill skipped for %s at %s (no fills found)",
+                product_id,
+                row.get('closed_at', ''),
+            )
+            continue
+
+        pnl = _calculate_pnl(net_size, entry_price, exit_price)
+        if pnl is None:
+            continue
+
+        pnl, exit_price, adjusted_reason = _apply_breakeven_adjustment(
+            'expired',
+            pnl,
+            entry_price,
+            exit_price,
+            net_size,
+        )
+        pnl_pct = _calculate_pnl_pct(net_size, entry_price, exit_price)
+
+        mae = _parse_log_float(row.get('mae', ''))
+        mfe = _parse_log_float(row.get('mfe', ''))
+        leverage = row.get('leverage', '')
+
+        record = _create_closure_record(
+            product_id=product_id,
+            position_side=row.get('position_side', ''),
+            net_size=net_size,
+            leverage=leverage,
+            opened_at=open_time,
+            close_time=close_time,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            pnl=pnl,
+            closure_reason=adjusted_reason,
+            mae=mae,
+            mfe=mfe,
+        )
+
+        # Preserve original closure timestamp format and duration if available
+        record['closed_at'] = row.get('closed_at', record['closed_at'])
+        record['duration_seconds'] = row.get('duration_seconds', record['duration_seconds'])
+        record['profit_loss_pct'] = _format_float(pnl_pct, 4)
+
+        rows[idx] = record
+        updated = True
+        logger.info(
+            "Backfilled %s at %s -> pnl=%s",
+            product_id,
+            record['closed_at'],
+            record['profit_loss'],
+        )
+
+    if not updated:
+        logger.info("No rows required backfill adjustments")
+        return
+
+    with csv_path.open('w', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=LOG_HEADERS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    logger.info("Backfill complete; updated %s", csv_path)
+
+
 def _infer_open_time_from_orders(cb: CoinbaseService, portfolio_uuid: str, product_id: str, expected_net: float, position_side: str) -> Optional[datetime]:
     """Infer current position open time by replaying filled orders chronologically.
 
@@ -662,10 +1043,22 @@ def _extract_symbol_and_size(pos: Any) -> tuple[Optional[str], float, str, str]:
         side_field = getattr(pos, 'position_side', '')
         leverage = str(getattr(pos, 'leverage', '1'))
 
-    return symbol, size, side_field, leverage
+    normalized_side = (side_field or '').upper()
+    if 'SHORT' in normalized_side:
+        size = -abs(size)
+    elif 'LONG' in normalized_side:
+        size = abs(size)
+
+    return symbol, size, normalized_side or side_field, leverage
 
 
-def _close_position(cb: CoinbaseService, product_id: str, net_size: float, position_side: str, leverage: str) -> bool:
+def _close_position(
+    cb: CoinbaseService,
+    product_id: str,
+    net_size: float,
+    position_side: str,
+    leverage: str,
+) -> tuple[bool, Optional[float], Optional[str]]:
     logger = logging.getLogger(__name__)
     # Determine closing side
     side = 'BUY' if position_side == 'FUTURES_POSITION_SIDE_SHORT' else 'SELL'
@@ -689,14 +1082,24 @@ def _close_position(cb: CoinbaseService, product_id: str, net_size: float, posit
             leverage=leverage,
             margin_type="CROSS"
         )
+        order_id = _extract_order_id(result)
+        fill_price = _extract_avg_filled_price(result)
         if _order_close_success(result):
-            logger.info(f"Closed {product_id} position via {side} {close_size}")
-            return True
+            if fill_price is None:
+                fill_price = _lookup_order_fill_price(cb, order_id, product_id)
+            logger.info(
+                "Closed %s position via %s %s at %s",
+                product_id,
+                side,
+                close_size,
+                f"price~{fill_price:.6f}" if fill_price is not None else "unknown price",
+            )
+            return True, fill_price, order_id
         logger.error(f"Close order did not report success for {product_id}: {result}")
-        return False
+        return False, None, order_id
     except Exception as e:
         logger.error(f"Error closing position for {product_id}: {e}")
-        return False
+        return False, None, None
 
 
 def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
@@ -755,19 +1158,32 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
             unrealized_pnl = _extract_unrealized_pnl(pos, net_size, entry_price, mark_price)
             mae, mfe = _extract_excursions(pos)
             closure_reason = _determine_closure_reason(pos, fallback='expired')
-            pnl_for_record = unrealized_pnl
-            if pnl_for_record is None:
-                pnl_for_record = _calculate_pnl(net_size, entry_price, mark_price)
-            pnl_for_record, mark_price, closure_reason = _apply_breakeven_adjustment(
-                closure_reason,
-                pnl_for_record,
-                entry_price,
-                mark_price,
-                net_size,
+            initial_pnl_estimate = unrealized_pnl
+            if initial_pnl_estimate is None:
+                initial_pnl_estimate = _calculate_pnl(net_size, entry_price, mark_price)
+
+            closed, execution_price, close_order_id = _close_position(
+                cb, symbol, net_size, position_side, leverage
             )
-            closed = _close_position(cb, symbol, net_size, position_side, leverage)
             if closed:
                 close_time = datetime.utcnow()
+                exit_price = execution_price if execution_price is not None else mark_price
+                if exit_price is None:
+                    exit_price = _lookup_order_fill_price(cb, close_order_id, symbol)
+                if exit_price is None and mark_price is not None:
+                    exit_price = mark_price
+
+                pnl_for_record = _calculate_pnl(net_size, entry_price, exit_price)
+                if pnl_for_record is None:
+                    pnl_for_record = initial_pnl_estimate
+
+                pnl_for_record, exit_price, closure_reason = _apply_breakeven_adjustment(
+                    closure_reason,
+                    pnl_for_record,
+                    entry_price,
+                    exit_price,
+                    net_size,
+                )
                 hist_mae, hist_mfe = compute_mae_mfe_from_history(
                     cb=cb,
                     product_id=symbol,
@@ -775,7 +1191,7 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
                     entry_price=entry_price,
                     open_time=opened_at,
                     close_time=close_time,
-                    exit_price=mark_price,
+                    exit_price=exit_price,
                 )
                 if mae is None:
                     mae = hist_mae
@@ -789,7 +1205,7 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
                     opened_at=opened_at,
                     close_time=close_time,
                     entry_price=entry_price,
-                    exit_price=mark_price,
+                    exit_price=exit_price,
                     pnl=pnl_for_record,
                     closure_reason=closure_reason,
                     mae=mae,
@@ -816,10 +1232,17 @@ def main() -> None:
     ap.add_argument("--max-age-hours", type=int, default=24, help="Age threshold in hours (default 24)")
     ap.add_argument("--product", type=str, help="Only check/close for a specific product id (e.g., BTC-PERP-INTX)")
     ap.add_argument("--interval-seconds", type=int, default=0, help="If >0, run continuously with this interval")
+    ap.add_argument("--backfill-last", type=int, default=0,
+                    help="Recompute exit price/PnL for the most recent N logged closures and exit")
     ap.add_argument("--verbose", action="store_true", help="Enable debug logging")
 
     args = ap.parse_args()
     setup_logging(verbose=args.verbose)
+
+    if int(args.backfill_last or 0) > 0:
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+        _backfill_last_entries(cb, int(args.backfill_last))
+        return
 
     if args.interval_seconds and args.interval_seconds > 0:
         while True:

@@ -274,12 +274,16 @@ python watchdog_close_old_positions.py --max-age-hours 12 --product BTC-PERP-INT
 
 # Enable verbose logs
 python watchdog_close_old_positions.py --max-age-hours 24 --verbose
+
+# Backfill the most recent 10 logged closures using exchange fills
+python watchdog_close_old_positions.py --backfill-last 10
 ```
 
 Options:
 - `--max-age-hours` (int, default 24): Age threshold; positions opened before now−N hours are closed
 - `--product` (str, optional): Only check/close this product id (e.g., `BTC-PERP-INTX`)
 - `--interval-seconds` (int, default 0): If >0, run continuously with this interval between scans
+- `--backfill-last` (int, default 0): Recompute exit price/PnL for the most recent N log entries and exit (no new closes)
 - `--verbose`: Enable debug logging
 
 How it works:
