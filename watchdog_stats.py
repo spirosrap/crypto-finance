@@ -56,14 +56,22 @@ def _safe_numeric(series: pd.Series) -> pd.Series:
 
 
 def _equity_curve_and_max_dd_pct(pnls: np.ndarray, starting_equity: float) -> Tuple[np.ndarray, float]:
-    # Ensure a positive baseline to avoid division by ~0 issues
+    # Ensure a positive baseline to avoid division by ~0 issues and seed the equity curve
     base = float(starting_equity) if starting_equity and starting_equity > 0 else 1.0
+    pnls = np.asarray(pnls, dtype=float)
     equity = base + pnls.cumsum()
     if equity.size == 0:
         return equity, 0.0
-    running_peak = np.maximum.accumulate(equity)
+
+    # Include the baseline before the first trade so initial drawdowns are captured.
+    equity_with_base = np.concatenate(([base], equity))
+    running_peak = np.maximum.accumulate(equity_with_base)
     with np.errstate(divide="ignore", invalid="ignore"):
-        dd_pct = np.where(running_peak != 0.0, (equity - running_peak) / running_peak * 100.0, 0.0)
+        dd_pct = np.where(
+            running_peak != 0.0,
+            (equity_with_base - running_peak) / running_peak * 100.0,
+            0.0,
+        )
     max_dd_pct = float(np.min(dd_pct)) if dd_pct.size else 0.0
     return equity, max_dd_pct
 
@@ -217,5 +225,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 

@@ -43,6 +43,10 @@ class WatchdogStatsTests(unittest.TestCase):
         _, dd = _equity_curve_and_max_dd_pct(pd.Series([100, -200, 50]).to_numpy(), 1000)
         self.assertLessEqual(dd, 0.0)
 
+    def test_equity_curve_drawdown_includes_baseline(self) -> None:
+        _, dd = _equity_curve_and_max_dd_pct(pd.Series([-100]).to_numpy(), 1000)
+        self.assertAlmostEqual(dd, -10.0)
+
     def test_r_denominator_handles_no_losses(self) -> None:
         denom = _derive_r_denominator(pd.Series([], dtype=float).to_numpy(), 'avg_loss', None)
         self.assertIsNone(denom)
