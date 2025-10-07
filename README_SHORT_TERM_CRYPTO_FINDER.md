@@ -321,6 +321,37 @@ CSV. A checkpoint in `trade_logs/watchdog_tp_sl_checkpoint.json` prevents
 duplicates. Use `--fills-bootstrap-existing` on your first run if you need to
 backfill historical TP/SL completions.
 
+**Accuracy notes**
+- Fill-derived rows always reflect actual execution prices and occur only when
+  the fills stream shows the position returning to zero (TP, SL, or manual
+  closure). They supersede the time-stop estimates logged in older workflows.
+- If you notice a historical row missing after a bootstrap run, it usually
+  means the required fills are outside the requested window or the exchange
+  never reported the matching exit leg. You can copy that single row from a
+  trusted backup if you are certain the trade completed.
+
+**Full backfill workflow**
+1. Delete any existing log/checkpoint files if you want to rebuild from scratch:
+   ```bash
+   rm trade_logs/watchdog_closed_positions.csv trade_logs/watchdog_tp_sl_checkpoint.json
+   ```
+2. Run a bootstrap pass that fetches enough recent fills to cover the history
+   you want to reconstruct (adjust `--fills-limit` as needed):
+   ```bash
+   python watchdog_close_old_positions.py --log-fills --fills-limit 600 --fills-bootstrap-existing --skip-close --verbose
+   ```
+   The verbose flag helps confirm each detected cycle.
+3. Keep the newly created checkpoint. Future runs should omit
+   `--fills-bootstrap-existing` so only brand-new closures are appended:
+   ```bash
+   python watchdog_close_old_positions.py --log-fills --skip-close
+   ```
+
+If you are combining the age-based closer and fill logging in one process,
+pair `--interval-seconds` and `--fills-interval` according to how frequently
+you want each loop to run. Otherwise, use `--skip-close` when you only need to
+refresh the log without touching live positions.
+
 ### Performance Snapshot (expectancy & drawdowns)
 
 After your watchdogs populate `trade_logs/watchdog_closed_positions.csv`, run
