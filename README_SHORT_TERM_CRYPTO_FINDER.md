@@ -281,8 +281,11 @@ python watchdog_close_old_positions.py --backfill-last 10
 # Log take-profit/stop-loss closures detected in recent fills (one shot)
 python watchdog_close_old_positions.py --log-fills
 
-# Continuously close stale positions and poll fills together
-python watchdog_close_old_positions.py --interval-seconds 300 --log-fills --fills-interval 300
+# Continuously close stale positions (skip fill logging in this loop)
+python watchdog_close_old_positions.py --interval-seconds 300
+
+# Run fill logging on its own cadence (separate process or cron)
+python watchdog_close_old_positions.py --log-fills --fills-interval 300 --skip-close
 ```
 
 Options:
@@ -293,7 +296,7 @@ Options:
 - `--skip-close`: Skip age-based closing and only run ancillary actions (for example, fill logging)
 - `--log-fills`: Append TP/SL closures from recent fills to the log using the watchdog checkpoint
 - `--fills-limit` (int, default 500): Number of recent fills to inspect when `--log-fills` is enabled
-- `--fills-interval` (int, default 0): If >0, poll fills continuously every N seconds
+- `--fills-interval` (int, default 0): If >0, poll fills continuously every N seconds (requires `--skip-close` when used in the same process)
 - `--fills-bootstrap-existing`: On the first run with `--log-fills`, treat existing cycles as new so historical TP/SL closures are captured
 - `--verbose`: Enable debug logging
 
@@ -347,10 +350,10 @@ backfill historical TP/SL completions.
    python watchdog_close_old_positions.py --log-fills --skip-close
    ```
 
-If you are combining the age-based closer and fill logging in one process,
-pair `--interval-seconds` and `--fills-interval` according to how frequently
-you want each loop to run. Otherwise, use `--skip-close` when you only need to
-refresh the log without touching live positions.
+When you need both behaviors running continuously, launch them in separate
+processes (for example, two terminals or background jobs). The script enforces
+this separation to avoid interleaving loops that manage orders and fills in the
+same thread. Use `--skip-close` whenever you are only refreshing the log.
 
 ### Performance Snapshot (expectancy & drawdowns)
 
