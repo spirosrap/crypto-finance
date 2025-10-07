@@ -145,6 +145,12 @@ def _extract_avg_filled_price(container: Any) -> Optional[float]:
         if price is not None:
             return price
 
+    nested_order = _get_value(container, 'order')
+    if nested_order is not None:
+        price = _extract_avg_filled_price(nested_order)
+        if price is not None:
+            return price
+
     filled_value = _coerce_numeric(_get_value(container, 'filled_value'))
     filled_size = _coerce_numeric(_get_value(container, 'filled_size'))
     if filled_value is not None and filled_size not in (None, 0):
@@ -341,6 +347,7 @@ def _lookup_recent_fill_price(
     cb: CoinbaseService,
     product_id: str,
     close_time: datetime,
+    net_size: float,
     target_size: Optional[float],
     lookback_seconds: int = 600,
 ) -> Optional[float]:
@@ -379,7 +386,104 @@ def _lookup_recent_fill_price(
     if not matched:
         return None
 
+    close_side = 'BUY' if net_size < 0 else 'SELL'
+    matched.sort(key=lambda fill: (_fill_time(fill) or close_time))
+    closing_fills: List[Dict[str, Any]] = []
+    accumulated = 0.0
+    for fill in matched:
+        side = str(fill.get('side') or '').upper()
+        if side != close_side:
+            continue
+        size = _extract_fill_size(fill)
+        if size is None or size <= 0:
+            continue
+        closing_fills.append(fill)
+        accumulated += size
+        if target_size and accumulated >= abs(target_size) - 1e-9:
+            break
+
+    if closing_fills:
+        return _average_fill_price(closing_fills, target_size=target_size)
+
     return _average_fill_price(matched, target_size=target_size)
+
+
+def _lookup_cycle_details(
+    cb: CoinbaseService,
+    product_id: str,
+    open_time: Optional[datetime],
+    close_time: datetime,
+    net_size: float,
+    tolerance_seconds: int = 120,
+) -> Optional[Cycle]:
+    fills_raw = fetch_fills(cb, limit=500)
+    if not fills_raw:
+        return None
+
+    def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+
+    close_utc = _ensure_utc(close_time)
+    open_utc = _ensure_utc(open_time)
+    pre_buffer = timedelta(seconds=tolerance_seconds)
+    post_buffer = timedelta(seconds=tolerance_seconds)
+    if open_utc is not None:
+        window_start = open_utc - pre_buffer
+    else:
+        window_start = close_utc - timedelta(hours=6)
+    window_end = close_utc + post_buffer
+
+    filtered: List[Fill] = []
+    for raw in fills_raw:
+        if raw.get('product_id') != product_id:
+            continue
+        ts = raw.get('time')
+        if ts is None:
+            continue
+        ts_utc = _ensure_utc(ts)
+        if ts_utc is None or ts_utc < window_start or ts_utc > window_end:
+            continue
+        filtered.append(
+            Fill(
+                product_id=raw.get('product_id', ''),
+                side=str(raw.get('side') or '').upper(),
+                size=float(raw.get('size') or 0.0),
+                price=float(raw.get('price') or 0.0),
+                fee=float(raw.get('fee') or 0.0),
+                time=ts_utc,
+                order_id=str(raw.get('order_id') or raw.get('trade_id') or ''),
+            )
+        )
+
+    if not filtered:
+        return None
+
+    cycles = _detect_cycles(filtered)
+    if not cycles:
+        return None
+
+    target_qty = abs(float(net_size))
+    target_sign = 1 if net_size >= 0 else -1
+    tolerance_time = timedelta(seconds=tolerance_seconds)
+    qty_tolerance = max(1e-6, target_qty * 0.001 + 1e-3)
+
+    for cycle in cycles:
+        end_time = cycle.end_time
+        if abs((end_time - close_utc).total_seconds()) > tolerance_seconds:
+            continue
+        cycle_qty = cycle.entry_qty
+        cycle_sign = 1 if cycle.side == 'LONG' else -1
+        if target_sign != cycle_sign:
+            continue
+        if abs(cycle_qty - target_qty) > qty_tolerance:
+            continue
+        return cycle
+
+    return None
 
 
 def _gather_containers(pos: Any) -> list[Any]:
@@ -1276,35 +1380,69 @@ def _backfill_last_entries(cb: CoinbaseService, count: int) -> None:
         current_pnl = _parse_log_float(row.get('profit_loss', ''))
         reason = row.get('closure_reason') or 'expired'
 
-        # Skip rows that already have non-zero pnl unless reason flagged as breakeven
-        if reason != 'expired_breakeven' and current_pnl not in (None, 0.0):
+        entry_candidate = entry_price
+        exit_candidate: Optional[float]
+        pnl_candidate: Optional[float]
+
+        cycle = _lookup_cycle_details(cb, product_id, open_time, close_time, net_size)
+        if cycle is not None and cycle.entry_qty > 0 and cycle.exit_qty > 0:
+            entry_candidate = cycle.entry_value / cycle.entry_qty
+            exit_candidate = cycle.exit_value / cycle.exit_qty
+            pnl_candidate = cycle.realized_pnl
+        else:
+            target_size = abs(net_size)
+            exit_candidate = _lookup_recent_fill_price(cb, product_id, close_time, net_size, target_size)
+            if exit_candidate is None:
+                logger.info(
+                    "Backfill skipped for %s at %s (no fills found)",
+                    product_id,
+                    row.get('closed_at', ''),
+                )
+                continue
+            pnl_candidate = _calculate_pnl(net_size, entry_candidate, exit_candidate)
+
+        if pnl_candidate is None:
             continue
 
-        target_size = abs(net_size)
-        exit_price = _lookup_recent_fill_price(cb, product_id, close_time, target_size)
-        if exit_price is None:
-            logger.info(
-                "Backfill skipped for %s at %s (no fills found)",
-                product_id,
-                row.get('closed_at', ''),
+        existing_exit = _parse_log_float(row.get('exit_price', ''))
+        existing_entry = entry_price
+        if (
+            current_pnl is not None
+            and abs(pnl_candidate - current_pnl) <= 1e-6
+            and (
+                (existing_exit is None and exit_candidate is None)
+                or (existing_exit is not None and exit_candidate is not None and abs(existing_exit - exit_candidate) <= 1e-6)
             )
+            and (
+                existing_entry is None or abs(entry_candidate - existing_entry) <= 1e-6
+            )
+        ):
             continue
 
-        pnl = _calculate_pnl(net_size, entry_price, exit_price)
-        if pnl is None:
-            continue
-
-        pnl, exit_price, adjusted_reason = _apply_breakeven_adjustment(
+        pnl_adjusted, exit_adjusted, adjusted_reason = _apply_breakeven_adjustment(
             'expired',
-            pnl,
-            entry_price,
-            exit_price,
+            pnl_candidate,
+            entry_candidate,
+            exit_candidate,
             net_size,
         )
-        pnl_pct = _calculate_pnl_pct(net_size, entry_price, exit_price)
+        pnl_pct = _calculate_pnl_pct(net_size, entry_candidate, exit_adjusted)
 
         mae = _parse_log_float(row.get('mae', ''))
         mfe = _parse_log_float(row.get('mfe', ''))
+        hist_mae, hist_mfe = compute_mae_mfe_from_history(
+            cb=cb,
+            product_id=product_id,
+            net_size=net_size,
+            entry_price=entry_candidate,
+            open_time=open_time,
+            close_time=close_time,
+            exit_price=exit_adjusted,
+        )
+        if hist_mae is not None:
+            mae = hist_mae
+        if hist_mfe is not None:
+            mfe = hist_mfe
         leverage = row.get('leverage', '')
 
         record = _create_closure_record(
@@ -1314,9 +1452,9 @@ def _backfill_last_entries(cb: CoinbaseService, count: int) -> None:
             leverage=leverage,
             opened_at=open_time,
             close_time=close_time,
-            entry_price=entry_price,
-            exit_price=exit_price,
-            pnl=pnl,
+            entry_price=entry_candidate,
+            exit_price=exit_adjusted,
+            pnl=pnl_adjusted,
             closure_reason=adjusted_reason,
             mae=mae,
             mfe=mfe,

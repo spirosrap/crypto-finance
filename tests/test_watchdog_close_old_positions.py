@@ -359,6 +359,10 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         client = SimpleNamespace(list_fills=lambda **kwargs: fills)
         cb = SimpleNamespace(client=client)
 
+        original_compute = self.module.compute_mae_mfe_from_history
+        self.module.compute_mae_mfe_from_history = lambda **kwargs: (-2.5, 4.5)
+        self.addCleanup(lambda: setattr(self.module, 'compute_mae_mfe_from_history', original_compute))
+
         self.module._backfill_last_entries(cb, 1)
 
         with log_path.open(newline='') as handle:
@@ -432,6 +436,16 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(record['mae'], '-12.34')
         self.assertEqual(record['mfe'], '45.67')
 
+    def test_extract_avg_filled_price_handles_nested_order(self) -> None:
+        price = self.module._extract_avg_filled_price({
+            'order': {
+                'average_filled_price': '5.325',
+                'filled_value': '484.575',
+                'filled_size': '91',
+            }
+        })
+        self.assertAlmostEqual(price or 0.0, 5.325)
+
     def test_checkpoint_filter(self) -> None:
         cycle = self.module._process_product_fills([
             self.module.Fill('ADA-PERP-INTX', 'BUY', 1.0, 0.3, 0.0, datetime(2025, 10, 5, 3, 0, tzinfo=UTC), '31'),
@@ -449,6 +463,68 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
             'last_order_id': '42',
         }
         self.assertFalse(self.module._is_new_cycle(cycle, checkpoint_same, bootstrap_existing=False))
+
+    def test_cycle_details_backfill_updates_entry_exit(self) -> None:
+        log_path = self.module._log_file_path()
+        with log_path.open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=self.module.LOG_HEADERS)
+            writer.writeheader()
+            writer.writerow({
+                'closed_at': '2025-10-02T00:00:00Z',
+                'product_id': 'APT-PERP-INTX',
+                'position_side': 'SHORT',
+                'net_size': '-10',
+                'leverage': '50',
+                'opened_at': '2025-10-01T00:00:00Z',
+                'closure_reason': 'expired',
+                'entry_price': '5.10',
+                'exit_price': '5.10',
+                'profit_loss': '0',
+                'profit_loss_pct': '0',
+                'mae': '',
+                'mfe': '',
+                'duration_seconds': '86400',
+            })
+
+        fills = {
+            'fills': [
+                {
+                    'product_id': 'APT-PERP-INTX',
+                    'side': 'SELL',
+                    'size': '10',
+                    'price': '5.49',
+                    'fee': '0',
+                    'order_id': 'open1',
+                    'trade_time': '2025-10-01T00:00:05Z',
+                },
+                {
+                    'product_id': 'APT-PERP-INTX',
+                    'side': 'BUY',
+                    'size': '10',
+                    'price': '5.35',
+                    'fee': '0',
+                    'order_id': 'close1',
+                    'trade_time': '2025-10-02T00:00:03Z',
+                },
+            ]
+        }
+
+        client = SimpleNamespace(list_fills=lambda **kwargs: fills)
+        cb = SimpleNamespace(client=client)
+
+        self.module._backfill_last_entries(cb, 1)
+
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row['closure_reason'], 'expired')
+        self.assertEqual(row['entry_price'], '5.49')
+        self.assertEqual(row['exit_price'], '5.35')
+        self.assertEqual(row['profit_loss'], '1.4')
+        self.assertEqual(row['mae'], '-2.5')
+        self.assertEqual(row['mfe'], '4.5')
 
 
 if __name__ == '__main__':
