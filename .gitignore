@@ -92,6 +92,7 @@ xrp_breakout_trigger_state.json
 btc_breakout_trigger_state.json
 eth_breakout_trigger_state.json
 btc_desc_channel_breakout_state.json
+trade_logs/
 *.log
 finder_long.txt
 finder_short.txt
