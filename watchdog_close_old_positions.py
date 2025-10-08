@@ -1383,12 +1383,16 @@ def _backfill_last_entries(cb: CoinbaseService, count: int) -> None:
         entry_candidate = entry_price
         exit_candidate: Optional[float]
         pnl_candidate: Optional[float]
+        reason_candidate = reason
 
         cycle = _lookup_cycle_details(cb, product_id, open_time, close_time, net_size)
         if cycle is not None and cycle.entry_qty > 0 and cycle.exit_qty > 0:
             entry_candidate = cycle.entry_value / cycle.entry_qty
             exit_candidate = cycle.exit_value / cycle.exit_qty
             pnl_candidate = cycle.realized_pnl
+            open_time = cycle.start_time
+            close_time = cycle.end_time
+            reason_candidate = _classify_reason(cycle.side, pnl_candidate, _breakeven_threshold())
         else:
             target_size = abs(net_size)
             exit_candidate = _lookup_recent_fill_price(cb, product_id, close_time, net_size, target_size)
@@ -1400,6 +1404,7 @@ def _backfill_last_entries(cb: CoinbaseService, count: int) -> None:
                 )
                 continue
             pnl_candidate = _calculate_pnl(net_size, entry_candidate, exit_candidate)
+            reason_candidate = reason
 
         if pnl_candidate is None:
             continue
@@ -1420,7 +1425,7 @@ def _backfill_last_entries(cb: CoinbaseService, count: int) -> None:
             continue
 
         pnl_adjusted, exit_adjusted, adjusted_reason = _apply_breakeven_adjustment(
-            'expired',
+            reason_candidate,
             pnl_candidate,
             entry_candidate,
             exit_candidate,

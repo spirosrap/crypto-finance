@@ -357,7 +357,10 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         }
 
         client = SimpleNamespace(list_fills=lambda **kwargs: fills)
-        cb = SimpleNamespace(client=client)
+        cb = SimpleNamespace(
+            client=client,
+            historical_data=SimpleNamespace(get_historical_data=lambda *args, **kwargs: []),
+        )
 
         original_compute = self.module.compute_mae_mfe_from_history
         self.module.compute_mae_mfe_from_history = lambda **kwargs: (-2.5, 4.5)
@@ -371,7 +374,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(row['product_id'], 'NEAR-PERP-INTX')
-        self.assertEqual(row['closure_reason'], 'expired')
+        self.assertEqual(row['closure_reason'], 'expired_breakeven')
         self.assertNotEqual(row['profit_loss'], '0')
         self.assertNotEqual(row['exit_price'], '3.0791')
 
@@ -510,7 +513,14 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         }
 
         client = SimpleNamespace(list_fills=lambda **kwargs: fills)
-        cb = SimpleNamespace(client=client)
+        cb = SimpleNamespace(
+            client=client,
+            historical_data=SimpleNamespace(get_historical_data=lambda *args, **kwargs: []),
+        )
+
+        original_compute = self.module.compute_mae_mfe_from_history
+        self.module.compute_mae_mfe_from_history = lambda **kwargs: (-2.5, 4.5)
+        self.addCleanup(lambda: setattr(self.module, 'compute_mae_mfe_from_history', original_compute))
 
         self.module._backfill_last_entries(cb, 1)
 
@@ -519,10 +529,10 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         row = rows[0]
-        self.assertEqual(row['closure_reason'], 'expired')
         self.assertEqual(row['entry_price'], '5.49')
         self.assertEqual(row['exit_price'], '5.35')
         self.assertEqual(row['profit_loss'], '1.4')
+        self.assertEqual(row['closure_reason'], 'take_profit')
         self.assertEqual(row['mae'], '-2.5')
         self.assertEqual(row['mfe'], '4.5')
 
