@@ -91,6 +91,17 @@ python short_term_crypto_finder.py --profile focused_llm --plain-output finder_s
 removes the extra logging noise so you no longer need a `tee | grep` filter.
 ```
 
+### Watchdog Reporting Companion
+
+- After executing the finder or automated bots, summarize how finished trades performed with
+  ```bash
+  python watchdog_reporting.py --start-date 2025-10-01 --top-n 10
+  ```
+- The helper reads `trade_logs/watchdog_closed_positions.csv`, filters by date (defaults to 2025-10-01),
+  and prints headline PnL, closure-reason splits, duration buckets (0–12h / 12–24h / ≥24h), and top/bottom trades.
+- Add `--json` to feed the stats into dashboards or notebooks, and adjust `--duration-bounds` (for example `--duration-bounds 6 18 30`).
+- Pair it with `short_term_crypto_finder.py --plain-output finder_short.txt` to loop: scan → trade execution → `watchdog_reporting.py` review.
+
 ### Preset Profiles
 
 - `default`: Mirrors environment defaults (or `SHORT_*` overrides) without extra changes.
