@@ -207,10 +207,16 @@ def main() -> None:
     ap.add_argument("--ending-equity", type=float, default=None,
                     help="Optional ending equity; if provided, starting equity is inferred as ending equity minus cumulative PnL")
     ap.add_argument("--last", type=int, default=0, help="Only analyze the most recent N trades (by closed_at if present)")
+    ap.add_argument("--start-date", type=str, default=None,
+                    help="Optional UTC date (YYYY-MM-DD) to filter trades with closed_at on/after this date")
     ap.add_argument("--json", action="store_true", help="Output metrics as JSON instead of pretty text")
 
     args = ap.parse_args()
     df = _load_csv(Path(args.csv))
+    if args.start_date:
+        closed = pd.to_datetime(df.get("closed_at"), errors="coerce", utc=True)
+        start = pd.to_datetime(args.start_date, utc=True)
+        df = df.loc[closed >= start]
     if int(args.last or 0) > 0:
         df = _select_last_trades(df, int(args.last))
     try:
@@ -238,13 +244,19 @@ def main() -> None:
             "r_basis": args.r_basis,
             "risk_dollar": args.risk_dollar,
             "csv": str(Path(args.csv)),
+            "start_date": args.start_date,
             "starting_equity_used": round(res.starting_equity_used, 6),
             "ending_equity": (None if res.ending_equity is None else round(res.ending_equity, 6)),
         }, indent=2))
         return
 
     print("\n=== Watchdog Performance Metrics ===")
-    scope = f" (last {int(args.last)} trades)" if int(args.last or 0) > 0 else ""
+    scope_parts = []
+    if args.start_date:
+        scope_parts.append(f"closed>= {args.start_date}")
+    if int(args.last or 0) > 0:
+        scope_parts.append(f"last {int(args.last)} trades")
+    scope = f" ({', '.join(scope_parts)})" if scope_parts else ""
     print(f"Source CSV: {Path(args.csv)}{scope}")
     print(f"Trades: {res.total_trades}  Wins: {res.wins}  Losses: {res.losses}  Breakevens: {res.breakevens}")
     print(f"Win Rate: {res.win_rate_pct:.2f}%")
