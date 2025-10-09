@@ -101,6 +101,11 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
   and prints headline PnL, closure-reason splits, duration buckets (0–12h / 12–24h / ≥24h), and top/bottom trades.
 - Add `--json` to feed the stats into dashboards or notebooks, and adjust `--duration-bounds` (for example `--duration-bounds 6 18 30`).
 - Pair it with `short_term_crypto_finder.py --plain-output finder_short.txt` to loop: scan → trade execution → `watchdog_reporting.py` review.
+- For expectancy/drawdown snapshots, run the legacy metrics helper with a matching window:
+  ```bash
+  python watchdog_stats.py --start-date 2025-10-01 --r-basis avg_loss
+  ```
+  Combine `--start-date` with `--last` for rolling slices (for example `--start-date 2025-10-01 --last 40`).
 
 ### Preset Profiles
 
