@@ -53,43 +53,21 @@ conda create -n myenv python=3.11
 conda activate myenv
 ```
 
-### Required Libraries
+### Install Dependencies
 
 ```bash
-pip install coinbase-advanced-py statsmodels yfinance newsapi-python schedule hmmlearn scikit-learn scikit-fuzzy xgboost joblib scikit-optimize shap pandas numpy matplotlib tqdm requests talib customtkinter tensorflow torch transformers openai deepseek-api openrouter-py hyperbolic-api
+python scripts/install_requirements.py
 ```
 
-### Additional Dependencies
+The helper script downloads and compiles the TA-Lib C library (v0.6.4) into `~/.local` when it is not already present, then installs all Python packages from `requirements.txt`. If you only need the C library, use:
 
-#### TA-Lib Installation
-
-TA-Lib is required for technical analysis calculations. Install it based on your operating system:
-
-#### Linux
 ```bash
-wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-tar -xzf ta-lib-0.4.0-src.tar.gz
-cd ta-lib/
-./configure --prefix=/usr
-make
-sudo make install
+python scripts/install_requirements.py --skip-pip
 ```
 
-#### macOS
-```bash
-brew install ta-lib
-```
-
-After installing TA-Lib, install the Python wrapper:
-```bash
-pip install TA-Lib
-```
-
-#### GUI Dependencies
-For the Market Analyzer UI:
-```bash
-pip install customtkinter pillow
-```
+> **macOS:** The script expects Homebrew to be available (`brew install ta-lib` under the hood).
+>
+> **Windows:** Automatic TA-Lib setup is not supported. Install the TA-Lib binary manually, then rerun the script.
 
 ## Installation
 
@@ -99,9 +77,9 @@ pip install customtkinter pillow
    cd bitcoin-trading-bot
    ```
 
-2. Install the required dependencies:
+2. Install the required dependencies (handles TA-Lib automatically):
    ```bash
-   pip install -r requirements.txt
+   python scripts/install_requirements.py
    ```
 
 3. Create a `config.py` file in the root directory with your API keys.
