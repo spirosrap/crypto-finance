@@ -1081,7 +1081,7 @@ def build_cli_parser(
         type=_positive_float,
         default=env_defaults.min_volume_market_cap_ratio,
         help=(
-            "Minimum volume-to-market-cap ratio (e.g., 0.03 for 3%) "
+            "Minimum volume-to-market-cap ratio (e.g., 0.03 for 3%%) "
             f"(default: {env_defaults.min_volume_market_cap_ratio})"
         ),
     )
