@@ -788,6 +788,18 @@ def _parse_log_datetime(value: str) -> Optional[datetime]:
     return _parse_iso8601(value)
 
 
+def _float_close(a: Optional[float], b: Optional[float], rel_tol: float = 1e-6, abs_tol: float = 1e-6) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return abs(a - b) <= max(abs_tol, rel_tol * max(abs(a), abs(b), 1.0))
+
+
+def _time_close(a: Optional[datetime], b: Optional[datetime], seconds: int) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return abs((a - b).total_seconds()) <= seconds
+
+
 def _record_position_close_if_new(record: Dict[str, str], tolerance_seconds: int = 60) -> bool:
     """Append closure record only if a similar entry does not already exist."""
 
@@ -808,7 +820,27 @@ def _record_position_close_if_new(record: Dict[str, str], tolerance_seconds: int
             if row_closed is None:
                 continue
             if abs((row_closed - closed_at).total_seconds()) <= tolerance:
-                return False
+                existing_net = _parse_log_float(row.get('net_size', ''))
+                current_net = _parse_log_float(record.get('net_size', ''))
+                same_net = _float_close(existing_net, current_net)
+
+                existing_entry = _parse_log_float(row.get('entry_price', ''))
+                current_entry = _parse_log_float(record.get('entry_price', ''))
+                same_entry = _float_close(existing_entry, current_entry)
+
+                existing_exit = _parse_log_float(row.get('exit_price', ''))
+                current_exit = _parse_log_float(record.get('exit_price', ''))
+                same_exit = _float_close(existing_exit, current_exit)
+
+                existing_open = _parse_log_datetime(row.get('opened_at', ''))
+                current_open = _parse_log_datetime(record.get('opened_at', ''))
+                same_open = _time_close(existing_open, current_open, tolerance)
+
+                existing_reason = (row.get('closure_reason') or '').strip().lower()
+                current_reason = (record.get('closure_reason') or '').strip().lower()
+
+                if same_net and same_entry and same_exit and same_open and existing_reason == current_reason:
+                    return False
 
     _record_position_close(record)
     return True
@@ -884,7 +916,9 @@ def _is_new_cycle(cycle: Cycle, checkpoint: Dict[str, Any], bootstrap_existing: 
     if cycle.end_time == last_time:
         if not last_order_id:
             return True
-        return cycle.closing_order_id > last_order_id
+        # Coinbase order IDs are UUIDs; lexical ordering does not guarantee chronology.
+        # Treat any differing order_id at the same timestamp as a new cycle to avoid misses.
+        return cycle.closing_order_id != last_order_id
     return False
 
 
