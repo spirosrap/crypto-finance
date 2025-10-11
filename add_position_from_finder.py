@@ -233,10 +233,22 @@ def main() -> None:
         sls.append(sl)
         limits.append(limit_price)
         sizes_usd.append(size_usd)
-        entry_disp = f"{parsed.entry:.{decimals}f}"
+        entry_basis = limit_price if limit_price is not None else parsed.entry
+        entry_basis = max(entry_basis, 1e-9)
+        entry_disp = f"{entry_basis:.{decimals}f}"
+        # Estimate USD risk/reward based on entry basis; use max to avoid negatives
+        if parsed.side == "SHORT":
+            reward_pct = max((entry_basis - tp) / entry_basis, 0.0)
+            risk_pct = max((sl - entry_basis) / entry_basis, 0.0)
+        else:
+            reward_pct = max((tp - entry_basis) / entry_basis, 0.0)
+            risk_pct = max((entry_basis - sl) / entry_basis, 0.0)
+        reward_usd = reward_pct * size_usd
+        risk_usd = risk_pct * size_usd
         summaries.append(
             f"Symbol: {parsed.symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
-            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}  Expiry: {args.expiry}"
+            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}  Expiry: {args.expiry}\n"
+            f"PnL @ entry: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
         )
 
     print("\n=== Parsed Finder Signals ===")
