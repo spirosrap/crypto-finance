@@ -1,5 +1,23 @@
 # Trading Journal
 
+## October 11, 2025 - Coinbase EURCUSDC Execution Anomaly
+
+### Market Context
+- Significant sell-off unfolded on October 10, 2025.
+- EURCUSDC pair on Coinbase dipped below the configured stop-loss level during the move.
+- Coinbase did not execute the stop-loss order despite the breach.
+- Position ultimately flattened at roughly breakeven; unable to fully verify the exact exit mechanics.
+
+### Current Execution Process
+- Running five discretionary trades each day: two short setups, two long setups, and one "best idea" slot.
+- Signal generation relies on `short_term_crypto_finder.py` with position additions managed through `add_top5_from_finder.py`.
+- Monitoring order-routing reliability closely after the missed stop-loss event.
+
+### Follow-up Notes
+- Revisit Coinbase order execution logs to confirm whether the stop was acknowledged.
+- Assess contingency routing in case of future exchange-level execution gaps.
+- Consider redundant exit automation (for example, failover to manual or secondary API call) when the stop threshold is crossed.
+
 ## June 19, 2025 - Single Bitcoin Position Reflection
 
 ### Personal Trading Philosophy Evolution
