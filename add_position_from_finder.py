@@ -236,19 +236,20 @@ def main() -> None:
         entry_basis = limit_price if limit_price is not None else parsed.entry
         entry_basis = max(entry_basis, 1e-9)
         entry_disp = f"{entry_basis:.{decimals}f}"
-        # Estimate USD risk/reward based on entry basis; use max to avoid negatives
+        # Estimate percentage move between entry and TP/SL; clamp to avoid negatives
         if parsed.side == "SHORT":
             reward_pct = max((entry_basis - tp) / entry_basis, 0.0)
             risk_pct = max((sl - entry_basis) / entry_basis, 0.0)
         else:
             reward_pct = max((tp - entry_basis) / entry_basis, 0.0)
             risk_pct = max((entry_basis - sl) / entry_basis, 0.0)
-        reward_usd = reward_pct * size_usd
-        risk_usd = risk_pct * size_usd
+        stake_usd = size_usd / max(args.leverage, 1e-9)
+        reward_usd = reward_pct * stake_usd
+        risk_usd = risk_pct * stake_usd
         summaries.append(
             f"Symbol: {parsed.symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
-            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}  Expiry: {args.expiry}\n"
-            f"PnL @ entry: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
+            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}  Expiry: {args.expiry}  Stake ≈ ${stake_usd:.2f}\n"
+            f"PnL vs stake: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
         )
 
     print("\n=== Parsed Finder Signals ===")
