@@ -9,8 +9,8 @@
 - Position ultimately flattened at roughly breakeven; unable to fully verify the exact exit mechanics.
 
 ### Current Execution Process
-- Running five automated trades each day: two short setups, two long setups, and one "best idea" slot.
-- Signal generation relies on `short_term_crypto_finder.py`, and `add_top5_from_finder.py` auto-selects the top candidates for execution.
+- Running five automated trades each day: top two short setups, top two long setups, plus whichever remaining candidate has the highest score regardless of side.
+- Signal generation relies on `short_term_crypto_finder.py`, and `add_top5_from_finder.py` auto-selects the top-scoring entries for execution.
 - Monitoring order-routing reliability closely after the missed stop-loss event.
 
 ### Follow-up Notes

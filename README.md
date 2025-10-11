@@ -33,7 +33,7 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 - Machine learning integration for enhanced prediction accuracy
 - High-frequency trading capabilities
 - Sentiment analysis integration
-- Daily trade routing where `add_top5_from_finder.py` pulls the top five candidates (2 long, 2 short, 1 best idea) surfaced by `short_term_crypto_finder.py`, keeping execution systematic rather than discretionary.
+- Daily trade routing where `add_top5_from_finder.py` pulls the top five candidates (top two longs, top two shorts, plus the highest remaining score regardless of side) surfaced by `short_term_crypto_finder.py`, keeping execution systematic rather than discretionary.
 
 ### Advanced Features
 - AI-powered market analysis with multiple model support (GPT-4, DeepSeek, Grok)
