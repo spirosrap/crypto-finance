@@ -263,13 +263,13 @@ def main() -> None:
         else:
             reward_pct = max((tp - entry_basis) / entry_basis, 0.0)
             risk_pct = max((entry_basis - sl) / entry_basis, 0.0)
-        stake_usd = size_usd / max(args.leverage, 1e-9)
-        reward_usd = reward_pct * stake_usd
-        risk_usd = risk_pct * stake_usd
+        margin_usd = size_usd / max(args.leverage, 1e-9)
+        reward_usd = reward_pct * size_usd
+        risk_usd = risk_pct * size_usd
         summaries.append(
             f"Symbol: {p.symbol} Side: {p.side}  Score: {p.score:.2f}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
-            f"Product: {display_pid} (API {api_pid})  Size: {p.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}  Expiry: {args.expiry}  Stake ≈ ${stake_usd:.2f}\n"
-            f"PnL vs stake: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
+            f"Product: {display_pid} (API {api_pid})  Size: {p.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f} (Margin ≈ ${margin_usd:.2f})  Expiry: {args.expiry}\n"
+            f"PnL vs position: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
         )
 
     print("\n=== Selected Top-5 Signals (2L/2S + next best) ===")
@@ -329,4 +329,3 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         pass
-
