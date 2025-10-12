@@ -770,6 +770,27 @@ def _record_position_close(record: Dict[str, str]) -> None:
         writer.writerow(record)
 
 
+def _rewrite_log_rows(rows: List[Dict[str, str]]) -> None:
+    path = _ensure_log_file()
+    with path.open('w', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=LOG_HEADERS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _reason_priority(reason: str) -> int:
+    order = {
+        'take_profit': 3,
+        'stop_loss': 3,
+        'manual': 2,
+        'manual_close': 2,
+        'expired': 0,
+        '': 0,
+    }
+    normalized = (reason or '').strip().lower()
+    return order.get(normalized, 1)
+
+
 def _parse_log_float(value: str) -> Optional[float]:
     if value is None:
         return None
@@ -811,36 +832,42 @@ def _record_position_close_if_new(record: Dict[str, str], tolerance_seconds: int
         return True
 
     tolerance = abs(int(tolerance_seconds))
+    rows: List[Dict[str, str]] = []
     with path.open(newline='') as handle:
         reader = csv.DictReader(handle)
-        for row in reader:
-            if (row.get('product_id') or '') != product_id:
-                continue
-            row_closed = _parse_log_datetime(row.get('closed_at', ''))
-            if row_closed is None:
-                continue
-            if abs((row_closed - closed_at).total_seconds()) <= tolerance:
-                existing_net = _parse_log_float(row.get('net_size', ''))
-                current_net = _parse_log_float(record.get('net_size', ''))
-                same_net = _float_close(existing_net, current_net)
+        rows.extend(reader)
 
-                existing_entry = _parse_log_float(row.get('entry_price', ''))
-                current_entry = _parse_log_float(record.get('entry_price', ''))
-                same_entry = _float_close(existing_entry, current_entry)
+    for idx, row in enumerate(rows):
+        if (row.get('product_id') or '') != product_id:
+            continue
+        row_closed = _parse_log_datetime(row.get('closed_at', ''))
+        if row_closed is None:
+            continue
+        if abs((row_closed - closed_at).total_seconds()) <= tolerance:
+            existing_net = _parse_log_float(row.get('net_size', ''))
+            current_net = _parse_log_float(record.get('net_size', ''))
+            same_net = _float_close(existing_net, current_net)
 
-                existing_exit = _parse_log_float(row.get('exit_price', ''))
-                current_exit = _parse_log_float(record.get('exit_price', ''))
-                same_exit = _float_close(existing_exit, current_exit)
+            existing_entry = _parse_log_float(row.get('entry_price', ''))
+            current_entry = _parse_log_float(record.get('entry_price', ''))
+            same_entry = _float_close(existing_entry, current_entry)
 
-                existing_open = _parse_log_datetime(row.get('opened_at', ''))
-                current_open = _parse_log_datetime(record.get('opened_at', ''))
-                same_open = _time_close(existing_open, current_open, tolerance)
+            existing_exit = _parse_log_float(row.get('exit_price', ''))
+            current_exit = _parse_log_float(record.get('exit_price', ''))
+            same_exit = _float_close(existing_exit, current_exit)
 
+            existing_open = _parse_log_datetime(row.get('opened_at', ''))
+            current_open = _parse_log_datetime(record.get('opened_at', ''))
+            same_open = _time_close(existing_open, current_open, tolerance)
+
+            if same_net and same_entry and same_exit and same_open:
                 existing_reason = (row.get('closure_reason') or '').strip().lower()
                 current_reason = (record.get('closure_reason') or '').strip().lower()
-
-                if same_net and same_entry and same_exit and same_open and existing_reason == current_reason:
-                    return False
+                if _reason_priority(current_reason) > _reason_priority(existing_reason):
+                    updated = {field: record.get(field, row.get(field, '')) or '' for field in LOG_HEADERS}
+                    rows[idx] = updated
+                    _rewrite_log_rows(rows)
+                return False
 
     _record_position_close(record)
     return True
