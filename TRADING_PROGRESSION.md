@@ -7,6 +7,7 @@
 - EURCUSDC pair on Coinbase dipped below the configured stop-loss level during the move.
 - Coinbase did not execute the stop-loss order despite the breach.
 - Position ultimately flattened at roughly breakeven; unable to fully verify the exact exit mechanics.
+- Coinbase activity log shows a ticket for the stop but reports twice the configured stop-loss distance, suggesting the order was never honored at the intended price.
 
 ### Current Execution Process
 - Running five automated trades each day: top two short setups, top two long setups, plus whichever remaining candidate has the highest score regardless of side.
