@@ -8,6 +8,7 @@
 - Coinbase did not execute the stop-loss order despite the breach.
 - Position ultimately flattened at roughly breakeven; unable to fully verify the exact exit mechanics.
 - Coinbase activity log shows a ticket for the stop but reports twice the configured stop-loss distance, suggesting the order was never honored at the intended price.
+- Subsequent order details (ID `b1b517c9-f48b-4fec-a4a4-4d3f3863102e`) confirm the exit filled at 1.1314 USDC versus the 1.1487 USDC stop—classic slippage as liquidity vanished, leaving the bracket stop to execute as a market fill well below target.
 
 ### Current Execution Process
 - Running five automated trades each day: top two short setups, top two long setups, plus whichever remaining candidate has the highest score regardless of side.
@@ -18,6 +19,7 @@
 - Revisit Coinbase order execution logs to confirm whether the stop was acknowledged.
 - Assess contingency routing in case of future exchange-level execution gaps.
 - Consider redundant exit automation (for example, failover to manual or secondary API call) when the stop threshold is crossed.
+- Review sizing/stop-width on thin EURC-PERP books to reduce future slippage and consider wider offsets or manual intervention protocols during fast sell-offs.
 
 ## June 19, 2025 - Single Bitcoin Position Reflection
 
