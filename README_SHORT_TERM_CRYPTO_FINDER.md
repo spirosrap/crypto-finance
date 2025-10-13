@@ -283,7 +283,7 @@ Usage:
 # Close positions older than 24h (one-shot)
 python watchdog_close_old_positions.py --max-age-hours 24
 
-# Run continuously every 5 minutes
+# Run continuously every 5 minutes (still logs every closure to CSV)
 python watchdog_close_old_positions.py --max-age-hours 24 --interval-seconds 300
 
 # Only act on a specific product
@@ -298,8 +298,8 @@ python watchdog_close_old_positions.py --backfill-last 10
 # Log take-profit/stop-loss closures detected in recent fills (one shot)
 python watchdog_close_old_positions.py --log-fills
 
-# Continuously close stale positions (skip fill logging in this loop)
-python watchdog_close_old_positions.py --interval-seconds 300
+# Continuously close stale positions (skip CSV logging; capture fills separately)
+python watchdog_close_old_positions.py --interval-seconds 300 --no-log-closures
 
 # Run fill logging on its own cadence (separate process or cron)
 python watchdog_close_old_positions.py --log-fills --fills-interval 300 --skip-close
@@ -312,6 +312,7 @@ Options:
 - `--backfill-last` (int, default 0): Recompute exit price/PnL for the most recent N log entries and exit (no new closes)
 - `--skip-close`: Skip age-based closing and only run ancillary actions (for example, fill logging)
 - `--log-fills`: Append TP/SL closures from recent fills to the log using the watchdog checkpoint
+- `--no-log-closures`: Skip writing age-triggered closes to `watchdog_closed_positions.csv` when you prefer to log fills manually (for example, via `--log-fills --skip-close`)
 - `--fills-limit` (int, default 500): Number of recent fills to inspect when `--log-fills` is enabled
 - `--fills-interval` (int, default 0): If >0, poll fills continuously every N seconds (requires `--skip-close` when used in the same process)
 - `--fills-bootstrap-existing`: On the first run with `--log-fills`, treat existing cycles as new so historical TP/SL closures are captured
@@ -329,7 +330,7 @@ Safety notes:
 - Uses market IOC; expect small slippage versus limit exits
 - Requires valid INTX API credentials (`API_KEY_PERPS`, `API_SECRET_PERPS` in `config.py`)
 - Only acts on non‑zero net perp positions; if none found, it exits quietly
-- Set `--interval-seconds` to keep enforcing the policy throughout the day
+- Set `--interval-seconds` to keep enforcing the policy throughout the day; add `--no-log-closures` if you plan to capture trade history via manual `--log-fills` runs instead of the auto-closer.
 
 File: `watchdog_close_old_positions.py`
 

@@ -1705,7 +1705,11 @@ def _close_position(
         return False, None, None
 
 
-def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
+def run_once(
+    max_age_hours: int,
+    product_filter: Optional[str],
+    log_closures: bool = True,
+) -> None:
     logger = logging.getLogger(__name__)
     cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
 
@@ -1814,8 +1818,16 @@ def run_once(max_age_hours: int, product_filter: Optional[str]) -> None:
                     mae=mae,
                     mfe=mfe,
                 )
-                _record_position_close(record)
-                logger.info(f"Recorded closure for {symbol} to {_log_file_path()}")
+                if log_closures:
+                    _record_position_close(record)
+                    logger.info(f"Recorded closure for {symbol} to {_log_file_path()}")
+                else:
+                    logger.info(
+                        "Closure logging disabled; skipping CSV append for %s (reason=%s, pnl=%s)",
+                        symbol,
+                        closure_reason,
+                        pnl_for_record,
+                    )
         else:
             # Report time remaining until threshold
             deadline = opened_at + timedelta(hours=max_age_hours)
@@ -1843,10 +1855,14 @@ def main() -> None:
     ap.add_argument("--fills-interval", type=int, default=0, help="If >0, poll fills continuously every N seconds")
     ap.add_argument("--fills-bootstrap-existing", action="store_true",
                     help="On first run, log existing fill cycles instead of only new ones")
+    ap.add_argument("--no-log-closures", action="store_true",
+                    help="Skip writing age-based closure rows to watchdog_closed_positions.csv")
     ap.add_argument("--verbose", action="store_true", help="Enable debug logging")
 
     args = ap.parse_args()
     setup_logging(verbose=args.verbose)
+
+    log_closures = not args.no_log_closures
 
     if args.log_fills and args.fills_interval > 0 and args.interval_seconds > 0 and not args.skip_close:
         ap.error("Cannot run fill logging loop and closing loop simultaneously; run separate processes or use --skip-close.")
@@ -1881,12 +1897,12 @@ def main() -> None:
     if args.interval_seconds and args.interval_seconds > 0:
         while True:
             try:
-                run_once(args.max_age_hours, args.product)
+                run_once(args.max_age_hours, args.product, log_closures=log_closures)
             except Exception as e:
                 logging.getLogger(__name__).error(f"Watchdog iteration error: {e}")
             time.sleep(args.interval_seconds)
     else:
-        run_once(args.max_age_hours, args.product)
+        run_once(args.max_age_hours, args.product, log_closures=log_closures)
 
 
 if __name__ == "__main__":
