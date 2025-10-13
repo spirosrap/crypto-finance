@@ -20,6 +20,8 @@
 - Assess contingency routing in case of future exchange-level execution gaps.
 - Consider redundant exit automation (for example, failover to manual or secondary API call) when the stop threshold is crossed.
 - Review sizing/stop-width on thin EURC-PERP books to reduce future slippage and consider wider offsets or manual intervention protocols during fast sell-offs.
+- Watchdog performance snapshot (51 trades through Oct 12): expectancy +0.43R with average winners 1.72R vs losers 1.0R, confirming edge despite modest 49% hit rate. Sharpe 0.26 / Sortino 0.37 highlight that equity swings are driven primarily by crypto’s intrinsic volatility rather than poor trade selection.
+
 
 ## June 19, 2025 - Single Bitcoin Position Reflection
 
