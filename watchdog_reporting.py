@@ -43,6 +43,12 @@ class HeadlineMetrics:
     worst_day: float
     avg_duration_h: float
     median_duration_h: float
+    avg_r_multiple: float
+    expectancy_r: float
+    avg_win_r: float
+    avg_loss_r: float
+    sharpe_ratio: float
+    sortino_ratio: float
 
 
 def _parse_args() -> argparse.Namespace:
@@ -125,6 +131,37 @@ def _headline_metrics(df: pd.DataFrame) -> HeadlineMetrics:
     best_day = float(daily.max()) if not daily.empty else 0.0
     worst_day = float(daily.min()) if not daily.empty else 0.0
     duration = df["duration_hours"] if "duration_hours" in df.columns else pd.Series(dtype=float)
+
+    avg_loss_abs = float(profits[profits < 0].abs().mean()) if (losses.any()) else 0.0
+    if avg_loss_abs > 0:
+        r_multiple = profits / avg_loss_abs
+        avg_r_multiple = float(r_multiple.mean())
+        avg_win_r = float(r_multiple[r_multiple > 0].mean()) if (r_multiple > 0).any() else 0.0
+        avg_loss_r = float((-r_multiple[r_multiple < 0]).mean()) if (r_multiple < 0).any() else 0.0
+    else:
+        avg_r_multiple = 0.0
+        avg_win_r = 0.0
+        avg_loss_r = 0.0
+
+    win_rate_dec = wins.mean() if total else 0.0
+    loss_rate_dec = losses.mean() if total else 0.0
+    expectancy_r = (win_rate_dec * avg_win_r) - (loss_rate_dec * avg_loss_r)
+
+    returns = _safe_numeric(df.get("profit_loss_pct", pd.Series(dtype=float))).dropna() / 100.0
+    if len(returns) >= 2:
+        mean_ret = returns.mean()
+        std_ret = returns.std(ddof=1)
+        sharpe_ratio = float(mean_ret / std_ret) if std_ret > 0 else 0.0
+        downside = returns[returns < 0]
+        downside_std = float((downside.pow(2).mean()) ** 0.5) if not downside.empty else 0.0
+        sortino_ratio = float(mean_ret / downside_std) if downside_std > 0 else 0.0
+    elif len(returns) == 1:
+        sharpe_ratio = float("inf") if returns.iloc[0] > 0 else 0.0
+        sortino_ratio = sharpe_ratio
+    else:
+        sharpe_ratio = 0.0
+        sortino_ratio = 0.0
+
     return HeadlineMetrics(
         trades=total,
         total_pnl=float(profits.sum()),
@@ -140,6 +177,12 @@ def _headline_metrics(df: pd.DataFrame) -> HeadlineMetrics:
         worst_day=worst_day,
         avg_duration_h=float(duration.mean()) if not duration.empty else 0.0,
         median_duration_h=float(duration.median()) if not duration.empty else 0.0,
+        avg_r_multiple=avg_r_multiple,
+        expectancy_r=float(expectancy_r),
+        avg_win_r=avg_win_r,
+        avg_loss_r=avg_loss_r,
+        sharpe_ratio=sharpe_ratio,
+        sortino_ratio=sortino_ratio,
     )
 
 
