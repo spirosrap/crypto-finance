@@ -197,6 +197,34 @@ def _select_last_trades(df: pd.DataFrame, last: int) -> pd.DataFrame:
     return df.tail(last)
 
 
+def _select_count_window(df: pd.DataFrame, start_count: int, end_count: int) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    start = start_count if start_count and start_count > 0 else 1 if (start_count and start_count > 0) or (end_count and end_count > 0) else None
+    stop = end_count if end_count and end_count > 0 else None
+    if start is None:
+        return df
+    if stop is not None and stop < start:
+        return df.iloc[0:0]
+    ordered = df
+    if "closed_at" in df.columns:
+        try:
+            s = pd.to_datetime(df["closed_at"], errors="coerce")
+            ordered = df.assign(_closed_dt=s).sort_values("_closed_dt", kind="stable")
+        except Exception:
+            ordered = df
+    start_idx = start - 1
+    if start_idx >= len(ordered):
+        subset = ordered.iloc[0:0]
+    else:
+        if stop is not None:
+            subset = ordered.iloc[start_idx:stop]
+        else:
+            subset = ordered.iloc[start_idx:]
+    subset = subset.drop(columns=["_closed_dt"], errors="ignore").copy()
+    return subset
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Compute expectancy, win rate, drawdown %, and average R from watchdog CSV")
     ap.add_argument("--csv", type=str, default=str(DEFAULT_CSV), help="Path to watchdog_closed_positions.csv")
@@ -207,6 +235,10 @@ def main() -> None:
     ap.add_argument("--ending-equity", type=float, default=None,
                     help="Optional ending equity; if provided, starting equity is inferred as ending equity minus cumulative PnL")
     ap.add_argument("--last", type=int, default=0, help="Only analyze the most recent N trades (by closed_at if present)")
+    ap.add_argument("--start-count", type=int, default=0,
+                    help="Start counting trades at this 1-based index after filters (default 1)")
+    ap.add_argument("--end-count", type=int, default=0,
+                    help="Stop counting trades at this 1-based index (inclusive). 0 means no upper bound.")
     ap.add_argument("--start-date", type=str, default=None,
                     help="Optional UTC date (YYYY-MM-DD) to filter trades with closed_at on/after this date")
     ap.add_argument("--json", action="store_true", help="Output metrics as JSON instead of pretty text")
@@ -217,6 +249,15 @@ def main() -> None:
         closed = pd.to_datetime(df.get("closed_at"), errors="coerce", utc=True)
         start = pd.to_datetime(args.start_date, utc=True)
         df = df.loc[closed >= start]
+    start_count = int(args.start_count or 0)
+    end_count = int(args.end_count or 0)
+    count_window = start_count > 0 or end_count > 0
+    display_start = max(start_count, 1) if count_window else None
+    display_end = end_count if end_count > 0 else None
+    if count_window and display_end is not None and display_start > display_end:
+        ap.error("--end-count must be greater than or equal to --start-count")
+    if count_window:
+        df = _select_count_window(df, start_count, end_count)
     if int(args.last or 0) > 0:
         df = _select_last_trades(df, int(args.last))
     try:
@@ -245,6 +286,9 @@ def main() -> None:
             "risk_dollar": args.risk_dollar,
             "csv": str(Path(args.csv)),
             "start_date": args.start_date,
+            "start_count": int(display_start) if count_window and display_start is not None else 0,
+            "end_count": int(display_end) if display_end is not None else 0,
+            "count_window_applied": bool(count_window),
             "starting_equity_used": round(res.starting_equity_used, 6),
             "ending_equity": (None if res.ending_equity is None else round(res.ending_equity, 6)),
         }, indent=2))
@@ -254,6 +298,11 @@ def main() -> None:
     scope_parts = []
     if args.start_date:
         scope_parts.append(f"closed>= {args.start_date}")
+    if count_window:
+        if display_end is not None:
+            scope_parts.append(f"count {int(display_start)}-{int(display_end)}")
+        else:
+            scope_parts.append(f"count >= {int(display_start)}")
     if int(args.last or 0) > 0:
         scope_parts.append(f"last {int(args.last)} trades")
     scope = f" ({', '.join(scope_parts)})" if scope_parts else ""

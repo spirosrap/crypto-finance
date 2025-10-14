@@ -315,6 +315,7 @@ Options:
 - `--backfill-last` (int, default 0): Recompute exit price/PnL for the most recent N log entries and exit (no new closes)
 - `--skip-close`: Skip age-based closing and only run ancillary actions (for example, fill logging)
 - `--log-fills`: Append TP/SL closures from recent fills to the log using the watchdog checkpoint
+- `--start-count` / `--end-count`: When you use `watchdog_reporting.py`, slice the post-filter trades by ordinal position (1-based). For example `--start-count 101 --end-count 200` reviews the 101st–200th trades in the window.
 - `--no-log-closures`: Skip writing age-triggered closes to `watchdog_closed_positions.csv` when you prefer to log fills manually (for example, via `--log-fills --skip-close`)
 - `--fills-limit` (int, default 500): Number of recent fills to inspect when `--log-fills` is enabled
 - `--fills-interval` (int, default 0): If >0, poll fills continuously every N seconds (requires `--skip-close` when used in the same process)
