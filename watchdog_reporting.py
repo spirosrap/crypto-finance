@@ -89,6 +89,18 @@ def _parse_args() -> argparse.Namespace:
         help="Emit JSON instead of human-readable tables",
     )
     parser.add_argument(
+        "--start-count",
+        type=int,
+        default=0,
+        help="Start counting trades at this 1-based index after date filters (default 1)",
+    )
+    parser.add_argument(
+        "--end-count",
+        type=int,
+        default=0,
+        help="Stop counting trades at this 1-based index (inclusive). 0 means no upper bound.",
+    )
+    parser.add_argument(
         "--last",
         type=int,
         default=0,
@@ -259,6 +271,29 @@ def _serialize_df(df: pd.DataFrame) -> List[dict]:
     return json.loads(df.to_json(orient="records", date_format="iso"))
 
 
+def _select_count_window(df: pd.DataFrame, start_count: int, end_count: int) -> pd.DataFrame:
+    if df.empty:
+        return df
+    start = start_count if start_count and start_count > 0 else None
+    end = end_count if end_count and end_count > 0 else None
+    if start is None and end is None:
+        return df
+    if start is None:
+        start = 1
+    if end is not None and end < start:
+        return df.iloc[0:0]
+    ordered = df.sort_values("closed_at") if "closed_at" in df.columns else df
+    start_idx = start - 1
+    if start_idx >= len(ordered):
+        subset = ordered.iloc[0:0]
+    else:
+        if end is not None:
+            subset = ordered.iloc[start_idx:end]
+        else:
+            subset = ordered.iloc[start_idx:]
+    return subset.copy()
+
+
 def _select_last(df: pd.DataFrame, last: int) -> pd.DataFrame:
     if last <= 0 or df.empty:
         return df
@@ -281,6 +316,19 @@ def main() -> None:
     if filtered.empty:
         print("No trades after the requested start date.")
         return
+    start_count = int(args.start_count or 0)
+    end_count = int(args.end_count or 0)
+    count_window = start_count > 0 or end_count > 0
+    display_start = max(start_count, 1) if count_window else None
+    display_end = end_count if end_count > 0 else None
+    if count_window and display_end is not None and display_start > display_end:
+        print("Invalid count window: --start-count must be <= --end-count.")
+        return
+    if count_window:
+        filtered = _select_count_window(filtered, start_count, end_count)
+        if filtered.empty:
+            print("No trades available in requested count window.")
+            return
     if int(args.last or 0) > 0:
         filtered = _select_last(filtered, int(args.last))
         if filtered.empty:
@@ -305,7 +353,10 @@ def main() -> None:
         payload_meta = {
             "start_date": args.start_date,
             "end_date": args.end_date,
+            "start_count": int(display_start) if count_window and display_start is not None else 0,
+            "end_count": int(display_end) if display_end is not None else 0,
             "last": int(args.last or 0),
+            "count_window_applied": bool(count_window),
             "trades_considered": int(len(filtered)),
         }
         payload = {
@@ -327,6 +378,11 @@ def main() -> None:
     window_line = f"Window: closed_at >= {args.start_date}"
     if args.end_date:
         window_line += f" and < {args.end_date}"
+    if count_window:
+        if display_end is not None:
+            window_line += f" | count {int(display_start)}-{int(display_end)}"
+        else:
+            window_line += f" | count >= {int(display_start)}"
     if int(args.last or 0) > 0:
         window_line += f" | last {int(args.last)} trades"
     print(window_line)

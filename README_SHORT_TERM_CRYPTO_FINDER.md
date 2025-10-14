@@ -96,9 +96,10 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 - After executing the finder or automated bots, summarize how finished trades performed with
   ```bash
   python watchdog_reporting.py --start-date 2025-10-01 --top-n 10
-
-# Review only the most recent 25 trades after date filtering
-python watchdog_reporting.py --start-date 2025-10-01 --last 25
+  # Review only the most recent 25 trades after date filtering
+  python watchdog_reporting.py --start-date 2025-10-01 --last 25
+  # Review trades 101-200 on or after the cutoff
+  python watchdog_reporting.py --start-date 2025-10-01 --start-count 101 --end-count 200
   ```
 - The helper reads `trade_logs/watchdog_closed_positions.csv`, filters by date (defaults to 2025-10-01),
   and prints headline PnL, closure-reason splits, duration buckets (0–12h / 12–24h / ≥24h), and top/bottom trades.
@@ -107,8 +108,12 @@ python watchdog_reporting.py --start-date 2025-10-01 --last 25
 - For expectancy/drawdown snapshots, run the legacy metrics helper with a matching window:
   ```bash
   python watchdog_stats.py --start-date 2025-10-01 --r-basis avg_loss
+  # Restrict to the latest 50 trades
+  python watchdog_stats.py --last 50
+  # Inspect trades 101-200 after the cutoff
+  python watchdog_stats.py --start-date 2025-10-01 --start-count 101 --end-count 200
   ```
-  Combine `--start-date` with `--last` for rolling slices (for example `--start-date 2025-10-01 --last 40`).
+  Combine `--start-date` with `--last` or `--start-count/--end-count` for rolling slices (for example `--start-date 2025-10-01 --last 40`).
 
 ### Preset Profiles
 
