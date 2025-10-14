@@ -49,6 +49,10 @@ class HeadlineMetrics:
     avg_loss_r: float
     sharpe_ratio: float
     sortino_ratio: float
+    max_drawdown: float
+    max_drawdown_pct: float
+    peak_equity: float
+    valley_equity: float
 
 
 def _parse_args() -> argparse.Namespace:
@@ -162,6 +166,16 @@ def _headline_metrics(df: pd.DataFrame) -> HeadlineMetrics:
         sharpe_ratio = 0.0
         sortino_ratio = 0.0
 
+    initial_equity = 1000.0
+    equity_curve = initial_equity + profits.cumsum()
+    rolling_peak = equity_curve.cummax()
+    drawdowns = equity_curve - rolling_peak
+    max_drawdown = float(drawdowns.min()) if not drawdowns.empty else 0.0
+    peak_equity = float(rolling_peak.max()) if not rolling_peak.empty else initial_equity
+    valley_equity = float(equity_curve.loc[drawdowns.idxmin()]) if not drawdowns.empty else initial_equity
+    drawdown_pct_series = (equity_curve / rolling_peak) - 1.0
+    max_drawdown_pct = float(drawdown_pct_series.min() * 100.0) if not drawdown_pct_series.empty else 0.0
+
     return HeadlineMetrics(
         trades=total,
         total_pnl=float(profits.sum()),
@@ -183,6 +197,10 @@ def _headline_metrics(df: pd.DataFrame) -> HeadlineMetrics:
         avg_loss_r=avg_loss_r,
         sharpe_ratio=sharpe_ratio,
         sortino_ratio=sortino_ratio,
+        max_drawdown=max_drawdown,
+        max_drawdown_pct=max_drawdown_pct,
+        peak_equity=peak_equity,
+        valley_equity=valley_equity,
     )
 
 
