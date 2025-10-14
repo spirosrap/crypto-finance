@@ -88,6 +88,12 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Emit JSON instead of human-readable tables",
     )
+    parser.add_argument(
+        "--last",
+        type=int,
+        default=0,
+        help="Only analyze the most recent N trades (after date filters)",
+    )
     return parser.parse_args()
 
 
@@ -253,6 +259,15 @@ def _serialize_df(df: pd.DataFrame) -> List[dict]:
     return json.loads(df.to_json(orient="records", date_format="iso"))
 
 
+def _select_last(df: pd.DataFrame, last: int) -> pd.DataFrame:
+    if last <= 0 or df.empty:
+        return df
+    if "closed_at" in df.columns:
+        ordered = df.sort_values("closed_at")
+        return ordered.tail(last)
+    return df.tail(last)
+
+
 def _text_table(title: str, df: pd.DataFrame, floatfmt: str = ".2f") -> str:
     if df.empty:
         return f"{title}: (no data)"
@@ -266,6 +281,11 @@ def main() -> None:
     if filtered.empty:
         print("No trades after the requested start date.")
         return
+    if int(args.last or 0) > 0:
+        filtered = _select_last(filtered, int(args.last))
+        if filtered.empty:
+            print("No trades available after applying --last filter.")
+            return
     filtered["duration_hours"] = filtered["duration_hours"].astype(float)
     filtered["profit_loss"] = _safe_numeric(filtered["profit_loss"]).fillna(0.0)
     duration_band = _assign_duration_band(filtered, args.duration_bounds)
@@ -282,7 +302,14 @@ def main() -> None:
     product_worst = products.tail(args.top_n).iloc[::-1]
 
     if args.json:
+        payload_meta = {
+            "start_date": args.start_date,
+            "end_date": args.end_date,
+            "last": int(args.last or 0),
+            "trades_considered": int(len(filtered)),
+        }
         payload = {
+            "meta": payload_meta,
             "headline": asdict(headline),
             "closure_reason": _serialize_df(closure.reset_index()),
             "products": _serialize_df(products.reset_index()),
@@ -297,7 +324,12 @@ def main() -> None:
 
     print("Watchdog Reporting")
     print(f"Source: {args.csv}")
-    print(f"Window: closed_at >= {args.start_date}" + (f" and < {args.end_date}" if args.end_date else ""))
+    window_line = f"Window: closed_at >= {args.start_date}"
+    if args.end_date:
+        window_line += f" and < {args.end_date}"
+    if int(args.last or 0) > 0:
+        window_line += f" | last {int(args.last)} trades"
+    print(window_line)
     print("\nHeadline Metrics")
     for key, value in asdict(headline).items():
         print(f"  {key}: {value:.2f}" if isinstance(value, float) else f"  {key}: {value}")
