@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 import pandas as pd
+import numpy as np
 
 DEFAULT_CSV = Path("trade_logs") / "watchdog_closed_positions.csv"
 DEFAULT_START_DATE = "2025-10-01"
@@ -53,6 +54,8 @@ class HeadlineMetrics:
     max_drawdown_pct: float
     peak_equity: float
     valley_equity: float
+    std_dev_currency: float
+    std_dev_drawdown: float
 
 
 def _parse_args() -> argparse.Namespace:
@@ -154,7 +157,7 @@ def _headline_metrics(df: pd.DataFrame) -> HeadlineMetrics:
     worst_day = float(daily.min()) if not daily.empty else 0.0
     duration = df["duration_hours"] if "duration_hours" in df.columns else pd.Series(dtype=float)
 
-    avg_loss_abs = float(profits[profits < 0].abs().mean()) if (losses.any()) else 0.0
+    avg_loss_abs = float(profits[profits < 0].abs().mean()) if losses.any() else 0.0
     if avg_loss_abs > 0:
         r_multiple = profits / avg_loss_abs
         avg_r_multiple = float(r_multiple.mean())
@@ -165,9 +168,17 @@ def _headline_metrics(df: pd.DataFrame) -> HeadlineMetrics:
         avg_win_r = 0.0
         avg_loss_r = 0.0
 
+    std_dev_currency = float(np.std(profits.to_numpy(), ddof=0)) if total else 0.0
+
     win_rate_dec = wins.mean() if total else 0.0
     loss_rate_dec = losses.mean() if total else 0.0
     expectancy_r = (win_rate_dec * avg_win_r) - (loss_rate_dec * avg_loss_r)
+
+    initial_equity = 1000.0
+    equity_curve = initial_equity + profits.cumsum()
+    rolling_peak = equity_curve.cummax()
+    drawdowns = equity_curve - rolling_peak
+    std_dev_drawdown = float(drawdowns.std(ddof=0)) if not drawdowns.empty else 0.0
 
     returns = _safe_numeric(df.get("profit_loss_pct", pd.Series(dtype=float))).dropna() / 100.0
     if len(returns) >= 2:
@@ -184,10 +195,6 @@ def _headline_metrics(df: pd.DataFrame) -> HeadlineMetrics:
         sharpe_ratio = 0.0
         sortino_ratio = 0.0
 
-    initial_equity = 1000.0
-    equity_curve = initial_equity + profits.cumsum()
-    rolling_peak = equity_curve.cummax()
-    drawdowns = equity_curve - rolling_peak
     max_drawdown = float(drawdowns.min()) if not drawdowns.empty else 0.0
     peak_equity = float(rolling_peak.max()) if not rolling_peak.empty else initial_equity
     valley_equity = float(equity_curve.loc[drawdowns.idxmin()]) if not drawdowns.empty else initial_equity
@@ -218,6 +225,8 @@ def _headline_metrics(df: pd.DataFrame) -> HeadlineMetrics:
         max_drawdown=max_drawdown,
         max_drawdown_pct=max_drawdown_pct,
         peak_equity=peak_equity,
+        std_dev_currency=std_dev_currency,
+        std_dev_drawdown=std_dev_drawdown,
         valley_equity=valley_equity,
     )
 

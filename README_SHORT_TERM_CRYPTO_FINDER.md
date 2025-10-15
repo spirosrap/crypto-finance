@@ -103,6 +103,7 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
   ```
 - The helper reads `trade_logs/watchdog_closed_positions.csv`, filters by date (defaults to 2025-10-01),
   and prints headline PnL, closure-reason splits, duration buckets (0–12h / 12–24h / ≥24h), and top/bottom trades.
+- The reporting helper now prints `Std Dev ($/trade)` and `Std Dev Drawdown ($)` so you can gauge both per-trade variance and equity swings.
 - Add `--json` to feed the stats into dashboards or notebooks, and adjust `--duration-bounds` (for example `--duration-bounds 6 18 30`).
 - Pair it with `short_term_crypto_finder.py --plain-output finder_short.txt` to loop: scan → trade execution → `watchdog_reporting.py` review.
 - For expectancy/drawdown snapshots, run the legacy metrics helper with a matching window:
