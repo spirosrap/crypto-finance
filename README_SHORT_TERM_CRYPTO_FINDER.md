@@ -385,8 +385,7 @@ same thread. Use `--skip-close` whenever you are only refreshing the log.
 ### Performance Snapshot (expectancy & drawdowns)
 
 After your watchdogs populate `trade_logs/watchdog_closed_positions.csv`, run
-`watchdog_stats.py` to compute win rate, expectancy, max drawdown %, and average
-R multiples across the logged trades.
+`watchdog_stats.py` to compute win rate, expectancy, standard deviation, max drawdown %, and average R multiples across the logged trades.
 
 ```
 # Full history with default average-loss risk basis
@@ -394,6 +393,9 @@ python watchdog_stats.py
 
 # Focus on the most recent 50 trades
 python watchdog_stats.py --last 50
+
+# Inspect trades 101-200 after the cutoff
+python watchdog_stats.py --start-date 2025-10-01 --start-count 101 --end-count 200
 
 # Infer starting equity from a known ending balance (for example $200 now)
 python watchdog_stats.py --last 50 --ending-equity 200
@@ -406,7 +408,8 @@ python watchdog_stats.py --json
 ```
 
 Metrics are derived from the `profit_loss` column (already breakeven-adjusted by
-the watchdogs). `closure_reason=expired_breakeven` rows are treated as zero PnL
+the watchdogs). The additional standard-deviation line shows how widely per-trade
+PnL has been swinging around the mean, so you can gauge variance alongside expectancy. `closure_reason=expired_breakeven` rows are treated as zero PnL
 to keep expectancy realistic.
 
 If your account balance changed during the window, supply `--ending-equity` so

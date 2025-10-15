@@ -50,6 +50,7 @@ class StatsResult:
     expectancy_r: Optional[float]
     starting_equity_used: float
     ending_equity: Optional[float]
+    std_dev_currency: float
 
 
 def _safe_numeric(series: pd.Series) -> pd.Series:
@@ -131,7 +132,7 @@ def compute_metrics(
         raise ValueError("starting_equity must be positive")
 
     if total == 0:
-        return StatsResult(0, 0, 0, 0, 0.0, 0.0, 0.0, None, None, resolved_start_equity, ending_equity_val)
+        return StatsResult(0, 0, 0, 0, 0.0, 0.0, 0.0, None, None, resolved_start_equity, ending_equity_val, 0.0)
 
     wins_mask = pnls > 0
     losses_mask = pnls < 0
@@ -157,6 +158,8 @@ def compute_metrics(
         average_r = float(np.mean(r_values))
         expectancy_r = average_r
 
+    std_dev_currency = float(np.std(pnls.to_numpy(), ddof=0)) if total else 0.0
+
     return StatsResult(
         total_trades=total,
         wins=wins,
@@ -169,6 +172,7 @@ def compute_metrics(
         expectancy_r=expectancy_r,
         starting_equity_used=resolved_start_equity,
         ending_equity=ending_equity_val,
+        std_dev_currency=std_dev_currency,
     )
 
 
@@ -289,6 +293,7 @@ def main() -> None:
             "start_count": int(display_start) if count_window and display_start is not None else 0,
             "end_count": int(display_end) if display_end is not None else 0,
             "count_window_applied": bool(count_window),
+            "std_dev_currency": round(res.std_dev_currency, 6),
             "starting_equity_used": round(res.starting_equity_used, 6),
             "ending_equity": (None if res.ending_equity is None else round(res.ending_equity, 6)),
         }, indent=2))
@@ -310,6 +315,7 @@ def main() -> None:
     print(f"Trades: {res.total_trades}  Wins: {res.wins}  Losses: {res.losses}  Breakevens: {res.breakevens}")
     print(f"Win Rate: {res.win_rate_pct:.2f}%")
     print(f"Expectancy ($/trade): {res.expectancy_currency:.2f}")
+    print(f"Std Dev ($/trade): {res.std_dev_currency:.2f}")
     start_label = res.starting_equity_used
     if res.ending_equity is not None:
         print(f"Max Drawdown: {res.max_drawdown_pct:.2f}% (inferred start=${start_label:.2f}, end=${res.ending_equity:.2f})")
