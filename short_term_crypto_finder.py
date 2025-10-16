@@ -1181,6 +1181,19 @@ def main() -> None:
         profile_presets=profile_presets,
     )
     start_time = time.perf_counter()
+
+    def _print_elapsed():
+        elapsed = time.perf_counter() - start_time
+        minutes, seconds = divmod(elapsed, 60)
+        hours, minutes = divmod(minutes, 60)
+        parts = []
+        if hours:
+            parts.append(f"{int(hours)}h")
+        if minutes:
+            parts.append(f"{int(minutes)}m")
+        parts.append(f"{seconds:.2f}s")
+        print(f"\nExecution time: {' '.join(parts)} (total {elapsed:.2f} seconds)")
+
     args = parser.parse_args()
 
     if args.list_profiles:
@@ -1368,8 +1381,7 @@ def main() -> None:
                     indent=2,
                 )
             )
-            elapsed = time.perf_counter() - start_time
-            print(f"\nExecution time: {elapsed:.2f} seconds")
+            _print_elapsed()
             return
         if args.plain_output:
             buffer = io.StringIO()
@@ -1463,9 +1475,7 @@ def main() -> None:
         elif args.save:
             print("Tip: use a .csv or .json extension in --save to write the file.")
 
-    elapsed = time.perf_counter() - start_time
-    minutes, seconds = divmod(elapsed, 60)
-    print(f"\nExecution time: {minutes:.2f} minutes ({seconds:.2f} seconds total)")
+    _print_elapsed()
 
 
 if __name__ == "__main__":
