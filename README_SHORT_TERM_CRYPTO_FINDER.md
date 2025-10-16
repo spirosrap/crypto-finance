@@ -116,6 +116,28 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
   ```
   Combine `--start-date` with `--last` or `--start-count/--end-count` for rolling slices (for example `--start-date 2025-10-01 --last 40`).
 
+### Daily Equity Drilldown
+
+Use `watchdog_daily_equity.py` when you want the full day-by-day equity curve (with cumulative PnL, drawdown, and daily returns) over any slice of the watchdog log.
+
+```
+# Full window from 1 Oct 2025
+python watchdog_daily_equity.py --start-date 2025-10-01
+
+# Focus on trades 101-200 and export the table
+python watchdog_daily_equity.py --start-date 2025-10-01 --start-count 101 --end-count 200 --output daily_equity.csv
+
+# Emit machine-readable output
+python watchdog_daily_equity.py --start-date 2025-10-01 --json
+```
+
+The tool mirrors the same filters as `watchdog_reporting.py` / `watchdog_stats.py` (date window, count window, `--last` tail selection) and reports additional metrics:
+
+- Daily cumulative equity and drawdown columns
+- Per-day return percentages and trade counts
+- Aggregate variance stats (`Std Dev ($/trade)` and `Std Dev Drawdown ($)`)
+- Ending equity, max drawdown, and Sharpe based on daily returns
+
 ### Preset Profiles
 
 - `default`: Mirrors environment defaults (or `SHORT_*` overrides) without extra changes.
