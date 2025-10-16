@@ -21,6 +21,7 @@ import io
 import json
 import logging
 import sys
+import time
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -1179,6 +1180,7 @@ def main() -> None:
         risk_level_type=risk_level_type,
         profile_presets=profile_presets,
     )
+    start_time = time.perf_counter()
     args = parser.parse_args()
 
     if args.list_profiles:
@@ -1366,6 +1368,9 @@ def main() -> None:
                     indent=2,
                 )
             )
+            elapsed = time.perf_counter() - start_time
+            print(f"\nExecution time: {elapsed:.2f} seconds")
+            return
         if args.plain_output:
             buffer = io.StringIO()
             finder.print_results(results, stream=buffer)
@@ -1457,6 +1462,10 @@ def main() -> None:
             print(f"Saved {len(results)} results to {final_path}")
         elif args.save:
             print("Tip: use a .csv or .json extension in --save to write the file.")
+
+    elapsed = time.perf_counter() - start_time
+    minutes, seconds = divmod(elapsed, 60)
+    print(f"\nExecution time: {minutes:.2f} minutes ({seconds:.2f} seconds total)")
 
 
 if __name__ == "__main__":
