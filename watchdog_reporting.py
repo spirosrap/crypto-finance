@@ -405,7 +405,7 @@ def main() -> None:
         ("Lagging Products", product_worst),
         ("Position Side", sides),
         ("Duration Bands", duration_summary),
-        ("Daily PnL", daily.tail(max(args.top_n, 7))),
+        ("Daily PnL", daily),
         ("Top Trades", tops["top"]),
         ("Bottom Trades", tops["bottom"]),
     ]
