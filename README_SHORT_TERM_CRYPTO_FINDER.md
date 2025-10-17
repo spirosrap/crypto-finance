@@ -444,6 +444,16 @@ opening figure.
 
 File: `watchdog_stats.py`
 
+### Interactive Dashboard
+
+Prefer a visual view? Launch the Streamlit dashboard (install once with `pip install streamlit`) to inspect equity, drawdowns, and daily PnL interactively.
+
+```
+streamlit run watchdog_dashboard.py
+```
+
+Use the sidebar to adjust the same filters available in the CLI tools (date window, start/end counts, last N trades, starting equity). The dashboard plots equity and drawdowns, displays daily metrics, and lets you download the filtered table as CSV.
+
 ## See Also
 
 - [`long_term_crypto_finder.py`](long_term_crypto_finder.py)
