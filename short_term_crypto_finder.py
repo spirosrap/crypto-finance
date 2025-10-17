@@ -954,6 +954,18 @@ PROFILE_PRESETS = {
         "unique_by_symbol": True,
         "max_risk_level": "MEDIUM",
     },
+    "loose": {
+        "limit": 400,
+        "max_results": 40,
+        "use_openai_scoring": False,
+        "min_volume_24h": 0,
+        "min_volume_market_cap_ratio": 0.0,
+        "intraday_lookback_days": 10,
+        "unique_by_symbol": False,
+        "top_per_side": 0,
+        "max_risk_level": "VERY_HIGH",
+        "min_overall_score": 0,
+    },
 }
 
 
@@ -1356,6 +1368,8 @@ def main() -> None:
     config.max_results = final_max_results
     config.side = args.side
     config.min_overall_score = float(args.min_score or 0.0)
+    if '--min-score' not in explicit_flags and 'min_overall_score' in profile_overrides:
+        config.min_overall_score = float(profile_overrides['min_overall_score'])
     config.offline = args.offline
     top_per_side = args.top_per_side
     if '--top-per-side' not in explicit_flags and 'top_per_side' in profile_overrides:

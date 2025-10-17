@@ -146,6 +146,7 @@ The tool mirrors the same filters as `watchdog_reporting.py` / `watchdog_stats.p
 - `focused_llm`: Concentrates on liquidity-plus momentum swings (`limit` 200, `top_per_side` 5, OpenAI scoring enabled, ≥$5M 24h volume, ≥3% volume/market-cap ratio, 20-day intraday lookback, `unique_by_symbol`, `max_risk_level` MEDIUM); pair with `--plain-output` to persist the run.
 - `focused_llm_400`: Same scaffolding as `focused_llm` but widens the scan (`limit` 400) so the LLM layer can sift a much larger universe while keeping the identical liquidity and risk guardrails.
 - `focused_llm_100`: Mirrors `focused_llm` but trims the universe (`limit` 100) for faster refreshes while keeping the same OpenAI-assisted filters and risk guardrails.
+- `loose`: High-variance exploration profile (`limit` 400, minimal liquidity filters, allows VERY_HIGH risk level, disables LLM scoring) that surfaces as many ideas as possible—intended for research, not production trading.
 
 Even when other constraints shrink the candidate list—say only `3S + 1L` or
 `2S + 1L` qualify—you should still consider executing the surfaced trades
