@@ -21,6 +21,7 @@ import io
 import json
 import logging
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
@@ -30,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TextIO
 import numpy as np
 import pandas as pd
 
+from dataclasses import asdict
 from long_term_crypto_finder import (
     CryptoFinderConfig,
     CryptoMetrics,
@@ -192,6 +194,11 @@ def build_short_term_config() -> CryptoFinderConfig:
     cfg.openai_sleep_seconds = _env_override("SHORT_OPENAI_SLEEP_SECONDS", cfg.openai_sleep_seconds, float)
     cfg.report_position_notional = _env_override("SHORT_REPORT_NOTIONAL", cfg.report_position_notional, float)
     cfg.report_leverage = _env_override("SHORT_REPORT_LEVERAGE", cfg.report_leverage, float)
+    cfg.incremental_cache = _env_flag("SHORT_INCREMENTAL_CACHE", getattr(cfg, 'incremental_cache', False))
+    cfg.incremental_cache_path = os.getenv(
+        "SHORT_INCREMENTAL_CACHE_PATH",
+        getattr(cfg, 'incremental_cache_path', 'cache/short_term_incremental.json'),
+    )
 
     return cfg
 
@@ -215,6 +222,120 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         cfg = config or build_short_term_config()
         super().__init__(config=cfg)
         logger.info("Short-term finder configured: %s", cfg.to_dict())
+        self.incremental_cache_enabled = bool(getattr(cfg, 'incremental_cache', False))
+        self.incremental_cache_path = Path(getattr(cfg, 'incremental_cache_path', 'cache/short_term_incremental.json'))
+        self._incremental_signature = {
+            'version': 1,
+            'analysis_days': self.config.analysis_days,
+            'side': self.side,
+            'min_overall_score': float(self.config.min_overall_score or 0.0),
+            'top_per_side': self.config.top_per_side,
+            'unique_by_symbol': bool(self.config.unique_by_symbol),
+            'use_openai_scoring': bool(self.config.use_openai_scoring),
+        }
+        self._incremental_cache_lock = threading.Lock()
+        self._incremental_cache: Dict[str, Dict[str, Any]] = {}
+        self._incremental_cache_dirty = False
+        self._incremental_hits = 0
+        self._incremental_total = 0
+        if self.incremental_cache_enabled and self.config.force_refresh_candles:
+            logger.info("Incremental cache disabled because force_refresh_candles is enabled.")
+            self.incremental_cache_enabled = False
+        if self.incremental_cache_enabled:
+            self._load_incremental_cache()
+            logger.info("Incremental cache active (stored entries: %s)", len(self._incremental_cache))
+
+    # ------------------------------------------------------------------
+    # Incremental cache helpers
+    # ------------------------------------------------------------------
+
+    def _load_incremental_cache(self) -> None:
+        self._incremental_cache = {}
+        try:
+            if not self.incremental_cache_enabled:
+                return
+            if not self.incremental_cache_path.exists():
+                return
+            data = json.loads(self.incremental_cache_path.read_text())
+            if data.get('signature') != self._incremental_signature:
+                logger.info("Incremental cache signature mismatch; ignoring cached entries.")
+                return
+            entries = data.get('entries') or {}
+            if isinstance(entries, dict):
+                self._incremental_cache = entries
+        except Exception as exc:
+            logger.debug("Failed to load incremental cache: %s", exc)
+
+    def _save_incremental_cache(self) -> None:
+        if not (self.incremental_cache_enabled and self._incremental_cache_dirty):
+            return
+        try:
+            payload = {
+                'signature': self._incremental_signature,
+                'entries': self._incremental_cache,
+                'saved_utc': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%SZ'),
+            }
+            self.incremental_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.incremental_cache_path.with_suffix(self.incremental_cache_path.suffix + f".tmp.{os.getpid()}" )
+            tmp_path.write_text(json.dumps(payload, indent=2))
+            os.replace(tmp_path, self.incremental_cache_path)
+            self._incremental_cache_dirty = False
+        except Exception as exc:
+            logger.debug("Failed to persist incremental cache: %s", exc)
+
+    def _serialize_metric(self, metric: CryptoMetrics) -> Dict[str, Any]:
+        record = asdict(metric)
+        risk_level = record.get('risk_level')
+        if isinstance(risk_level, RiskLevel):
+            record['risk_level'] = risk_level.value
+        return record
+
+    def _deserialize_metric(self, record: Dict[str, Any]) -> CryptoMetrics:
+        data = dict(record)
+        rl = data.get('risk_level')
+        if isinstance(rl, str):
+            try:
+                data['risk_level'] = RiskLevel(rl)
+            except Exception:
+                data['risk_level'] = RiskLevel.MEDIUM
+        return CryptoMetrics(**data)
+
+    def _fetch_incremental(self, symbol: str, timestamp: str) -> Optional[List[CryptoMetrics]]:
+        if not (self.incremental_cache_enabled and timestamp):
+            return None
+        with self._incremental_cache_lock:
+            self._incremental_total += 1
+            record = self._incremental_cache.get(symbol.upper())
+            if not record:
+                return None
+            if record.get('data_timestamp_utc') != timestamp:
+                return None
+            self._incremental_hits += 1
+            candidates = []
+            for payload in record.get('candidates', []):
+                side = (payload.get('position_side') or '').lower()
+                if self.side == 'both' or side == self.side:
+                    candidates.append(self._deserialize_metric(payload))
+            return candidates
+
+    def _update_incremental_cache(
+        self,
+        symbol: str,
+        metrics: List[CryptoMetrics],
+        timestamp_hint: str = "",
+    ) -> None:
+        if not self.incremental_cache_enabled:
+            return
+        timestamp = next((getattr(m, 'data_timestamp_utc', '') for m in metrics if getattr(m, 'data_timestamp_utc', '')), '')
+        if not timestamp:
+            timestamp = timestamp_hint or ''
+        payload = {
+            'data_timestamp_utc': timestamp,
+            'candidates': [self._serialize_metric(m) for m in metrics],
+        }
+        with self._incremental_cache_lock:
+            self._incremental_cache[symbol.upper()] = payload
+            self._incremental_cache_dirty = True
 
     # ------------------------------------------------------------------
     # Intraday enrichment helpers
@@ -1041,6 +1162,12 @@ def build_cli_parser(
         help='Force fresh candle downloads instead of using cache (default: %(default)s)',
     )
     parser.add_argument(
+        '--incremental-cache',
+        action=argparse.BooleanOptionalAction,
+        default=getattr(env_defaults, 'incremental_cache', False),
+        help='Reuse cached metrics when data unchanged to speed up reruns',
+    )
+    parser.add_argument(
         '--quotes',
         type=str,
         help='Preferred quote currencies (comma-separated), e.g., USDC,USD,USDT',
@@ -1182,17 +1309,18 @@ def main() -> None:
     )
     start_time = time.perf_counter()
 
-    def _print_elapsed():
+    def _print_elapsed() -> None:
         elapsed = time.perf_counter() - start_time
         minutes, seconds = divmod(elapsed, 60)
         hours, minutes = divmod(minutes, 60)
-        parts = []
+        parts: List[str] = []
         if hours:
             parts.append(f"{int(hours)}h")
         if minutes:
             parts.append(f"{int(minutes)}m")
         parts.append(f"{seconds:.2f}s")
-        print(f"\nExecution time: {' '.join(parts)} (total {elapsed:.2f} seconds)")
+        label = ' '.join(parts)
+        print(f"\nExecution time: {label} (total {elapsed:.2f} seconds)")
 
     args = parser.parse_args()
 
@@ -1263,6 +1391,7 @@ def main() -> None:
         config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
 
     config.force_refresh_candles = args.force_refresh
+    config.incremental_cache = args.incremental_cache
 
     unique_flag_set = '--unique-by-symbol' in explicit_flags or '--no-unique-by-symbol' in explicit_flags
     if not unique_flag_set and 'unique_by_symbol' in profile_overrides:

@@ -86,6 +86,8 @@ class CryptoFinderConfig:
     openai_sleep_seconds: float = 0.0
     report_position_notional: float = 1000.0
     report_leverage: float = 50.0
+    incremental_cache: bool = False
+    incremental_cache_path: str = "cache/incremental_metrics.json"
 
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -173,6 +175,8 @@ class CryptoFinderConfig:
             openai_sleep_seconds=_float_env('CRYPTO_OPENAI_SLEEP_SECONDS', 0.0),
             report_position_notional=_float_env('CRYPTO_REPORT_NOTIONAL', 1000.0),
             report_leverage=_float_env('CRYPTO_REPORT_LEVERAGE', 50.0),
+            incremental_cache=os.getenv('CRYPTO_INCREMENTAL_CACHE', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
+            incremental_cache_path=os.getenv('CRYPTO_INCREMENTAL_CACHE_PATH', 'cache/incremental_metrics.json'),
         )
 
     def to_dict(self) -> Dict:
@@ -218,6 +222,8 @@ class CryptoFinderConfig:
             'openai_sleep_seconds': self.openai_sleep_seconds,
             'report_position_notional': self.report_position_notional,
             'report_leverage': self.report_leverage,
+            'incremental_cache': self.incremental_cache,
+            'incremental_cache_path': self.incremental_cache_path,
         }
 
 # Configure enhanced logging with file rotation
@@ -3539,6 +3545,9 @@ class LongTermCryptoFinder:
             List of CryptoMetrics objects sorted by overall score
         """
         logger.info("Starting comprehensive crypto analysis using Coinbase...")
+        if getattr(self, 'incremental_cache_enabled', False):
+            self._incremental_hits = 0
+            self._incremental_total = 0
 
         # Get cryptocurrencies to analyze (respect limit and optional symbols)
         crypto_list = self.get_cryptocurrencies_to_analyze(limit=limit, symbols=self.config.symbols)
@@ -3554,6 +3563,20 @@ class LongTermCryptoFinder:
                 symbol = coin.get('symbol', 'UNKNOWN')
                 name = coin.get('name', symbol)
                 logger.info(f"Analyzing {symbol} ({name})")
+                timestamp_hint = coin.get('data_timestamp_utc') or ''
+                cache_enabled = bool(getattr(self, 'incremental_cache_enabled', False))
+                cached_results: Optional[List[CryptoMetrics]] = None
+                if cache_enabled:
+                    cache_fetch = getattr(self, '_fetch_incremental', None)
+                    if cache_fetch and timestamp_hint:
+                        cached_results = cache_fetch(symbol, timestamp_hint)
+                        if cached_results is not None:
+                            return cached_results
+                    elif cache_enabled:
+                        cache_lock = getattr(self, '_incremental_cache_lock', None)
+                        if cache_lock is not None:
+                            with cache_lock:
+                                self._incremental_total += 1
                 product_id = coin['product_id']
                 df = self.get_historical_data(product_id, days=self.config.analysis_days)
                 if df is None or len(df) < 30:
@@ -3572,6 +3595,10 @@ class LongTermCryptoFinder:
                     short_metrics = self._build_short_metrics(coin, df, tech, mom, chg)
                     if short_metrics and getattr(short_metrics, 'risk_reward_ratio', 0.0) >= 2.0:
                         results.append(short_metrics)
+                if cache_enabled:
+                    cache_update = getattr(self, '_update_incremental_cache', None)
+                    if cache_update:
+                        cache_update(symbol, results, timestamp_hint)
                 return results
             except Exception as e:
                 try:
@@ -3691,6 +3718,14 @@ class LongTermCryptoFinder:
         logger.info(
             f"Analysis complete. Found {len(top_results)} top opportunities (LONG={long_count}, SHORT={short_count})."
         )
+        if getattr(self, 'incremental_cache_enabled', False):
+            total = getattr(self, '_incremental_total', 0)
+            hits = getattr(self, '_incremental_hits', 0)
+            ratio = (hits / total * 100.0) if total else 0.0
+            logger.info("Incremental cache reuse: %s/%s symbols (%.1f%%)", hits, total, ratio)
+            save_fn = getattr(self, '_save_incremental_cache', None)
+            if save_fn:
+                save_fn()
         return top_results
 
     def _macd_short_phrase(self, crypto: CryptoMetrics) -> str:

@@ -101,6 +101,7 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
   # Review trades 101-200 on or after the cutoff
   python watchdog_reporting.py --start-date 2025-10-01 --start-count 101 --end-count 200
   ```
+- Add `--incremental-cache` (or set `SHORT_INCREMENTAL_CACHE=1`) when rerunning the finder frequently; it reuses cached metrics for symbols whose candles haven't changed, cutting rerun time dramatically on large universes.
 - The helper reads `trade_logs/watchdog_closed_positions.csv`, filters by date (defaults to 2025-10-01),
   and prints headline PnL, closure-reason splits, duration buckets (0–12h / 12–24h / ≥24h), and top/bottom trades.
 - The reporting helper now prints `Std Dev ($/trade)` and `Std Dev Drawdown ($)` so you can gauge both per-trade variance and equity swings.
@@ -172,6 +173,7 @@ instead of waiting for a full five-per-side roster.
 | `--max-workers` | env/profile | Override concurrency for data fetch (must be >0 when provided) |
 | `--offline` / `--no-offline` | env | Use cached data only when possible |
 | `--force-refresh` / `--no-force-refresh` | env (`SHORT_FORCE_REFRESH_CANDLES`) | Force fresh candle downloads instead of cache |
+| `--incremental-cache` / `--no-incremental-cache` | env (`SHORT_INCREMENTAL_CACHE`) | Reuse cached metrics when candles unchanged |
 | `--quotes` | env | Preferred quote currencies (e.g., `USDC,USD,USDT`) |
 | `--risk-free-rate` | env (~1%) | Annualised rate for Sharpe/Sortino |
 | `--analysis-days` | env/profile (120) | Daily bars for swing analytics (must be >0 when provided) |
