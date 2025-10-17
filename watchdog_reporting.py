@@ -23,6 +23,8 @@ from typing import List, Optional, Sequence
 import pandas as pd
 import numpy as np
 
+from watchdog_utils import filter_by_date, select_count_window, select_last
+
 DEFAULT_CSV = Path("trade_logs") / "watchdog_closed_positions.csv"
 DEFAULT_START_DATE = "2025-10-01"
 DEFAULT_DURATION_BOUNDS = (12.0, 24.0)
@@ -125,15 +127,6 @@ def _load_dataframe(path: Path) -> pd.DataFrame:
     else:
         df["duration_hours"] = pd.NA
     return df
-
-
-def _filter_date(df: pd.DataFrame, start_date: str, end_date: Optional[str]) -> pd.DataFrame:
-    start = pd.to_datetime(start_date, utc=True)
-    mask = df["closed_at"] >= start
-    if end_date:
-        end = pd.to_datetime(end_date, utc=True)
-        mask &= df["closed_at"] < end
-    return df.loc[mask].copy()
 
 
 def _safe_numeric(series: pd.Series) -> pd.Series:
@@ -280,38 +273,6 @@ def _serialize_df(df: pd.DataFrame) -> List[dict]:
     return json.loads(df.to_json(orient="records", date_format="iso"))
 
 
-def _select_count_window(df: pd.DataFrame, start_count: int, end_count: int) -> pd.DataFrame:
-    if df.empty:
-        return df
-    start = start_count if start_count and start_count > 0 else None
-    end = end_count if end_count and end_count > 0 else None
-    if start is None and end is None:
-        return df
-    if start is None:
-        start = 1
-    if end is not None and end < start:
-        return df.iloc[0:0]
-    ordered = df.sort_values("closed_at") if "closed_at" in df.columns else df
-    start_idx = start - 1
-    if start_idx >= len(ordered):
-        subset = ordered.iloc[0:0]
-    else:
-        if end is not None:
-            subset = ordered.iloc[start_idx:end]
-        else:
-            subset = ordered.iloc[start_idx:]
-    return subset.copy()
-
-
-def _select_last(df: pd.DataFrame, last: int) -> pd.DataFrame:
-    if last <= 0 or df.empty:
-        return df
-    if "closed_at" in df.columns:
-        ordered = df.sort_values("closed_at")
-        return ordered.tail(last)
-    return df.tail(last)
-
-
 def _text_table(title: str, df: pd.DataFrame, floatfmt: str = ".2f") -> str:
     if df.empty:
         return f"{title}: (no data)"
@@ -321,7 +282,7 @@ def _text_table(title: str, df: pd.DataFrame, floatfmt: str = ".2f") -> str:
 def main() -> None:
     args = _parse_args()
     df = _load_dataframe(args.csv)
-    filtered = _filter_date(df, args.start_date, args.end_date)
+    filtered = filter_by_date(df, args.start_date, args.end_date)
     if filtered.empty:
         print("No trades after the requested start date.")
         return
@@ -334,12 +295,17 @@ def main() -> None:
         print("Invalid count window: --start-count must be <= --end-count.")
         return
     if count_window:
-        filtered = _select_count_window(filtered, start_count, end_count)
+        filtered = select_count_window(
+            filtered,
+            start_count=start_count,
+            end_count=end_count,
+            ordering_col="closed_at",
+        )
         if filtered.empty:
             print("No trades available in requested count window.")
             return
     if int(args.last or 0) > 0:
-        filtered = _select_last(filtered, int(args.last))
+        filtered = select_last(filtered, int(args.last), ordering_col="closed_at")
         if filtered.empty:
             print("No trades available after applying --last filter.")
             return

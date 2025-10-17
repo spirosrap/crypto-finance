@@ -33,6 +33,8 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from watchdog_utils import select_count_window, select_last
+
 
 DEFAULT_CSV = Path("trade_logs") / "watchdog_closed_positions.csv"
 
@@ -186,49 +188,6 @@ def _load_csv(path: Path) -> pd.DataFrame:
         return pd.read_csv(path, engine="python")
 
 
-def _select_last_trades(df: pd.DataFrame, last: int) -> pd.DataFrame:
-    if df is None or df.empty or not last or last <= 0:
-        return df
-    if "closed_at" in df.columns:
-        try:
-            s = pd.to_datetime(df["closed_at"], errors="coerce")
-            df = df.assign(_closed_dt=s).sort_values("_closed_dt", kind="stable")
-            out = df.tail(last).drop(columns=["_closed_dt"])  # keep original cols
-            return out
-        except Exception:
-            pass
-    # Fallback: rely on file order
-    return df.tail(last)
-
-
-def _select_count_window(df: pd.DataFrame, start_count: int, end_count: int) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
-    start = start_count if start_count and start_count > 0 else 1 if (start_count and start_count > 0) or (end_count and end_count > 0) else None
-    stop = end_count if end_count and end_count > 0 else None
-    if start is None:
-        return df
-    if stop is not None and stop < start:
-        return df.iloc[0:0]
-    ordered = df
-    if "closed_at" in df.columns:
-        try:
-            s = pd.to_datetime(df["closed_at"], errors="coerce")
-            ordered = df.assign(_closed_dt=s).sort_values("_closed_dt", kind="stable")
-        except Exception:
-            ordered = df
-    start_idx = start - 1
-    if start_idx >= len(ordered):
-        subset = ordered.iloc[0:0]
-    else:
-        if stop is not None:
-            subset = ordered.iloc[start_idx:stop]
-        else:
-            subset = ordered.iloc[start_idx:]
-    subset = subset.drop(columns=["_closed_dt"], errors="ignore").copy()
-    return subset
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description="Compute expectancy, win rate, drawdown %, and average R from watchdog CSV")
     ap.add_argument("--csv", type=str, default=str(DEFAULT_CSV), help="Path to watchdog_closed_positions.csv")
@@ -261,9 +220,14 @@ def main() -> None:
     if count_window and display_end is not None and display_start > display_end:
         ap.error("--end-count must be greater than or equal to --start-count")
     if count_window:
-        df = _select_count_window(df, start_count, end_count)
+        df = select_count_window(
+            df,
+            start_count=start_count,
+            end_count=end_count,
+            ordering_col="closed_at",
+        )
     if int(args.last or 0) > 0:
-        df = _select_last_trades(df, int(args.last))
+        df = select_last(df, int(args.last), ordering_col="closed_at")
     try:
         res = compute_metrics(
             df,

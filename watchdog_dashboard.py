@@ -17,6 +17,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from watchdog_utils import filter_by_date, select_count_window, select_last
+
 
 UTC = timezone.utc
 
@@ -41,23 +43,17 @@ def apply_filters(
     end_count: int,
     last: int,
 ) -> pd.DataFrame:
-    filtered = df.copy()
-    if start:
-        filtered = filtered[filtered["closed_at"] >= pd.to_datetime(start, utc=True)]
-    if end:
-        filtered = filtered[filtered["closed_at"] < pd.to_datetime(end, utc=True)]
-
+    filtered = filter_by_date(df, start, end)
     if filtered.empty:
         return filtered
 
-    if start_count > 0 or end_count > 0:
-        start_idx = max(start_count - 1, 0)
-        end_idx = None if end_count <= 0 else end_count
-        filtered = filtered.iloc[start_idx:end_idx]
-
-    if last and last > 0:
-        filtered = filtered.tail(last)
-
+    filtered = select_count_window(
+        filtered,
+        start_count=start_count,
+        end_count=end_count,
+        ordering_col="closed_at",
+    )
+    filtered = select_last(filtered, last, ordering_col="closed_at")
     return filtered
 
 

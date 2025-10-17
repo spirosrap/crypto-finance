@@ -24,6 +24,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from watchdog_utils import filter_by_date, select_count_window, select_last
+
 DEFAULT_CSV = Path("trade_logs") / "watchdog_closed_positions.csv"
 DEFAULT_START_DATE = "2025-10-01"
 
@@ -88,43 +90,6 @@ def _load_dataframe(path: Path) -> pd.DataFrame:
         raise ValueError("CSV missing required column 'closed_at'")
     df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True, errors="coerce")
     return df
-
-
-def _filter_date(df: pd.DataFrame, start_date: Optional[str], end_date: Optional[str]) -> pd.DataFrame:
-    if start_date:
-        start = pd.to_datetime(start_date, utc=True)
-        df = df[df["closed_at"] >= start]
-    if end_date:
-        end = pd.to_datetime(end_date, utc=True)
-        df = df[df["closed_at"] < end]
-    return df
-
-
-def _select_count_window(df: pd.DataFrame, start_count: int, end_count: int) -> pd.DataFrame:
-    if df.empty:
-        return df
-    start = start_count if start_count and start_count > 0 else None
-    end = end_count if end_count and end_count > 0 else None
-    if start is None and end is None:
-        return df
-    if start is None:
-        start = 1
-    if end is not None and end < start:
-        return df.iloc[0:0]
-    ordered = df.sort_values("closed_at")
-    start_idx = start - 1
-    if start_idx >= len(ordered):
-        return ordered.iloc[0:0]
-    if end is not None:
-        return ordered.iloc[start_idx:end]
-    return ordered.iloc[start_idx:]
-
-
-def _select_last(df: pd.DataFrame, last: int) -> pd.DataFrame:
-    if last <= 0 or df.empty:
-        return df
-    ordered = df.sort_values("closed_at")
-    return ordered.tail(last)
 
 
 @dataclass
@@ -216,10 +181,15 @@ def _build_daily_equity(
 
 
 def _prepare_trade_subset(df: pd.DataFrame, args: argparse.Namespace) -> pd.DataFrame:
-    filtered = _filter_date(df, args.start_date, args.end_date)
+    filtered = filter_by_date(df, args.start_date, args.end_date)
     filtered = filtered.dropna(subset=["closed_at"]).sort_values("closed_at")
-    filtered = _select_count_window(filtered, args.start_count, args.end_count)
-    filtered = _select_last(filtered, args.last)
+    filtered = select_count_window(
+        filtered,
+        args.start_count,
+        args.end_count,
+        ordering_col="closed_at",
+    )
+    filtered = select_last(filtered, args.last, ordering_col="closed_at")
     return filtered
 
 
