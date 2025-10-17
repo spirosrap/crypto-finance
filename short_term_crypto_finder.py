@@ -326,9 +326,24 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
     ) -> None:
         if not self.incremental_cache_enabled:
             return
-        timestamp = next((getattr(m, 'data_timestamp_utc', '') for m in metrics if getattr(m, 'data_timestamp_utc', '')), '')
-        if not timestamp:
-            timestamp = timestamp_hint or ''
+        normalized_hint = (timestamp_hint or '').strip()
+        timestamp = normalized_hint or next(
+            (
+                getattr(m, 'data_timestamp_utc', '')
+                for m in metrics
+                if getattr(m, 'data_timestamp_utc', '')
+            ),
+            '',
+        )
+        if normalized_hint and timestamp != normalized_hint:
+            timestamp = normalized_hint
+        if timestamp and metrics:
+            for metric in metrics:
+                try:
+                    setattr(metric, 'data_timestamp_utc', timestamp)
+                except Exception:
+                    # Metrics are dataclasses; setattr should always work but guard just in case.
+                    continue
         payload = {
             'data_timestamp_utc': timestamp,
             'candidates': [self._serialize_metric(m) for m in metrics],
