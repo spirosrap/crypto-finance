@@ -247,7 +247,7 @@ def _fill_time(fill: Dict[str, Any]) -> Optional[datetime]:
             return dt
         # Accept epoch seconds
         try:
-            return datetime.fromtimestamp(float(value))
+            return datetime.fromtimestamp(float(value), tz=UTC)
         except Exception:
             continue
     return None
@@ -1757,9 +1757,9 @@ def run_once(
         logger.info("No perpetual positions found")
         return
 
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(UTC)
     cutoff = now_utc - timedelta(hours=max_age_hours)
-    logger.info(f"Closing positions opened before {cutoff.isoformat()}Z")
+    logger.info(f"Closing positions opened before {_format_datetime(cutoff)}")
 
     for pos in positions:
         symbol, net_size, position_side, leverage = _extract_symbol_and_size(pos)
@@ -1791,7 +1791,7 @@ def run_once(
                 cb, symbol, net_size, position_side, leverage
             )
             if closed:
-                close_time = datetime.utcnow()
+                close_time = datetime.now(UTC)
                 exit_price = execution_price if execution_price is not None else mark_price
                 if exit_price is None:
                     exit_price = _lookup_order_fill_price(cb, close_order_id, symbol)
