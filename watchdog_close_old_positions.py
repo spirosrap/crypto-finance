@@ -1305,18 +1305,36 @@ def _get_portfolio_uuid(cb: CoinbaseService) -> Optional[str]:
 def _parse_iso8601(ts: Any) -> Optional[datetime]:
     if not ts:
         return None
-    s = ts if isinstance(ts, str) else str(ts)
-    fmts = [
-        "%Y-%m-%dT%H:%M:%S.%fZ",
-        "%Y-%m-%dT%H:%M:%SZ",
-        "%Y-%m-%d %H:%M:%S",
-    ]
-    for f in fmts:
-        try:
-            return datetime.strptime(s, f)
-        except Exception:
-            continue
-    return None
+
+    if isinstance(ts, datetime):
+        return ts.astimezone(UTC) if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
+
+    s = str(ts).strip()
+    if not s:
+        return None
+
+    normalized = s.replace('Z', '+00:00').replace('z', '+00:00')
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        fmts = [
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+        ]
+        for fmt in fmts:
+            try:
+                parsed = datetime.strptime(s, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def _extract_position_open_time(pos: Any) -> Optional[datetime]:
