@@ -873,6 +873,50 @@ def _record_position_close_if_new(record: Dict[str, str], tolerance_seconds: int
     return True
 
 
+def _cycle_logged(cycle: "Cycle", tolerance_seconds: int = 60) -> bool:
+    """Return True if the given cycle already exists in the log CSV."""
+
+    path = _ensure_log_file()
+    tolerance = abs(int(tolerance_seconds))
+    if tolerance == 0:
+        tolerance = 1
+
+    expected_close = cycle.end_time
+    expected_open = cycle.start_time
+    expected_net = cycle.entry_qty if cycle.side == 'LONG' else -cycle.entry_qty
+    expected_entry = cycle.entry_value / cycle.entry_qty if cycle.entry_qty else None
+    expected_exit = cycle.exit_value / cycle.exit_qty if cycle.exit_qty else None
+
+    try:
+        with path.open(newline='') as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                if (row.get('product_id') or '') != cycle.product_id:
+                    continue
+                row_close = _parse_log_datetime(row.get('closed_at', ''))
+                if row_close is None:
+                    continue
+                if abs((row_close - expected_close).total_seconds()) > tolerance:
+                    continue
+
+                row_net = _parse_log_float(row.get('net_size', ''))
+                row_entry = _parse_log_float(row.get('entry_price', ''))
+                row_exit = _parse_log_float(row.get('exit_price', ''))
+                row_open = _parse_log_datetime(row.get('opened_at', ''))
+
+                same_net = _float_close(row_net, expected_net)
+                same_entry = _float_close(row_entry, expected_entry)
+                same_exit = _float_close(row_exit, expected_exit)
+                same_open = _time_close(row_open, expected_open, tolerance)
+
+                if same_net and same_entry and same_exit and same_open:
+                    return True
+    except FileNotFoundError:
+        return False
+
+    return False
+
+
 @dataclass(frozen=True)
 class Fill:
     product_id: str
@@ -946,6 +990,9 @@ def _is_new_cycle(cycle: Cycle, checkpoint: Dict[str, Any], bootstrap_existing: 
         # Coinbase order IDs are UUIDs; lexical ordering does not guarantee chronology.
         # Treat any differing order_id at the same timestamp as a new cycle to avoid misses.
         return cycle.closing_order_id != last_order_id
+    delta = last_time - cycle.end_time
+    if delta <= timedelta(minutes=5) and not _cycle_logged(cycle):
+        return True
     return False
 
 
@@ -1015,6 +1062,7 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
     short_inventory: deque[Dict[str, float]] = deque()
     long_qty = 0.0
     short_qty = 0.0
+    eps = 1e-12
 
     cycles: List[Cycle] = []
     cycle_side: Optional[str] = None
@@ -1059,13 +1107,18 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
         last_fill_id = fill.order_id or ''
         total_fees += fill.fee
 
-        if long_qty == 0.0 and short_qty == 0.0:
-            cycle_side = 'LONG' if fill.side == 'BUY' else 'SHORT'
+        def start_new_cycle(side: str) -> None:
+            nonlocal cycle_side, cycle_start
+            cycle_side = side
             cycle_start = fill.time
+
+        if long_qty == 0.0 and short_qty == 0.0:
+            start_new_cycle('LONG' if fill.side == 'BUY' else 'SHORT')
 
         if fill.side == 'BUY':
             remaining = fill.size
-            while remaining > 1e-12 and short_inventory:
+            crossed_flat = False
+            while remaining > eps and short_inventory:
                 lot = short_inventory[0]
                 match_qty = min(remaining, lot['qty'])
                 realized += (lot['price'] - fill.price) * match_qty
@@ -1074,18 +1127,26 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
                 lot['qty'] -= match_qty
                 remaining -= match_qty
                 short_qty -= match_qty
-                if lot['qty'] <= 1e-12:
+                if lot['qty'] <= eps:
                     short_inventory.popleft()
-            if short_qty <= 1e-12:
+                if short_qty <= eps:
+                    short_qty = 0.0
+                    crossed_flat = True
+            if short_qty <= eps:
                 short_qty = 0.0
-            if remaining > 1e-12:
+            if crossed_flat:
+                close_cycle(fill.time)
+            if remaining > eps:
+                if long_qty == 0.0 and short_qty == 0.0:
+                    start_new_cycle('LONG')
                 long_inventory.append({'qty': remaining, 'price': fill.price})
                 long_qty += remaining
                 entry_qty += remaining
                 entry_value += fill.price * remaining
         else:
             remaining = fill.size
-            while remaining > 1e-12 and long_inventory:
+            crossed_flat = False
+            while remaining > eps and long_inventory:
                 lot = long_inventory[0]
                 match_qty = min(remaining, lot['qty'])
                 realized += (fill.price - lot['price']) * match_qty
@@ -1094,11 +1155,18 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
                 lot['qty'] -= match_qty
                 remaining -= match_qty
                 long_qty -= match_qty
-                if lot['qty'] <= 1e-12:
+                if lot['qty'] <= eps:
                     long_inventory.popleft()
-            if long_qty <= 1e-12:
+                if long_qty <= eps:
+                    long_qty = 0.0
+                    crossed_flat = True
+            if long_qty <= eps:
                 long_qty = 0.0
-            if remaining > 1e-12:
+            if crossed_flat:
+                close_cycle(fill.time)
+            if remaining > eps:
+                if long_qty == 0.0 and short_qty == 0.0:
+                    start_new_cycle('SHORT')
                 short_inventory.append({'qty': remaining, 'price': fill.price})
                 short_qty += remaining
                 entry_qty += remaining
