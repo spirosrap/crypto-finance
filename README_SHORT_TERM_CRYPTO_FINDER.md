@@ -139,6 +139,32 @@ The tool mirrors the same filters as `watchdog_reporting.py` / `watchdog_stats.p
 - Aggregate variance stats (`Std Dev ($/trade)` and `Std Dev Drawdown ($)`)
 - Ending equity, max drawdown, and Sharpe based on daily returns
 
+### Risk Calendar Automation
+
+- Stay ahead of macro catalysts with the bundled utilities:
+  ```bash
+  python risk_calendar.py upcoming --days 14
+  # FOMC-only (no API key required)
+  python risk_calendar_sync.py --sources fomc --dry-run
+  # Add preloaded U.S. macro surprises (CPI, NFP, GDP, PCE) from manual_data/us_macro_surprises.json
+  python risk_calendar_sync.py --sources manual --dry-run
+  # TradingEconomics feed (requires guest or personal key)
+  python risk_calendar_sync.py --sources tradingeconomics --countries "United States" --min-importance 3 --lookahead-days 30 --dry-run
+  ```
+  Review the preview first; dropping `--dry-run` upserts the events into `risk_calendar/risk_events.json` so the finder, dashboards, and runbooks share the same schedule.
+- Automate refresh via cron (example runs 11:00 UTC daily, roughly four hours before U.S. markets open):
+  ```
+  0 11 * * * /usr/bin/env bash -lc 'cd /home/spiros/crypto-finance && python risk_calendar_sync.py --sources fomc,manual --symbols BTC,ETH'
+  ```
+  Tweak the cadence, countries, or symbol list to match your book; the sync script is idempotent and overwrites previously ingested entries when they change.
+- The script automatically falls back to `manual_data/us_macro_surprises.json` when `--sources manual` is used without extra arguments; edit that file to reflect any date changes you care about.
+- If you need TradingEconomics data and the public `guest:guest` key throws 500s, rerun with a smaller window (for example `--chunk-days 3`) or supply a personal key via `--api-key`.
+- Inspect upcoming windows visually:
+  ```bash
+  streamlit run risk_calendar_dashboard.py
+  ```
+  Use the sidebar filters to isolate high-impact weeks before deciding whether to pause, scale, or proceed with the short-term plays.
+
 ### Preset Profiles
 
 - `default`: Mirrors environment defaults (or `SHORT_*` overrides) without extra changes.

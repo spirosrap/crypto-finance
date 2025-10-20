@@ -1,0 +1,87 @@
+{
+  "version": "2025.10",
+  "source": "Manual compilation of key U.S. macroeconomic releases (BLS/BEA) as of October 2025.",
+  "events": [
+    {
+      "id": "macro-2025-10-gdp-advance",
+      "name": "US GDP Advance Estimate (Q3 2025)",
+      "start": "2025-10-30T12:30:00Z",
+      "category": "bea_gdp",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "Bureau of Economic Analysis advance estimate for Q3 2025 GDP."
+    },
+    {
+      "id": "macro-2025-11-nfp",
+      "name": "US Nonfarm Payrolls (October 2025)",
+      "start": "2025-11-07T13:30:00Z",
+      "category": "bls_employment",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "Bureau of Labor Statistics Employment Situation release."
+    },
+    {
+      "id": "macro-2025-11-cpi",
+      "name": "US CPI Release (October 2025)",
+      "start": "2025-11-13T13:30:00Z",
+      "category": "bls_cpi",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "Consumer Price Index release covering October 2025."
+    },
+    {
+      "id": "macro-2025-11-pce",
+      "name": "US Core PCE Price Index (October 2025)",
+      "start": "2025-11-26T13:30:00Z",
+      "category": "bea_pce",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "BEA Personal Income & Outlays report with core PCE."
+    },
+    {
+      "id": "macro-2025-12-nfp",
+      "name": "US Nonfarm Payrolls (November 2025)",
+      "start": "2025-12-05T13:30:00Z",
+      "category": "bls_employment",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "Bureau of Labor Statistics Employment Situation release."
+    },
+    {
+      "id": "macro-2025-12-cpi",
+      "name": "US CPI Release (November 2025)",
+      "start": "2025-12-11T13:30:00Z",
+      "category": "bls_cpi",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "Consumer Price Index release covering November 2025."
+    },
+    {
+      "id": "macro-2025-12-pce",
+      "name": "US Core PCE Price Index (November 2025)",
+      "start": "2025-12-24T13:30:00Z",
+      "category": "bea_pce",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "BEA Personal Income & Outlays report with core PCE."
+    },
+    {
+      "id": "macro-2026-01-nfp",
+      "name": "US Nonfarm Payrolls (December 2025)",
+      "start": "2026-01-02T13:30:00Z",
+      "category": "bls_employment",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "Bureau of Labor Statistics Employment Situation release."
+    },
+    {
+      "id": "macro-2026-01-cpi",
+      "name": "US CPI Release (December 2025)",
+      "start": "2026-01-14T13:30:00Z",
+      "category": "bls_cpi",
+      "impact": "high",
+      "symbols": ["BTC", "ETH"],
+      "notes": "Consumer Price Index release covering December 2025."
+    }
+  ]
+}

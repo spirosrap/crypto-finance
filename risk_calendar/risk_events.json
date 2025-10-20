@@ -1,0 +1,448 @@
+{
+  "version": 1,
+  "generated_utc": "2025-10-20T06:56:31Z",
+  "events": [
+    {
+      "id": "fomc-2025-01-28",
+      "name": "FOMC Meeting (January 28)",
+      "start_utc": "2025-01-28T18:00:00Z",
+      "end_utc": "2025-01-29T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": null,
+      "completed": true,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2025-03-18",
+      "name": "FOMC Meeting (March 18)",
+      "start_utc": "2025-03-18T18:00:00Z",
+      "end_utc": "2025-03-19T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "Press conference",
+      "completed": true,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2025-05-06",
+      "name": "FOMC Meeting (May 6)",
+      "start_utc": "2025-05-06T18:00:00Z",
+      "end_utc": "2025-05-07T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": null,
+      "completed": true,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2025-06-17",
+      "name": "FOMC Meeting (June 17)",
+      "start_utc": "2025-06-17T18:00:00Z",
+      "end_utc": "2025-06-18T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "Press conference",
+      "completed": true,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2025-07-29",
+      "name": "FOMC Meeting (July 29)",
+      "start_utc": "2025-07-29T18:00:00Z",
+      "end_utc": "2025-07-30T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": null,
+      "completed": true,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2025-08-22",
+      "name": "FOMC Meeting (August 22)",
+      "start_utc": "2025-08-22T18:00:00Z",
+      "end_utc": null,
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "notation vote",
+      "completed": true,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2025-09-16",
+      "name": "FOMC Meeting (September 16)",
+      "start_utc": "2025-09-16T18:00:00Z",
+      "end_utc": "2025-09-17T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "Press conference",
+      "completed": true,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2025-10-28",
+      "name": "FOMC Meeting (October 28)",
+      "start_utc": "2025-10-28T18:00:00Z",
+      "end_utc": "2025-10-29T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": null,
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2025-10-gdp-advance",
+      "name": "US GDP Advance Estimate (Q3 2025)",
+      "start_utc": "2025-10-30T12:30:00Z",
+      "end_utc": null,
+      "category": "bea_gdp",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "Bureau of Economic Analysis advance estimate for Q3 2025 GDP.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2025-11-nfp",
+      "name": "US Nonfarm Payrolls (October 2025)",
+      "start_utc": "2025-11-07T13:30:00Z",
+      "end_utc": null,
+      "category": "bls_employment",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "Bureau of Labor Statistics Employment Situation release.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2025-11-cpi",
+      "name": "US CPI Release (October 2025)",
+      "start_utc": "2025-11-13T13:30:00Z",
+      "end_utc": null,
+      "category": "bls_cpi",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "Consumer Price Index release covering October 2025.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2025-11-pce",
+      "name": "US Core PCE Price Index (October 2025)",
+      "start_utc": "2025-11-26T13:30:00Z",
+      "end_utc": null,
+      "category": "bea_pce",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "BEA Personal Income & Outlays report with core PCE.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2025-12-nfp",
+      "name": "US Nonfarm Payrolls (November 2025)",
+      "start_utc": "2025-12-05T13:30:00Z",
+      "end_utc": null,
+      "category": "bls_employment",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "Bureau of Labor Statistics Employment Situation release.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2025-12-09",
+      "name": "FOMC Meeting (December 9)",
+      "start_utc": "2025-12-09T18:00:00Z",
+      "end_utc": "2025-12-10T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "Press conference",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2025-12-cpi",
+      "name": "US CPI Release (November 2025)",
+      "start_utc": "2025-12-11T13:30:00Z",
+      "end_utc": null,
+      "category": "bls_cpi",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "Consumer Price Index release covering November 2025.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2025-12-pce",
+      "name": "US Core PCE Price Index (November 2025)",
+      "start_utc": "2025-12-24T13:30:00Z",
+      "end_utc": null,
+      "category": "bea_pce",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "BEA Personal Income & Outlays report with core PCE.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2026-01-nfp",
+      "name": "US Nonfarm Payrolls (December 2025)",
+      "start_utc": "2026-01-02T13:30:00Z",
+      "end_utc": null,
+      "category": "bls_employment",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "Bureau of Labor Statistics Employment Situation release.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "macro-2026-01-cpi",
+      "name": "US CPI Release (December 2025)",
+      "start_utc": "2026-01-14T13:30:00Z",
+      "end_utc": null,
+      "category": "bls_cpi",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "/home/spiros/crypto-finance/manual_data/us_macro_surprises.json",
+      "notes": "Consumer Price Index release covering December 2025.",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2026-01-27",
+      "name": "FOMC Meeting (January 27)",
+      "start_utc": "2026-01-27T18:00:00Z",
+      "end_utc": "2026-01-28T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": null,
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2026-03-17",
+      "name": "FOMC Meeting (March 17)",
+      "start_utc": "2026-03-17T18:00:00Z",
+      "end_utc": "2026-03-18T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "Press conference",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2026-04-28",
+      "name": "FOMC Meeting (April 28)",
+      "start_utc": "2026-04-28T18:00:00Z",
+      "end_utc": "2026-04-29T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": null,
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2026-06-16",
+      "name": "FOMC Meeting (June 16)",
+      "start_utc": "2026-06-16T18:00:00Z",
+      "end_utc": "2026-06-17T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "Press conference",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2026-07-28",
+      "name": "FOMC Meeting (July 28)",
+      "start_utc": "2026-07-28T18:00:00Z",
+      "end_utc": "2026-07-29T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": null,
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2026-09-15",
+      "name": "FOMC Meeting (September 15)",
+      "start_utc": "2026-09-15T18:00:00Z",
+      "end_utc": "2026-09-16T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "Press conference",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2026-10-27",
+      "name": "FOMC Meeting (October 27)",
+      "start_utc": "2026-10-27T18:00:00Z",
+      "end_utc": "2026-10-28T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": null,
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    },
+    {
+      "id": "fomc-2026-12-08",
+      "name": "FOMC Meeting (December 8)",
+      "start_utc": "2026-12-08T18:00:00Z",
+      "end_utc": "2026-12-09T20:00:00Z",
+      "category": "fomc",
+      "impact": "high",
+      "symbols": [
+        "BTC",
+        "ETH"
+      ],
+      "source": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "notes": "Press conference",
+      "completed": false,
+      "created_utc": "2025-10-20T06:56:31Z",
+      "updated_utc": "2025-10-20T06:56:31Z"
+    }
+  ]
+}
