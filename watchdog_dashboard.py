@@ -30,7 +30,9 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
     if "closed_at" not in df.columns:
         raise ValueError("CSV missing required column 'closed_at'")
     df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True, errors="coerce")
-    df["profit_loss"] = pd.to_numeric(df["profit_loss"], errors="coerce").fillna(0.0)
+    df["profit_loss"] = pd.to_numeric(df["profit_loss"], errors="coerce")
+    if "profit_loss_pct" in df.columns:
+        df["profit_loss_pct"] = pd.to_numeric(df["profit_loss_pct"], errors="coerce")
     df = df.dropna(subset=["closed_at"]).sort_values("closed_at")
     return df
 
@@ -64,7 +66,9 @@ def build_daily_equity(
     trades = trades.sort_values("closed_at")
     trades["date"] = trades["closed_at"].dt.date
 
-    daily = trades.groupby("date")["profit_loss"].agg(["sum", "count"]).rename(columns={"sum": "daily_pnl", "count": "trades"})
+    daily_pnl = trades.groupby("date")["profit_loss"].sum(min_count=1).fillna(0.0)
+    trade_counts = trades.groupby("date").size()
+    daily = pd.DataFrame({"daily_pnl": daily_pnl, "trades": trade_counts})
     daily["cum_pnl"] = daily["daily_pnl"].cumsum()
     daily["equity"] = starting_equity + daily["cum_pnl"]
 
@@ -82,19 +86,63 @@ def build_daily_equity(
     daily["drawdown"] = drawdown_values
     daily["drawdown_pct"] = drawdown_pct
 
+    profit_loss_series = trades["profit_loss"]
+    valid_profit_loss = profit_loss_series.dropna()
+    valid_trade_count = len(valid_profit_loss)
+
+    gross_profit = valid_profit_loss[valid_profit_loss > 0].sum()
+    gross_loss = valid_profit_loss[valid_profit_loss < 0].sum()
+    gross_loss_abs = abs(gross_loss)
+    if valid_trade_count == 0:
+        profit_factor = float("nan")
+    elif gross_loss_abs > 0:
+        profit_factor = gross_profit / gross_loss_abs
+    else:
+        profit_factor = float("inf") if gross_profit > 0 else 0.0
+
+    profit_loss_pct_series = trades["profit_loss_pct"] if "profit_loss_pct" in trades.columns else None
+    if profit_loss_pct_series is not None:
+        valid_profit_loss_pct = profit_loss_pct_series.dropna()
+        nonzero_profit_loss_pct = valid_profit_loss_pct[valid_profit_loss_pct != 0]
+        if not nonzero_profit_loss_pct.empty:
+            median_profit_loss_pct = float(nonzero_profit_loss_pct.median())
+        elif not valid_profit_loss_pct.empty:
+            median_profit_loss_pct = float(valid_profit_loss_pct.median())
+        else:
+            median_profit_loss_pct = float("nan")
+    else:
+        median_profit_loss_pct = float("nan")
+
+    wins = int((valid_profit_loss > 0).sum())
+    losses = int((valid_profit_loss < 0).sum())
+    breakevens = int((valid_profit_loss == 0).sum())
+    win_rate_pct = float(wins / valid_trade_count * 100.0) if valid_trade_count else 0.0
+    expectancy = float(valid_profit_loss.mean()) if valid_trade_count else 0.0
+    nonzero_profit_loss = valid_profit_loss[valid_profit_loss != 0]
+    if not nonzero_profit_loss.empty:
+        median_profit_loss = float(nonzero_profit_loss.median())
+    elif not valid_profit_loss.empty:
+        median_profit_loss = float(valid_profit_loss.median())
+    else:
+        median_profit_loss = float("nan")
+    std_dev_trade = float(valid_profit_loss.std(ddof=0)) if valid_trade_count else float("nan")
+
     metrics = {
         "trades": int(len(trades)),
-        "wins": int((trades["profit_loss"] > 0).sum()),
-        "losses": int((trades["profit_loss"] < 0).sum()),
-        "breakevens": int((trades["profit_loss"] == 0).sum()),
-        "win_rate_pct": float((trades["profit_loss"] > 0).mean() * 100) if len(trades) else 0.0,
-        "expectancy": float(trades["profit_loss"].mean()) if len(trades) else 0.0,
+        "wins": wins,
+        "losses": losses,
+        "breakevens": breakevens,
+        "win_rate_pct": win_rate_pct,
+        "expectancy": expectancy,
+        "profit_factor": float(profit_factor),
+        "median_profit_loss": median_profit_loss,
+        "median_profit_loss_pct": median_profit_loss_pct,
         "best_day": float(daily["daily_pnl"].max()) if not daily.empty else 0.0,
         "worst_day": float(daily["daily_pnl"].min()) if not daily.empty else 0.0,
         "ending_equity": float(daily["equity"].iloc[-1]) if not daily.empty else starting_equity,
         "max_drawdown": float(drawdown.min()) if not daily.empty else 0.0,
         "max_drawdown_pct": float(daily["drawdown_pct"].min()) if not daily.empty else 0.0,
-        "std_dev_trade": float(trades["profit_loss"].std(ddof=0)) if len(trades) else 0.0,
+        "std_dev_trade": std_dev_trade,
         "std_dev_drawdown": float(drawdown.std(ddof=0)) if len(daily) else 0.0,
     }
 
@@ -154,17 +202,50 @@ def main() -> None:
     daily, metrics = build_daily_equity(filtered, float(starting_equity))
 
     st.subheader("Summary")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Trades", metrics["trades"])
-    c2.metric("Win rate", f"{metrics['win_rate_pct']:.1f}%")
-    c3.metric("Expectancy", f"{metrics['expectancy']:.2f}")
-    c4.metric("Sharpe (daily)", "∞" if math.isinf(metrics["sharpe_ratio"]) else f"{metrics['sharpe_ratio']:.2f}")
+    summary_row1 = st.columns(4)
+    summary_row1[0].metric("Trades", metrics["trades"])
+    summary_row1[1].metric("Win rate", f"{metrics['win_rate_pct']:.1f}%")
+    summary_row1[2].metric("Expectancy", f"{metrics['expectancy']:.2f}")
+    summary_row1[3].metric("Sharpe (daily)", "∞" if math.isinf(metrics["sharpe_ratio"]) else f"{metrics['sharpe_ratio']:.2f}")
 
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Best day", f"{metrics['best_day']:.2f}")
-    c6.metric("Worst day", f"{metrics['worst_day']:.2f}")
-    c7.metric("Ending equity", f"{metrics['ending_equity']:.2f}")
-    c8.metric("Max drawdown", f"{metrics['max_drawdown']:.2f} ({metrics['max_drawdown_pct']:.2f}%)")
+    summary_row2 = st.columns(4)
+    profit_factor_value = metrics["profit_factor"]
+    if math.isnan(profit_factor_value):
+        profit_factor_display = "—"
+    elif math.isinf(profit_factor_value):
+        profit_factor_display = "∞"
+    else:
+        profit_factor_display = f"{profit_factor_value:.2f}"
+    summary_row2[0].metric("Profit factor", profit_factor_display)
+
+    median_pl_value = metrics["median_profit_loss"]
+    if math.isnan(median_pl_value):
+        median_pl_display = "—"
+    elif abs(median_pl_value) >= 1:
+        median_pl_display = f"{median_pl_value:.2f}"
+    elif abs(median_pl_value) >= 0.01:
+        median_pl_display = f"{median_pl_value:.4f}"
+    else:
+        median_pl_display = f"{median_pl_value:.6f}"
+    summary_row2[1].metric("Median trade P/L", median_pl_display)
+
+    median_pct = metrics.get("median_profit_loss_pct", float("nan"))
+    if math.isnan(median_pct):
+        median_pct_display = "—"
+    elif abs(median_pct) >= 1:
+        median_pct_display = f"{median_pct:.2f}%"
+    elif abs(median_pct) >= 0.01:
+        median_pct_display = f"{median_pct:.4f}%"
+    else:
+        median_pct_display = f"{median_pct:.6f}%"
+    summary_row2[2].metric("Median trade P/L %", median_pct_display)
+    summary_row2[3].metric("Ending equity", f"{metrics['ending_equity']:.2f}")
+
+    summary_row3 = st.columns(4)
+    summary_row3[0].metric("Best day", f"{metrics['best_day']:.2f}")
+    summary_row3[1].metric("Worst day", f"{metrics['worst_day']:.2f}")
+    summary_row3[2].metric("Max drawdown", f"{metrics['max_drawdown']:.2f}")
+    summary_row3[3].metric("Max drawdown %", f"{metrics['max_drawdown_pct']:.2f}%")
 
     st.markdown("---")
     st.subheader("Charts")
