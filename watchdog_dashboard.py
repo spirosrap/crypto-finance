@@ -127,6 +127,26 @@ def build_daily_equity(
         median_profit_loss = float("nan")
     std_dev_trade = float(valid_profit_loss.std(ddof=0)) if valid_trade_count else float("nan")
 
+    recent_trade_window = min(20, valid_trade_count)
+    if recent_trade_window > 0:
+        recent_profit_losses = valid_profit_loss.tail(recent_trade_window)
+        recent_trade_expectancy = float(recent_profit_losses.mean())
+        recent_trade_win_rate_pct = float((recent_profit_losses > 0).mean() * 100.0)
+    else:
+        recent_trade_expectancy = float("nan")
+        recent_trade_win_rate_pct = float("nan")
+
+    recent_expectancy_delta = (
+        recent_trade_expectancy - expectancy
+        if recent_trade_window > 0 and valid_trade_count > 0
+        else float("nan")
+    )
+    recent_win_rate_delta = (
+        recent_trade_win_rate_pct - win_rate_pct
+        if recent_trade_window > 0 and valid_trade_count > 0
+        else float("nan")
+    )
+
     metrics = {
         "trades": int(len(trades)),
         "wins": wins,
@@ -144,6 +164,11 @@ def build_daily_equity(
         "max_drawdown_pct": float(daily["drawdown_pct"].min()) if not daily.empty else 0.0,
         "std_dev_trade": std_dev_trade,
         "std_dev_drawdown": float(drawdown.std(ddof=0)) if len(daily) else 0.0,
+        "recent_trade_window": int(recent_trade_window),
+        "recent_trade_expectancy": float(recent_trade_expectancy),
+        "recent_trade_expectancy_delta": float(recent_expectancy_delta),
+        "recent_trade_win_rate_pct": float(recent_trade_win_rate_pct),
+        "recent_trade_win_rate_delta": float(recent_win_rate_delta),
     }
 
     daily_returns = daily["daily_return_pct"] / 100.0
@@ -157,12 +182,83 @@ def build_daily_equity(
         sharpe = 0.0
     metrics["sharpe_ratio"] = float(sharpe)
 
+    lookback_days = min(7, len(daily_returns))
+    if lookback_days >= 2:
+        recent_returns = daily_returns.tail(lookback_days)
+        recent_mean = recent_returns.mean()
+        recent_std = recent_returns.std(ddof=1)
+        if recent_std > 0:
+            recent_sharpe = (recent_mean / recent_std) * math.sqrt(365)
+        else:
+            recent_sharpe = float("inf") if recent_mean > 0 else 0.0
+    elif lookback_days == 1:
+        val = daily_returns.tail(1).iloc[0]
+        recent_sharpe = float("inf") if val > 0 else 0.0
+    else:
+        recent_sharpe = float("nan")
+
+    metrics["recent_sharpe_ratio"] = float(recent_sharpe)
+    if math.isfinite(metrics["sharpe_ratio"]) and math.isfinite(recent_sharpe):
+        metrics["recent_sharpe_delta"] = float(recent_sharpe - metrics["sharpe_ratio"])
+    else:
+        metrics["recent_sharpe_delta"] = float("nan")
+
+    degradation_reasons = []
+    recent_window = metrics["recent_trade_window"]
+    recent_expectancy = metrics["recent_trade_expectancy"]
+    overall_expectancy = metrics["expectancy"]
+    if recent_window >= 5 and not math.isnan(recent_expectancy):
+        threshold_exp = max(abs(overall_expectancy) * 0.25, 0.1)
+        if overall_expectancy > 0 and recent_expectancy < 0:
+            degradation_reasons.append("Recent expectancy turned negative while overall expectancy is positive.")
+        elif recent_expectancy < overall_expectancy - threshold_exp:
+            diff = overall_expectancy - recent_expectancy
+            degradation_reasons.append(f"Recent expectancy is {diff:.2f} below overall.")
+
+    recent_win_rate = metrics["recent_trade_win_rate_pct"]
+    overall_win_rate = metrics["win_rate_pct"]
+    if recent_window >= 5 and not math.isnan(recent_win_rate):
+        if recent_win_rate < overall_win_rate - 10:
+            diff = overall_win_rate - recent_win_rate
+            degradation_reasons.append(f"Recent win rate dropped by {diff:.1f} percentage points.")
+
+    overall_sharpe = metrics["sharpe_ratio"]
+    if math.isfinite(recent_sharpe) and math.isfinite(overall_sharpe):
+        if overall_sharpe > 0 and recent_sharpe <= 0:
+            degradation_reasons.append("Recent Sharpe fell to zero or negative while overall Sharpe is positive.")
+        elif recent_sharpe < overall_sharpe - 0.5:
+            diff = overall_sharpe - recent_sharpe
+            degradation_reasons.append(f"Recent Sharpe is {diff:.2f} below the overall level.")
+
+    metrics["recent_degradation_flag"] = bool(degradation_reasons)
+    metrics["recent_degradation_reasons"] = degradation_reasons
+
     daily_reset = daily.reset_index()
     return daily_reset, metrics
 
 
 def main() -> None:
     st.set_page_config(page_title="Watchdog Daily Equity", layout="wide")
+    st.markdown(
+        """
+        <style>
+            section[data-testid="stSidebar"] > div:first-child {
+                padding-top: 0.5rem;
+            }
+
+            .block-container {
+                padding-top: 1rem;
+                padding-bottom: 2rem;
+            }
+
+            h1:first-child {
+                margin-top: 0;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.title("Watchdog Daily Equity Dashboard")
     st.caption("Visualise equity, drawdowns, and daily performance derived from watchdog logs.")
 
@@ -202,6 +298,54 @@ def main() -> None:
     daily, metrics = build_daily_equity(filtered, float(starting_equity))
 
     st.subheader("Summary")
+
+    def format_compact(value: float) -> str:
+        if value is None:
+            return "—"
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return "—"
+        if math.isnan(numeric):
+            return "—"
+        if math.isinf(numeric):
+            return "∞" if numeric > 0 else "-∞"
+        abs_value = abs(numeric)
+        if abs_value >= 1:
+            return f"{numeric:.2f}"
+        if abs_value >= 0.01:
+            return f"{numeric:.4f}"
+        return f"{numeric:.6f}"
+
+    def format_compact_pct(value: float) -> str:
+        formatted = format_compact(value)
+        if formatted in {"—"}:
+            return formatted
+        if formatted in {"∞", "-∞"}:
+            return f"{formatted}%"
+        return f"{formatted}%"
+
+    def format_delta(value: float, suffix: str = "") -> Optional[str]:
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(numeric):
+            return None
+        if math.isinf(numeric):
+            sign = "∞" if numeric > 0 else "-∞"
+            return f"{sign}{suffix}"
+        abs_value = abs(numeric)
+        if abs_value >= 1:
+            delta_str = f"{numeric:+.2f}"
+        elif abs_value >= 0.01:
+            delta_str = f"{numeric:+.4f}"
+        else:
+            delta_str = f"{numeric:+.6f}"
+        return f"{delta_str}{suffix}"
+
     summary_row1 = st.columns(4)
     summary_row1[0].metric("Trades", metrics["trades"])
     summary_row1[1].metric("Win rate", f"{metrics['win_rate_pct']:.1f}%")
@@ -219,26 +363,10 @@ def main() -> None:
     summary_row2[0].metric("Profit factor", profit_factor_display)
 
     median_pl_value = metrics["median_profit_loss"]
-    if math.isnan(median_pl_value):
-        median_pl_display = "—"
-    elif abs(median_pl_value) >= 1:
-        median_pl_display = f"{median_pl_value:.2f}"
-    elif abs(median_pl_value) >= 0.01:
-        median_pl_display = f"{median_pl_value:.4f}"
-    else:
-        median_pl_display = f"{median_pl_value:.6f}"
-    summary_row2[1].metric("Median trade P/L", median_pl_display)
+    summary_row2[1].metric("Median trade P/L", format_compact(median_pl_value))
 
     median_pct = metrics.get("median_profit_loss_pct", float("nan"))
-    if math.isnan(median_pct):
-        median_pct_display = "—"
-    elif abs(median_pct) >= 1:
-        median_pct_display = f"{median_pct:.2f}%"
-    elif abs(median_pct) >= 0.01:
-        median_pct_display = f"{median_pct:.4f}%"
-    else:
-        median_pct_display = f"{median_pct:.6f}%"
-    summary_row2[2].metric("Median trade P/L %", median_pct_display)
+    summary_row2[2].metric("Median trade P/L %", format_compact_pct(median_pct))
     summary_row2[3].metric("Ending equity", f"{metrics['ending_equity']:.2f}")
 
     summary_row3 = st.columns(4)
@@ -246,6 +374,39 @@ def main() -> None:
     summary_row3[1].metric("Worst day", f"{metrics['worst_day']:.2f}")
     summary_row3[2].metric("Max drawdown", f"{metrics['max_drawdown']:.2f}")
     summary_row3[3].metric("Max drawdown %", f"{metrics['max_drawdown_pct']:.2f}%")
+
+    recent_window = metrics.get("recent_trade_window", 0)
+    recent_cols = st.columns(3)
+
+    recent_expectancy = metrics.get("recent_trade_expectancy", float("nan"))
+    delta_expectancy = metrics.get("recent_trade_expectancy_delta", float("nan"))
+    expectancy_label = "Recent expectancy" if recent_window <= 0 else f"Recent expectancy (last {recent_window} trades)"
+    recent_cols[0].metric(
+        expectancy_label,
+        format_compact(recent_expectancy),
+        delta=format_delta(delta_expectancy),
+    )
+
+    recent_win_rate = metrics.get("recent_trade_win_rate_pct", float("nan"))
+    delta_win_rate = metrics.get("recent_trade_win_rate_delta", float("nan"))
+    recent_cols[1].metric(
+        "Recent win rate",
+        format_compact_pct(recent_win_rate),
+        delta=format_delta(delta_win_rate, suffix="%"),
+    )
+
+    recent_sharpe = metrics.get("recent_sharpe_ratio", float("nan"))
+    delta_sharpe = metrics.get("recent_sharpe_delta", float("nan"))
+    recent_cols[2].metric(
+        "Recent Sharpe (7 days)",
+        format_compact(recent_sharpe),
+        delta=format_delta(delta_sharpe),
+    )
+
+    if metrics.get("recent_degradation_flag"):
+        reasons = metrics.get("recent_degradation_reasons") or []
+        joined_reasons = " ".join(reasons) if reasons else "Recent performance is weaker than the broader sample."
+        st.warning(f"Recent degradation detected: {joined_reasons}")
 
     st.markdown("---")
     st.subheader("Charts")
