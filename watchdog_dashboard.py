@@ -44,10 +44,16 @@ def apply_filters(
     start_count: int,
     end_count: int,
     last: int,
+    symbols: Optional[list[str]] = None,
 ) -> pd.DataFrame:
     filtered = filter_by_date(df, start, end)
     if filtered.empty:
         return filtered
+
+    if symbols:
+        filtered = filtered[filtered["product_id"].isin(symbols)]
+        if filtered.empty:
+            return filtered
 
     filtered = select_count_window(
         filtered,
@@ -287,9 +293,25 @@ def main() -> None:
         st.error(f"Failed to load data: {exc}")
         st.stop()
 
+    available_products = sorted(trades_df["product_id"].dropna().unique())
+    product_filter = st.sidebar.multiselect(
+        "Products (leave empty for all)",
+        options=available_products,
+        default=[],
+        help="Filter summary and charts to selected instruments.",
+    )
+
     start_str = start_date_input.isoformat() if start_date_input else None
     end_str = end_date_input.isoformat() if end_date_input else None
-    filtered = apply_filters(trades_df, start_str, end_str, int(start_count), int(end_count), int(tail_last))
+    filtered = apply_filters(
+        trades_df,
+        start_str,
+        end_str,
+        int(start_count),
+        int(end_count),
+        int(tail_last),
+        symbols=product_filter or None,
+    )
 
     if filtered.empty:
         st.warning("No trades match the selected filters.")
@@ -298,6 +320,8 @@ def main() -> None:
     daily, metrics = build_daily_equity(filtered, float(starting_equity))
 
     st.subheader("Summary")
+    if product_filter:
+        st.caption(f"Filtered to {', '.join(product_filter)}")
 
     def format_compact(value: float) -> str:
         if value is None:
