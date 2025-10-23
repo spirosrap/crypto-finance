@@ -9,7 +9,7 @@ Launch with:
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -273,6 +273,14 @@ def main() -> None:
     csv_path = csv_path.strip()
     data_path = Path(csv_path)
 
+    today = date.today()
+    date_preset = st.sidebar.selectbox(
+        "Date preset",
+        options=("Custom", "Last 7 days", "Last 30 days", "Year to date"),
+        index=0,
+        help="Quickly apply a rolling time window; choose Custom to rely on the manual date inputs below.",
+    )
+
     start_date_default = date(2025, 10, 1)
     start_date_input = st.sidebar.date_input("Start date", start_date_default)
     end_date_input = st.sidebar.date_input("End date", value=None)
@@ -294,7 +302,7 @@ def main() -> None:
         st.stop()
 
     available_products = sorted(trades_df["product_id"].dropna().unique())
-    product_filter = st.sidebar.multiselect(
+    selected_products = st.sidebar.multiselect(
         "Products (leave empty for all)",
         options=available_products,
         default=[],
@@ -303,6 +311,22 @@ def main() -> None:
 
     start_str = start_date_input.isoformat() if start_date_input else None
     end_str = end_date_input.isoformat() if end_date_input else None
+    if date_preset != "Custom":
+        if date_preset == "Last 7 days":
+            preset_start = today - timedelta(days=6)
+            preset_end = today + timedelta(days=1)
+        elif date_preset == "Last 30 days":
+            preset_start = today - timedelta(days=29)
+            preset_end = today + timedelta(days=1)
+        elif date_preset == "Year to date":
+            preset_start = date(today.year, 1, 1)
+            preset_end = today + timedelta(days=1)
+        else:
+            preset_start = start_date_input or today
+            preset_end = (end_date_input or today) + timedelta(days=1)
+
+        start_str = preset_start.isoformat()
+        end_str = preset_end.isoformat()
     filtered = apply_filters(
         trades_df,
         start_str,
@@ -310,7 +334,7 @@ def main() -> None:
         int(start_count),
         int(end_count),
         int(tail_last),
-        symbols=product_filter or None,
+        symbols=selected_products or None,
     )
 
     if filtered.empty:
@@ -320,8 +344,22 @@ def main() -> None:
     daily, metrics = build_daily_equity(filtered, float(starting_equity))
 
     st.subheader("Summary")
-    if product_filter:
-        st.caption(f"Filtered to {', '.join(product_filter)}")
+    summary_notes = []
+    if selected_products:
+        summary_notes.append(f"Products: {', '.join(selected_products)}")
+    if date_preset != "Custom":
+        summary_notes.append(f"Preset window: {date_preset}")
+    elif start_str or end_str:
+        summary_notes.append("Custom date window")
+    if not filtered.empty:
+        window_start = filtered["closed_at"].min()
+        window_end = filtered["closed_at"].max()
+        if window_start is not None and window_end is not None:
+            summary_notes.append(
+                f"Data range: {window_start.date().isoformat()} → {window_end.date().isoformat()}"
+            )
+    if summary_notes:
+        st.caption(" | ".join(summary_notes))
 
     def format_compact(value: float) -> str:
         if value is None:
