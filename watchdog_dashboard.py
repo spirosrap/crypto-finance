@@ -309,6 +309,25 @@ def main() -> None:
         help="Filter summary and charts to selected instruments.",
     )
 
+    batch_split = st.sidebar.number_input(
+        "Trade split index",
+        min_value=1,
+        value=93,
+        step=1,
+        help="Index (1-based) separating the legacy allocation from scaled trades.",
+    )
+    batch_options = (
+        "All trades",
+        f"Trades 1–{batch_split}",
+        f"Trades {batch_split + 1}+",
+    )
+    batch_choice = st.sidebar.radio(
+        "Trade batch",
+        options=batch_options,
+        index=0,
+        help="Quick toggle between the initial batch of trades and the scaled batch.",
+    )
+
     start_str = start_date_input.isoformat() if start_date_input else None
     end_str = end_date_input.isoformat() if end_date_input else None
     if date_preset != "Custom":
@@ -327,12 +346,21 @@ def main() -> None:
 
         start_str = preset_start.isoformat()
         end_str = preset_end.isoformat()
+    filter_start_count = int(start_count)
+    filter_end_count = int(end_count)
+    if batch_choice == batch_options[1]:
+        filter_start_count = 1
+        filter_end_count = int(batch_split)
+    elif batch_choice == batch_options[2]:
+        filter_start_count = int(batch_split + 1)
+        filter_end_count = 0
+
     filtered = apply_filters(
         trades_df,
         start_str,
         end_str,
-        int(start_count),
-        int(end_count),
+        filter_start_count,
+        filter_end_count,
         int(tail_last),
         symbols=selected_products or None,
     )
@@ -351,6 +379,8 @@ def main() -> None:
         summary_notes.append(f"Preset window: {date_preset}")
     elif start_str or end_str:
         summary_notes.append("Custom date window")
+    if batch_choice != batch_options[0]:
+        summary_notes.append(batch_choice)
     if not filtered.empty:
         window_start = filtered["closed_at"].min()
         window_end = filtered["closed_at"].max()
