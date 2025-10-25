@@ -318,8 +318,8 @@ def main() -> None:
     )
     batch_options = (
         "All trades",
-        f"Trades 1–{batch_split}",
-        f"Trades {batch_split + 1}+",
+        f"Trades 1–{batch_split + 1}",
+        f"Trades {batch_split + 2}+",
     )
     batch_choice = st.sidebar.radio(
         "Trade batch",
@@ -350,9 +350,9 @@ def main() -> None:
     filter_end_count = int(end_count)
     if batch_choice == batch_options[1]:
         filter_start_count = 1
-        filter_end_count = int(batch_split)
+        filter_end_count = int(batch_split + 1)
     elif batch_choice == batch_options[2]:
-        filter_start_count = int(batch_split + 1)
+        filter_start_count = int(batch_split + 2)
         filter_end_count = 0
 
     filtered = apply_filters(
