@@ -575,7 +575,20 @@ def main() -> None:
         st.caption(" | ".join(summary_notes))
 
     open_positions_df = load_open_positions()
-    with st.expander("Open positions (live)", expanded=False):
+    total_unrealized = float(open_positions_df["unrealized_pnl"].sum()) if not open_positions_df.empty else 0.0
+    exp_label = "Open positions (live)"
+    if not open_positions_df.empty:
+        pnl_color = "green" if total_unrealized >= 0 else "red"
+        exp_label += f" | <span style='color:{pnl_color};'>P/L {total_unrealized:+.2f}</span>"
+
+    expander_args = {"expanded": False}
+    if "<span" in exp_label:
+        expander_args["label"] = exp_label
+        expander_args["unsafe_allow_html"] = True
+    else:
+        expander_args["label"] = exp_label
+
+    with st.expander(**expander_args):
         if open_positions_df.empty:
             st.caption("No open INTX positions detected.")
         else:
