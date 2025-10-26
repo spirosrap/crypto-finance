@@ -448,7 +448,6 @@ def main() -> None:
         </script>
         """,
         height=0,
-        key="watchdog-live-refresh",
     )
     st.markdown(
         """
