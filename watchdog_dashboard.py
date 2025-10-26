@@ -117,10 +117,9 @@ def load_open_positions() -> pd.DataFrame:
         leverage = pos_dict.get("leverage", "")
 
         query_size = abs(size)
-        entry_time = None
-        net_progress = 0.0
+        all_orders: list[dict] = []
         cursor = None
-        while entry_time is None:
+        while True:
             try:
                 orders_response = cb.client.list_orders(
                     portfolio_uuid=portfolio_uuid,
@@ -141,33 +140,37 @@ def load_open_positions() -> pd.DataFrame:
                 has_next = bool(getattr(orders_response, "has_next", False))
                 cursor = getattr(orders_response, "cursor", None)
 
-            normalized_orders = []
             for raw_order in orders_raw:
                 if isinstance(raw_order, dict):
-                    normalized_orders.append(raw_order)
+                    all_orders.append(raw_order)
                 else:
                     order_dict = getattr(raw_order, "to_dict", None)
-                    normalized_orders.append(order_dict() if callable(order_dict) else {})
+                    all_orders.append(order_dict() if callable(order_dict) else {})
 
-            for order in sorted(normalized_orders, key=lambda o: o.get("created_time", "")):
-                side_order = (order.get("side") or "").upper()
-                try:
-                    filled = float(order.get("filled_size") or 0)
-                except Exception:
-                    filled = 0.0
-                created_time = order.get("created_time") or order.get("completion_time")
-                if side_order == "BUY":
-                    net_progress += filled
-                elif side_order == "SELL":
-                    net_progress -= filled
-                if entry_time is None:
-                    if side_label == "LONG" and net_progress >= query_size:
-                        entry_time = created_time
-                    elif side_label == "SHORT" and net_progress <= -query_size:
-                        entry_time = created_time
-
-            if not orders_raw or not has_next:
+            if not has_next:
                 break
+
+        net_progress = 0.0
+        entry_time = None
+        tolerance = max(1e-6, abs(size) * 1e-6)
+        for order in sorted(all_orders, key=lambda o: o.get("created_time", "")):
+            side_order = (order.get("side") or "").upper()
+            try:
+                filled = float(order.get("filled_size") or 0)
+            except Exception:
+                filled = 0.0
+            created_raw = order.get("created_time") or order.get("completion_time")
+            if side_order == "BUY":
+                net_progress += filled
+            elif side_order == "SELL":
+                net_progress -= filled
+
+            if abs(net_progress) < tolerance:
+                entry_time = None
+                continue
+
+            if entry_time is None and created_raw:
+                entry_time = created_raw
 
         opened_dt = None
         if entry_time:
