@@ -16,7 +16,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
-import time
+import streamlit.components.v1 as components
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
@@ -32,7 +32,7 @@ from watchdog_close_old_positions import (
 
 
 UTC = timezone.utc
-AUTO_REFRESH_SECONDS = 60
+AUTO_REFRESH_SECONDS = 10
 
 
 def load_watchdog_csv(path: Path) -> pd.DataFrame:
@@ -438,29 +438,15 @@ def build_daily_equity(
 
 def main() -> None:
     st.set_page_config(page_title="Watchdog Daily Equity", layout="wide")
-    last_refresh = st.session_state.get("_watchdog_last_refresh")
-    now_ts = time.time()
-    if last_refresh is None:
-        st.session_state["_watchdog_last_refresh"] = now_ts
-    elif now_ts - last_refresh >= AUTO_REFRESH_SECONDS:
-        st.session_state["_watchdog_last_refresh"] = now_ts
-        st.experimental_rerun()
-    st.markdown(
+    components.html(
         f"""
         <script>
-        const watchdogRefreshMs = {AUTO_REFRESH_SECONDS * 1000};
-        const watchdogRefreshKey = 'watchdog-live-refresh';
-        const now = Date.now();
-        const last = window.sessionStorage.getItem(watchdogRefreshKey);
-        const remaining = last ? Math.max(0, watchdogRefreshMs - (now - Number(last))) : watchdogRefreshMs;
-        window.sessionStorage.setItem(watchdogRefreshKey, now + remaining);
-        setTimeout(() => {{
-            window.sessionStorage.setItem(watchdogRefreshKey, Date.now());
-            window.location.reload();
-        }}, remaining);
+        setTimeout(function() {{
+            window.parent.postMessage({{type: 'streamlit:rerun'}}, '*');
+        }}, {AUTO_REFRESH_SECONDS * 1000});
         </script>
         """,
-        unsafe_allow_html=True,
+        height=0,
     )
     st.markdown(
         """
