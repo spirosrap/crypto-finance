@@ -16,7 +16,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
+import time
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
@@ -32,7 +32,7 @@ from watchdog_close_old_positions import (
 
 
 UTC = timezone.utc
-AUTO_REFRESH_SECONDS = 10
+AUTO_REFRESH_SECONDS = 60
 
 
 def load_watchdog_csv(path: Path) -> pd.DataFrame:
@@ -438,10 +438,13 @@ def build_daily_equity(
 
 def main() -> None:
     st.set_page_config(page_title="Watchdog Daily Equity", layout="wide")
-    components.html(
-        f"<script>setTimeout(function(){{window.parent.location.reload();}},{AUTO_REFRESH_SECONDS * 1000});</script>",
-        height=0,
-    )
+    last_refresh = st.session_state.get("_watchdog_last_refresh")
+    now_ts = time.time()
+    if last_refresh is None:
+        st.session_state["_watchdog_last_refresh"] = now_ts
+    elif now_ts - last_refresh >= AUTO_REFRESH_SECONDS:
+        st.session_state["_watchdog_last_refresh"] = now_ts
+        st.experimental_rerun()
     st.markdown(
         f"""
         <script>
