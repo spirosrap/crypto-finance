@@ -581,14 +581,13 @@ def main() -> None:
         pnl_color = "green" if total_unrealized >= 0 else "red"
         exp_label += f" | <span style='color:{pnl_color};'>P/L {total_unrealized:+.2f}</span>"
 
-    expander_args = {"expanded": False}
     if "<span" in exp_label:
-        expander_args["label"] = exp_label
-        expander_args["unsafe_allow_html"] = True
+        st.markdown(exp_label, unsafe_allow_html=True)
+        expander = st.expander("Open positions breakdown", expanded=False)
     else:
-        expander_args["label"] = exp_label
+        expander = st.expander(exp_label, expanded=False)
 
-    with st.expander(**expander_args):
+    with expander:
         if open_positions_df.empty:
             st.caption("No open INTX positions detected.")
         else:
