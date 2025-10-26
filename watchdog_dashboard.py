@@ -522,7 +522,7 @@ def main() -> None:
                         "Hours": "{:.2f}",
                     }
                 ),
-                use_container_width=True,
+                width="stretch",
             )
 
     def format_compact(value: float) -> str:
