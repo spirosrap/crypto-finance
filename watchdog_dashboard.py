@@ -31,6 +31,7 @@ from watchdog_close_old_positions import (
 
 
 UTC = timezone.utc
+AUTO_REFRESH_SECONDS = 5
 
 
 def load_watchdog_csv(path: Path) -> pd.DataFrame:
@@ -428,6 +429,23 @@ def build_daily_equity(
 
 def main() -> None:
     st.set_page_config(page_title="Watchdog Daily Equity", layout="wide")
+    st.markdown(
+        f"""
+        <script>
+        const watchdogRefreshMs = {AUTO_REFRESH_SECONDS * 1000};
+        const watchdogRefreshKey = 'watchdog-live-refresh';
+        const now = Date.now();
+        const last = window.sessionStorage.getItem(watchdogRefreshKey);
+        const remaining = last ? Math.max(0, watchdogRefreshMs - (now - Number(last))) : watchdogRefreshMs;
+        window.sessionStorage.setItem(watchdogRefreshKey, now + remaining);
+        setTimeout(() => {{
+            window.sessionStorage.setItem(watchdogRefreshKey, Date.now());
+            window.location.reload();
+        }}, remaining);
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown(
         """
         <style>
