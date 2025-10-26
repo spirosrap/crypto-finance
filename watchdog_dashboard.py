@@ -16,6 +16,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
@@ -48,23 +49,23 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
     return df
 
 
-def load_open_positions() -> pd.DataFrame:
+def load_open_positions() -> Tuple[pd.DataFrame, float]:
     if not API_KEY_PERPS or not API_SECRET_PERPS:
-        return pd.DataFrame()
+        return pd.DataFrame(), 0.0
 
     try:
         cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
     except Exception:
-        return pd.DataFrame()
+        return pd.DataFrame(), 0.0
 
     portfolio_uuid = _get_portfolio_uuid(cb)
     if not portfolio_uuid:
-        return pd.DataFrame()
+        return pd.DataFrame(), 0.0
 
     try:
         positions_response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
     except Exception:
-        return pd.DataFrame()
+        return pd.DataFrame(), 0.0
 
     positions_raw = []
     if isinstance(positions_response, dict):
@@ -85,6 +86,13 @@ def load_open_positions() -> pd.DataFrame:
             return float(container)
         except (TypeError, ValueError):
             return default
+
+    summary_total = 0.0
+    summary_obj = positions_response.get("summary") if isinstance(positions_response, dict) else getattr(positions_response, "summary", None)
+    if isinstance(summary_obj, dict):
+        summary_total = _from_currency(summary_obj.get("aggregated_pnl"))
+    elif summary_obj is not None:
+        summary_total = _from_currency(getattr(summary_obj, "aggregated_pnl", None))
 
     rows = []
     for pos in positions_raw:
@@ -202,7 +210,7 @@ def load_open_positions() -> pd.DataFrame:
         )
 
     if not rows:
-        return pd.DataFrame()
+        return pd.DataFrame(), summary_total
 
     df = pd.DataFrame(rows)
     df["opened_at"] = pd.to_datetime(df["opened_at"], errors="coerce")
@@ -218,7 +226,8 @@ def load_open_positions() -> pd.DataFrame:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["hours_open"] = df["hours_open"].round(2)
     df = df.sort_values("notional", ascending=False)
-    return df
+    total_unrealized = summary_total if summary_total or summary_total == 0.0 else float(df["unrealized_pnl"].sum())
+    return df, total_unrealized
 
 
 def apply_filters(
@@ -429,6 +438,10 @@ def build_daily_equity(
 
 def main() -> None:
     st.set_page_config(page_title="Watchdog Daily Equity", layout="wide")
+    components.html(
+        f"<script>setTimeout(function(){{window.parent.location.reload();}},{AUTO_REFRESH_SECONDS * 1000});</script>",
+        height=0,
+    )
     st.markdown(
         f"""
         <script>
@@ -592,20 +605,7 @@ def main() -> None:
     if summary_notes:
         st.caption(" | ".join(summary_notes))
 
-    open_positions_df = load_open_positions()
-    total_unrealized: float
-    if not open_positions_df.empty:
-        try:
-            summary_response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
-            summary_raw = summary_response.summary if summary_response else {}
-            if isinstance(summary_raw, dict):
-                total_unrealized = float(summary_raw.get("aggregated_pnl", {}).get("value", 0.0))
-            else:
-                total_unrealized = float(getattr(summary_raw, "aggregated_pnl", {}).get("value", 0.0))
-        except Exception:
-            total_unrealized = float(open_positions_df["unrealized_pnl"].sum())
-    else:
-        total_unrealized = 0.0
+    open_positions_df, total_unrealized = load_open_positions()
     exp_label_text = "Open positions (live)"
     label_color = None
     if not open_positions_df.empty:
