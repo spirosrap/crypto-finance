@@ -47,7 +47,6 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=60, show_spinner=False)
 def load_open_positions() -> pd.DataFrame:
     if not API_KEY_PERPS or not API_SECRET_PERPS:
         return pd.DataFrame()
