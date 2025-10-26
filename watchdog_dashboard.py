@@ -627,6 +627,7 @@ def main() -> None:
                 "entry_price",
                 "mark_price",
                 "unrealized_pnl",
+                "notional",
                 "hours_open",
             ]
             display_df = open_positions_df[columns_to_use].copy()
@@ -634,20 +635,22 @@ def main() -> None:
                 columns={
                     "product_id": "Product",
                     "side": "Side",
-                    "net_size": "Size",
+                    "net_size": "Quantity",
                     "entry_price": "Entry",
                     "mark_price": "Mark",
                     "unrealized_pnl": "Unrealized",
+                    "notional": "Notional",
                     "hours_open": "Hours",
                 }
             )
             st.dataframe(
                 display_df.style.format(
                     {
-                        "Size": "{:.4f}",
+                        "Quantity": "{:.4f}",
                         "Entry": "{:.4f}",
                         "Mark": "{:.4f}",
                         "Unrealized": "{:+.2f}",
+                        "Notional": "{:.2f}",
                         "Hours": "{:.2f}",
                     }
                 ),
