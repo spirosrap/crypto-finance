@@ -17,7 +17,17 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from coinbaseservice import CoinbaseService
+from config import API_KEY_PERPS, API_SECRET_PERPS
 from watchdog_utils import filter_by_date, select_count_window, select_last
+from watchdog_close_old_positions import (
+    _extract_entry_price,
+    _extract_mark_price,
+    _extract_position_open_time,
+    _extract_symbol_and_size,
+    _extract_unrealized_pnl,
+    _get_portfolio_uuid,
+)
 
 
 UTC = timezone.utc
@@ -34,6 +44,76 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
     if "profit_loss_pct" in df.columns:
         df["profit_loss_pct"] = pd.to_numeric(df["profit_loss_pct"], errors="coerce")
     df = df.dropna(subset=["closed_at"]).sort_values("closed_at")
+    return df
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_open_positions() -> pd.DataFrame:
+    if not API_KEY_PERPS or not API_SECRET_PERPS:
+        return pd.DataFrame()
+
+    try:
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+    except Exception:
+        return pd.DataFrame()
+
+    portfolio_uuid = _get_portfolio_uuid(cb)
+    if not portfolio_uuid:
+        return pd.DataFrame()
+
+    try:
+        breakdown = cb.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+    except Exception:
+        return pd.DataFrame()
+
+    positions_raw = []
+    if isinstance(breakdown, dict):
+        positions_raw = breakdown.get("breakdown", {}).get("perp_positions", []) or []
+    else:
+        data = getattr(breakdown, "breakdown", None)
+        positions_raw = getattr(data, "perp_positions", []) if data is not None else []
+
+    rows = []
+    now = datetime.now(UTC)
+    for pos in positions_raw or []:
+        symbol, net_size, position_side, leverage = _extract_symbol_and_size(pos)
+        if not symbol or abs(net_size) <= 0:
+            continue
+        entry = _extract_entry_price(pos) or 0.0
+        mark = _extract_mark_price(pos) or entry
+        pnl = _extract_unrealized_pnl(pos, net_size, entry, mark)
+        if pnl is None:
+            pnl = (mark - entry) * net_size if entry and mark else 0.0
+        opened_at = _extract_position_open_time(pos)
+        hours_open = (
+            (now - opened_at).total_seconds() / 3600.0
+            if opened_at is not None
+            else None
+        )
+        notional = abs(entry if entry else mark) * abs(net_size)
+
+        rows.append(
+            {
+                "product_id": symbol,
+                "side": position_side,
+                "net_size": net_size,
+                "entry_price": entry,
+                "mark_price": mark,
+                "unrealized_pnl": pnl,
+                "notional": notional,
+                "hours_open": hours_open,
+                "opened_at": opened_at,
+                "leverage": leverage or "",
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    df["opened_at"] = pd.to_datetime(df["opened_at"], errors="coerce")
+    df["hours_open"] = df["hours_open"].round(2)
+    df = df.sort_values("notional", ascending=False)
     return df
 
 
@@ -390,6 +470,45 @@ def main() -> None:
             )
     if summary_notes:
         st.caption(" | ".join(summary_notes))
+
+    open_positions_df = load_open_positions()
+    with st.expander("Open positions (live)", expanded=False):
+        if open_positions_df.empty:
+            st.caption("No open INTX positions detected.")
+        else:
+            columns_to_use = [
+                "product_id",
+                "side",
+                "net_size",
+                "entry_price",
+                "mark_price",
+                "unrealized_pnl",
+                "hours_open",
+            ]
+            display_df = open_positions_df[columns_to_use].copy()
+            display_df = display_df.rename(
+                columns={
+                    "product_id": "Product",
+                    "side": "Side",
+                    "net_size": "Size",
+                    "entry_price": "Entry",
+                    "mark_price": "Mark",
+                    "unrealized_pnl": "Unrealized",
+                    "hours_open": "Hours",
+                }
+            )
+            st.dataframe(
+                display_df.style.format(
+                    {
+                        "Size": "{:.4f}",
+                        "Entry": "{:.4f}",
+                        "Mark": "{:.4f}",
+                        "Unrealized": "{:+.2f}",
+                        "Hours": "{:.2f}",
+                    }
+                ),
+                use_container_width=True,
+            )
 
     def format_compact(value: float) -> str:
         if value is None:
