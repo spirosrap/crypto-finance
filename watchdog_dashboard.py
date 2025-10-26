@@ -112,6 +112,16 @@ def load_open_positions() -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df["opened_at"] = pd.to_datetime(df["opened_at"], errors="coerce")
+    numeric_cols = [
+        "net_size",
+        "entry_price",
+        "mark_price",
+        "unrealized_pnl",
+        "notional",
+        "hours_open",
+    ]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
     df["hours_open"] = df["hours_open"].round(2)
     df = df.sort_values("notional", ascending=False)
     return df
