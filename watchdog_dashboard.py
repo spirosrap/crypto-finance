@@ -576,16 +576,25 @@ def main() -> None:
 
     open_positions_df = load_open_positions()
     total_unrealized = float(open_positions_df["unrealized_pnl"].sum()) if not open_positions_df.empty else 0.0
-    exp_label = "Open positions (live)"
+    exp_label_text = "Open positions (live)"
+    label_color = None
     if not open_positions_df.empty:
-        pnl_color = "green" if total_unrealized >= 0 else "red"
-        exp_label += f" | <span style='color:{pnl_color};'>P/L {total_unrealized:+.2f}</span>"
+        label_color = "green" if total_unrealized >= 0 else "red"
+        exp_label_text += f" | P/L {total_unrealized:+.2f}"
 
-    if "<span" in exp_label:
-        st.markdown(exp_label, unsafe_allow_html=True)
-        expander = st.expander("Open positions breakdown", expanded=False)
-    else:
-        expander = st.expander(exp_label, expanded=False)
+    expander = st.expander(exp_label_text, expanded=False)
+    if label_color:
+        st.markdown(
+            f"""
+            <style>
+            div[data-testid="stExpander"]:first-of-type button div:first-child span {{
+                color: {label_color};
+                font-weight: 600;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
     with expander:
         if open_positions_df.empty:
