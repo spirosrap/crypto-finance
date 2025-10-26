@@ -32,8 +32,24 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+import os
+
 from coinbaseservice import CoinbaseService
-from config import API_KEY_PERPS, API_SECRET_PERPS
+
+try:  # pragma: no cover
+    import config as _watchdog_cfg
+except Exception:  # pragma: no cover
+    _watchdog_cfg = None
+
+
+def _resolve_credential(name: str) -> str:
+    if _watchdog_cfg and getattr(_watchdog_cfg, name, None):
+        return getattr(_watchdog_cfg, name)
+    return os.getenv(name, "")
+
+
+API_KEY_PERPS = _resolve_credential("API_KEY_PERPS")
+API_SECRET_PERPS = _resolve_credential("API_SECRET_PERPS")
 from fills_pnl import fetch_fills
 
 
