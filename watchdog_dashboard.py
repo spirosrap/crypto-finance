@@ -61,54 +61,73 @@ def load_open_positions() -> pd.DataFrame:
         return pd.DataFrame()
 
     try:
-        breakdown = cb.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+        positions_response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
     except Exception:
         return pd.DataFrame()
 
     positions_raw = []
-    if isinstance(breakdown, dict):
-        positions_raw = breakdown.get("breakdown", {}).get("perp_positions", []) or []
+    if isinstance(positions_response, dict):
+        positions_raw = positions_response.get("positions", []) or []
     else:
-        data = getattr(breakdown, "breakdown", None)
-        positions_raw = getattr(data, "perp_positions", []) if data is not None else []
+        positions_raw = getattr(positions_response, "positions", []) or []
 
     rows = []
-    now = datetime.now(UTC)
-    for pos in positions_raw or []:
-        symbol, net_size, position_side, leverage = _extract_symbol_and_size(pos)
-        if not symbol or abs(net_size) <= 0:
+    for pos in positions_raw:
+        pos_dict = pos if isinstance(pos, dict) else pos.to_dict()
+        symbol = pos_dict.get("symbol") or pos_dict.get("product_id")
+        try:
+            size = float(pos_dict.get("net_size", 0) or 0)
+        except Exception:
+            size = 0.0
+        side_raw = (pos_dict.get("position_side") or "").upper()
+        side_label = "SHORT" if "SHORT" in side_raw else "LONG"
+        if side_label == "SHORT":
+            size = -abs(size)
+        else:
+            size = abs(size)
+
+        if not symbol or abs(size) <= 0:
             continue
-        entry = _extract_entry_price(pos) or 0.0
-        mark = _extract_mark_price(pos) or entry
-        pnl = _extract_unrealized_pnl(pos, net_size, entry, mark)
-        if pnl is None:
-            pnl = (mark - entry) * net_size if entry and mark else 0.0
-        if mark and net_size:
+
+        def _from_currency(container: dict, default: float = 0.0) -> float:
+            if not container:
+                return default
+            if isinstance(container, dict):
+                value = container.get("value")
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
             try:
-                entry = mark - (pnl / net_size)
-            except ZeroDivisionError:
-                entry = mark
-        side_label = "SHORT" if net_size < 0 else "LONG"
-        opened_at = _extract_position_open_time(pos)
-        hours_open = (
-            (now - opened_at).total_seconds() / 3600.0
-            if opened_at is not None
-            else None
-        )
-        notional = abs(entry if entry else mark) * abs(net_size)
+                return float(container)
+            except (TypeError, ValueError):
+                return default
+
+        entry = _from_currency(pos_dict.get("entry_vwap")) or _from_currency(pos_dict.get("vwap"))
+        mark = _from_currency(pos_dict.get("mark_price"), entry)
+        pnl = _from_currency(pos_dict.get("aggregated_pnl"))
+        if pnl == 0.0:
+            pnl = _from_currency(pos_dict.get("unrealized_pnl"))
+        if entry and mark and size:
+            computed_pnl = (mark - entry) * size
+            if abs(computed_pnl - pnl) > max(1.0, abs(pnl) * 0.1):
+                pnl = computed_pnl
+
+        notional = _from_currency(pos_dict.get("position_notional"))
+        leverage = pos_dict.get("leverage", "")
 
         rows.append(
             {
                 "product_id": symbol,
                 "side": side_label,
-                "net_size": net_size,
+                "net_size": size,
                 "entry_price": entry,
                 "mark_price": mark,
                 "unrealized_pnl": pnl,
-                "notional": notional,
-                "hours_open": hours_open,
-                "opened_at": opened_at,
-                "leverage": leverage or "",
+                "notional": notional if notional else abs(entry * size),
+                "hours_open": None,
+                "opened_at": None,
+                "leverage": leverage,
             }
         )
 
