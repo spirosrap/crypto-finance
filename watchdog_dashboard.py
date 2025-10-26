@@ -116,35 +116,58 @@ def load_open_positions() -> pd.DataFrame:
         notional = _from_currency(pos_dict.get("position_notional"))
         leverage = pos_dict.get("leverage", "")
 
-        try:
-            orders_response = cb.client.list_orders(
-                portfolio_uuid=portfolio_uuid,
-                product_id=symbol,
-                order_status="FILLED",
-                limit=200,
-            )
-            orders_raw = orders_response.get("orders", []) if isinstance(orders_response, dict) else []
-        except Exception:
-            orders_raw = []
-
+        query_size = abs(size)
         entry_time = None
         net_progress = 0.0
-        for order in sorted(orders_raw, key=lambda o: o.get("created_time", "")):
-            side_order = (order.get("side") or "").upper()
+        cursor = None
+        while entry_time is None:
             try:
-                filled = float(order.get("filled_size") or 0)
+                orders_response = cb.client.list_orders(
+                    portfolio_uuid=portfolio_uuid,
+                    product_id=symbol,
+                    order_status="FILLED",
+                    limit=200,
+                    cursor=cursor,
+                )
             except Exception:
-                filled = 0.0
-            created_time = order.get("created_time") or order.get("completion_time")
-            if side_order == "BUY":
-                net_progress += filled
-            elif side_order == "SELL":
-                net_progress -= filled
-            if entry_time is None:
-                if side_label == "LONG" and net_progress >= abs(size):
-                    entry_time = created_time
-                elif side_label == "SHORT" and net_progress <= -abs(size):
-                    entry_time = created_time
+                orders_response = None
+
+            if isinstance(orders_response, dict):
+                orders_raw = orders_response.get("orders", []) or []
+                has_next = bool(orders_response.get("has_next"))
+                cursor = orders_response.get("cursor")
+            else:
+                orders_raw = getattr(orders_response, "orders", []) or []
+                has_next = bool(getattr(orders_response, "has_next", False))
+                cursor = getattr(orders_response, "cursor", None)
+
+            normalized_orders = []
+            for raw_order in orders_raw:
+                if isinstance(raw_order, dict):
+                    normalized_orders.append(raw_order)
+                else:
+                    order_dict = getattr(raw_order, "to_dict", None)
+                    normalized_orders.append(order_dict() if callable(order_dict) else {})
+
+            for order in sorted(normalized_orders, key=lambda o: o.get("created_time", "")):
+                side_order = (order.get("side") or "").upper()
+                try:
+                    filled = float(order.get("filled_size") or 0)
+                except Exception:
+                    filled = 0.0
+                created_time = order.get("created_time") or order.get("completion_time")
+                if side_order == "BUY":
+                    net_progress += filled
+                elif side_order == "SELL":
+                    net_progress -= filled
+                if entry_time is None:
+                    if side_label == "LONG" and net_progress >= query_size:
+                        entry_time = created_time
+                    elif side_label == "SHORT" and net_progress <= -query_size:
+                        entry_time = created_time
+
+            if not orders_raw or not has_next:
+                break
 
         opened_dt = None
         if entry_time:
