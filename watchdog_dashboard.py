@@ -575,7 +575,19 @@ def main() -> None:
         st.caption(" | ".join(summary_notes))
 
     open_positions_df = load_open_positions()
-    total_unrealized = float(open_positions_df["unrealized_pnl"].sum()) if not open_positions_df.empty else 0.0
+    total_unrealized: float
+    if not open_positions_df.empty:
+        try:
+            summary_response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
+            summary_raw = summary_response.summary if summary_response else {}
+            if isinstance(summary_raw, dict):
+                total_unrealized = float(summary_raw.get("aggregated_pnl", {}).get("value", 0.0))
+            else:
+                total_unrealized = float(getattr(summary_raw, "aggregated_pnl", {}).get("value", 0.0))
+        except Exception:
+            total_unrealized = float(open_positions_df["unrealized_pnl"].sum())
+    else:
+        total_unrealized = 0.0
     exp_label_text = "Open positions (live)"
     label_color = None
     if not open_positions_df.empty:
