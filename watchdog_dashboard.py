@@ -71,6 +71,20 @@ def load_open_positions() -> pd.DataFrame:
     else:
         positions_raw = getattr(positions_response, "positions", []) or []
 
+    def _from_currency(container: dict, default: float = 0.0) -> float:
+        if not container:
+            return default
+        if isinstance(container, dict):
+            value = container.get("value")
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+        try:
+            return float(container)
+        except (TypeError, ValueError):
+            return default
+
     rows = []
     for pos in positions_raw:
         pos_dict = pos if isinstance(pos, dict) else pos.to_dict()
@@ -89,20 +103,6 @@ def load_open_positions() -> pd.DataFrame:
         if not symbol or abs(size) <= 0:
             continue
 
-        def _from_currency(container: dict, default: float = 0.0) -> float:
-            if not container:
-                return default
-            if isinstance(container, dict):
-                value = container.get("value")
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    return default
-            try:
-                return float(container)
-            except (TypeError, ValueError):
-                return default
-
         entry = _from_currency(pos_dict.get("entry_vwap")) or _from_currency(pos_dict.get("vwap"))
         mark = _from_currency(pos_dict.get("mark_price"), entry)
         pnl = _from_currency(pos_dict.get("aggregated_pnl"))
@@ -116,6 +116,49 @@ def load_open_positions() -> pd.DataFrame:
         notional = _from_currency(pos_dict.get("position_notional"))
         leverage = pos_dict.get("leverage", "")
 
+        try:
+            orders_response = cb.client.list_orders(
+                portfolio_uuid=portfolio_uuid,
+                product_id=symbol,
+                order_status="FILLED",
+                limit=200,
+            )
+            orders_raw = orders_response.get("orders", []) if isinstance(orders_response, dict) else []
+        except Exception:
+            orders_raw = []
+
+        entry_time = None
+        net_progress = 0.0
+        for order in sorted(orders_raw, key=lambda o: o.get("created_time", "")):
+            side_order = (order.get("side") or "").upper()
+            try:
+                filled = float(order.get("filled_size") or 0)
+            except Exception:
+                filled = 0.0
+            created_time = order.get("created_time") or order.get("completion_time")
+            if side_order == "BUY":
+                net_progress += filled
+            elif side_order == "SELL":
+                net_progress -= filled
+            if entry_time is None:
+                if side_label == "LONG" and net_progress >= abs(size):
+                    entry_time = created_time
+                elif side_label == "SHORT" and net_progress <= -abs(size):
+                    entry_time = created_time
+
+        opened_dt = None
+        if entry_time:
+            try:
+                opened_dt = datetime.fromisoformat(str(entry_time).replace("Z", "+00:00"))
+            except Exception:
+                opened_dt = None
+
+        hours_open = (
+            (datetime.now(UTC) - opened_dt).total_seconds() / 3600.0
+            if opened_dt is not None
+            else None
+        )
+
         rows.append(
             {
                 "product_id": symbol,
@@ -125,8 +168,8 @@ def load_open_positions() -> pd.DataFrame:
                 "mark_price": mark,
                 "unrealized_pnl": pnl,
                 "notional": notional if notional else abs(entry * size),
-                "hours_open": None,
-                "opened_at": None,
+                "hours_open": hours_open,
+                "opened_at": opened_dt,
                 "leverage": leverage,
             }
         )
