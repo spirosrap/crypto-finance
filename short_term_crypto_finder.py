@@ -226,6 +226,7 @@ def build_short_term_config() -> CryptoFinderConfig:
 class ShortTermCryptoFinder(LongTermCryptoFinder):
     REPORT_TITLE = "SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS"
     FINDER_LABEL = "Short-Term Crypto Finder"
+    EXCLUDED_PRODUCTS = {"EURC-PERP-INTX", "EURC-USD", "EURC-USDC"}
 
     MOMENTUM_MIN_BARS = 20
     MOMENTUM_MAX_BARS = 45
@@ -259,6 +260,26 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         if self.incremental_cache_enabled:
             self._load_incremental_cache()
             logger.info("Incremental cache active (stored entries: %s)", len(self._incremental_cache))
+
+    # Override to permanently remove unwanted products (e.g., thin/stable perps)
+    def get_cryptocurrencies_to_analyze(
+        self,
+        limit: Optional[int] = None,
+        symbols: Optional[List[str]] = None,
+    ) -> List[Dict]:
+        raw = super().get_cryptocurrencies_to_analyze(limit=limit, symbols=symbols)
+        if not raw:
+            return raw
+        filtered: List[Dict] = []
+        excluded = {pid.upper() for pid in self.EXCLUDED_PRODUCTS}
+        for item in raw:
+            product_id = str(item.get("product_id") or "").upper()
+            base_symbol = str(item.get("symbol") or "").upper()
+            if product_id in excluded or base_symbol == "EURC":
+                logger.debug("Skipping excluded product %s", product_id or base_symbol)
+                continue
+            filtered.append(item)
+        return filtered
 
     # ------------------------------------------------------------------
     # Incremental cache helpers
