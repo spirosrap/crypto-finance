@@ -32,7 +32,7 @@ from watchdog_close_old_positions import (
 
 
 UTC = timezone.utc
-AUTO_REFRESH_SECONDS = 5
+AUTO_REFRESH_SECONDS = 10
 
 
 def load_watchdog_csv(path: Path) -> pd.DataFrame:
