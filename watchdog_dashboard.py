@@ -449,7 +449,6 @@ def main() -> None:
         """,
         height=0,
     )
-    st.autorefresh(interval=AUTO_REFRESH_SECONDS * 1000, key="watchdog_live_autorefresh")
     st.markdown(
         """
         <style>
