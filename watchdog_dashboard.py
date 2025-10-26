@@ -441,12 +441,14 @@ def main() -> None:
     components.html(
         f"""
         <script>
-        setTimeout(function() {{
+        const watchdogInterval = {AUTO_REFRESH_SECONDS * 1000};
+        setTimeout(() => {{
             window.parent.postMessage({{type: 'streamlit:rerun'}}, '*');
-        }}, {AUTO_REFRESH_SECONDS * 1000});
+        }}, watchdogInterval);
         </script>
         """,
         height=0,
+        key="watchdog-live-refresh",
     )
     st.markdown(
         """
