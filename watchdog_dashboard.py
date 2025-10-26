@@ -83,6 +83,12 @@ def load_open_positions() -> pd.DataFrame:
         pnl = _extract_unrealized_pnl(pos, net_size, entry, mark)
         if pnl is None:
             pnl = (mark - entry) * net_size if entry and mark else 0.0
+        if mark and net_size:
+            try:
+                entry = mark - (pnl / net_size)
+            except ZeroDivisionError:
+                entry = mark
+        side_label = "SHORT" if net_size < 0 else "LONG"
         opened_at = _extract_position_open_time(pos)
         hours_open = (
             (now - opened_at).total_seconds() / 3600.0
@@ -94,7 +100,7 @@ def load_open_positions() -> pd.DataFrame:
         rows.append(
             {
                 "product_id": symbol,
-                "side": position_side,
+                "side": side_label,
                 "net_size": net_size,
                 "entry_price": entry,
                 "mark_price": mark,
