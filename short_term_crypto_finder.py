@@ -13,23 +13,21 @@ from __future__ import annotations
 
 import os
 
+from credentials import get_primary_credentials
+
 os.environ.setdefault("CRYPTO_FINDER_LOG_SUBDIR", "short_term_crypto_finder")
 os.environ.setdefault("CRYPTO_FINDER_LOGGER_NAME", "short_term_crypto_finder")
 
-try:  # pragma: no cover
-    import config as _short_cfg
-except Exception:  # pragma: no cover
-    _short_cfg = None
+
+def _seed_credentials() -> None:
+    key, secret = get_primary_credentials()
+    if key and not os.getenv("API_KEY"):
+        os.environ["API_KEY"] = key
+    if secret and not os.getenv("API_SECRET"):
+        os.environ["API_SECRET"] = secret
 
 
-def _seed_credentials_from_config() -> None:
-    for key_name in ("API_KEY", "API_SECRET"):
-        cfg_value = getattr(_short_cfg, key_name, None) if _short_cfg else None
-        if cfg_value and not os.getenv(key_name):
-            os.environ[key_name] = cfg_value
-
-
-_seed_credentials_from_config()
+_seed_credentials()
 
 import argparse
 import io

@@ -34,5 +34,12 @@ def get_perps_credentials() -> Tuple[str, str]:
     return key, secret
 
 
-__all__ = ["get_perps_credentials"]
+def get_primary_credentials() -> Tuple[str, str]:
+    """Return (API_KEY, API_SECRET) for spot endpoints."""
 
+    key = _from_env_then_config("API_KEY")
+    secret = _from_env_then_config("API_SECRET")
+    return key, secret
+
+
+__all__ = ["get_perps_credentials", "get_primary_credentials"]
