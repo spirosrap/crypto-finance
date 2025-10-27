@@ -42,4 +42,10 @@ def get_primary_credentials() -> Tuple[str, str]:
     return key, secret
 
 
-__all__ = ["get_perps_credentials", "get_primary_credentials"]
+def get_openai_api_key() -> str:
+    """Return the OpenAI API key using env first, then config."""
+
+    return _from_env_then_config("OPENAI_KEY")
+
+
+__all__ = ["get_perps_credentials", "get_primary_credentials", "get_openai_api_key"]

@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover - handled gracefully via attribute guards
     OpenAI = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+from credentials import get_openai_api_key
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:
@@ -82,14 +83,7 @@ class LLMScorer:
         self.request_timeout = request_timeout
         self.sleep_seconds = max(0.0, sleep_seconds)
 
-        resolved_key = api_key or os.getenv("OPENAI_KEY")
-        if not resolved_key:
-            try:
-                from config import OPENAI_KEY as CONFIG_KEY  # type: ignore
-            except Exception:
-                CONFIG_KEY = None
-            if CONFIG_KEY:
-                resolved_key = CONFIG_KEY
+        resolved_key = api_key or get_openai_api_key()
 
         self.api_key = resolved_key
 

@@ -37,7 +37,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 from coinbaseservice import CoinbaseService
-from credentials import get_primary_credentials
+from credentials import get_openai_api_key, get_primary_credentials
 from historicaldata import HistoricalData
 from llm_scoring import LLMScorer, build_llm_payload
 
@@ -48,6 +48,9 @@ def _seed_credentials() -> None:
         os.environ["API_KEY"] = key
     if secret and not os.getenv("API_SECRET"):
         os.environ["API_SECRET"] = secret
+    openai_key = get_openai_api_key()
+    if openai_key and not os.getenv("OPENAI_KEY"):
+        os.environ["OPENAI_KEY"] = openai_key
 
 
 _seed_credentials()

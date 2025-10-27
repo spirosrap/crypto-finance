@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 
-from credentials import get_primary_credentials
+from credentials import get_primary_credentials, get_openai_api_key
 
 os.environ.setdefault("CRYPTO_FINDER_LOG_SUBDIR", "short_term_crypto_finder")
 os.environ.setdefault("CRYPTO_FINDER_LOGGER_NAME", "short_term_crypto_finder")
@@ -25,6 +25,9 @@ def _seed_credentials() -> None:
         os.environ["API_KEY"] = key
     if secret and not os.getenv("API_SECRET"):
         os.environ["API_SECRET"] = secret
+    openai_key = get_openai_api_key()
+    if openai_key and not os.getenv("OPENAI_KEY"):
+        os.environ["OPENAI_KEY"] = openai_key
 
 
 _seed_credentials()
