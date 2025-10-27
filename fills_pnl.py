@@ -6,24 +6,11 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional
 
-import os
-
 from coinbaseservice import CoinbaseService
-
-try:  # pragma: no cover
-    import config as _fills_cfg
-except Exception:  # pragma: no cover
-    _fills_cfg = None
+from credentials import get_perps_credentials
 
 
-def _resolve_credential(name: str) -> str:
-    if _fills_cfg and getattr(_fills_cfg, name, None):
-        return getattr(_fills_cfg, name)
-    return os.getenv(name, "")
-
-
-API_KEY_PERPS = _resolve_credential("API_KEY_PERPS")
-API_SECRET_PERPS = _resolve_credential("API_SECRET_PERPS")
+API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
 
 
 UTC = timezone.utc
@@ -268,4 +255,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

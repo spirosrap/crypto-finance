@@ -9,7 +9,6 @@ Launch with:
 from __future__ import annotations
 
 import math
-import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -20,11 +19,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from coinbaseservice import CoinbaseService
-
-try:  # pragma: no cover
-    import config as _watchdog_config
-except Exception:  # pragma: no cover
-    _watchdog_config = None
+from credentials import get_perps_credentials
 from watchdog_utils import filter_by_date, select_count_window, select_last
 from watchdog_close_old_positions import (
     _extract_entry_price,
@@ -40,16 +35,7 @@ UTC = timezone.utc
 AUTO_REFRESH_SECONDS = 10
 
 
-def _resolve_credential(name: str) -> str:
-    cfg_value = getattr(_watchdog_config, name, None) if _watchdog_config else None
-    if cfg_value:
-        return cfg_value
-    env_value = os.getenv(name)
-    return env_value or ""
-
-
-API_KEY_PERPS = _resolve_credential("API_KEY_PERPS")
-API_SECRET_PERPS = _resolve_credential("API_SECRET_PERPS")
+API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
 
 
 def load_watchdog_csv(path: Path) -> pd.DataFrame:
