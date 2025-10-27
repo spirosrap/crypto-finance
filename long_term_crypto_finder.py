@@ -37,8 +37,20 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 from coinbaseservice import CoinbaseService
+from credentials import get_primary_credentials
 from historicaldata import HistoricalData
 from llm_scoring import LLMScorer, build_llm_payload
+
+
+def _seed_credentials() -> None:
+    key, secret = get_primary_credentials()
+    if key and not os.getenv("API_KEY"):
+        os.environ["API_KEY"] = key
+    if secret and not os.getenv("API_SECRET"):
+        os.environ["API_SECRET"] = secret
+
+
+_seed_credentials()
 
 # Configuration management
 @dataclass
