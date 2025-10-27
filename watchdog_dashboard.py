@@ -9,6 +9,7 @@ Launch with:
 from __future__ import annotations
 
 import math
+import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -19,7 +20,23 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from coinbaseservice import CoinbaseService
-from credentials import get_perps_credentials
+
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from credentials import get_perps_credentials
+except ModuleNotFoundError:
+    try:  # pragma: no cover - fallback for older deployments
+        from config import API_KEY_PERPS, API_SECRET_PERPS  # type: ignore
+    except ModuleNotFoundError:  # pragma: no cover - no config available
+        API_KEY_PERPS = ""  # type: ignore
+        API_SECRET_PERPS = ""  # type: ignore
+
+    def get_perps_credentials() -> Tuple[str, str]:
+        return (API_KEY_PERPS or "", API_SECRET_PERPS or "")  # type: ignore[arg-type]
+
 from watchdog_utils import filter_by_date, select_count_window, select_last
 from watchdog_close_old_positions import (
     _extract_entry_price,

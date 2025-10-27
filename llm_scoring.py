@@ -7,7 +7,9 @@ import logging
 import os
 import re
 import time
+import sys
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Sequence
 
 try:  # Lazy optional import to keep module usable without openai installed
@@ -16,7 +18,20 @@ except Exception:  # pragma: no cover - handled gracefully via attribute guards
     OpenAI = None  # type: ignore
 
 logger = logging.getLogger(__name__)
-from credentials import get_openai_api_key
+
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from credentials import get_openai_api_key
+except ModuleNotFoundError:
+    def get_openai_api_key() -> str:  # pragma: no cover - fallback path
+        try:
+            import config as _cfg  # type: ignore
+            return getattr(_cfg, "OPENAI_KEY", "") or ""
+        except Exception:
+            return ""
 
 
 def _coerce_float(value: Any, default: float = 0.0) -> float:

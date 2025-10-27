@@ -12,8 +12,28 @@ trading levels are tuned for swing/short-term setups (≈days to weeks).
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
-from credentials import get_primary_credentials, get_openai_api_key
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from credentials import get_primary_credentials, get_openai_api_key
+except ModuleNotFoundError:
+    def _config_value(name: str) -> str:  # pragma: no cover - fallback path
+        try:
+            import config as _cfg  # type: ignore
+            return getattr(_cfg, name, "") or ""
+        except Exception:
+            return ""
+
+    def get_primary_credentials():
+        return (_config_value("API_KEY"), _config_value("API_SECRET"))
+
+    def get_openai_api_key():
+        return _config_value("OPENAI_KEY")
 
 os.environ.setdefault("CRYPTO_FINDER_LOG_SUBDIR", "short_term_crypto_finder")
 os.environ.setdefault("CRYPTO_FINDER_LOGGER_NAME", "short_term_crypto_finder")
@@ -36,7 +56,6 @@ import argparse
 import io
 import json
 import logging
-import sys
 import threading
 import time
 from datetime import datetime, timedelta

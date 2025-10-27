@@ -37,7 +37,27 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 from coinbaseservice import CoinbaseService
-from credentials import get_openai_api_key, get_primary_credentials
+
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from credentials import get_openai_api_key, get_primary_credentials
+except ModuleNotFoundError:
+    def _config_value(name: str) -> str:  # pragma: no cover - fallback path
+        try:
+            import config as _cfg  # type: ignore
+            return getattr(_cfg, name, "") or ""
+        except Exception:
+            return ""
+
+    def get_primary_credentials() -> Tuple[str, str]:
+        return (_config_value("API_KEY"), _config_value("API_SECRET"))
+
+    def get_openai_api_key() -> str:
+        return _config_value("OPENAI_KEY")
+
 from historicaldata import HistoricalData
 from llm_scoring import LLMScorer, build_llm_payload
 

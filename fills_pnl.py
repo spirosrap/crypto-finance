@@ -4,10 +4,26 @@ import csv
 import sys
 from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any, Optional
+from pathlib import Path
+from typing import Dict, List, Any, Optional, Tuple
 
 from coinbaseservice import CoinbaseService
-from credentials import get_perps_credentials
+
+REPO_ROOT = Path(__file__).resolve().parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from credentials import get_perps_credentials
+except ModuleNotFoundError:
+    try:  # pragma: no cover - fallback for environments without credentials.py
+        from config import API_KEY_PERPS, API_SECRET_PERPS  # type: ignore
+    except ModuleNotFoundError:  # pragma: no cover
+        API_KEY_PERPS = ""  # type: ignore
+        API_SECRET_PERPS = ""  # type: ignore
+
+    def get_perps_credentials() -> Tuple[str, str]:
+        return (API_KEY_PERPS or "", API_SECRET_PERPS or "")  # type: ignore[arg-type]
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
