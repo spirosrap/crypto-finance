@@ -609,14 +609,12 @@ class LongTermCryptoFinder:
         if env_key and env_secret:
             return env_key, env_secret
 
-        # Fallback to config.py if available
-        try:
-            from config import API_KEY as CFG_API_KEY, API_SECRET as CFG_API_SECRET  # type: ignore
+        key, secret = get_primary_credentials()
+        if key and secret:
+            return key, secret
 
-            return CFG_API_KEY, CFG_API_SECRET
-        except Exception:
-            logger.warning("API credentials not found in environment or config.py; public endpoints may still work.")
-            return None, None
+        logger.warning("API credentials not found in environment or config.py; public endpoints may still work.")
+        return None, None
 
     def _make_request(self, url: str, params: Optional[Dict] = None, max_retries: int = 3) -> Optional[Union[Dict, List]]:
         """Make API request via shared Session with retries and thread-safe throttle."""
