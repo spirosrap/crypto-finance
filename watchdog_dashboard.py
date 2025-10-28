@@ -46,6 +46,7 @@ from watchdog_close_old_positions import (
     _extract_unrealized_pnl,
     _get_portfolio_uuid,
 )
+from watchdog_metrics import build_snapshot
 
 
 UTC = timezone.utc
@@ -490,7 +491,6 @@ def main() -> None:
     )
 
     st.title("Watchdog Daily Equity Dashboard")
-    st.caption("Visualise equity, drawdowns, and daily performance derived from watchdog logs.")
 
     default_csv = Path("trade_logs/watchdog_closed_positions.csv")
     csv_path = st.sidebar.text_input("CSV path", str(default_csv))
@@ -524,6 +524,12 @@ def main() -> None:
     except Exception as exc:
         st.error(f"Failed to load data: {exc}")
         st.stop()
+
+    try:
+        pipeline_snapshot = build_snapshot(trades_df, include_unrealized=False)
+    except Exception as exc:
+        pipeline_snapshot = None
+        st.sidebar.caption(f"Metrics snapshot unavailable: {exc}")
 
     available_products = sorted(trades_df["product_id"].dropna().unique())
     selected_products = st.sidebar.multiselect(
@@ -595,8 +601,7 @@ def main() -> None:
 
     daily, metrics = build_daily_equity(filtered, float(starting_equity))
 
-    st.subheader("Summary")
-    summary_notes = []
+    summary_notes = ["Visualise equity, drawdowns, and daily performance derived from watchdog logs."]
     if selected_products:
         summary_notes.append(f"Products: {', '.join(selected_products)}")
     if date_preset != "Custom":
@@ -616,6 +621,35 @@ def main() -> None:
         st.caption(" | ".join(summary_notes))
 
     open_positions_df, total_unrealized = load_open_positions()
+
+    if pipeline_snapshot is not None:
+        if total_unrealized is not None:
+            try:
+                pipeline_snapshot.unrealized_pnl = float(total_unrealized)
+            except (TypeError, ValueError):
+                pass
+        pipeline_snapshot.open_positions = int(len(open_positions_df))
+
+        health_col1, health_col2, health_col3 = st.columns([2, 1, 1])
+        if pipeline_snapshot.health_level == "ok":
+            health_col1.success("Pipeline health: OK")
+        else:
+            msg = "Pipeline attention required"
+            if pipeline_snapshot.health_reasons:
+                msg += " — " + "; ".join(pipeline_snapshot.health_reasons)
+            health_col1.warning(msg)
+
+        trades_24h = pipeline_snapshot.trades_last_24h
+        health_col2.metric("Trades (24h)", trades_24h)
+
+        age_seconds = pipeline_snapshot.latest_closed_age_seconds
+        if math.isfinite(age_seconds):
+            age_value = age_seconds / 3600.0
+            age_display = f"{age_value:.1f} h"
+        else:
+            age_display = "n/a"
+        health_col3.metric("Latest close age", age_display)
+
     exp_label_text = "Open positions (live)"
     label_color = None
     if not open_positions_df.empty:
