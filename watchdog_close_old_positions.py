@@ -1261,6 +1261,40 @@ def _cycle_to_record(
     return record
 
 
+def _active_net_sizes(cb: CoinbaseService) -> Dict[str, float]:
+    """Return current perp net sizes keyed by product symbol."""
+
+    logger = logging.getLogger(__name__)
+    portfolio_uuid = _get_portfolio_uuid(cb)
+    if not portfolio_uuid:
+        logger.debug("No portfolio UUID retrieved; unable to verify open positions.")
+        return {}
+
+    try:
+        response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
+    except Exception as exc:  # pragma: no cover - network failure path
+        logger.debug("list_perps_positions failed: %s", exc)
+        return {}
+
+    if isinstance(response, dict):
+        positions_raw = response.get("positions", []) or []
+    else:
+        positions_raw = getattr(response, "positions", []) or []
+
+    nets: Dict[str, float] = {}
+    for pos in positions_raw:
+        symbol, net_size, _, _ = _extract_symbol_and_size(pos)
+        if not symbol:
+            continue
+        try:
+            net_float = float(net_size)
+        except (TypeError, ValueError):
+            continue
+        if abs(net_float) > 1e-6:
+            nets[symbol] = net_float
+    return nets
+
+
 def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -> None:
     logger = logging.getLogger(__name__)
 
@@ -1301,7 +1335,18 @@ def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -
         return compute_mae_mfe_from_history(cb=cb, **kwargs)
 
     appended = 0
+    active_net_sizes = _active_net_sizes(cb)
     for cycle in new_cycles:
+        active_net = active_net_sizes.get(cycle.product_id)
+        if active_net is not None and abs(active_net) > 1e-6:
+            logger.info(
+                "Skipping TP/SL closure for %s at %s: net position still open (net_size=%s)",
+                cycle.product_id,
+                cycle.end_time.isoformat(),
+                active_net,
+            )
+            continue
+
         record = _cycle_to_record(cycle, threshold, mae_mfe_fetcher=_mae_mfe_fetcher)
         if _record_position_close_if_new(record):
             appended += 1
