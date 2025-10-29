@@ -10,6 +10,7 @@
 - **Ridge readouts per coin** – fast, deterministic predictions of the next-period log return.
 - **Volatility-aware trade levels** – ATR% drives take-profit/stop-loss distances (2× / 1×) with a 24h expiry.
 - **Automatic discovery profiles** – scan Coinbase product lists by liquidity/quote via presets or custom filters.
+- **Signal-first ordering** – longs and shorts sorted together by absolute predicted return so the strongest conviction leads.
 - **Finder-compatible output** – ranked CSV diagnostics plus a `finder_short.txt` formatted for `add_position_from_finder.py`.
 - **Performance checks** – optional hit-rate and Sharpe summaries in `_evaluation.csv`.
 

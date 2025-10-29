@@ -922,7 +922,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         return 1
 
     results_df = pd.DataFrame(results)
-    results_df = results_df.sort_values(by="predicted_return", ascending=False)
+    results_df = results_df.sort_values(
+        by="predicted_return",
+        key=lambda series: np.abs(series),
+        ascending=False,
+    ).reset_index(drop=True)
 
     ranked_path = args.output_csv.with_name(args.output_csv.stem + "_ranked.csv")
     results_df.to_csv(ranked_path, index=False)
