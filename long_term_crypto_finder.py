@@ -36,6 +36,11 @@ import traceback
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
+try:
+    import ccxt  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    ccxt = None
+
 from coinbaseservice import CoinbaseService
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -123,6 +128,8 @@ class CryptoFinderConfig:
     report_leverage: float = 50.0
     incremental_cache: bool = False
     incremental_cache_path: str = "cache/incremental_metrics.json"
+    exchange_backend: str = "coinbase"  # coinbase or ccxt
+    ccxt_exchange_id: str = "coinbaseadvanced"  # default CCXT exchange when backend=ccxt
 
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -212,6 +219,8 @@ class CryptoFinderConfig:
             report_leverage=_float_env('CRYPTO_REPORT_LEVERAGE', 50.0),
             incremental_cache=os.getenv('CRYPTO_INCREMENTAL_CACHE', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
             incremental_cache_path=os.getenv('CRYPTO_INCREMENTAL_CACHE_PATH', 'cache/incremental_metrics.json'),
+            exchange_backend=os.getenv('CRYPTO_EXCHANGE_BACKEND', 'coinbase').strip().lower(),
+            ccxt_exchange_id=os.getenv('CRYPTO_CCXT_EXCHANGE', 'coinbaseadvanced').strip(),
         )
 
     def to_dict(self) -> Dict:
@@ -259,6 +268,8 @@ class CryptoFinderConfig:
             'report_leverage': self.report_leverage,
             'incremental_cache': self.incremental_cache,
             'incremental_cache_path': self.incremental_cache_path,
+            'exchange_backend': self.exchange_backend,
+            'ccxt_exchange_id': self.ccxt_exchange_id,
         }
 
 # Configure enhanced logging with file rotation
@@ -468,6 +479,26 @@ class LongTermCryptoFinder:
         'MEDIUM_HIGH': 0.70,
         'HIGH': 0.85
     }
+    GRANULARITY_TO_TIMEFRAME = {
+        "ONE_MINUTE": "1m",
+        "FIVE_MINUTE": "5m",
+        "TEN_MINUTE": "10m",
+        "FIFTEEN_MINUTE": "15m",
+        "THIRTY_MINUTE": "30m",
+        "ONE_HOUR": "1h",
+        "SIX_HOUR": "6h",
+        "ONE_DAY": "1d",
+    }
+    GRANULARITY_TO_SECONDS = {
+        "ONE_MINUTE": 60,
+        "FIVE_MINUTE": 300,
+        "TEN_MINUTE": 600,
+        "FIFTEEN_MINUTE": 900,
+        "THIRTY_MINUTE": 1800,
+        "ONE_HOUR": 3600,
+        "SIX_HOUR": 6 * 3600,
+        "ONE_DAY": 24 * 3600,
+    }
     """
     A comprehensive tool for finding long-term cryptocurrency investment opportunities using Coinbase API.
     """
@@ -487,15 +518,24 @@ class LongTermCryptoFinder:
         # Auth presence flag (used to prefer authenticated product paths)
         self._has_auth = bool(self.api_key and self.api_secret)
 
-        # Initialize Coinbase service
-        self.coinbase_service = CoinbaseService(self.api_key, self.api_secret)
-        self.historical_data = HistoricalData(self.coinbase_service.client)
-        self.historical_data.set_force_refresh(bool(self.config.force_refresh_candles))
-        if getattr(self.config, 'force_refresh_candles', False):
-            try:
-                self._cached_candles.cache_clear()  # type: ignore[attr-defined]
-            except AttributeError:
-                pass
+        self.exchange_backend = getattr(self.config, 'exchange_backend', 'coinbase').lower()
+        self.ccxt_exchange_id = getattr(self.config, 'ccxt_exchange_id', 'coinbaseadvanced')
+        self._ccxt = None
+
+        if self.exchange_backend == 'ccxt':
+            self.coinbase_service = None
+            self.historical_data = None
+            self._init_ccxt_backend()
+        else:
+            # Initialize Coinbase service
+            self.coinbase_service = CoinbaseService(self.api_key, self.api_secret)
+            self.historical_data = HistoricalData(self.coinbase_service.client)
+            self.historical_data.set_force_refresh(bool(self.config.force_refresh_candles))
+            if getattr(self.config, 'force_refresh_candles', False):
+                try:
+                    self._cached_candles.cache_clear()  # type: ignore[attr-defined]
+                except AttributeError:
+                    pass
 
         # HTTP session with retries + backoff
         self._sess = requests.Session()
@@ -582,7 +622,8 @@ class LongTermCryptoFinder:
                 self.llm_scorer = None
 
         finder_label = getattr(self, 'FINDER_LABEL', 'Long-Term Crypto Finder')
-        logger.info(f"{finder_label} initialized with Coinbase API")
+        backend_label = 'CCXT' if self.exchange_backend == 'ccxt' else 'Coinbase API'
+        logger.info(f"{finder_label} initialized with {backend_label}")
         logger.info(f"Configuration: {self.config.to_dict()}")
 
         # Counters for diagnostics
@@ -591,6 +632,29 @@ class LongTermCryptoFinder:
         
         # Validate API credentials
         self._validate_api_credentials()
+
+    def _init_ccxt_backend(self) -> None:
+        """Initialise CCXT exchange client when backend is set to 'ccxt'."""
+        if ccxt is None:
+            raise RuntimeError(
+                "ccxt package is required for exchange_backend='ccxt'. Install via 'pip install ccxt'."
+            )
+        exchange_id = (self.ccxt_exchange_id or 'coinbaseadvanced').lower()
+        try:
+            exchange_cls = getattr(ccxt, exchange_id)
+        except AttributeError as exc:
+            raise RuntimeError(f"Unsupported CCXT exchange id '{exchange_id}'.") from exc
+
+        params = {"enableRateLimit": True}
+        if self.api_key and self.api_secret:
+            params["apiKey"] = self.api_key
+            params["secret"] = self.api_secret
+        try:
+            self._ccxt = exchange_cls(params)
+            self._ccxt.load_markets()
+            logger.info("CCXT exchange '%s' initialised for long-term finder", exchange_id)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to initialise CCXT exchange '{exchange_id}': {exc}") from exc
 
     def _normalize_ts(self, t) -> int:
         """Return epoch seconds from seconds/ms/us or ISO string; 0 on failure."""
@@ -1284,6 +1348,9 @@ class LongTermCryptoFinder:
 
         Gracefully falls back to a small static set if auth/public endpoint fails.
         """
+        if self.exchange_backend == 'ccxt' and self._ccxt is not None:
+            return self._fetch_ccxt_products()
+
         products: List = []
         # Prefer authenticated product list when keys are present to avoid public 401 noise
         if getattr(self, "_has_auth", False):
@@ -1388,6 +1455,57 @@ class LongTermCryptoFinder:
         self._symbol_to_product = {k: v["product_id"] for k, v in result.items() if v.get("product_id")}
         skipped = max(0, total_online - kept)
         logger.info(f"Coinbase products filtered by quotes {sorted(quotes_set)}: kept {kept}, skipped {skipped}")
+        return result
+
+    def _fetch_ccxt_products(self) -> Dict[str, Dict[str, str]]:
+        if not self._ccxt:
+            return {}
+
+        try:
+            markets = self._ccxt.load_markets()
+        except Exception as exc:
+            logger.warning("ccxt.load_markets failed: %s", exc)
+            markets = getattr(self._ccxt, 'markets', {}) or {}
+
+        try:
+            quotes = [q.strip().upper() for q in (self.config.quotes or []) if q]
+        except Exception:
+            quotes = None
+        if not quotes:
+            env_q = os.getenv('CRYPTO_QUOTES', 'USDC,USD,USDT')
+            quotes = [q.strip().upper() for q in env_q.split(',') if q.strip()]
+        quotes_set = set(quotes or ['USDC'])
+        order = {q: i for i, q in enumerate(quotes)}
+
+        result: Dict[str, Dict[str, str]] = {}
+        kept = 0
+        for market in markets.values():
+            if not isinstance(market, dict):
+                continue
+            if market.get('inactive', False):
+                continue
+            if not market.get('active', True):
+                continue
+            base = str(market.get('base') or '').upper()
+            quote = str(market.get('quote') or '').upper()
+            if not base or quote not in quotes_set:
+                continue
+            symbol = str(market.get('symbol') or f"{base}/{quote}")
+            product_id = symbol.replace('/', '-')
+            current = result.get(base)
+            if (not current) or (order.get(quote, 1e9) < order.get(current.get('quote', 'ZZZ'), 1e9)):
+                result[base] = {
+                    'product_id': product_id,
+                    'base_name': base,
+                    'quote': quote,
+                }
+                kept += 1
+
+        if not result:
+            logger.warning("CCXT product discovery returned no matches for quotes %s", quotes)
+        else:
+            logger.info("CCXT products filtered by quotes %s: kept %s", sorted(quotes_set), kept)
+        self._symbol_to_product = {k: v['product_id'] for k, v in result.items() if v.get('product_id')}
         return result
 
     def _load_coingecko_list(self) -> List[Dict[str, str]]:
@@ -2212,6 +2330,9 @@ class LongTermCryptoFinder:
         """
         logger.debug(f"Fetching {days} days of historical data for {product_id}")
 
+        if self.exchange_backend == 'ccxt':
+            return self._get_ccxt_historical_dataframe(product_id, days)
+
         try:
             # Calculate time range
             end_time = datetime.now(UTC)
@@ -2260,6 +2381,9 @@ class LongTermCryptoFinder:
         try:
             start_time = datetime.fromisoformat(start_iso)
             end_time = datetime.fromisoformat(end_iso)
+            if self.exchange_backend == 'ccxt':
+                candles = self._fetch_ccxt_candles(product_id, granularity, start_time, end_time)
+                return tuple(candles or [])
             # Throttle Coinbase historical fetches to avoid burst rate limits
             self._throttle()
             with self._cb_sem:
@@ -2274,6 +2398,84 @@ class LongTermCryptoFinder:
         except Exception as e:
             logger.warning(f"Cached candles retrieval failed for {product_id}: {e}")
             return tuple()
+
+    def _fetch_ccxt_candles(
+        self,
+        product_id: str,
+        granularity: str,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> List[dict]:
+        if not self._ccxt:
+            return []
+        timeframe = self.GRANULARITY_TO_TIMEFRAME.get(granularity, '1d')
+        pair = product_id.replace('-', '/')
+        since_ms = int(start_time.timestamp() * 1000)
+        end_ms = int(end_time.timestamp() * 1000)
+        limit = None
+        seconds = self.GRANULARITY_TO_SECONDS.get(granularity)
+        if seconds:
+            total_seconds = max(seconds, int((end_time - start_time).total_seconds()))
+            limit = min(2000, int(total_seconds / seconds) + 5)
+
+        try:
+            self._throttle()
+            ohlcv = self._ccxt.fetch_ohlcv(pair, timeframe=timeframe, since=since_ms, limit=limit)
+        except Exception as exc:
+            logger.warning("CCXT fetch_ohlcv failed for %s (%s): %s", pair, timeframe, exc)
+            return []
+
+        candles: List[dict] = []
+        for row in ohlcv or []:
+            if not row or len(row) < 6:
+                continue
+            ts = int(row[0])
+            if ts < since_ms or ts > end_ms + 60_000:
+                continue
+            candles.append(
+                {
+                    'start': ts // 1000,
+                    'time': ts // 1000,
+                    'open': float(row[1]),
+                    'high': float(row[2]),
+                    'low': float(row[3]),
+                    'close': float(row[4]),
+                    'volume': float(row[5]),
+                }
+            )
+        return candles
+
+    def _get_ccxt_historical_dataframe(self, product_id: str, days: int) -> Optional[pd.DataFrame]:
+        if not self._ccxt:
+            return None
+        end_time = datetime.now(UTC)
+        start_time = end_time - timedelta(days=days)
+        candles = self._fetch_ccxt_candles(product_id, "ONE_DAY", start_time, end_time)
+        if not candles or len(candles) < 30:
+            logger.warning(
+                "Insufficient CCXT historical data for %s: %s candles",
+                product_id,
+                len(candles) if candles else 0,
+            )
+            return None
+
+        df = pd.DataFrame(
+            [
+                {
+                    'timestamp': datetime.fromtimestamp(c['start'], UTC),
+                    'price': float(c['close']),
+                    'high': float(c['high']),
+                    'low': float(c['low']),
+                    'open': float(c['open']),
+                    'volume': float(c.get('volume', 0.0)),
+                }
+                for c in candles
+            ]
+        )
+        df = df.dropna(subset=['timestamp'])
+        df.set_index('timestamp', inplace=True)
+        df.sort_index(inplace=True)
+        return df
 
     def calculate_technical_indicators(self, df: pd.DataFrame) -> Dict:
         """
@@ -4131,6 +4333,18 @@ def build_cli_parser(
         help='Avoid external HTTP where possible (use cache only)',
     )
     parser.add_argument(
+        '--exchange-backend',
+        choices=['coinbase', 'ccxt'],
+        default=env_defaults.exchange_backend,
+        help=f"Market data backend (default: {env_defaults.exchange_backend})",
+    )
+    parser.add_argument(
+        '--ccxt-exchange',
+        type=str,
+        default=env_defaults.ccxt_exchange_id,
+        help='CCXT exchange id when using --exchange-backend=ccxt (default: coinbaseadvanced)',
+    )
+    parser.add_argument(
         '--force-refresh',
         action=argparse.BooleanOptionalAction,
         default=env_defaults.force_refresh_candles,
@@ -4290,6 +4504,9 @@ def main():
         config.openai_temperature = float(args.openai_temperature)
     if args.openai_sleep_seconds is not None:
         config.openai_sleep_seconds = float(args.openai_sleep_seconds)
+    config.exchange_backend = (args.exchange_backend or config.exchange_backend).lower()
+    if args.ccxt_exchange:
+        config.ccxt_exchange_id = args.ccxt_exchange
 
     if config.offline and config.force_refresh_candles:
         logger.warning("Force refresh disabled because offline mode is enabled; using cached candles only.")

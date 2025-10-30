@@ -66,6 +66,9 @@ By default, the tool evaluates both LONG and SHORT sides and ranks the top oppor
 # Analyze top 30 cryptocurrencies, show top 10 best opportunities across BOTH sides
 python long_term_crypto_finder.py --limit 30 --max-results 10
 
+# Pull data via CCXT (defaulting to coinbaseadvanced) instead of direct Coinbase REST
+python long_term_crypto_finder.py --exchange-backend ccxt --ccxt-exchange coinbaseadvanced
+
 # Only consider cryptocurrencies with market cap > $500M
 python long_term_crypto_finder.py --min-market-cap 500000000
 
@@ -102,6 +105,8 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--top-per-side` | - | Cap results per side before final sort (must be >0 when provided) |
 | `--save` | - | Save results to path (`.json` or `.csv`) |
 | `--offline` / `--no-offline` | false | Avoid external HTTP where possible (use cache) |
+| `--exchange-backend` | coinbase | Market data backend: `coinbase` (legacy REST) or `ccxt` |
+| `--ccxt-exchange` | coinbaseadvanced | CCXT exchange id when `--exchange-backend=ccxt` |
 | `--force-refresh` / `--no-force-refresh` | env (`CRYPTO_FORCE_REFRESH_CANDLES`) | Force fresh candle downloads instead of using cache |
 | `--max-workers` | env/profile | Override parallel workers; defaults from env/profile or CPU count (must be >0 when provided) |
 | `--quotes` | env | Preferred quote currencies, e.g., `USDC,USD,USDT` |
