@@ -1,6 +1,6 @@
 # Long-Term Crypto Opportunity Finder
 
-A comprehensive Python program that analyzes cryptocurrencies to identify the best long-term opportunities on both the LONG and SHORT side using multiple analytical approaches.
+A comprehensive Python program that analyzes cryptocurrencies to identify the best long-term opportunities on both the LONG and SHORT side using multiple analytical approaches. By default it sources market data through [CCXT](https://github.com/ccxt/ccxt) (using `coinbaseadvanced`), but you can opt back into the native Coinbase REST client if needed.
 
 ## Features
 
@@ -66,8 +66,11 @@ By default, the tool evaluates both LONG and SHORT sides and ranks the top oppor
 # Analyze top 30 cryptocurrencies, show top 10 best opportunities across BOTH sides
 python long_term_crypto_finder.py --limit 30 --max-results 10
 
-# Pull data via CCXT (defaulting to coinbaseadvanced) instead of direct Coinbase REST
-python long_term_crypto_finder.py --exchange-backend ccxt --ccxt-exchange coinbaseadvanced
+# Switch CCXT to a different supported venue
+python long_term_crypto_finder.py --ccxt-exchange binance
+
+# Use the explicit Coinbase REST backend instead of CCXT
+python long_term_crypto_finder.py --exchange-backend coinbase
 
 # Only consider cryptocurrencies with market cap > $500M
 python long_term_crypto_finder.py --min-market-cap 500000000
@@ -105,7 +108,7 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--top-per-side` | - | Cap results per side before final sort (must be >0 when provided) |
 | `--save` | - | Save results to path (`.json` or `.csv`) |
 | `--offline` / `--no-offline` | false | Avoid external HTTP where possible (use cache) |
-| `--exchange-backend` | coinbase | Market data backend: `coinbase` (legacy REST) or `ccxt` |
+| `--exchange-backend` | ccxt | Market data backend: `ccxt` (default) or `coinbase` (native REST) |
 | `--ccxt-exchange` | coinbaseadvanced | CCXT exchange id when `--exchange-backend=ccxt` |
 | `--force-refresh` / `--no-force-refresh` | env (`CRYPTO_FORCE_REFRESH_CANDLES`) | Force fresh candle downloads instead of using cache |
 | `--max-workers` | env/profile | Override parallel workers; defaults from env/profile or CPU count (must be >0 when provided) |

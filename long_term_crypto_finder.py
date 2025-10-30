@@ -128,7 +128,7 @@ class CryptoFinderConfig:
     report_leverage: float = 50.0
     incremental_cache: bool = False
     incremental_cache_path: str = "cache/incremental_metrics.json"
-    exchange_backend: str = "coinbase"  # coinbase or ccxt
+    exchange_backend: str = "ccxt"  # ccxt or coinbase
     ccxt_exchange_id: str = "coinbaseadvanced"  # default CCXT exchange when backend=ccxt
 
     @classmethod
@@ -219,7 +219,7 @@ class CryptoFinderConfig:
             report_leverage=_float_env('CRYPTO_REPORT_LEVERAGE', 50.0),
             incremental_cache=os.getenv('CRYPTO_INCREMENTAL_CACHE', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
             incremental_cache_path=os.getenv('CRYPTO_INCREMENTAL_CACHE_PATH', 'cache/incremental_metrics.json'),
-            exchange_backend=os.getenv('CRYPTO_EXCHANGE_BACKEND', 'coinbase').strip().lower(),
+            exchange_backend=os.getenv('CRYPTO_EXCHANGE_BACKEND', 'ccxt').strip().lower(),
             ccxt_exchange_id=os.getenv('CRYPTO_CCXT_EXCHANGE', 'coinbaseadvanced').strip(),
         )
 
@@ -794,6 +794,9 @@ class LongTermCryptoFinder:
 
     def _validate_api_credentials(self) -> None:
         """Lightweight presence check; do not block public/offline usage."""
+        if self.exchange_backend == 'ccxt':
+            # CCXT can operate keyless by default; no warning necessary here
+            return
         if getattr(self, 'offline', False) or os.getenv("CRYPTO_PUBLIC_ONLY") in ("1", "true", "True"):
             logger.info("Public-only/offline: skipping API credential presence check")
             return
@@ -1889,22 +1892,22 @@ class LongTermCryptoFinder:
         """Process a single cryptocurrency in parallel."""
         try:
             logger.info(f"Processing {index+1}/{total}: {product_id}")
-            
-            # Get last 24 hours of hourly candles from Coinbase
-            # This supports accurate 24h change and 24h volume calculations
+
             current_time = datetime.now(UTC)
             start_time = current_time - timedelta(hours=24)
 
-            # Throttle Coinbase hourly candles request
-            self._throttle()
-            with self._cb_sem:
-                candles = self.historical_data.get_historical_data(
-                    product_id,
-                    start_time,
-                    current_time,
-                    "ONE_HOUR",
-                    force_refresh=self.config.force_refresh_candles,
-                )
+            if self.exchange_backend == 'ccxt':
+                candles = self._fetch_ccxt_candles(product_id, "ONE_HOUR", start_time, current_time)
+            else:
+                self._throttle()
+                with self._cb_sem:
+                    candles = self.historical_data.get_historical_data(
+                        product_id,
+                        start_time,
+                        current_time,
+                        "ONE_HOUR",
+                        force_refresh=self.config.force_refresh_candles,
+                    )
 
             if not candles or len(candles) == 0:
                 logger.warning(f"No candle data available for {product_id}")
