@@ -1004,14 +1004,16 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     else:
         logger.info("Insufficient history to compute evaluation metrics.")
 
+    report_text = build_plain_report(
+        results_df=results_df,
+        raw_feature_frames=feature_frames_raw,
+        threshold=args.threshold,
+        timeframe=args.timeframe,
+        expiry_hours=EXPIRY_HOURS,
+    )
+    if report_text:
+        print(report_text, end="")
     if args.plain_output:
-        report_text = build_plain_report(
-            results_df=results_df,
-            raw_feature_frames=feature_frames_raw,
-            threshold=args.threshold,
-            timeframe=args.timeframe,
-            expiry_hours=EXPIRY_HOURS,
-        )
         _save_plain_report(Path(args.plain_output), report_text)
 
     return 0
