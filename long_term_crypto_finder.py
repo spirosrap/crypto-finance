@@ -1896,7 +1896,7 @@ class LongTermCryptoFinder:
             current_time = datetime.now(UTC)
             start_time = current_time - timedelta(hours=24)
 
-            if self.exchange_backend == 'ccxt':
+            if self.exchange_backend == 'ccxt' or self.historical_data is None:
                 candles = self._fetch_ccxt_candles(product_id, "ONE_HOUR", start_time, current_time)
             else:
                 self._throttle()
@@ -2384,7 +2384,7 @@ class LongTermCryptoFinder:
         try:
             start_time = datetime.fromisoformat(start_iso)
             end_time = datetime.fromisoformat(end_iso)
-            if self.exchange_backend == 'ccxt':
+            if self.exchange_backend == 'ccxt' or self.historical_data is None:
                 candles = self._fetch_ccxt_candles(product_id, granularity, start_time, end_time)
                 return tuple(candles or [])
             # Throttle Coinbase historical fetches to avoid burst rate limits
