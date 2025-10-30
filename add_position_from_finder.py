@@ -35,6 +35,11 @@ from typing import Optional, Tuple, List
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
+from perp_support import (
+    canonical_perp_symbol,
+    is_perp_supported,
+    perp_price_multiplier,
+)
 
 # Reuse tick/size helpers from trade_btc_perp.py
 try:
@@ -75,23 +80,43 @@ def _decimals_for_tick(tick: float) -> int:
     return 0
 
 
+def _decimals_for_value(value: float, max_places: int = 8) -> int:
+    """Infer the number of decimal places from a numeric value."""
+    s = f"{value:.{max_places}f}".rstrip("0").rstrip(".")
+    if "." in s:
+        return len(s.split(".")[1])
+    return 0
+
+
+def normalize_perp(symbol: str, prefer: str = "PERP-INTX") -> str:
+    base = canonical_perp_symbol(symbol)
+    if not base:
+        return ""
+    suffix = "INTX-PERP" if prefer == "INTX-PERP" else "PERP-INTX"
+    return f"{base}-{suffix}"
+
+
 @dataclass
 class ParsedFinder:
     symbol: str
+    base_symbol: str
     side: str  # LONG | SHORT
     entry: float
     stop: float
     take_profit: float
     pos_size_pct: float  # percentage
+    entry_decimals: int
+    stop_decimals: int
+    take_profit_decimals: int
 
+    def max_price_decimals(self) -> int:
+        """Return the max precision implied by parsed price levels (cap at 8)."""
+        return min(8, max(self.entry_decimals, self.stop_decimals, self.take_profit_decimals))
 
-def normalize_perp(symbol: str, prefer: str = "PERP-INTX") -> str:
-    s = (symbol or "").upper().strip()
-    if not s:
-        return ""
-    if prefer == "INTX-PERP":
-        return f"{s}-INTX-PERP"
-    return f"{s}-PERP-INTX"
+    def min_price_value(self) -> float:
+        """Return the smallest positive price among entry/TP/SL."""
+        positives = [v for v in (self.entry, self.stop, self.take_profit) if v > 0]
+        return min(positives) if positives else 0.0
 
 
 def parse_finder_text(text: str) -> ParsedFinder:
@@ -102,6 +127,8 @@ def parse_finder_text(text: str) -> ParsedFinder:
     if not m_sym:
         raise ValueError("Could not find symbol in text")
     symbol = m_sym.group(1).upper()
+    m_base = re.search(r"\(([A-Z0-9]{2,20})-[A-Z0-9]{2,10}\)", text)
+    base_symbol = m_base.group(1).upper() if m_base else symbol
 
     # Side: from header line or TRADING LEVELS block
     m_side = re.search(r"—\s*(LONG|SHORT)", text)
@@ -110,14 +137,20 @@ def parse_finder_text(text: str) -> ParsedFinder:
     side = (m_side.group(1) if m_side else "LONG").upper()
 
     # Trading levels
-    def _num_after(label: str) -> Optional[float]:
+    def _extract_value(label: str) -> Tuple[Optional[float], int]:
         pat = rf"{label}\s*:\s*\$?\s*([0-9]+(?:\.[0-9]+)?)"
         m = re.search(pat, text, re.I)
-        return float(m.group(1)) if m else None
+        if not m:
+            return None, 0
+        raw = m.group(1)
+        decimals = len(raw.split(".")[1]) if "." in raw else 0
+        return float(raw), decimals
 
-    entry = _num_after("Entry Price") or _num_after("Price")
-    stop = _num_after("Stop Loss")
-    take_profit = _num_after("Take Profit")
+    entry, entry_dec = _extract_value("Entry Price")
+    if entry is None:
+        entry, entry_dec = _extract_value("Price")
+    stop, stop_dec = _extract_value("Stop Loss")
+    take_profit, tp_dec = _extract_value("Take Profit")
     if entry is None or stop is None or take_profit is None:
         raise ValueError("Missing entry/stop/take-profit values in text")
 
@@ -125,7 +158,18 @@ def parse_finder_text(text: str) -> ParsedFinder:
     m_sz = re.search(r"Recommended Position Size\s*:\s*([0-9]+(?:\.[0-9]+)?)%", text, re.I)
     pos_pct = float(m_sz.group(1)) if m_sz else 0.0
 
-    return ParsedFinder(symbol=symbol, side=side, entry=entry, stop=stop, take_profit=take_profit, pos_size_pct=pos_pct)
+    return ParsedFinder(
+        symbol=symbol,
+        base_symbol=base_symbol,
+        side=side,
+        entry=entry,
+        stop=stop,
+        take_profit=take_profit,
+        pos_size_pct=pos_pct,
+        entry_decimals=entry_dec,
+        stop_decimals=stop_dec,
+        take_profit_decimals=tp_dec,
+    )
 
 
 def split_blocks(text: str) -> List[str]:
@@ -197,18 +241,53 @@ def main() -> None:
     limits: List[Optional[float]] = []
     sizes_usd: List[float] = []
 
+    cb_for_support: Optional[CoinbaseService] = None
+    if API_KEY_PERPS and API_SECRET_PERPS:
+        try:
+            cb_for_support = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+        except Exception:
+            cb_for_support = None
+
+    unsupported: List[Tuple[str, str]] = []
+
     for parsed in parsed_list:
-        display_pid = normalize_perp(parsed.symbol, prefer=args.product_form)
-        api_pid = normalize_perp(parsed.symbol, prefer="PERP-INTX")
+        display_symbol = canonical_perp_symbol(parsed.base_symbol or parsed.symbol)
+        display_pid = normalize_perp(parsed.base_symbol or parsed.symbol, prefer=args.product_form)
+        api_pid = normalize_perp(parsed.base_symbol or parsed.symbol, prefer="PERP-INTX")
+        if not is_perp_supported(api_pid, cb_for_support):
+            unsupported.append((display_symbol or parsed.symbol, api_pid))
+            continue
+        price_multiplier = perp_price_multiplier(parsed.base_symbol or parsed.symbol)
+        scaled_entry = parsed.entry * price_multiplier
+        scaled_tp_val = parsed.take_profit * price_multiplier
+        scaled_sl_val = parsed.stop * price_multiplier
         side_perp = "SELL" if parsed.side == "SHORT" else "BUY"
         size_usd = (args.portfolio_usd * (parsed.pos_size_pct / 100.0)) if parsed.pos_size_pct > 0 else (args.portfolio_usd * 0.05)
         tick = get_price_precision(api_pid)
-        tp = round_to_precision(parsed.take_profit, tick)
-        sl = round_to_precision(parsed.stop, tick)
-        limit_price = round_to_precision(parsed.entry, tick) if args.order == "limit" else None
+        price_candidates = [v for v in (scaled_entry, scaled_tp_val, scaled_sl_val) if v > 0]
+        min_price_value = min(price_candidates) if price_candidates else 0.0
+        fallback_decimals = parsed.max_price_decimals()
+        if price_multiplier != 1.0:
+            fallback_decimals = max(
+                fallback_decimals,
+                _decimals_for_value(scaled_entry),
+                _decimals_for_value(scaled_tp_val),
+                _decimals_for_value(scaled_sl_val),
+            )
+        fallback_tick = 10 ** (-fallback_decimals) if fallback_decimals > 0 else (tick if tick > 0 else 1.0)
+        effective_tick = tick if tick and tick > 0 else fallback_tick
+        if min_price_value > 0 and min_price_value < effective_tick:
+            effective_tick = fallback_tick
+        if effective_tick <= 0:
+            effective_tick = fallback_tick if fallback_tick > 0 else 0.01
 
-        # Format numbers according to tick precision to avoid float noise
-        decimals = _decimals_for_tick(tick)
+        tp = round_to_precision(scaled_tp_val, effective_tick) if effective_tick > 0 else scaled_tp_val
+        sl = round_to_precision(scaled_sl_val, effective_tick) if effective_tick > 0 else scaled_sl_val
+        entry_value = round_to_precision(scaled_entry, effective_tick) if effective_tick > 0 else scaled_entry
+        limit_price = entry_value if args.order == "limit" else None
+
+        # Format numbers according to combined precision (tick + finder text)
+        decimals = max(_decimals_for_tick(effective_tick), fallback_decimals)
         tp_str = f"{tp:.{decimals}f}"
         sl_str = f"{sl:.{decimals}f}"
         limit_str = f"{limit_price:.{decimals}f}" if limit_price is not None else None
@@ -233,21 +312,23 @@ def main() -> None:
         sls.append(sl)
         limits.append(limit_price)
         sizes_usd.append(size_usd)
-        entry_basis = limit_price if limit_price is not None else parsed.entry
-        entry_basis = max(entry_basis, 1e-9)
+        entry_basis = limit_price if limit_price is not None else entry_value
+        if entry_basis <= 0:
+            entry_basis = max(scaled_entry, 1e-9)
         entry_disp = f"{entry_basis:.{decimals}f}"
         # Estimate percentage move between entry and TP/SL; clamp to avoid negatives
+        reward_denominator = max(entry_basis, 1e-9)
         if parsed.side == "SHORT":
-            reward_pct = max((entry_basis - tp) / entry_basis, 0.0)
-            risk_pct = max((sl - entry_basis) / entry_basis, 0.0)
+            reward_pct = max((entry_basis - tp) / reward_denominator, 0.0)
+            risk_pct = max((sl - entry_basis) / reward_denominator, 0.0)
         else:
-            reward_pct = max((tp - entry_basis) / entry_basis, 0.0)
-            risk_pct = max((entry_basis - sl) / entry_basis, 0.0)
+            reward_pct = max((tp - entry_basis) / reward_denominator, 0.0)
+            risk_pct = max((entry_basis - sl) / reward_denominator, 0.0)
         margin_usd = size_usd / max(args.leverage, 1e-9)
         reward_usd = reward_pct * size_usd
         risk_usd = risk_pct * size_usd
         summaries.append(
-            f"Symbol: {parsed.symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
+            f"Symbol: {display_symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
             f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f} (Margin ≈ ${margin_usd:.2f})  Expiry: {args.expiry}\n"
             f"PnL vs position: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
         )
@@ -261,10 +342,14 @@ def main() -> None:
         print(" ".join(cmd))
 
     if not args.execute:
+        if unsupported:
+            print("\nSkipped unsupported Coinbase perps:")
+            for sym, pid in unsupported:
+                print(f"- {sym}: {pid}")
         return
 
     # Execute all sequentially
-    cb = setup_cb()
+    cb = cb_for_support or setup_cb()
     for i, api_pid in enumerate(api_pids):
         try:
             # Current price for base size calc

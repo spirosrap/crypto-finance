@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 from coinbaseservice import CoinbaseService
 from historicaldata import HistoricalData
+from perp_support import canonical_perp_symbol, is_perp_supported
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 
@@ -54,7 +55,6 @@ DEFAULT_SYMBOLS = ["BTC-USDC", "ETH-USDC", "SOL-USDC", "AVAX-USDC"]
 DEFAULT_TIMEFRAME = "ONE_HOUR"
 DEFAULT_LOOKBACK = 720
 EXPIRY_HOURS = 24
-
 RESERVOIR_PROFILES: Dict[str, Dict[str, Any]] = {
     "default": {
         "max_products": 40,
@@ -206,6 +206,12 @@ def normalize_granularity(value: str) -> str:
 
 def normalize_product_id(symbol: str) -> str:
     return symbol.strip().upper().replace("/", "-").replace(":", "-")
+
+def spot_to_perp_id(product_id: str, prefer: str = "PERP-INTX") -> str:
+    base = product_id.split("-")[0]
+    base = canonical_perp_symbol(base)
+    suffix = "INTX-PERP" if prefer == "INTX-PERP" else "PERP-INTX"
+    return f"{base}-{suffix}"
 
 
 def _pget(obj: Any, key: str) -> Any:
@@ -526,6 +532,8 @@ def train_readout_for_coin(
     latest_rel_volume = float(latest_raw["relative_volume"])
     timestamp = df_raw.index[-1].to_pydatetime()
 
+    perp_product_id = spot_to_perp_id(symbol)
+
     result = {
         "timestamp": timestamp.isoformat(),
         "coin": symbol,
@@ -538,6 +546,7 @@ def train_readout_for_coin(
         "atr_pct": final_atr,
         "rsi": latest_rsi,
         "relative_volume": latest_rel_volume,
+        "perp_product_id": perp_product_id,
     }
 
     history = CoinReadoutHistory(
@@ -616,6 +625,38 @@ def _format_percent(value: float) -> str:
     return f"{value * 100:.2f}%"
 
 
+def prefer_usdc_products(df: pd.DataFrame) -> pd.DataFrame:
+    """Deduplicate results by base asset, preferring USDC-quoted products when available."""
+    if df.empty or "coin" not in df.columns:
+        return df
+    df = df.copy()
+    df["_order_idx"] = np.arange(len(df))
+    split = df["coin"].str.split("-", n=1, expand=True)
+    df["_base"] = split[0]
+    df["_quote"] = split[1].fillna("")
+
+    keep_indices: List[int] = []
+    selection: Dict[str, Tuple[int, str]] = {}
+    for _, row in df.iterrows():
+        base = row["_base"]
+        quote = row["_quote"]
+        idx = int(row["_order_idx"])
+        if base not in selection:
+            selection[base] = (idx, quote)
+            keep_indices.append(idx)
+            continue
+        prev_idx, prev_quote = selection[base]
+        if quote == "USDC" and prev_quote != "USDC":
+            if prev_idx in keep_indices:
+                keep_indices.remove(prev_idx)
+            keep_indices.append(idx)
+            selection[base] = (idx, quote)
+
+    kept = df[df["_order_idx"].isin(keep_indices)].copy()
+    kept = kept.sort_values("_order_idx").drop(columns=["_order_idx", "_base", "_quote"])
+    return kept.reset_index(drop=True)
+
+
 def _save_plain_report(path: Path, content: str) -> None:
     tmp_path = Path(f"{path}.tmp.{os.getpid()}.{int(datetime.now().timestamp() * 1000)}")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -655,7 +696,8 @@ def build_plain_report(
 
     for idx, row in active.iterrows():
         product_id = str(row["coin"])
-        base_symbol = product_id.split("-")[0]
+        raw_base = product_id.split("-")[0]
+        display_symbol = canonical_perp_symbol(raw_base)
         side = "LONG" if int(row["signal"]) > 0 else "SHORT"
         raw_df = raw_feature_frames.get(product_id)
         if raw_df is None or raw_df.empty:
@@ -688,7 +730,7 @@ def build_plain_report(
             if math.isfinite(rr_ratio_value):
                 rr_ratio = f"{rr_ratio_value:.2f}:1"
 
-        lines.append(f"{idx + 1}. {base_symbol} ({product_id}) — {side}")
+        lines.append(f"{idx + 1}. {display_symbol} ({product_id}) — {side}")
         lines.append("-" * 50)
         lines.append(f"Data Timestamp (UTC): {data_timestamp}")
         lines.append(f"Price: {_format_usd(price)}")
@@ -889,6 +931,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     results: List[Dict[str, object]] = []
     histories: Dict[str, CoinReadoutHistory] = {}
+    skipped_perps: List[str] = []
 
     for symbol, df_scaled in feature_frames_scaled.items():
         df_raw = feature_frames_raw[symbol]
@@ -906,6 +949,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             logger.warning("Skipping %s due to training failure", symbol)
             continue
         result, history = trained
+        perp_id = result.get("perp_product_id")
+        if perp_id and not is_perp_supported(perp_id, coinbase_service, logger=logger):
+            skipped_perps.append(f"{symbol}→{perp_id}")
+            continue
         results.append(result)
         histories[symbol] = history
         logger.info(
@@ -920,6 +967,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     if not results:
         logger.error("No signals generated.")
         return 1
+    if skipped_perps:
+        logger.info("Skipped unsupported perps: %s", ", ".join(skipped_perps))
 
     results_df = pd.DataFrame(results)
     results_df = results_df.sort_values(
@@ -927,6 +976,14 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         key=lambda series: np.abs(series),
         ascending=False,
     ).reset_index(drop=True)
+    preferred_results = prefer_usdc_products(results_df)
+    if len(preferred_results) != len(results_df):
+        logger.info(
+            "Filtered duplicate quote variants: kept %s of %s (preferring USDC).",
+            len(preferred_results),
+            len(results_df),
+        )
+    results_df = preferred_results
 
     ranked_path = args.output_csv.with_name(args.output_csv.stem + "_ranked.csv")
     results_df.to_csv(ranked_path, index=False)
@@ -936,7 +993,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     execution_df.to_csv(args.output_csv, index=False)
     logger.info("Execution signals saved to %s", args.output_csv)
 
-    metrics_df = evaluate_signals(histories, args.threshold, timeframe_hours)
+    active_coins = set(results_df["coin"])
+    filtered_histories = {k: v for k, v in histories.items() if k in active_coins}
+
+    metrics_df = evaluate_signals(filtered_histories, args.threshold, timeframe_hours)
     if not metrics_df.empty:
         metrics_path = args.output_csv.with_name(args.output_csv.stem + "_evaluation.csv")
         metrics_df.to_csv(metrics_path, index=False)
