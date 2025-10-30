@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from coinbaseservice import CoinbaseService
 from historicaldata import HistoricalData
-from perp_support import canonical_perp_symbol, is_perp_supported
+from perp_support import canonical_perp_symbol, is_perp_supported, perp_price_multiplier
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 
@@ -673,23 +673,30 @@ def build_plain_report(
     timeframe: str,
     expiry_hours: int = EXPIRY_HOURS,
     recommended_position_pct: float = 5.0,
+    compact: bool = False,
 ) -> str:
     lines: List[str] = []
     generated_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
-    header_rule = "=" * 100
-    lines.append(header_rule)
-    lines.append("MULTI-COIN RESERVOIR DAYTRADER SIGNALS")
-    lines.append(header_rule)
-
     active = results_df[results_df["signal"] != 0].copy()
-    lines.append(f"Generated on (UTC): {generated_utc}")
-    lines.append(f"Signal threshold: {threshold:.4f} | Timeframe: {timeframe} | Expiry: {expiry_hours}h")
-    lines.append(f"Total opportunities listed: {len(active)}")
-    lines.append(header_rule)
-    lines.append("")
+
+    if compact:
+        lines.append(
+            f"{len(active)} signal(s) | threshold={threshold:.4f} | timeframe={timeframe} | expiry={expiry_hours}h | generated_utc={generated_utc}"
+        )
+    else:
+        header_rule = "=" * 100
+        lines.append(header_rule)
+        lines.append("MULTI-COIN RESERVOIR DAYTRADER SIGNALS")
+        lines.append(header_rule)
+        lines.append(f"Generated on (UTC): {generated_utc}")
+        lines.append(f"Signal threshold: {threshold:.4f} | Timeframe: {timeframe} | Expiry: {expiry_hours}h")
+        lines.append(f"Total opportunities listed: {len(active)}")
+        lines.append(header_rule)
+        lines.append("")
 
     if active.empty:
-        lines.append("No actionable signals crossed the threshold today. Consider lowering the threshold or extending lookback.")
+        msg = "No actionable signals crossed the threshold today. Consider lowering the threshold or extending lookback."
+        lines.append(msg)
         return "\n".join(lines) + "\n"
 
     active.reset_index(drop=True, inplace=True)
@@ -724,30 +731,46 @@ def build_plain_report(
             take_profit_price = price * (1 - tp_pct)
             stop_loss_price = price * (1 + sl_pct)
 
+        multiplier = perp_price_multiplier(raw_base)
+        display_price = price * multiplier
+        display_tp = take_profit_price * multiplier
+        display_sl = stop_loss_price * multiplier
+
+        pred_str = _format_percent(predicted_return)
+        atr_str = _format_percent(atr_pct)
+        rel_vol_str = f"{rel_vol:.2f}" if math.isfinite(rel_vol) else "N/A"
+
         rr_ratio = "N/A"
         if sl_pct > 0 and math.isfinite(tp_pct):
             rr_ratio_value = tp_pct / sl_pct if sl_pct else float("inf")
             if math.isfinite(rr_ratio_value):
                 rr_ratio = f"{rr_ratio_value:.2f}:1"
 
-        lines.append(f"{idx + 1}. {display_symbol} ({product_id}) — {side}")
-        lines.append("-" * 50)
-        lines.append(f"Data Timestamp (UTC): {data_timestamp}")
-        lines.append(f"Price: {_format_usd(price)}")
-        lines.append(f"Predicted Return (next period): {_format_percent(predicted_return)}")
-        lines.append(f"RSI: {rsi_val:.2f}" if math.isfinite(rsi_val) else "RSI: N/A")
-        lines.append(f"ATR %: {atr_pct * 100:.2f}%" if math.isfinite(atr_pct) else "ATR %: N/A")
-        lines.append(f"Relative Volume: {rel_vol:.2f}" if math.isfinite(rel_vol) else "Relative Volume: N/A")
-        lines.append("")
-        lines.append(f"💼 TRADING LEVELS ({side}):")
-        lines.append(f"Entry Price: {_format_usd(price)}")
-        lines.append(f"Stop Loss: {_format_usd(stop_loss_price)}")
-        lines.append(f"Take Profit: {_format_usd(take_profit_price)}")
-        lines.append(f"Risk:Reward Ratio: {rr_ratio}")
-        lines.append(f"Recommended Position Size: {recommended_position_pct:.1f}% of portfolio")
-        lines.append(f"Take-Profit Distance: {_format_percent(tp_pct)} | Stop-Loss Distance: {_format_percent(sl_pct)}")
-        lines.append(f"Signal Expires In: {expiry_hours} hours")
-        lines.append("")
+        if compact:
+            lines.append(
+                f"{idx + 1}. {display_symbol:<12} {side:<5} entry={display_price:.6f} tp={display_tp:.6f} sl={display_sl:.6f} "
+                f"pred={pred_str} atr={atr_str} rv={rel_vol_str} "
+                f"timestamp={data_timestamp}"
+            )
+        else:
+            lines.append(f"{idx + 1}. {display_symbol} ({product_id}) — {side}")
+            lines.append("-" * 50)
+            lines.append(f"Data Timestamp (UTC): {data_timestamp}")
+            lines.append(f"Price: {_format_usd(display_price)}")
+            lines.append(f"Predicted Return (next period): {pred_str}")
+            lines.append(f"RSI: {rsi_val:.2f}" if math.isfinite(rsi_val) else "RSI: N/A")
+            lines.append(f"ATR %: {atr_str}" if math.isfinite(atr_pct) else "ATR %: N/A")
+            lines.append(f"Relative Volume: {rel_vol_str}")
+            lines.append("")
+            lines.append(f"💼 TRADING LEVELS ({side}):")
+            lines.append(f"Entry Price: {_format_usd(display_price)}")
+            lines.append(f"Stop Loss: {_format_usd(display_sl)}")
+            lines.append(f"Take Profit: {_format_usd(display_tp)}")
+            lines.append(f"Risk:Reward Ratio: {rr_ratio}")
+            lines.append(f"Recommended Position Size: {recommended_position_pct:.1f}% of portfolio")
+            lines.append(f"Take-Profit Distance: {_format_percent(tp_pct)} | Stop-Loss Distance: {_format_percent(sl_pct)}")
+            lines.append(f"Signal Expires In: {expiry_hours} hours")
+            lines.append("")
 
     return "\n".join(lines) + "\n"
 
@@ -1004,17 +1027,27 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     else:
         logger.info("Insufficient history to compute evaluation metrics.")
 
-    report_text = build_plain_report(
+    compact_report = build_plain_report(
         results_df=results_df,
         raw_feature_frames=feature_frames_raw,
         threshold=args.threshold,
         timeframe=args.timeframe,
         expiry_hours=EXPIRY_HOURS,
+        compact=True,
     )
-    if report_text:
-        print(report_text, end="")
+    if compact_report:
+        print(compact_report, end="")
+
     if args.plain_output:
-        _save_plain_report(Path(args.plain_output), report_text)
+        detailed_report = build_plain_report(
+            results_df=results_df,
+            raw_feature_frames=feature_frames_raw,
+            threshold=args.threshold,
+            timeframe=args.timeframe,
+            expiry_hours=EXPIRY_HOURS,
+            compact=False,
+        )
+        _save_plain_report(Path(args.plain_output), detailed_report)
 
     return 0
 
