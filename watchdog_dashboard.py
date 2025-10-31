@@ -525,6 +525,15 @@ def main() -> None:
         st.error(f"Failed to load data: {exc}")
         st.stop()
 
+    count_candidates = [c for c in ("count", "trade_number", "trade_index") if c in trades_df.columns]
+    if count_candidates:
+        max_trade_count = int(trades_df[count_candidates[0]].max())
+    else:
+        max_trade_count = len(trades_df)
+    primary_default = 93
+    if max_trade_count <= primary_default + 1:
+        primary_default = max(1, max_trade_count - 2)
+
     try:
         pipeline_snapshot = build_snapshot(trades_df, include_unrealized=False)
     except Exception as exc:
@@ -542,14 +551,15 @@ def main() -> None:
     primary_split = st.sidebar.number_input(
         "Trade split index #1",
         min_value=1,
-        value=93,
+        value=primary_default,
         step=1,
         help="Trades with count ≤ split #1 belong to Batch A.",
     )
+    secondary_default = max(primary_split + 1, min(max_trade_count - 1, 2000))
     secondary_split = st.sidebar.number_input(
         "Trade split index #2",
         min_value=int(primary_split + 1),
-        value=135,
+        value=secondary_default,
         step=1,
         help="Trades with count between split #1 and split #2 belong to Batch B.",
     )
