@@ -562,8 +562,8 @@ def main() -> None:
         help="Trades with count ≤ split #1 belong to Batch A.",
     )
     secondary_floor = primary_split + 1
-    secondary_ceiling = max(secondary_floor, max_trade_count)
-    secondary_default = min(max_trade_count, max(primary_split + 41, secondary_floor))
+    secondary_ceiling = max(secondary_floor, max_trade_count - 1)
+    secondary_default = min(secondary_ceiling, max(primary_split + 40, secondary_floor))
     secondary_split = st.sidebar.number_input(
         "Trade split index #2",
         min_value=int(secondary_floor),
@@ -572,11 +572,14 @@ def main() -> None:
         step=1,
         help="Trades with count between split #1 and split #2 belong to Batch B.",
     )
+    third_label_start = secondary_split + 2
+    if third_label_start > max_trade_count + 1:
+        third_label_start = max_trade_count + 1
     batch_options = (
         "All trades",
         f"Trades 1–{primary_split + 1}",
         f"Trades {primary_split + 2}–{min(secondary_split + 1, max_trade_count)}",
-        f"Trades {min(secondary_split + 2, max_trade_count + 1)}+",
+        f"Trades {third_label_start}+",
     )
     batch_choice = st.sidebar.radio(
         "Trade batch",
