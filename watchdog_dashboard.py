@@ -525,11 +525,16 @@ def main() -> None:
         st.error(f"Failed to load data: {exc}")
         st.stop()
 
-    count_candidates = [c for c in ("count", "trade_number", "trade_index") if c in trades_df.columns]
-    if count_candidates:
-        max_trade_count = int(trades_df[count_candidates[0]].max())
-    else:
-        max_trade_count = len(trades_df)
+    column_map = {col.strip().lower(): col for col in trades_df.columns}
+    max_trade_count = None
+    for key in ("count", "trade_count", "trade_number", "trade_index"):
+        if key in column_map:
+            series = pd.to_numeric(trades_df[column_map[key]], errors='coerce')
+            if series.notna().any():
+                max_trade_count = int(series.max())
+                break
+    if max_trade_count is None:
+        max_trade_count = int(trades_df.shape[0])
     primary_default = 93
     if max_trade_count <= primary_default + 1:
         primary_default = max(1, max_trade_count - 2)
@@ -555,11 +560,14 @@ def main() -> None:
         step=1,
         help="Trades with count ≤ split #1 belong to Batch A.",
     )
-    secondary_default = max(primary_split + 1, min(max_trade_count - 1, 2000))
+    secondary_floor = primary_split + 1
+    secondary_ceiling = max(secondary_floor, max_trade_count - 1)
+    secondary_default = secondary_ceiling
     secondary_split = st.sidebar.number_input(
         "Trade split index #2",
-        min_value=int(primary_split + 1),
-        value=secondary_default,
+        min_value=int(secondary_floor),
+        max_value=int(secondary_ceiling),
+        value=int(secondary_default),
         step=1,
         help="Trades with count between split #1 and split #2 belong to Batch B.",
     )
