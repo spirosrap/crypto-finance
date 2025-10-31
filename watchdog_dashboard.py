@@ -539,17 +539,25 @@ def main() -> None:
         help="Filter summary and charts to selected instruments.",
     )
 
-    batch_split = st.sidebar.number_input(
-        "Trade split index",
+    primary_split = st.sidebar.number_input(
+        "Trade split index #1",
         min_value=1,
         value=93,
         step=1,
-        help="Index (1-based) separating the legacy allocation from scaled trades.",
+        help="Trades with count ≤ split #1 belong to Batch A.",
+    )
+    secondary_split = st.sidebar.number_input(
+        "Trade split index #2",
+        min_value=int(primary_split + 1),
+        value=135,
+        step=1,
+        help="Trades with count between split #1 and split #2 belong to Batch B.",
     )
     batch_options = (
         "All trades",
-        f"Trades 1–{batch_split + 1}",
-        f"Trades {batch_split + 2}+",
+        f"Trades 1–{primary_split + 1}",
+        f"Trades {primary_split + 2}–{secondary_split + 1}",
+        f"Trades {secondary_split + 2}+",
     )
     batch_choice = st.sidebar.radio(
         "Trade batch",
@@ -580,9 +588,12 @@ def main() -> None:
     filter_end_count = int(end_count)
     if batch_choice == batch_options[1]:
         filter_start_count = 1
-        filter_end_count = int(batch_split + 1)
+        filter_end_count = int(primary_split + 1)
     elif batch_choice == batch_options[2]:
-        filter_start_count = int(batch_split + 2)
+        filter_start_count = int(primary_split + 2)
+        filter_end_count = int(secondary_split + 1)
+    elif batch_choice == batch_options[3]:
+        filter_start_count = int(secondary_split + 2)
         filter_end_count = 0
 
     filtered = apply_filters(
