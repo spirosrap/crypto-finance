@@ -9,6 +9,7 @@ Launch with:
 from __future__ import annotations
 
 import math
+import json
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -50,7 +51,7 @@ from watchdog_metrics import build_snapshot
 
 
 UTC = timezone.utc
-AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000
+AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 250
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -511,6 +512,15 @@ def main() -> None:
     if isinstance(end_date_input, list):
         end_date_input = end_date_input[0] if end_date_input else None
 
+    batch_pref_path = Path('cache/watchdog_batch_pref.json')
+    default_batch_choice = 0
+    if batch_pref_path.exists():
+        try:
+            data = json.loads(batch_pref_path.read_text())
+            default_batch_choice = int(data.get('batch_choice', 0))
+        except Exception:
+            default_batch_choice = 0
+
     start_count = st.sidebar.number_input("Start count (1-based)", min_value=0, value=0, step=1)
     end_count = st.sidebar.number_input("End count (inclusive, 0 for none)", min_value=0, value=0, step=1)
     tail_last = st.sidebar.number_input("Last N trades (0 to ignore)", min_value=0, value=0, step=1)
@@ -581,12 +591,20 @@ def main() -> None:
         f"Trades {primary_split + 2}–{min(secondary_split + 1, max_trade_count)}",
         f"Trades {third_label_start}+",
     )
+    batch_choice_index = min(default_batch_choice, len(batch_options) - 1)
     batch_choice = st.sidebar.radio(
         "Trade batch",
         options=batch_options,
-        index=0,
-        help="Quick toggle between the initial batch of trades and the scaled batch.",
+        index=batch_choice_index,
+        help="Quick toggle between batches.",
     )
+    selected_index = batch_options.index(batch_choice)
+    st.session_state['batch_choice'] = selected_index
+    try:
+        batch_pref_path.parent.mkdir(parents=True, exist_ok=True)
+        batch_pref_path.write_text(json.dumps({'batch_choice': selected_index}))
+    except Exception:
+        pass
 
     start_str = start_date_input.isoformat() if start_date_input else None
     end_str = end_date_input.isoformat() if end_date_input else None
