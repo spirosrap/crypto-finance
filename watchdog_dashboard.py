@@ -50,7 +50,7 @@ from watchdog_metrics import build_snapshot
 
 
 UTC = timezone.utc
-AUTO_REFRESH_SECONDS = 5 * 60
+AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -462,9 +462,9 @@ def main() -> None:
     components.html(
         f"""
         <script>
-        const WATCHDOG_REFRESH_MS = {AUTO_REFRESH_SECONDS * 1000};
+        const WATCHDOG_REFRESH_MS = {AUTO_REFRESH_INTERVAL_MS};
         setInterval(() => {{
-            window.parent.postMessage({{type: 'streamlit:rerun'}}, '*');
+            window.parent.location.reload();
         }}, WATCHDOG_REFRESH_MS);
         </script>
         """,
