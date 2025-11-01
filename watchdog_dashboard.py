@@ -685,7 +685,7 @@ def main() -> None:
 
     open_positions_count = int(len(open_positions_df))
     position_label = "open position" if open_positions_count == 1 else "open positions"
-    summary_total_value = float(summary_total) if 'summary_total' in locals() and summary_total is not None else 0.0
+    summary_total_value = float(total_unrealized) if total_unrealized is not None else 0.0
     exp_label_text = f"({open_positions_count}) Open positions (live) | P/L {summary_total_value:+.2f}"
     label_color = None
     if open_positions_count > 0:
