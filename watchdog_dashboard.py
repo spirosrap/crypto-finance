@@ -685,7 +685,7 @@ def main() -> None:
 
     open_positions_count = int(len(open_positions_df))
     position_label = "open position" if open_positions_count == 1 else "open positions"
-    exp_label_text = f"Open positions (live) | {open_positions_count} {position_label}"
+    exp_label_text = f"Open positions (live) — {open_positions_count} {position_label}"
     label_color = None
     if open_positions_count > 0:
         label_color = "green" if total_unrealized >= 0 else "red"
