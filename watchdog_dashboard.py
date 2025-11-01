@@ -683,9 +683,11 @@ def main() -> None:
             age_display = "n/a"
         health_col3.metric("Latest close age", age_display)
 
-    exp_label_text = "Open positions (live)"
+    open_positions_count = int(len(open_positions_df))
+    position_label = "open position" if open_positions_count == 1 else "open positions"
+    exp_label_text = f"Open positions (live) | {open_positions_count} {position_label}"
     label_color = None
-    if not open_positions_df.empty:
+    if open_positions_count > 0:
         label_color = "green" if total_unrealized >= 0 else "red"
         exp_label_text += f" | P/L {total_unrealized:+.2f}"
 
