@@ -690,7 +690,6 @@ def main() -> None:
     label_color = None
     if open_positions_count > 0:
         label_color = "green" if total_unrealized >= 0 else "red"
-        exp_label_text += f" | P/L {total_unrealized:+.2f}"
 
     expander = st.expander(exp_label_text, expanded=False)
     if label_color:
