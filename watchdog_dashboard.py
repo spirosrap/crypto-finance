@@ -50,7 +50,7 @@ from watchdog_metrics import build_snapshot
 
 
 UTC = timezone.utc
-AUTO_REFRESH_SECONDS = 10
+AUTO_REFRESH_SECONDS = 5 * 60
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
