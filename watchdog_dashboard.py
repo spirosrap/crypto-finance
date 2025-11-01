@@ -686,7 +686,7 @@ def main() -> None:
     open_positions_count = int(len(open_positions_df))
     position_label = "open position" if open_positions_count == 1 else "open positions"
     summary_pl = float(summary_total) if summary_total is not None else 0.0
-    exp_label_text = f"({open_positions_count}) Open positions (live) | P/L {summary_pl:+.2f}"
+    exp_label_text = f"({open_positions_count}) Open positions (live) | P/L {summary_total:+.2f}"
     label_color = None
     if open_positions_count > 0:
         label_color = "green" if total_unrealized >= 0 else "red"
