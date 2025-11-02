@@ -1,4 +1,5 @@
 coinbase-advanced-py>=1.8.2
+ccxt>=4.2.0
 numpy>=1.24,<2.0
 pandas>=2.3.2
 pandas-ta @ https://files.pythonhosted.org/packages/f7/0b/1666f0a185d4f08215f53cc088122a73c92421447b04028f0464fabe1ce6/pandas_ta-0.3.14b.tar.gz
