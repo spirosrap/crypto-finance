@@ -325,12 +325,6 @@ def main() -> None:
     if abs(potential_loss) < 1e-6:
         raise RuntimeError("Stop loss too close to entry; risk zero.")
 
-    if not args.dry_run:
-        confirm = input("Proceed with order placement? (yes/no): ").strip().lower()
-        if confirm != "yes":
-            print("Aborted by user.")
-            return
-
     entry_order = place_entry_order(
         exchange,
         meta,
