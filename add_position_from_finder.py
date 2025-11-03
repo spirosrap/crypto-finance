@@ -4,11 +4,12 @@ Add Perp Position From Finder Output
 
 Parses a single-asset text block produced by ``long_term_crypto_finder.py`` or
 ``short_term_crypto_finder.py`` and prepares a perpetual order using the
-conventions in ``trade_btc_perp.py``.
+conventions in ``ccxt_trade_perp.py``.
 
-Default behavior is dry-run: prints a ready-to-run trade_btc_perp.py command
+Default behavior is dry-run: prints a ready-to-run ccxt_trade_perp.py command
 and a summarized order plan. Pass --execute to actually place the order using
-CoinbaseService (market or limit with brackets). API keys must be configured.
+the CCXT Coinbase Advanced client (market or limit with brackets). API keys
+must be configured for execution.
 
 Assumptions
 - Side comes from lines like "— LONG/SHORT" or "TRADING LEVELS (LONG/SHORT)".
@@ -27,43 +28,33 @@ Examples
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from dataclasses import dataclass
 from typing import Optional, Tuple, List
 
-from coinbaseservice import CoinbaseService
-from config import API_KEY_PERPS, API_SECRET_PERPS
+from ccxt_trade_perp import (
+    MarketMeta,
+    calculate_base_size,
+    ensure_margin_balance,
+    fetch_reference_price,
+    get_market_meta,
+    load_exchange,
+    place_entry_order,
+    place_trigger_bracket_order,
+    quantize_price,
+    wait_for_fill,
+)
 from perp_support import (
     canonical_perp_symbol,
-    is_perp_supported,
     perp_price_multiplier,
 )
 
-# Reuse tick/size helpers from trade_btc_perp.py
-try:
-    from trade_btc_perp import get_price_precision, round_to_precision, calculate_base_size
-except Exception:
-    # Minimal fallbacks if import path changes
-    def get_price_precision(product_id: str) -> float:
-        return {
-            'BTC-PERP-INTX': 1.0,
-            'ETH-PERP-INTX': 0.1,
-            'DOGE-PERP-INTX': 0.0001,
-            'SOL-PERP-INTX': 0.01,
-            'XRP-PERP-INTX': 0.001,
-            '1000SHIB-PERP-INTX': 0.000001,
-            'NEAR-PERP-INTX': 0.001,
-            'SUI-PERP-INTX': 0.0001,
-            'ATOM-PERP-INTX': 0.001,
-        }.get(product_id, 0.01)
-
-    def round_to_precision(value: float, precision: float) -> float:
-        return round(value / precision) * precision if precision > 0 else value
-
-    def calculate_base_size(product_id: str, size_usd: float, current_price: float) -> float:
-        return max(size_usd / max(current_price, 1e-9), 0.0)
+def round_to_step(value: float, step: float) -> float:
+    """Round ``value`` to the nearest multiple of ``step``."""
+    if step <= 0:
+        return value
+    return round(value / step) * step
 
 
 def _decimals_for_tick(tick: float) -> int:
@@ -194,14 +185,6 @@ def split_blocks(text: str) -> List[str]:
     return blocks
 
 
-def setup_cb() -> CoinbaseService:
-    api_key = API_KEY_PERPS
-    api_secret = API_SECRET_PERPS
-    if not api_key or not api_secret:
-        raise RuntimeError("Missing API_KEY_PERPS/API_SECRET_PERPS in config.py or env")
-    return CoinbaseService(api_key, api_secret)
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description="Create perp position from long- or short-term finder text output")
     ap.add_argument("--file", type=str, help="Path to finder output text; omit to read stdin")
@@ -210,7 +193,7 @@ def main() -> None:
     ap.add_argument("--product-form", type=str, choices=["PERP-INTX", "INTX-PERP"], default="PERP-INTX", help="Perp suffix format to display")
     ap.add_argument("--order", type=str, choices=["market", "limit"], default="market", help="Order type")
     ap.add_argument("--execute", action="store_true", help="Actually place the order (otherwise dry-run)")
-    ap.add_argument("--expiry", type=str, choices=["12h", "24h", "30d"], default="30d", help="GTD expiry for bracket orders")
+    ap.add_argument("--expiry", type=str, choices=["GTC", "12h", "24h", "30d"], default="30d", help="GTD expiry for bracket orders")
 
     args = ap.parse_args()
 
@@ -232,6 +215,31 @@ def main() -> None:
     # Format leverage without unnecessary decimals (e.g., 50.0 -> 50)
     leverage_str = f"{args.leverage:g}"
 
+    exchange_obj: Optional[object] = None
+    exchange_error: Optional[Exception] = None
+    exchange_warning_shown = False
+
+    def ensure_exchange(require: bool) -> Optional[object]:
+        nonlocal exchange_obj, exchange_error, exchange_warning_shown
+        if exchange_obj is not None:
+            return exchange_obj
+        if exchange_error is not None:
+            if require:
+                raise RuntimeError("Unable to initialise CCXT Coinbase Advanced client.") from exchange_error
+            return None
+        try:
+            exchange_obj = load_exchange()
+            return exchange_obj
+        except Exception as exc:
+            exchange_error = exc
+            if require:
+                raise RuntimeError("Unable to initialise CCXT Coinbase Advanced client.") from exc
+            if not exchange_warning_shown:
+                print(f"Warning: could not load Coinbase Advanced markets via CCXT ({exc}). "
+                      "Falling back to heuristic precision estimates.")
+                exchange_warning_shown = True
+            return None
+
     commands: List[List[str]] = []
     summaries: List[str] = []
     api_pids: List[str] = []
@@ -240,30 +248,30 @@ def main() -> None:
     sls: List[float] = []
     limits: List[Optional[float]] = []
     sizes_usd: List[float] = []
+    metas: List[Optional[MarketMeta]] = []
+    price_steps: List[float] = []
 
-    cb_for_support: Optional[CoinbaseService] = None
-    if API_KEY_PERPS and API_SECRET_PERPS:
-        try:
-            cb_for_support = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
-        except Exception:
-            cb_for_support = None
-
-    unsupported: List[Tuple[str, str]] = []
+    unsupported: List[Tuple[str, str, Optional[str]]] = []
 
     for parsed in parsed_list:
         display_symbol = canonical_perp_symbol(parsed.base_symbol or parsed.symbol)
         display_pid = normalize_perp(parsed.base_symbol or parsed.symbol, prefer=args.product_form)
         api_pid = normalize_perp(parsed.base_symbol or parsed.symbol, prefer="PERP-INTX")
-        if not is_perp_supported(api_pid, cb_for_support):
-            unsupported.append((display_symbol or parsed.symbol, api_pid))
-            continue
+        exchange_candidate = ensure_exchange(require=False)
+        meta: Optional[MarketMeta] = None
+        if exchange_candidate is not None:
+            try:
+                meta = get_market_meta(exchange_candidate, api_pid)
+            except Exception as exc:
+                unsupported.append((display_symbol or parsed.symbol, api_pid, str(exc)))
+                continue
         price_multiplier = perp_price_multiplier(parsed.base_symbol or parsed.symbol)
         scaled_entry = parsed.entry * price_multiplier
         scaled_tp_val = parsed.take_profit * price_multiplier
         scaled_sl_val = parsed.stop * price_multiplier
         side_perp = "SELL" if parsed.side == "SHORT" else "BUY"
         size_usd = (args.portfolio_usd * (parsed.pos_size_pct / 100.0)) if parsed.pos_size_pct > 0 else (args.portfolio_usd * 0.05)
-        tick = get_price_precision(api_pid)
+        tick = meta.price_precision if meta and getattr(meta, "price_precision", 0.0) else 0.0
         price_candidates = [v for v in (scaled_entry, scaled_tp_val, scaled_sl_val) if v > 0]
         min_price_value = min(price_candidates) if price_candidates else 0.0
         fallback_decimals = parsed.max_price_decimals()
@@ -281,19 +289,35 @@ def main() -> None:
         if effective_tick <= 0:
             effective_tick = fallback_tick if fallback_tick > 0 else 0.01
 
-        tp = round_to_precision(scaled_tp_val, effective_tick) if effective_tick > 0 else scaled_tp_val
-        sl = round_to_precision(scaled_sl_val, effective_tick) if effective_tick > 0 else scaled_sl_val
-        entry_value = round_to_precision(scaled_entry, effective_tick) if effective_tick > 0 else scaled_entry
+        if meta and getattr(meta, "price_precision", 0.0):
+            tp = quantize_price(scaled_tp_val, meta.price_precision)
+            sl = quantize_price(scaled_sl_val, meta.price_precision)
+            entry_value = quantize_price(scaled_entry, meta.price_precision)
+            rounding_step = meta.price_precision
+        else:
+            tp = round_to_step(scaled_tp_val, effective_tick)
+            sl = round_to_step(scaled_sl_val, effective_tick)
+            entry_value = round_to_step(scaled_entry, effective_tick)
+            rounding_step = effective_tick
         limit_price = entry_value if args.order == "limit" else None
 
         # Format numbers according to combined precision (tick + finder text)
         decimals = max(_decimals_for_tick(effective_tick), fallback_decimals)
-        tp_str = f"{tp:.{decimals}f}"
-        sl_str = f"{sl:.{decimals}f}"
-        limit_str = f"{limit_price:.{decimals}f}" if limit_price is not None else None
+        if exchange_candidate is not None and meta is not None:
+            tp_str = exchange_candidate.price_to_precision(meta.ccxt_symbol, tp)
+            sl_str = exchange_candidate.price_to_precision(meta.ccxt_symbol, sl)
+            limit_str = (
+                exchange_candidate.price_to_precision(meta.ccxt_symbol, limit_price)
+                if limit_price is not None
+                else None
+            )
+        else:
+            tp_str = f"{tp:.{decimals}f}"
+            sl_str = f"{sl:.{decimals}f}"
+            limit_str = f"{limit_price:.{decimals}f}" if limit_price is not None else None
 
         cmd = [
-            "python", "trade_btc_perp.py",
+            "python", "ccxt_trade_perp.py",
             "--product", api_pid,
             "--side", side_perp,
             "--size", f"{size_usd:.2f}",
@@ -312,10 +336,15 @@ def main() -> None:
         sls.append(sl)
         limits.append(limit_price)
         sizes_usd.append(size_usd)
+        metas.append(meta)
+        price_steps.append(rounding_step if rounding_step > 0 else effective_tick)
         entry_basis = limit_price if limit_price is not None else entry_value
         if entry_basis <= 0:
             entry_basis = max(scaled_entry, 1e-9)
-        entry_disp = f"{entry_basis:.{decimals}f}"
+        if exchange_candidate is not None and meta is not None:
+            entry_disp = exchange_candidate.price_to_precision(meta.ccxt_symbol, entry_basis)
+        else:
+            entry_disp = f"{entry_basis:.{decimals}f}"
         # Estimate percentage move between entry and TP/SL; clamp to avoid negatives
         reward_denominator = max(entry_basis, 1e-9)
         if parsed.side == "SHORT":
@@ -344,48 +373,75 @@ def main() -> None:
     if not args.execute:
         if unsupported:
             print("\nSkipped unsupported Coinbase perps:")
-            for sym, pid in unsupported:
-                print(f"- {sym}: {pid}")
+            for sym, pid, reason in unsupported:
+                if reason:
+                    print(f"- {sym}: {pid} ({reason})")
+                else:
+                    print(f"- {sym}: {pid}")
         return
 
     # Execute all sequentially
-    cb = cb_for_support or setup_cb()
+    exchange_live = ensure_exchange(require=True)
+    if exchange_live is None:
+        print("Execution aborted: unable to initialise CCXT exchange client.")
+        return
     for i, api_pid in enumerate(api_pids):
         try:
-            # Current price for base size calc
-            trades = cb.client.get_market_trades(product_id=api_pid, limit=1)
-            current_price = float(trades['trades'][0]['price'])
-            base_size = calculate_base_size(api_pid, sizes_usd[i], current_price)
+            meta = metas[i]
+            if meta is None:
+                meta = get_market_meta(exchange_live, api_pid)
+                metas[i] = meta
+            current_price = fetch_reference_price(exchange_live, meta.ccxt_symbol)
+            entry_price = limits[i] if limits[i] is not None else current_price
+            base_size = calculate_base_size(sizes_usd[i], entry_price, meta)
+            ensure_margin_balance(exchange_live, sizes_usd[i] / max(args.leverage, 1e-9))
 
-            if limits[i] is not None:
-                res = cb.place_limit_order_with_targets(
-                    product_id=api_pid,
-                    side=side_perps[i],
-                    size=base_size,
-                    entry_price=limits[i],
-                    take_profit_price=tps[i],
-                    stop_loss_price=sls[i],
-                    leverage=leverage_str,
-                    expiry=args.expiry,
-                )
-                if isinstance(res, dict) and "error" in res:
-                    print(f"\n[{api_pid}] Error placing limit order: {res['error']}")
-                else:
-                    print(f"\n[{api_pid}] Limit order submitted.")
+            precision_step = meta.price_precision if meta.price_precision and meta.price_precision > 0 else price_steps[i]
+            if precision_step and precision_step > 0:
+                tp_price = quantize_price(tps[i], precision_step)
+                sl_price = quantize_price(sls[i], precision_step)
+                limit_price = quantize_price(limits[i], precision_step) if limits[i] is not None else None
             else:
-                res = cb.place_market_order_with_targets(
-                    product_id=api_pid,
-                    side=side_perps[i],
-                    size=base_size,
-                    take_profit_price=tps[i],
-                    stop_loss_price=sls[i],
-                    leverage=leverage_str,
-                    expiry=args.expiry,
+                tp_price = tps[i]
+                sl_price = sls[i]
+                limit_price = limits[i]
+
+            entry_order = place_entry_order(
+                exchange_live,
+                meta,
+                side_perps[i],
+                base_size,
+                limit_price,
+                args.leverage,
+                args.expiry,
+                dry_run=False,
+            )
+
+            bracket_response = {}
+            if tp_price > 0 and sl_price > 0:
+                entry_order_id = entry_order.get("id")
+                entry_status = entry_order.get("status")
+                if limit_price is not None and entry_order_id and entry_status != "closed":
+                    final_state = wait_for_fill(exchange_live, meta.ccxt_symbol, entry_order_id)
+                    if final_state and final_state.get("status") != "closed":
+                        print(f"\n[{api_pid}] Entry order not filled (status={final_state.get('status')}); bracket submission skipped.")
+                        continue
+                bracket_response = place_trigger_bracket_order(
+                    exchange_live,
+                    meta,
+                    side_perps[i],
+                    base_size,
+                    tp_price,
+                    sl_price,
+                    args.leverage,
+                    args.expiry,
+                    dry_run=False,
                 )
-                if isinstance(res, dict) and "error" in res:
-                    print(f"\n[{api_pid}] Error placing market order: {res['error']}")
-                else:
-                    print(f"\n[{api_pid}] Market order submitted.")
+            else:
+                print(f"\n[{api_pid}] Skipping bracket submission (tp/sl <= 0).")
+
+            print(f"\n[{api_pid}] Entry order submitted (id={entry_order.get('id')}). "
+                  f"Bracket response: {bracket_response if bracket_response else 'n/a'}")
         except Exception as e:
             print(f"\n[{api_pid}] Execution error: {e}")
 
