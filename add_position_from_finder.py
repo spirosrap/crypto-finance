@@ -31,7 +31,8 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass
-from typing import Optional, Tuple, List
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple, List, Set, TextIO
 
 from ccxt_trade_perp import (
     MarketMeta,
@@ -49,6 +50,8 @@ from perp_support import (
     canonical_perp_symbol,
     perp_price_multiplier,
 )
+
+DEFAULT_EXCLUSION_FILE = Path("config/excluded_perps.txt")
 
 def round_to_step(value: float, step: float) -> float:
     """Round ``value`` to the nearest multiple of ``step``."""
@@ -108,6 +111,20 @@ class ParsedFinder:
         """Return the smallest positive price among entry/TP/SL."""
         positives = [v for v in (self.entry, self.stop, self.take_profit) if v > 0]
         return min(positives) if positives else 0.0
+
+
+@dataclass
+class OrderSettings:
+    """Execution settings shared between CLI and programmatic integrations."""
+
+    portfolio_usd: float
+    leverage: float
+    product_form: str = "PERP-INTX"
+    order_type: str = "market"
+    execute: bool = False
+    expiry: str = "30d"
+    exclude_file: Optional[Path] = DEFAULT_EXCLUSION_FILE
+    excluded_products: Optional[Set[str]] = None
 
 
 def parse_finder_text(text: str) -> ParsedFinder:
@@ -185,37 +202,54 @@ def split_blocks(text: str) -> List[str]:
     return blocks
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Create perp position from long- or short-term finder text output")
-    ap.add_argument("--file", type=str, help="Path to finder output text; omit to read stdin")
-    ap.add_argument("--portfolio-usd", type=float, required=True, help="Total portfolio value in USD")
-    ap.add_argument("--leverage", type=float, default=5.0, help="Leverage 1-20 (default 5)")
-    ap.add_argument("--product-form", type=str, choices=["PERP-INTX", "INTX-PERP"], default="PERP-INTX", help="Perp suffix format to display")
-    ap.add_argument("--order", type=str, choices=["market", "limit"], default="market", help="Order type")
-    ap.add_argument("--execute", action="store_true", help="Actually place the order (otherwise dry-run)")
-    ap.add_argument("--expiry", type=str, choices=["GTC", "12h", "24h", "30d"], default="30d", help="GTD expiry for bracket orders")
+def load_exclusion_list(path: Optional[Path]) -> Set[str]:
+    """Return uppercase product ids parsed from ``path`` (ignoring comments)."""
 
-    args = ap.parse_args()
+    exclusions: Set[str] = set()
+    if path is None:
+        return exclusions
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return exclusions
+    except Exception as exc:  # pragma: no cover - filesystem I/O
+        print(f"Warning: unable to read exclusion file {path}: {exc}", file=sys.stderr)
+        return exclusions
 
-    # Read text
-    if args.file:
-        with open(args.file, "r", encoding="utf-8") as f:
-            text = f.read()
-    else:
-        text = sys.stdin.read()
-    blocks = split_blocks(text)
-    parsed_list: List[ParsedFinder] = []
-    for b in blocks:
-        try:
-            parsed_list.append(parse_finder_text(b))
-        except Exception as e:
-            print(f"Skipping block due to parse error: {e}")
+    for raw in content.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
             continue
+        exclusions.add(line.upper())
+    return exclusions
 
-    # Format leverage without unnecessary decimals (e.g., 50.0 -> 50)
-    leverage_str = f"{args.leverage:g}"
 
-    exchange_obj: Optional[object] = None
+def process_parsed_signals(
+    parsed_list: List[ParsedFinder],
+    settings: OrderSettings,
+    *,
+    exchange: Optional[object] = None,
+    stream: Optional[TextIO] = None,
+) -> Dict[str, Any]:
+    """Prepare command strings and optionally execute orders for parsed finder signals."""
+
+    output = stream or sys.stdout
+    if not parsed_list:
+        print("No finder entries to process.", file=output)
+        return {"commands": [], "summaries": [], "unsupported": [], "executions": []}
+
+    order_type = settings.order_type.lower()
+    if order_type not in {"market", "limit"}:
+        raise ValueError(f"Unsupported order type: {settings.order_type}")
+
+    product_form = settings.product_form.upper()
+    if product_form not in {"PERP-INTX", "INTX-PERP"}:
+        raise ValueError(f"Unsupported product form: {settings.product_form}")
+
+    expiry = settings.expiry
+    leverage_str = f"{settings.leverage:g}"
+
+    exchange_obj = exchange
     exchange_error: Optional[Exception] = None
     exchange_warning_shown = False
 
@@ -235,12 +269,15 @@ def main() -> None:
             if require:
                 raise RuntimeError("Unable to initialise CCXT Coinbase Advanced client.") from exc
             if not exchange_warning_shown:
-                print(f"Warning: could not load Coinbase Advanced markets via CCXT ({exc}). "
-                      "Falling back to heuristic precision estimates.")
+                print(
+                    f"Warning: could not load Coinbase Advanced markets via CCXT ({exc}). "
+                    "Falling back to heuristic precision estimates.",
+                    file=output,
+                )
                 exchange_warning_shown = True
             return None
 
-    commands: List[List[str]] = []
+    commands: List[str] = []
     summaries: List[str] = []
     api_pids: List[str] = []
     side_perps: List[str] = []
@@ -252,11 +289,21 @@ def main() -> None:
     price_steps: List[float] = []
 
     unsupported: List[Tuple[str, str, Optional[str]]] = []
+    manually_excluded: List[Tuple[str, str]] = []
+
+    exclusion_set = (
+        settings.excluded_products
+        if settings.excluded_products is not None
+        else load_exclusion_list(settings.exclude_file)
+    )
 
     for parsed in parsed_list:
         display_symbol = canonical_perp_symbol(parsed.base_symbol or parsed.symbol)
-        display_pid = normalize_perp(parsed.base_symbol or parsed.symbol, prefer=args.product_form)
+        display_pid = normalize_perp(parsed.base_symbol or parsed.symbol, prefer=product_form)
         api_pid = normalize_perp(parsed.base_symbol or parsed.symbol, prefer="PERP-INTX")
+        if exclusion_set and api_pid.upper() in exclusion_set:
+            manually_excluded.append((display_symbol or parsed.symbol, api_pid))
+            continue
         exchange_candidate = ensure_exchange(require=False)
         meta: Optional[MarketMeta] = None
         if exchange_candidate is not None:
@@ -270,7 +317,11 @@ def main() -> None:
         scaled_tp_val = parsed.take_profit * price_multiplier
         scaled_sl_val = parsed.stop * price_multiplier
         side_perp = "SELL" if parsed.side == "SHORT" else "BUY"
-        size_usd = (args.portfolio_usd * (parsed.pos_size_pct / 100.0)) if parsed.pos_size_pct > 0 else (args.portfolio_usd * 0.05)
+        size_usd = (
+            settings.portfolio_usd * (parsed.pos_size_pct / 100.0)
+            if parsed.pos_size_pct > 0
+            else (settings.portfolio_usd * 0.05)
+        )
         tick = meta.price_precision if meta and getattr(meta, "price_precision", 0.0) else 0.0
         price_candidates = [v for v in (scaled_entry, scaled_tp_val, scaled_sl_val) if v > 0]
         min_price_value = min(price_candidates) if price_candidates else 0.0
@@ -299,9 +350,8 @@ def main() -> None:
             sl = round_to_step(scaled_sl_val, effective_tick)
             entry_value = round_to_step(scaled_entry, effective_tick)
             rounding_step = effective_tick
-        limit_price = entry_value if args.order == "limit" else None
+        limit_price = entry_value if order_type == "limit" else None
 
-        # Format numbers according to combined precision (tick + finder text)
         decimals = max(_decimals_for_tick(effective_tick), fallback_decimals)
         if exchange_candidate is not None and meta is not None:
             tp_str = exchange_candidate.price_to_precision(meta.ccxt_symbol, tp)
@@ -316,20 +366,27 @@ def main() -> None:
             sl_str = f"{sl:.{decimals}f}"
             limit_str = f"{limit_price:.{decimals}f}" if limit_price is not None else None
 
-        cmd = [
-            "python", "ccxt_trade_perp.py",
-            "--product", api_pid,
-            "--side", side_perp,
-            "--size", f"{size_usd:.2f}",
-            "--leverage", leverage_str,
-            "--tp", tp_str,
-            "--sl", sl_str,
+        cmd_parts = [
+            "python",
+            "ccxt_trade_perp.py",
+            "--product",
+            api_pid,
+            "--side",
+            side_perp,
+            "--size",
+            f"{size_usd:.2f}",
+            "--leverage",
+            leverage_str,
+            "--tp",
+            tp_str,
+            "--sl",
+            sl_str,
         ]
         if limit_str is not None:
-            cmd += ["--limit", limit_str]
-        cmd += ["--expiry", args.expiry]
+            cmd_parts += ["--limit", limit_str]
+        cmd_parts += ["--expiry", expiry]
 
-        commands.append(cmd)
+        commands.append(" ".join(cmd_parts))
         api_pids.append(api_pid)
         side_perps.append(side_perp)
         tps.append(tp)
@@ -345,7 +402,6 @@ def main() -> None:
             entry_disp = exchange_candidate.price_to_precision(meta.ccxt_symbol, entry_basis)
         else:
             entry_disp = f"{entry_basis:.{decimals}f}"
-        # Estimate percentage move between entry and TP/SL; clamp to avoid negatives
         reward_denominator = max(entry_basis, 1e-9)
         if parsed.side == "SHORT":
             reward_pct = max((entry_basis - tp) / reward_denominator, 0.0)
@@ -353,38 +409,55 @@ def main() -> None:
         else:
             reward_pct = max((tp - entry_basis) / reward_denominator, 0.0)
             risk_pct = max((entry_basis - sl) / reward_denominator, 0.0)
-        margin_usd = size_usd / max(args.leverage, 1e-9)
+        margin_usd = size_usd / max(settings.leverage, 1e-9)
         reward_usd = reward_pct * size_usd
         risk_usd = risk_pct * size_usd
         summaries.append(
-            f"Symbol: {display_symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
-            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f} (Margin ≈ ${margin_usd:.2f})  Expiry: {args.expiry}\n"
+            f"Symbol: {display_symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: {tp_str}  SL: {sl_str}\n"
+            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${settings.portfolio_usd:.2f} ≈ ${size_usd:.2f} (Margin ≈ ${margin_usd:.2f})  Expiry: {expiry}\n"
             f"PnL vs position: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
         )
 
-    print("\n=== Parsed Finder Signals ===")
+    print("\n=== Parsed Finder Signals ===", file=output)
     for s in summaries:
-        print("\n" + s)
+        print("\n" + s, file=output)
 
-    print("\nCommands:")
+    print("\nCommands:", file=output)
     for cmd in commands:
-        print(" ".join(cmd))
+        print(cmd, file=output)
 
-    if not args.execute:
+    if not settings.execute:
         if unsupported:
-            print("\nSkipped unsupported Coinbase perps:")
+            print("\nSkipped unsupported Coinbase perps:", file=output)
             for sym, pid, reason in unsupported:
                 if reason:
-                    print(f"- {sym}: {pid} ({reason})")
+                    print(f"- {sym}: {pid} ({reason})", file=output)
                 else:
-                    print(f"- {sym}: {pid}")
-        return
+                    print(f"- {sym}: {pid}", file=output)
+        if manually_excluded:
+            print("\nSkipped excluded perps:", file=output)
+            for sym, pid in manually_excluded:
+                print(f"- {sym}: {pid}", file=output)
+        return {
+            "commands": commands,
+            "summaries": summaries,
+            "unsupported": unsupported,
+            "excluded": manually_excluded,
+            "executions": [],
+        }
 
-    # Execute all sequentially
+    execution_logs: List[Dict[str, Any]] = []
     exchange_live = ensure_exchange(require=True)
     if exchange_live is None:
-        print("Execution aborted: unable to initialise CCXT exchange client.")
-        return
+        print("Execution aborted: unable to initialise CCXT exchange client.", file=output)
+        return {
+            "commands": commands,
+            "summaries": summaries,
+            "unsupported": unsupported,
+            "excluded": manually_excluded,
+            "executions": execution_logs,
+        }
+
     for i, api_pid in enumerate(api_pids):
         try:
             meta = metas[i]
@@ -394,7 +467,7 @@ def main() -> None:
             current_price = fetch_reference_price(exchange_live, meta.ccxt_symbol)
             entry_price = limits[i] if limits[i] is not None else current_price
             base_size = calculate_base_size(sizes_usd[i], entry_price, meta)
-            ensure_margin_balance(exchange_live, sizes_usd[i] / max(args.leverage, 1e-9))
+            ensure_margin_balance(exchange_live, sizes_usd[i] / max(settings.leverage, 1e-9))
 
             precision_step = meta.price_precision if meta.price_precision and meta.price_precision > 0 else price_steps[i]
             if precision_step and precision_step > 0:
@@ -412,19 +485,28 @@ def main() -> None:
                 side_perps[i],
                 base_size,
                 limit_price,
-                args.leverage,
-                args.expiry,
+                settings.leverage,
+                expiry,
                 dry_run=False,
             )
 
-            bracket_response = {}
+            bracket_response: Dict[str, Any] = {}
             if tp_price > 0 and sl_price > 0:
                 entry_order_id = entry_order.get("id")
                 entry_status = entry_order.get("status")
                 if limit_price is not None and entry_order_id and entry_status != "closed":
                     final_state = wait_for_fill(exchange_live, meta.ccxt_symbol, entry_order_id)
                     if final_state and final_state.get("status") != "closed":
-                        print(f"\n[{api_pid}] Entry order not filled (status={final_state.get('status')}); bracket submission skipped.")
+                        message = f"[{api_pid}] Entry order not filled (status={final_state.get('status')}); bracket submission skipped."
+                        print(f"\n{message}", file=output)
+                        execution_logs.append(
+                            {
+                                "product": api_pid,
+                                "status": "entry_not_filled",
+                                "entry_order": entry_order,
+                                "final_state": final_state,
+                            }
+                        )
                         continue
                 bracket_response = place_trigger_bracket_order(
                     exchange_live,
@@ -433,17 +515,88 @@ def main() -> None:
                     base_size,
                     tp_price,
                     sl_price,
-                    args.leverage,
-                    args.expiry,
+                    settings.leverage,
+                    expiry,
                     dry_run=False,
                 )
             else:
-                print(f"\n[{api_pid}] Skipping bracket submission (tp/sl <= 0).")
+                print(f"\n[{api_pid}] Skipping bracket submission (tp/sl <= 0).", file=output)
 
-            print(f"\n[{api_pid}] Entry order submitted (id={entry_order.get('id')}). "
-                  f"Bracket response: {bracket_response if bracket_response else 'n/a'}")
+            print(
+                f"\n[{api_pid}] Entry order submitted (id={entry_order.get('id')}). "
+                f"Bracket response: {bracket_response if bracket_response else 'n/a'}",
+                file=output,
+            )
+            execution_logs.append(
+                {
+                    "product": api_pid,
+                    "status": "submitted",
+                    "entry_order": entry_order,
+                    "bracket": bracket_response,
+                }
+            )
+        except Exception as exc:
+            print(f"\n[{api_pid}] Execution error: {exc}", file=output)
+            execution_logs.append(
+                {
+                    "product": api_pid,
+                    "status": "error",
+                    "error": str(exc),
+                }
+            )
+
+    return {
+        "commands": commands,
+        "summaries": summaries,
+        "unsupported": unsupported,
+        "excluded": manually_excluded,
+        "executions": execution_logs,
+    }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Create perp position from long- or short-term finder text output")
+    ap.add_argument("--file", type=str, help="Path to finder output text; omit to read stdin")
+    ap.add_argument("--portfolio-usd", type=float, required=True, help="Total portfolio value in USD")
+    ap.add_argument("--leverage", type=float, default=5.0, help="Leverage 1-20 (default 5)")
+    ap.add_argument("--product-form", type=str, choices=["PERP-INTX", "INTX-PERP"], default="PERP-INTX", help="Perp suffix format to display")
+    ap.add_argument("--order", type=str, choices=["market", "limit"], default="market", help="Order type")
+    ap.add_argument("--execute", action="store_true", help="Actually place the order (otherwise dry-run)")
+    ap.add_argument("--expiry", type=str, choices=["GTC", "12h", "24h", "30d"], default="30d", help="GTD expiry for bracket orders")
+    ap.add_argument(
+        "--exclude-file",
+        type=Path,
+        default=DEFAULT_EXCLUSION_FILE,
+        help=f"Path to newline-separated perp ids to skip (default: {DEFAULT_EXCLUSION_FILE})",
+    )
+
+    args = ap.parse_args()
+
+    # Read text
+    if args.file:
+        with open(args.file, "r", encoding="utf-8") as f:
+            text = f.read()
+    else:
+        text = sys.stdin.read()
+    blocks = split_blocks(text)
+    parsed_list: List[ParsedFinder] = []
+    for b in blocks:
+        try:
+            parsed_list.append(parse_finder_text(b))
         except Exception as e:
-            print(f"\n[{api_pid}] Execution error: {e}")
+            print(f"Skipping block due to parse error: {e}")
+            continue
+
+    settings = OrderSettings(
+        portfolio_usd=args.portfolio_usd,
+        leverage=args.leverage,
+        product_form=args.product_form,
+        order_type=args.order,
+        execute=args.execute,
+        expiry=args.expiry,
+        exclude_file=args.exclude_file,
+    )
+    process_parsed_signals(parsed_list, settings)
 
 
 if __name__ == "__main__":
