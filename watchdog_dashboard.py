@@ -53,6 +53,9 @@ from watchdog_metrics import build_snapshot
 UTC = timezone.utc
 AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 250
 
+FUTURE_BATCH_START = 161
+FUTURE_BATCH_PREVIOUS_END = FUTURE_BATCH_START - 1
+
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
 
@@ -526,6 +529,30 @@ def main() -> None:
     tail_last = st.sidebar.number_input("Last N trades (0 to ignore)", min_value=0, value=0, step=1)
     starting_equity = st.sidebar.number_input("Starting equity", min_value=0.0, value=1000.0, step=100.0)
 
+    future_pref_path = Path('cache/watchdog_future_batch.json')
+    future_pref = {
+        "start_timestamp": datetime.now(UTC).isoformat(),
+    }
+    if future_pref_path.exists():
+        try:
+            future_pref.update(json.loads(future_pref_path.read_text()))
+        except Exception:
+            future_pref_path.unlink(missing_ok=True)
+    if not future_pref_path.exists():
+        try:
+            future_pref_path.parent.mkdir(parents=True, exist_ok=True)
+            future_pref_path.write_text(json.dumps(future_pref))
+        except Exception:
+            pass
+
+    if st.sidebar.button("Rebase future batch to now"):
+        future_pref["start_timestamp"] = datetime.now(UTC).isoformat()
+        try:
+            future_pref_path.write_text(json.dumps(future_pref))
+        except Exception:
+            pass
+        st.experimental_rerun()
+
     if st.sidebar.button("Reset filters"):
         st.experimental_rerun()
 
@@ -583,14 +610,32 @@ def main() -> None:
         help="Trades with count between split #1 and split #2 belong to Batch B.",
     )
     third_label_start = secondary_split + 2
-    if third_label_start > max_trade_count + 1:
-        third_label_start = max_trade_count + 1
-    batch_options = (
-        "All trades",
-        f"Trades 1–{primary_split + 1}",
-        f"Trades {primary_split + 2}–{min(secondary_split + 1, max_trade_count)}",
-        f"Trades {third_label_start}+",
-    )
+    third_label_end = FUTURE_BATCH_PREVIOUS_END
+    if third_label_end > max_trade_count:
+        third_label_end = max_trade_count
+    if third_label_start > third_label_end:
+        third_label_start = third_label_end + 1
+
+    second_label_end = min(secondary_split + 1, third_label_end)
+    if second_label_end < primary_split + 2:
+        second_label_end = max(primary_split + 1, min(secondary_split + 1, max_trade_count))
+
+    batch_filters: list[tuple[str, int, int]] = [
+        ("All trades", 0, 0),
+        (f"Trades 1–{primary_split + 1}", 1, primary_split + 1),
+        (f"Trades {primary_split + 2}–{second_label_end}", primary_split + 2, second_label_end),
+    ]
+
+    if third_label_start <= third_label_end:
+        batch_filters.append((f"Trades {third_label_start}–{third_label_end}", third_label_start, third_label_end))
+    else:
+        batch_filters.append((f"Trades {third_label_start}+", third_label_start, 0))
+
+    future_label_start = FUTURE_BATCH_START
+    batch_filters.append((f"Trades {future_label_start}+", future_label_start, 0))
+    future_batch_index = len(batch_filters) - 1
+
+    batch_options = [label for label, _, _ in batch_filters]
     batch_choice_index = min(default_batch_choice, len(batch_options) - 1)
     batch_choice = st.sidebar.radio(
         "Trade batch",
@@ -626,15 +671,10 @@ def main() -> None:
         end_str = preset_end.isoformat()
     filter_start_count = int(start_count)
     filter_end_count = int(end_count)
-    if batch_choice == batch_options[1]:
-        filter_start_count = 1
-        filter_end_count = int(primary_split + 1)
-    elif batch_choice == batch_options[2]:
-        filter_start_count = int(primary_split + 2)
-        filter_end_count = int(secondary_split + 1)
-    elif batch_choice == batch_options[3]:
-        filter_start_count = int(secondary_split + 2)
-        filter_end_count = 0
+    selected_filter = batch_filters[selected_index]
+    if selected_index != 0:
+        filter_start_count = int(selected_filter[1])
+        filter_end_count = int(selected_filter[2])
 
     filtered = apply_filters(
         trades_df,
@@ -646,9 +686,25 @@ def main() -> None:
         symbols=selected_products or None,
     )
 
-    if filtered.empty:
+    is_future_batch = selected_index == future_batch_index
+    if filtered.empty and not is_future_batch:
         st.warning("No trades match the selected filters.")
         st.stop()
+
+    if is_future_batch:
+        try:
+            future_start_ts = pd.to_datetime(future_pref.get("start_timestamp"), utc=True)
+        except Exception:
+            future_start_ts = None
+        if future_start_ts is None:
+            future_start_ts = pd.Timestamp(datetime.now(UTC))
+        timestamps = pd.to_datetime(filtered["closed_at"], errors="coerce", utc=True)
+        filtered = filtered.loc[timestamps >= future_start_ts].copy()
+        if filtered.empty:
+            st.info(
+                f"Awaiting new trades for {batch_options[selected_index]} "
+                f"(since {future_start_ts.strftime('%Y-%m-%d %H:%M UTC')})."
+            )
 
     daily, metrics = build_daily_equity(filtered, float(starting_equity))
 
