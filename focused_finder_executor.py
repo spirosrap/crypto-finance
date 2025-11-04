@@ -73,7 +73,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate and optionally execute focused short-term perp trades via CCXT."
     )
-    parser.add_argument("--portfolio-usd", type=float, required=True, help="Total portfolio value in USD.")
+    parser.add_argument(
+        "--portfolio-usd",
+        type=float,
+        required=True,
+        help="Total portfolio value in USD.",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=sorted(PROFILE_PRESETS.keys()),
+        default="focused_llm_100",
+        help="Finder profile preset to apply (default focused_llm_100).",
+    )
     parser.add_argument("--leverage", type=float, default=50.0, help="Target leverage (default 50).")
     parser.add_argument("--top", type=int, default=5, help="Number of trades to forward (default 5).")
     parser.add_argument(
@@ -133,7 +144,7 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    profile_name = "focused_llm_100"
+    profile_name = args.profile
     profile_overrides = PROFILE_PRESETS.get(profile_name, {})
     config = build_short_term_config()
     _apply_profile_overrides(config, profile_overrides)
@@ -160,7 +171,7 @@ def main() -> None:
         sys.exit(1)
 
     if not args.quiet:
-        print(f"Focused profile '{profile_name}' produced {len(results)} candidates (limit {finder_limit}).")
+        print(f"Profile '{profile_name}' produced {len(results)} candidates (limit {finder_limit}).")
         print(f"Forwarding top {len(selected)} opportunities:")
         for idx, crypto in enumerate(selected, 1):
             side = getattr(crypto, "position_side", "LONG")
