@@ -2,6 +2,8 @@
 
 `multi_coin_reservoir_daytrader.py` generates 24-hour long/short signals for leading Coinbase spot pairs using a shared echo state network (reservoir computing) model. It mirrors the short-term finder workflow, including an execution-ready `finder_short.txt`, so you can feed the results straight into `add_position_from_finder.py`.
 
+Reservoir computing is a neural-forecasting technique where a large, randomly connected recurrent network (the “reservoir”) transforms raw inputs into a rich, high-dimensional state. Because the reservoir weights stay fixed, only a lightweight linear readout must be trained, making it fast and stable for streaming data. This setup excels at capturing non-linear temporal patterns without expensive backpropagation through time.
+
 ---
 
 ## Highlights
