@@ -1,5 +1,39 @@
 # Trading Journal
 
+## November 5, 2025 - Multi-Coin Reservoir Day Trader Testing
+
+### Current Strategy Testing
+- Actively testing `multi_coin_reservoir_daytrader.py` for automated trade signal generation
+- Taking the top 5 best trades per day from the reservoir computing model
+- Each trade has a 24-hour expiration period
+- System generates signals across multiple crypto assets using shared echo state network readout
+
+### Technical Implementation
+- Script uses reservoir computing (echo state network) to predict short-term price movements
+- Evaluates multiple crypto pairs for long/short opportunities
+- Trade targets and stops are derived from each asset's current volatility regime
+- Outputs ranked CSV signals and plain text reports for execution
+
+### Risk Management
+- 24-hour time horizon for each trade position
+- ATR-based stop losses and take profit levels
+- Position sizing based on volatility-adjusted risk parameters
+- Focus on high-volume USDC pairs for better liquidity
+
+### Monitoring & Evaluation
+- Tracking signal quality and execution performance
+- Evaluating hit rates across different market conditions
+- Monitoring for overfitting and adapting parameters as needed
+- Comparing reservoir predictions against actual market outcomes
+
+### Next Steps
+- Accumulate performance data over multiple trading days
+- Fine-tune threshold parameters and reservoir hyperparameters
+- Assess correlation between predicted returns and actual outcomes
+- Consider integrating with existing automated execution framework
+
+---
+
 ## October 11, 2025 - Coinbase EURCUSDC Execution Anomaly
 
 ### Market Context
