@@ -1,5 +1,25 @@
 # Trading Journal
 
+## November 6, 2025 - Regime Protection Playbook
+
+### Finder Vulnerability
+- Noted that `short_term_crypto_finder.py` bleeds quickly after regime shifts; rule-based scoring keeps firing legacy setups and fixed TP/SL brackets become too tight in fresh volatility.
+- Outcome: when the environment turns, the finder alone can go from edge to drag in a handful of runs unless someone intervenes manually.
+
+### Reservoir Guardrails
+- Pairing the finder with `multi_coin_reservoir_daytrader.py` adds an adaptive view: the ridge readout retrains every run and ATR-based brackets expand or contract with current volatility.
+- New workflow: require reservoir confirmation for full-size positions; if reservoir disagrees, either skip the trade or scale the size down sharply.
+
+### Automation Safeties
+- TODO: build a “tripwire” script that watches the finder’s rolling expectancy (last N trades) and auto-pauses execution after three consecutive negative readings.
+- Log the reservoir `_evaluation.csv` daily; if 24h Sharpe dips below a set floor, force signals into paper-trade mode until metrics recover.
+- Medium-term idea: intersection engine that only approves trades when finder and reservoir agree on side and comparable TP/SL distances.
+
+### Action Items
+1. Prototype the expectancy tripwire and hook it into the execution pipeline.
+2. Surface finder vs reservoir P/L divergence on the Watchdog dashboard for quick visual checkpoints.
+3. Test a 15m reservoir profile off-line; if it stabilises the evaluation metrics, add it as an additional confirmation layer.
+
 ## November 5, 2025 - Multi-Coin Reservoir Day Trader Testing
 
 ### Current Strategy Testing
