@@ -10,6 +10,7 @@
 - **Ridge readouts per coin** – fast, deterministic predictions of the next-period log return.
 - **Volatility-aware trade levels** – ATR% drives take-profit/stop-loss distances (2× / 1×) with a 24h expiry.
 - **Automatic discovery profiles** – scan Coinbase product lists by liquidity/quote via presets or custom filters.
+- **LLM-aware profile (optional)** – `focused_llm_100` mirrors the short-term finder’s LLM blend, layering an OpenAI “opinion” on top of reservoir scores.
 - **Signal-first ordering** – longs and shorts sorted together by absolute predicted return so the strongest conviction leads.
 - **Finder-compatible output** – ranked CSV diagnostics plus a `finder_short.txt` formatted for `add_position_from_finder.py`.
 - **Performance checks** – optional hit-rate and Sharpe summaries in `_evaluation.csv`.
@@ -85,11 +86,12 @@ If evaluation metrics are available, a fourth file is emitted:
 
 ## Discovery Profiles
 
-| Profile | Max Products | Quotes | Min Volume | Description |
-|---------|--------------|--------|------------|-------------|
-| `default` | 40 | USDC, USD | 2,000,000 | Balanced coverage of the most liquid majors. |
-| `wide` | 150 | USDC, USD, USDT | 500,000 | Broad scan across high-volume spot pairs. |
-| `focused` | 20 | USDC | 5,000,000 | Tight basket of USDC majors for faster execution. |
+| Profile | Max Products | Quotes | Min Volume | LLM | Description |
+|---------|--------------|--------|------------|-----|-------------|
+| `default` | 40 | USDC, USD | 2,000,000 | ✗ | Balanced coverage of the most liquid majors. |
+| `wide` | 150 | USDC, USD, USDT | 500,000 | ✗ | Broad scan across high-volume spot pairs. |
+| `focused` | 20 | USDC | 5,000,000 | ✗ | Tight basket of USDC majors for faster execution. |
+| `focused_llm_100` | 100 | USDC | 5,000,000 | ✓ | Focused basket with OpenAI LLM blend (mirrors `focused_llm_100` from the short-term finder). |
 
 Run `python multi_coin_reservoir_daytrader.py --list-profiles` to view these presets inside the CLI, or mix `--quotes`, `--max-products`, and `--min-volume` for custom discovery filters.
 
