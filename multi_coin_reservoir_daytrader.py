@@ -27,6 +27,8 @@ from perp_support import canonical_perp_symbol, is_perp_supported, perp_price_mu
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 
+from llm_scoring import LLMScorer
+
 try:
     from credentials import get_primary_credentials
 except ModuleNotFoundError:  # pragma: no cover - fallback for tests
@@ -71,12 +73,24 @@ RESERVOIR_PROFILES: Dict[str, Dict[str, Any]] = {
         "quotes": ["USDC"],
         "min_volume": 5_000_000.0,
     },
+    "focused_llm_100": {
+        "max_products": 100,
+        "quotes": ["USDC"],
+        "min_volume": 5_000_000.0,
+        "use_llm_scoring": True,
+        "llm_weight": 0.25,
+        "llm_model": "gpt-5-mini",
+        "llm_max_candidates": 20,
+        "llm_temperature": None,
+        "llm_sleep_seconds": 0.0,
+    },
 }
 
 PROFILE_DESCRIPTIONS: Dict[str, str] = {
     "default": "Balanced coverage of the most liquid USDC/USD pairs.",
     "wide": "Broader scan across top-volume quotes (USDC/USD/USDT) up to 150 products.",
     "focused": "Tight list of high-volume USDC majors for faster execution.",
+    "focused_llm_100": "Focused USDC basket with OpenAI opinion blended into rankings (100 product scan).",
 }
 
 COINBASE_GRANULARITIES: Dict[str, float] = {
@@ -231,6 +245,8 @@ def profile_summary() -> str:
             f"quotes={','.join(cfg.get('quotes', [])) or 'ANY'}",
             f"min_volume={cfg.get('min_volume', 0)}",
         ]
+        if cfg.get("use_llm_scoring"):
+            parts.append("llm=on")
         if desc:
             parts.append(desc)
         lines.append(" | ".join(parts))
@@ -625,6 +641,47 @@ def _format_percent(value: float) -> str:
     return f"{value * 100:.2f}%"
 
 
+def _prepare_llm_candidates(df: pd.DataFrame, threshold: float) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    if df.empty:
+        return candidates
+
+    safe_threshold = max(abs(threshold), 1e-6)
+
+    for _, row in df.iterrows():
+        coin = str(row.get("coin", "") or "")
+        if not coin:
+            continue
+        predicted_return = _safe_float(row.get("predicted_return"))
+        atr_pct = _safe_float(row.get("atr_pct"))
+        rsi = _safe_float(row.get("rsi"))
+        rel_vol = _safe_float(row.get("relative_volume"))
+        tp_pct = _safe_float(row.get("tp_pct"))
+        sl_pct = _safe_float(row.get("sl_pct"))
+        signal = int(row.get("signal", 0) or 0)
+        side = "LONG" if signal > 0 else "SHORT" if signal < 0 else "FLAT"
+
+        base_score = min(100.0, max(0.0, abs(predicted_return) / safe_threshold * 50.0))
+
+        candidates.append(
+            {
+                "candidate_id": coin,
+                "symbol": coin,
+                "position_side": side,
+                "base_score": base_score,
+                "predicted_return_pct": predicted_return * 100.0,
+                "atr_pct": atr_pct * 100.0,
+                "rsi": rsi,
+                "relative_volume": rel_vol,
+                "tp_pct": tp_pct * 100.0,
+                "sl_pct": sl_pct * 100.0,
+                "threshold_pct": safe_threshold * 100.0,
+            }
+        )
+
+    return candidates
+
+
 def prefer_usdc_products(df: pd.DataFrame) -> pd.DataFrame:
     """Deduplicate results by base asset, preferring USDC-quoted products when available."""
     if df.empty or "coin" not in df.columns:
@@ -751,6 +808,11 @@ def build_plain_report(
                 f"{idx + 1}. {display_symbol:<12} {side:<5} entry={display_price:.6f} tp={display_tp:.6f} sl={display_sl:.6f} "
                 f"pred={pred_str} atr={atr_str} rv={rel_vol_str} "
                 f"timestamp={data_timestamp}"
+                + (
+                    f" llm={row['llm_score']:.1f}/{row.get('llm_confidence', 'N/A')}"
+                    if "llm_score" in row and math.isfinite(_safe_float(row.get("llm_score")))
+                    else ""
+                )
             )
         else:
             lines.append(f"{idx + 1}. {display_symbol} ({product_id}) — {side}")
@@ -770,6 +832,12 @@ def build_plain_report(
             lines.append(f"Recommended Position Size: {recommended_position_pct:.1f}% of portfolio")
             lines.append(f"Take-Profit Distance: {_format_percent(tp_pct)} | Stop-Loss Distance: {_format_percent(sl_pct)}")
             lines.append(f"Signal Expires In: {expiry_hours} hours")
+            if "llm_score" in row and math.isfinite(_safe_float(row.get("llm_score"))):
+                confidence = row.get("llm_confidence") or "N/A"
+                lines.append(f"LLM Score: {row['llm_score']:.2f} (confidence: {confidence})")
+                reason = row.get("llm_reason")
+                if isinstance(reason, str) and reason.strip():
+                    lines.append(f"LLM Insight: {reason.strip()}")
             lines.append("")
 
     return "\n".join(lines) + "\n"
@@ -844,6 +912,37 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         default=os.getenv("MC_RESERVOIR_LOG_LEVEL", "INFO"),
         help="Logging level.",
     )
+    parser.add_argument(
+        "--use-llm-scoring",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Blend reservoir ranking with an OpenAI LLM opinion.",
+    )
+    parser.add_argument(
+        "--llm-weight",
+        type=float,
+        help="Weight (0-1) applied when combining reservoir and LLM scores.",
+    )
+    parser.add_argument(
+        "--llm-model",
+        type=str,
+        help="OpenAI model name for LLM scoring (default: profile setting or gpt-5-mini).",
+    )
+    parser.add_argument(
+        "--llm-max-candidates",
+        type=int,
+        help="Maximum number of candidates to score with the LLM.",
+    )
+    parser.add_argument(
+        "--llm-temperature",
+        type=float,
+        help="Optional temperature for the LLM call (<=0 disables).",
+    )
+    parser.add_argument(
+        "--llm-sleep-seconds",
+        type=float,
+        help="Optional sleep between LLM calls (seconds).",
+    )
     return parser.parse_args(argv)
 
 
@@ -875,6 +974,43 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     quotes = _parse_quotes(args.quotes, profile_cfg.get("quotes", []))
     max_products = args.max_products if args.max_products is not None else profile_cfg.get("max_products")
     min_volume = args.min_volume if args.min_volume is not None else float(profile_cfg.get("min_volume", 0.0))
+    use_llm_scoring = (
+        bool(profile_cfg.get("use_llm_scoring", False))
+        if args.use_llm_scoring is None
+        else bool(args.use_llm_scoring)
+    )
+    llm_weight = args.llm_weight if args.llm_weight is not None else float(profile_cfg.get("llm_weight", 0.25))
+    llm_model = args.llm_model or profile_cfg.get("llm_model", "gpt-5-mini")
+    llm_max_candidates = (
+        args.llm_max_candidates if args.llm_max_candidates is not None else int(profile_cfg.get("llm_max_candidates", 12))
+    )
+    llm_temperature: Optional[float]
+    if args.llm_temperature is not None:
+        llm_temperature = args.llm_temperature
+    else:
+        llm_temperature = profile_cfg.get("llm_temperature")
+    llm_sleep_seconds = (
+        args.llm_sleep_seconds if args.llm_sleep_seconds is not None else float(profile_cfg.get("llm_sleep_seconds", 0.0))
+    )
+
+    llm_scorer: Optional[LLMScorer] = None
+    if use_llm_scoring:
+        try:
+            llm_scorer = LLMScorer(
+                model=str(llm_model),
+                weight=float(np.clip(llm_weight, 0.0, 1.0)),
+                max_candidates=int(max(1, llm_max_candidates)),
+                temperature=llm_temperature,
+                sleep_seconds=float(max(0.0, llm_sleep_seconds)),
+            )
+            if not getattr(llm_scorer, "enabled", False):
+                logger.warning("LLM scoring disabled: OpenAI client unavailable.")
+                llm_scorer = None
+            else:
+                logger.info("LLM scoring enabled (model=%s, weight=%.2f).", llm_scorer.model, llm_scorer.weight)
+        except Exception as exc:
+            logger.warning("Failed to initialise LLM scoring: %s", exc)
+            llm_scorer = None
 
     os.makedirs(args.output_csv.parent, exist_ok=True)
 
@@ -994,9 +1130,42 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         logger.info("Skipped unsupported perps: %s", ", ".join(skipped_perps))
 
     results_df = pd.DataFrame(results)
+
+    base_scores: Dict[str, float] = {}
+    if not results_df.empty:
+        candidates = _prepare_llm_candidates(results_df, args.threshold)
+        for cand in candidates:
+            base_scores[str(cand.get("candidate_id"))] = float(cand.get("base_score", 0.0))
+        if base_scores:
+            results_df["base_score"] = results_df["coin"].map(base_scores).fillna(0.0)
+        if llm_scorer and candidates:
+            llm_results = llm_scorer.score_candidates(candidates)
+            if llm_results:
+                llm_rows = []
+                for idx, row in results_df.iterrows():
+                    coin = str(row.get("coin", "") or "")
+                    base = base_scores.get(coin, 0.0)
+                    outcome = llm_results.get(coin)
+                    if outcome:
+                        llm_score = float(outcome.get("llm_score", base))
+                        combined = llm_scorer.combine_scores(base, llm_score)
+                        results_df.at[idx, "llm_score"] = llm_score
+                        results_df.at[idx, "llm_confidence"] = outcome.get("confidence", "")
+                        results_df.at[idx, "llm_reason"] = outcome.get("reason", "")
+                        results_df.at[idx, "combined_score"] = combined
+                    else:
+                        results_df.at[idx, "combined_score"] = base
+                logger.info("LLM scoring refined %s candidate(s).", len(llm_results))
+            else:
+                logger.info("LLM scoring returned no adjustments; falling back to base ordering.")
+        if "combined_score" not in results_df.columns:
+            # Use base score fallback derived from predicted returns
+            for idx, row in results_df.iterrows():
+                coin = str(row.get("coin", "") or "")
+                results_df.at[idx, "combined_score"] = base_scores.get(coin, abs(row.get("predicted_return", 0.0)))
+
     results_df = results_df.sort_values(
-        by="predicted_return",
-        key=lambda series: np.abs(series),
+        by="combined_score",
         ascending=False,
     ).reset_index(drop=True)
     preferred_results = prefer_usdc_products(results_df)
