@@ -125,8 +125,18 @@ Run `python multi_coin_reservoir_daytrader.py --list-profiles` to view these pre
      --position-usd 500 \
      --leverage 5 \
      --order market \
+     --confidence-scale 0.5 \
+     --confidence-threshold 0.003 \
+     --max-confidence-multiplier 1.8 \
+     --expectancy-window 30 \
+     --min-expectancy 0 \
+     --max-daily-loss 150 \
+     --max-consecutive-losses 3 \
      --execute
    ```
+
+- `--confidence-*` adjusts the fixed $500 base using the finder’s predicted return; set the scale to 0 to keep a flat size.
+- Expectancy and kill-switch rails read `trade_logs/watchdog_closed_positions.csv`; when thresholds trigger the helper automatically falls back to dry-run mode.
 
 ---
 

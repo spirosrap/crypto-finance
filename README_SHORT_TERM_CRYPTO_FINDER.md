@@ -92,11 +92,18 @@ python add_position_from_finder.py \
   --file finder_short.txt \
   --position-usd 500 \
   --leverage 5 \
-  --order market
+  --order market \
+  --confidence-scale 0.5 \
+  --confidence-threshold 0.003 \
+  --expectancy-window 30 \
+  --max-daily-loss 150 \
+  --max-consecutive-losses 3
 
 `--plain-output` mirrors the console view, and `--suppress-console-logs`
 removes the extra logging noise so you no longer need a `tee | grep` filter.
-```
+
+- Risk rails (`--expectancy-window`, `--max-daily-loss`, `--max-consecutive-losses`) inspect `trade_logs/watchdog_closed_positions.csv` before orders are sent. If a limit is breached, execution automatically drops back to a dry run.
+``` 
 
 ### Watchdog Reporting Companion
 

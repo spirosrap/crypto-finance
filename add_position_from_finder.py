@@ -30,9 +30,11 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, Set, TextIO
+
+import datetime as dt
 
 from ccxt_trade_perp import (
     MarketMeta,
@@ -47,9 +49,11 @@ from ccxt_trade_perp import (
     wait_for_fill,
 )
 from perp_support import (
-    canonical_perp_symbol,
-    perp_price_multiplier,
+        canonical_perp_symbol,
+        perp_price_multiplier,
 )
+
+import pandas as pd
 
 DEFAULT_EXCLUSION_FILE = Path("config/excluded_perps.txt")
 
@@ -102,6 +106,7 @@ class ParsedFinder:
     entry_decimals: int
     stop_decimals: int
     take_profit_decimals: int
+    predicted_return: Optional[float] = None
 
     def max_price_decimals(self) -> int:
         """Return the max precision implied by parsed price levels (cap at 8)."""
@@ -126,6 +131,14 @@ class OrderSettings:
     expiry: str = "30d"
     exclude_file: Optional[Path] = DEFAULT_EXCLUSION_FILE
     excluded_products: Optional[Set[str]] = None
+    confidence_scale: float = 0.0
+    confidence_threshold: float = 0.0
+    max_confidence_multiplier: float = 2.0
+    risk_log_path: Path = Path("trade_logs/watchdog_closed_positions.csv")
+    expectancy_window: int = 0
+    min_expectancy: Optional[float] = None
+    max_daily_loss: Optional[float] = None
+    max_consecutive_losses: Optional[int] = None
 
 
 def parse_finder_text(text: str) -> ParsedFinder:
@@ -167,6 +180,15 @@ def parse_finder_text(text: str) -> ParsedFinder:
     m_sz = re.search(r"Recommended Position Size\s*:\s*([0-9]+(?:\.[0-9]+)?)%", text, re.I)
     pos_pct = float(m_sz.group(1)) if m_sz else 0.0
 
+    predicted_return = None
+    m_pred = re.search(r"Predicted Return .*?:\s*([-+]?[0-9]*\.?[0-9]+)%", text, re.I)
+    if m_pred:
+        predicted_return = float(m_pred.group(1)) / 100.0
+    else:
+        m_compact = re.search(r"pred=([-+]?[0-9]*\.?[0-9]+)", text, re.I)
+        if m_compact:
+            predicted_return = float(m_compact.group(1))
+
     return ParsedFinder(
         symbol=symbol,
         base_symbol=base_symbol,
@@ -178,6 +200,7 @@ def parse_finder_text(text: str) -> ParsedFinder:
         entry_decimals=entry_dec,
         stop_decimals=stop_dec,
         take_profit_decimals=tp_dec,
+        predicted_return=predicted_return,
     )
 
 
@@ -223,6 +246,71 @@ def load_exclusion_list(path: Optional[Path]) -> Set[str]:
             continue
         exclusions.add(line.upper())
     return exclusions
+
+
+def evaluate_recent_performance(
+    path: Path,
+    window: int,
+    min_expectancy: Optional[float],
+    max_daily_loss: Optional[float],
+    max_consecutive_losses: Optional[int],
+) -> Tuple[bool, List[str]]:
+    reasons: List[str] = []
+    if not path.exists():
+        return True, reasons
+    try:
+        df = pd.read_csv(path)
+    except Exception as exc:
+        reasons.append(f"Failed to read performance log {path}: {exc}")
+        return False, reasons
+
+    if "closed_at" not in df.columns or "profit_loss" not in df.columns:
+        reasons.append("Performance log missing required columns.")
+        return False, reasons
+
+    df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True, errors="coerce")
+    df["profit_loss"] = pd.to_numeric(df["profit_loss"], errors="coerce")
+    df = df.dropna(subset=["closed_at", "profit_loss"])
+    if df.empty:
+        return True, reasons
+
+    df = df.sort_values("closed_at")
+
+    if window and window > 0 and len(df) >= window:
+        window_slice = df.tail(window)
+    else:
+        window_slice = df
+
+    if min_expectancy is not None and not window_slice.empty:
+        expectancy = window_slice["profit_loss"].mean()
+        if expectancy < min_expectancy:
+            reasons.append(
+                f"Rolling expectancy {expectancy:.2f} < minimum {min_expectancy:.2f} over last {len(window_slice)} trades."
+            )
+
+    if max_consecutive_losses is not None and max_consecutive_losses > 0:
+        losses = 0
+        for pl in reversed(df["profit_loss"]):
+            if pl < 0:
+                losses += 1
+            else:
+                break
+        if losses >= max_consecutive_losses:
+            reasons.append(
+                f"{losses} consecutive losses ≥ limit ({max_consecutive_losses})."
+            )
+
+    if max_daily_loss is not None:
+        today = dt.datetime.utcnow().date()
+        day_slice = df[df["closed_at"].dt.date == today]
+        if not day_slice.empty:
+            daily_loss = day_slice["profit_loss"].sum()
+            if daily_loss <= -abs(max_daily_loss):
+                reasons.append(
+                    f"Today's net P/L {daily_loss:.2f} ≤ -{abs(max_daily_loss):.2f} limit."
+                )
+
+    return len(reasons) == 0, reasons
 
 
 def process_parsed_signals(
@@ -318,6 +406,7 @@ def process_parsed_signals(
         scaled_tp_val = parsed.take_profit * price_multiplier
         scaled_sl_val = parsed.stop * price_multiplier
         side_perp = "SELL" if parsed.side == "SHORT" else "BUY"
+        size_multiplier = 1.0
         if settings.position_usd is not None and settings.position_usd > 0:
             size_usd = float(settings.position_usd)
             applied_pct = None
@@ -326,6 +415,19 @@ def process_parsed_signals(
             base_pct = parsed.pos_size_pct if parsed.pos_size_pct > 0 else 5.0
             size_usd = portfolio_base * (base_pct / 100.0)
             applied_pct = base_pct
+        if (
+            settings.confidence_scale > 0
+            and parsed.predicted_return is not None
+            and parsed.predicted_return > 0
+        ):
+            threshold = settings.confidence_threshold if settings.confidence_threshold > 0 else 1.0
+            ratio = parsed.predicted_return / threshold
+            if ratio > 0:
+                size_multiplier = 1.0 + settings.confidence_scale * ratio
+                size_multiplier = min(size_multiplier, settings.max_confidence_multiplier)
+                size_usd *= size_multiplier
+                if applied_pct is not None and settings.portfolio_usd is not None and settings.portfolio_usd > 0:
+                    applied_pct = (size_usd / settings.portfolio_usd) * 100.0
         tick = meta.price_precision if meta and getattr(meta, "price_precision", 0.0) else 0.0
         price_candidates = [v for v in (scaled_entry, scaled_tp_val, scaled_sl_val) if v > 0]
         min_price_value = min(price_candidates) if price_candidates else 0.0
@@ -424,10 +526,17 @@ def process_parsed_signals(
             size_blurb = (
                 f"{applied_pct:.2f}% of ${settings.portfolio_usd:.2f} ≈ ${size_usd:.2f}"
             )
+        if size_multiplier != 1.0:
+            size_blurb += f" (multiplier {size_multiplier:.2f}x)"
         summaries.append(
             f"Symbol: {display_symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: {tp_str}  SL: {sl_str}\n"
             f"Product: {display_pid} (API {api_pid})  Size: {size_blurb} (Margin ≈ ${margin_usd:.2f})  Expiry: {expiry}\n"
             f"PnL vs position: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
+            + (
+                f"\nPredicted return: {parsed.predicted_return:.4f}"
+                if parsed.predicted_return is not None
+                else ""
+            )
         )
 
     print("\n=== Parsed Finder Signals ===", file=output)
@@ -586,6 +695,51 @@ def main() -> None:
         default=DEFAULT_EXCLUSION_FILE,
         help=f"Path to newline-separated perp ids to skip (default: {DEFAULT_EXCLUSION_FILE})",
     )
+    ap.add_argument(
+        "--confidence-scale",
+        type=float,
+        default=0.0,
+        help="Scale position size by predicted-return confidence (0 disables).",
+    )
+    ap.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=0.0,
+        help="Reference predicted-return threshold for scaling (set to reservoir threshold).",
+    )
+    ap.add_argument(
+        "--max-confidence-multiplier",
+        type=float,
+        default=2.0,
+        help="Maximum multiplier applied via confidence scaling.",
+    )
+    ap.add_argument(
+        "--expectancy-window",
+        type=int,
+        default=0,
+        help="Number of recent trades to evaluate expectancy (0 disables).",
+    )
+    ap.add_argument(
+        "--min-expectancy",
+        type=float,
+        help="Minimum average PnL (USD) over expectancy window to allow live execution.",
+    )
+    ap.add_argument(
+        "--max-daily-loss",
+        type=float,
+        help="Abort execution when today's cumulative PnL ≤ -value (USD).",
+    )
+    ap.add_argument(
+        "--max-consecutive-losses",
+        type=int,
+        help="Abort execution after this many consecutive losing trades.",
+    )
+    ap.add_argument(
+        "--performance-log",
+        type=Path,
+        default=Path("trade_logs/watchdog_closed_positions.csv"),
+        help="Path to closed-trade log for expectancy/killswitch checks.",
+    )
 
     args = ap.parse_args()
 
@@ -604,6 +758,21 @@ def main() -> None:
             print(f"Skipping block due to parse error: {e}")
             continue
 
+    ok_to_trade, rail_reasons = evaluate_recent_performance(
+        settings.risk_log_path,
+        settings.expectancy_window,
+        settings.min_expectancy,
+        settings.max_daily_loss,
+        settings.max_consecutive_losses,
+    )
+    if not ok_to_trade:
+        print("Risk rails triggered; skipping execution:")
+        for reason in rail_reasons:
+            print(f"- {reason}")
+        if not parsed_list:
+            return
+        settings = replace(settings, execute=False)
+
     settings = OrderSettings(
         portfolio_usd=args.portfolio_usd,
         leverage=args.leverage,
@@ -613,6 +782,14 @@ def main() -> None:
         execute=args.execute,
         expiry=args.expiry,
         exclude_file=args.exclude_file,
+        confidence_scale=args.confidence_scale,
+        confidence_threshold=args.confidence_threshold,
+        max_confidence_multiplier=args.max_confidence_multiplier,
+        risk_log_path=args.performance_log,
+        expectancy_window=args.expectancy_window,
+        min_expectancy=args.min_expectancy,
+        max_daily_loss=args.max_daily_loss,
+        max_consecutive_losses=args.max_consecutive_losses,
     )
     process_parsed_signals(parsed_list, settings)
 
