@@ -87,6 +87,14 @@ python short_term_crypto_finder.py --list-profiles
 # Run the focused LLM preset for tighter swing candidates and saved report
 python short_term_crypto_finder.py --profile focused_llm --plain-output finder_short.txt
 
+# Fix the execution size at $500 per trade instead of using finder percentages
+python add_position_from_finder.py \
+  --file finder_short.txt \
+  --portfolio-usd 25000 \
+  --position-usd 500 \
+  --leverage 5 \
+  --order market
+
 `--plain-output` mirrors the console view, and `--suppress-console-logs`
 removes the extra logging noise so you no longer need a `tee | grep` filter.
 ```

@@ -122,6 +122,7 @@ Run `python multi_coin_reservoir_daytrader.py --list-profiles` to view these pre
    python add_position_from_finder.py \
      --file finder_short.txt \
      --portfolio-usd 25000 \
+     --position-usd 500 \
      --leverage 5 \
      --order market \
      --execute
