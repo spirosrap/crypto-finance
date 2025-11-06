@@ -1,5 +1,22 @@
 # Trading Journal
 
+## November 7, 2025 - Watchdog P/L Snapshot & Guardrails
+
+### What the CSV Shows
+- Pulled `watchdog_closed_positions.csv`: only 8 trades logged since the reservoir go-live, expectancy at **–3.81 USDC/trade** with a **37.5% win rate**.
+- Losses cluster in recent shorts (`ICP`, `PROMPT`, `TOWNS`); longs remain positive (+86 vs –116 on shorts), so directional bias slipped during the latest volatility spike.
+- MINA and B3 winners can’t offset the outsized short losers—median trade is negative, confirming the edge disappeared quickly once regime changed.
+
+### Immediate Adjustments
+- Treat reservoir signals as “pilot” size until `_evaluation.csv` reports Sharpe > 0.2; finder trades stay half-size unless the reservoir agrees.
+- Write a quick expectancy tripwire that scans the last N trades in the CSV and auto-flips execution to paper mode after three consecutive negative expectancy readings.
+- Temporarily blacklist `ICP` and `PROMPT` perps (or widen ATR multipliers) until the books settle; both delivered heavier losses than the average win.
+
+### Follow-up
+- Weekend task: re-run the reservoir with a slightly higher threshold (0.0045) and compare hit rate before reinstating full size on Monday.
+- Instrument the Watchdog dashboard with long vs short cumulative P/L so directional drift is visible at a glance.
+- Keep logging finder vs reservoir divergence; give the consensus gate higher weight whenever volatility breaks the prior regime.
+
 ## November 6, 2025 - Regime Protection Playbook
 
 ### Finder Vulnerability
