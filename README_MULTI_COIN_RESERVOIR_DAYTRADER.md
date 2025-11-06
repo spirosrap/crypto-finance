@@ -93,6 +93,7 @@ If evaluation metrics are available, a fourth file is emitted:
 | `default` | 40 | USDC, USD | 2,000,000 | ✗ | Balanced coverage of the most liquid majors. |
 | `wide` | 150 | USDC, USD, USDT | 500,000 | ✗ | Broad scan across high-volume spot pairs. |
 | `focused` | 20 | USDC | 5,000,000 | ✗ | Tight basket of USDC majors for faster execution. |
+| `focused_reservoir_100` | 100 | USDC | 5,000,000 | ✗ | Same universe as the LLM profile but ranked purely by reservoir scores. |
 | `focused_llm_100` | 100 | USDC | 5,000,000 | ✓ | Focused basket with OpenAI LLM blend (mirrors `focused_llm_100` from the short-term finder). |
 
 Run `python multi_coin_reservoir_daytrader.py --list-profiles` to view these presets inside the CLI, or mix `--quotes`, `--max-products`, and `--min-volume` for custom discovery filters.
