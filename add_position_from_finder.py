@@ -758,21 +758,6 @@ def main() -> None:
             print(f"Skipping block due to parse error: {e}")
             continue
 
-    ok_to_trade, rail_reasons = evaluate_recent_performance(
-        settings.risk_log_path,
-        settings.expectancy_window,
-        settings.min_expectancy,
-        settings.max_daily_loss,
-        settings.max_consecutive_losses,
-    )
-    if settings.execute and not ok_to_trade:
-        print("Risk rails triggered; switching to dry run:")
-        for reason in rail_reasons:
-            print(f"- {reason}")
-        settings = replace(settings, execute=False)
-        if not parsed_list:
-            return
-
     settings = OrderSettings(
         portfolio_usd=args.portfolio_usd,
         leverage=args.leverage,
@@ -791,6 +776,20 @@ def main() -> None:
         max_daily_loss=args.max_daily_loss,
         max_consecutive_losses=args.max_consecutive_losses,
     )
+    ok_to_trade, rail_reasons = evaluate_recent_performance(
+        settings.risk_log_path,
+        settings.expectancy_window,
+        settings.min_expectancy,
+        settings.max_daily_loss,
+        settings.max_consecutive_losses,
+    )
+    if settings.execute and not ok_to_trade:
+        print("Risk rails triggered; switching to dry run:")
+        for reason in rail_reasons:
+            print(f"- {reason}")
+        settings = replace(settings, execute=False)
+        if not parsed_list:
+            return
     process_parsed_signals(parsed_list, settings)
 
 
