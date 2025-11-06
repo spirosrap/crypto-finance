@@ -84,6 +84,12 @@ RESERVOIR_PROFILES: Dict[str, Dict[str, Any]] = {
         "llm_temperature": None,
         "llm_sleep_seconds": 0.0,
     },
+    "focused_reservoir_100": {
+        "max_products": 100,
+        "quotes": ["USDC"],
+        "min_volume": 5_000_000.0,
+        "use_llm_scoring": False,
+    },
 }
 
 PROFILE_DESCRIPTIONS: Dict[str, str] = {
@@ -91,6 +97,7 @@ PROFILE_DESCRIPTIONS: Dict[str, str] = {
     "wide": "Broader scan across top-volume quotes (USDC/USD/USDT) up to 150 products.",
     "focused": "Tight list of high-volume USDC majors for faster execution.",
     "focused_llm_100": "Focused USDC basket with OpenAI opinion blended into rankings (100 product scan).",
+    "focused_reservoir_100": "Same universe as focused_llm_100 but ranked purely by reservoir scores (no LLM opinion).",
 }
 
 COINBASE_GRANULARITIES: Dict[str, float] = {
