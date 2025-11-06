@@ -117,7 +117,7 @@ class ParsedFinder:
 class OrderSettings:
     """Execution settings shared between CLI and programmatic integrations."""
 
-    portfolio_usd: float
+    portfolio_usd: Optional[float]
     leverage: float
     position_usd: Optional[float] = None
     product_form: str = "PERP-INTX"
@@ -322,8 +322,9 @@ def process_parsed_signals(
             size_usd = float(settings.position_usd)
             applied_pct = None
         else:
+            portfolio_base = settings.portfolio_usd if settings.portfolio_usd is not None else 0.0
             base_pct = parsed.pos_size_pct if parsed.pos_size_pct > 0 else 5.0
-            size_usd = settings.portfolio_usd * (base_pct / 100.0)
+            size_usd = portfolio_base * (base_pct / 100.0)
             applied_pct = base_pct
         tick = meta.price_precision if meta and getattr(meta, "price_precision", 0.0) else 0.0
         price_candidates = [v for v in (scaled_entry, scaled_tp_val, scaled_sl_val) if v > 0]
@@ -417,6 +418,8 @@ def process_parsed_signals(
         risk_usd = risk_pct * size_usd
         if applied_pct is None:
             size_blurb = f"Fixed size ≈ ${size_usd:.2f}"
+        elif settings.portfolio_usd is None:
+            size_blurb = f"{applied_pct:.2f}% sizing (portfolio unspecified) ≈ ${size_usd:.2f}"
         else:
             size_blurb = (
                 f"{applied_pct:.2f}% of ${settings.portfolio_usd:.2f} ≈ ${size_usd:.2f}"
@@ -566,7 +569,7 @@ def process_parsed_signals(
 def main() -> None:
     ap = argparse.ArgumentParser(description="Create perp position from long- or short-term finder text output")
     ap.add_argument("--file", type=str, help="Path to finder output text; omit to read stdin")
-    ap.add_argument("--portfolio-usd", type=float, required=True, help="Total portfolio value in USD")
+    ap.add_argument("--portfolio-usd", type=float, help="Total portfolio value in USD (optional when --position-usd is provided)")
     ap.add_argument(
         "--position-usd",
         type=float,
