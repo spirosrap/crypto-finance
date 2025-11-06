@@ -765,13 +765,13 @@ def main() -> None:
         settings.max_daily_loss,
         settings.max_consecutive_losses,
     )
-    if not ok_to_trade:
-        print("Risk rails triggered; skipping execution:")
+    if settings.execute and not ok_to_trade:
+        print("Risk rails triggered; switching to dry run:")
         for reason in rail_reasons:
             print(f"- {reason}")
+        settings = replace(settings, execute=False)
         if not parsed_list:
             return
-        settings = replace(settings, execute=False)
 
     settings = OrderSettings(
         portfolio_usd=args.portfolio_usd,
