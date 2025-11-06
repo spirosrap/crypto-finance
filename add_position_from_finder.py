@@ -119,6 +119,7 @@ class OrderSettings:
 
     portfolio_usd: float
     leverage: float
+    position_usd: Optional[float] = None
     product_form: str = "PERP-INTX"
     order_type: str = "market"
     execute: bool = False
@@ -317,11 +318,13 @@ def process_parsed_signals(
         scaled_tp_val = parsed.take_profit * price_multiplier
         scaled_sl_val = parsed.stop * price_multiplier
         side_perp = "SELL" if parsed.side == "SHORT" else "BUY"
-        size_usd = (
-            settings.portfolio_usd * (parsed.pos_size_pct / 100.0)
-            if parsed.pos_size_pct > 0
-            else (settings.portfolio_usd * 0.05)
-        )
+        if settings.position_usd is not None and settings.position_usd > 0:
+            size_usd = float(settings.position_usd)
+            applied_pct = None
+        else:
+            base_pct = parsed.pos_size_pct if parsed.pos_size_pct > 0 else 5.0
+            size_usd = settings.portfolio_usd * (base_pct / 100.0)
+            applied_pct = base_pct
         tick = meta.price_precision if meta and getattr(meta, "price_precision", 0.0) else 0.0
         price_candidates = [v for v in (scaled_entry, scaled_tp_val, scaled_sl_val) if v > 0]
         min_price_value = min(price_candidates) if price_candidates else 0.0
@@ -412,9 +415,15 @@ def process_parsed_signals(
         margin_usd = size_usd / max(settings.leverage, 1e-9)
         reward_usd = reward_pct * size_usd
         risk_usd = risk_pct * size_usd
+        if applied_pct is None:
+            size_blurb = f"Fixed size ≈ ${size_usd:.2f}"
+        else:
+            size_blurb = (
+                f"{applied_pct:.2f}% of ${settings.portfolio_usd:.2f} ≈ ${size_usd:.2f}"
+            )
         summaries.append(
             f"Symbol: {display_symbol} Side: {parsed.side}  Entry: ${entry_disp}  TP: {tp_str}  SL: {sl_str}\n"
-            f"Product: {display_pid} (API {api_pid})  Size: {parsed.pos_size_pct or 5.0:.2f}% of ${settings.portfolio_usd:.2f} ≈ ${size_usd:.2f} (Margin ≈ ${margin_usd:.2f})  Expiry: {expiry}\n"
+            f"Product: {display_pid} (API {api_pid})  Size: {size_blurb} (Margin ≈ ${margin_usd:.2f})  Expiry: {expiry}\n"
             f"PnL vs position: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
         )
 
@@ -558,6 +567,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Create perp position from long- or short-term finder text output")
     ap.add_argument("--file", type=str, help="Path to finder output text; omit to read stdin")
     ap.add_argument("--portfolio-usd", type=float, required=True, help="Total portfolio value in USD")
+    ap.add_argument(
+        "--position-usd",
+        type=float,
+        help="Fixed USD notional per trade (overrides percentage sizing from finder).",
+    )
     ap.add_argument("--leverage", type=float, default=5.0, help="Leverage 1-20 (default 5)")
     ap.add_argument("--product-form", type=str, choices=["PERP-INTX", "INTX-PERP"], default="PERP-INTX", help="Perp suffix format to display")
     ap.add_argument("--order", type=str, choices=["market", "limit"], default="market", help="Order type")
@@ -590,6 +604,7 @@ def main() -> None:
     settings = OrderSettings(
         portfolio_usd=args.portfolio_usd,
         leverage=args.leverage,
+        position_usd=args.position_usd,
         product_form=args.product_form,
         order_type=args.order,
         execute=args.execute,
