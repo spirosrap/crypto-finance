@@ -90,12 +90,6 @@ RESERVOIR_PROFILES: Dict[str, Dict[str, Any]] = {
         "min_volume": 5_000_000.0,
         "use_llm_scoring": False,
     },
-    "oos_15m_focus": {
-        "max_products": 40,
-        "quotes": ["USDC"],
-        "min_volume": 2_000_000.0,
-        "use_llm_scoring": False,
-    },
 }
 
 PROFILE_DESCRIPTIONS: Dict[str, str] = {
@@ -104,7 +98,6 @@ PROFILE_DESCRIPTIONS: Dict[str, str] = {
     "focused": "Tight list of high-volume USDC majors for faster execution.",
     "focused_llm_100": "Focused USDC basket with OpenAI opinion blended into rankings (100 product scan).",
     "focused_reservoir_100": "Same universe as focused_llm_100 but ranked purely by reservoir scores (no LLM opinion).",
-    "oos_15m_focus": "Walk-forward friendly 15m preset (LLM disabled) for faster regime checks.",
 }
 
 COINBASE_GRANULARITIES: Dict[str, float] = {
@@ -477,10 +470,6 @@ class CoinReadoutHistory:
     timestamps: pd.Index
     predicted_returns: np.ndarray
     actual_returns: np.ndarray
-    log_returns: np.ndarray
-    ema_slope: np.ndarray
-    relative_volume: np.ndarray
-    atr_pct: np.ndarray
 
 
 class SharedReservoir:
@@ -530,78 +519,63 @@ def train_readout_for_coin(
     df_raw: pd.DataFrame,
     feature_cols: List[str],
     threshold: float,
-    short_threshold: float,
     ridge_alpha: float,
     washout: int,
-    timeframe_hours: float,
 ) -> Optional[Tuple[Dict[str, object], CoinReadoutHistory]]:
-    if len(df_scaled) < washout + 60:
-        logger.warning("%s insufficient history (%s rows)", symbol, len(df_scaled))
+    if len(df_scaled) < washout + 5:
+        logger.warning("%s insufficient data after indicator prep (%s rows)", symbol, len(df_scaled))
         return None
 
-    step = max(1, int(round(EXPIRY_HOURS / max(timeframe_hours, 1e-6))))
-    predicted_returns, actual_returns = walk_forward_train_predict(
-        df_raw=df_raw,
-        feature_cols=feature_cols,
-        reservoir=reservoir,
-        ridge_alpha=ridge_alpha,
-        washout=washout,
-        step=step,
-    )
+    features = df_scaled[feature_cols].values
+    states, _ = reservoir.compute_states(features)
 
-    valid_idx = np.where(~np.isnan(predicted_returns))[0]
-    if valid_idx.size == 0:
-        logger.warning("%s produced no walk-forward predictions", symbol)
+    target_mask = ~df_scaled["target_return"].isna()
+    train_indices = np.where(target_mask)[0]
+    if len(train_indices) <= washout:
+        logger.warning("%s insufficient history after washout (%s vs %s)", symbol, len(train_indices), washout)
+        return None
+    effective_indices = train_indices[washout:]
+    train_states = states[effective_indices]
+    train_targets = df_scaled["target_return"].iloc[effective_indices].values
+
+    if len(train_states) < 2:
+        logger.warning("%s not enough samples post washout to train", symbol)
         return None
 
-    latest_idx = int(valid_idx[-1])
-    final_prediction = float(predicted_returns[latest_idx])
-    latest_row = df_raw.iloc[latest_idx]
-    ema_slope = float(latest_row["ema_slope"])
-    rel_vol = float(latest_row["relative_volume"])
-    atr_pct = float(latest_row["atr_pct"])
-    latest_close = float(latest_row["close"])
-    latest_rsi = float(latest_row["rsi"])
-    timestamp = df_raw.index[latest_idx].to_pydatetime()
+    model = Ridge(alpha=ridge_alpha, fit_intercept=True)
+    model.fit(train_states, train_targets)
+    predicted_returns = model.predict(states)
 
-    final_signal = signal_from_prediction_side(final_prediction, threshold, short_threshold)
-    if not regime_gate(final_signal, ema_slope, rel_vol, atr_pct):
-        final_signal = 0
+    final_prediction = predicted_returns[-1]
+    final_signal = signal_from_prediction(final_prediction, threshold)
+    latest_raw = df_raw.iloc[-1]
+    final_atr = float(latest_raw["atr_pct"])
+    latest_close = float(latest_raw["close"])
+    latest_rsi = float(latest_raw["rsi"])
+    latest_rel_volume = float(latest_raw["relative_volume"])
+    timestamp = df_raw.index[-1].to_pydatetime()
 
-    uptick_tp, downtick_tp = calibrate_tp_sl(df_raw, timeframe_hours=timeframe_hours)
-    if final_signal > 0:
-        tp_pct = min(2.5 * atr_pct, uptick_tp)
-        sl_pct = max(0.6 * atr_pct, 0.5 * tp_pct)
-    elif final_signal < 0:
-        tp_pct = min(2.5 * atr_pct, downtick_tp)
-        sl_pct = max(0.6 * atr_pct, 0.5 * tp_pct)
-    else:
-        tp_pct = max(atr_pct * 1.5, 0.005)
-        sl_pct = max(0.6 * atr_pct, 0.5 * tp_pct)
+    perp_product_id = spot_to_perp_id(symbol)
 
     result = {
         "timestamp": timestamp.isoformat(),
         "coin": symbol,
         "signal": final_signal,
-        "tp_pct": float(tp_pct),
-        "sl_pct": float(sl_pct),
+        "tp_pct": max(final_atr * 2.0, 0.0),
+        "sl_pct": max(final_atr * 1.0, 0.0),
         "expiry_h": EXPIRY_HOURS,
         "predicted_return": float(final_prediction),
         "last_price": latest_close,
-        "atr_pct": atr_pct,
+        "atr_pct": final_atr,
         "rsi": latest_rsi,
-        "relative_volume": rel_vol,
-        "perp_product_id": spot_to_perp_id(symbol),
+        "relative_volume": latest_rel_volume,
+        "perp_product_id": perp_product_id,
     }
 
     history = CoinReadoutHistory(
-        timestamps=df_raw.index,
-        predicted_returns=predicted_returns,
-        actual_returns=actual_returns,
-        log_returns=df_raw["log_return"].to_numpy(),
-        ema_slope=df_raw["ema_slope"].to_numpy(),
-        relative_volume=df_raw["relative_volume"].to_numpy(),
-        atr_pct=df_raw["atr_pct"].to_numpy(),
+        timestamps=df_raw.index[effective_indices],
+        predicted_returns=predicted_returns[effective_indices],
+        actual_returns=train_targets,
     )
     return result, history
 
@@ -609,14 +583,44 @@ def train_readout_for_coin(
 def evaluate_signals(
     histories: Dict[str, CoinReadoutHistory],
     threshold: float,
-    short_threshold: float,
     timeframe_hours: float,
+    horizon_hours: float = EXPIRY_HOURS,
 ) -> pd.DataFrame:
     rows = []
+    periods = max(1, int(round(horizon_hours / timeframe_hours)))
     for symbol, history in histories.items():
-        metrics = oos_metrics(history, threshold, short_threshold, timeframe_hours)
-        metrics["coin"] = symbol
-        rows.append(metrics)
+        if len(history.predicted_returns) == 0:
+            continue
+        preds = history.predicted_returns[-periods:]
+        actuals = history.actual_returns[-periods:]
+        signals = np.where(preds > threshold, 1, np.where(preds < -threshold, -1, 0))
+        active_mask = signals != 0
+        n_trades = int(active_mask.sum())
+        if n_trades == 0:
+            rows.append(
+                {
+                    "coin": symbol,
+                    "n_trades": 0,
+                    "hit_rate": np.nan,
+                    "sharpe_24h": np.nan,
+                }
+            )
+            continue
+        realised = actuals[active_mask] * signals[active_mask]
+        correct = (realised > 0).sum()
+        hit_rate = correct / n_trades
+        std = realised.std(ddof=1)
+        sharpe = 0.0
+        if not math.isclose(std, 0.0):
+            sharpe = realised.mean() / std * math.sqrt(n_trades)
+        rows.append(
+            {
+                "coin": symbol,
+                "n_trades": n_trades,
+                "hit_rate": hit_rate,
+                "sharpe_24h": sharpe,
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -642,128 +646,6 @@ def _format_percent(value: float) -> str:
     if not math.isfinite(value):
         return "N/A"
     return f"{value * 100:.2f}%"
-
-
-def fit_scaler_past_only(df: pd.DataFrame, feature_cols: List[str], cutoff_idx: int) -> StandardScaler:
-    scaler = StandardScaler()
-    cutoff = max(1, int(cutoff_idx))
-    scaler.fit(df[feature_cols].iloc[:cutoff].values)
-    return scaler
-
-
-def walk_forward_train_predict(
-    df_raw: pd.DataFrame,
-    feature_cols: List[str],
-    reservoir: SharedReservoir,
-    ridge_alpha: float,
-    washout: int,
-    step: int,
-) -> Tuple[np.ndarray, np.ndarray]:
-    n_rows = len(df_raw)
-    preds = np.full(n_rows, np.nan, dtype=float)
-    targets = df_raw["target_return"].to_numpy(copy=True)
-    if n_rows < washout + 60:
-        return preds, targets
-
-    for end in range(washout + 50, n_rows - 1, step):
-        scaler = fit_scaler_past_only(df_raw, feature_cols, end)
-        scaled_values = scaler.transform(df_raw[feature_cols].values)
-        states, final_state = reservoir.compute_states(scaled_values[:end], initial_state=None)
-        y = targets[:end]
-        valid = ~np.isnan(y)
-        idx = np.where(valid)[0]
-        idx = idx[idx >= washout]
-        if idx.size < 5:
-            continue
-
-        model = Ridge(alpha=ridge_alpha, fit_intercept=True)
-        model.fit(states[idx], y[idx])
-
-        future_end = min(end + step, n_rows)
-        future_inputs = scaled_values[end:future_end]
-        future_states, _ = reservoir.compute_states(future_inputs, initial_state=final_state)
-        preds[end:future_end] = model.predict(future_states)
-
-    return preds, targets
-
-
-def signal_from_prediction_side(pred: float, thr_long: float, thr_short: float) -> int:
-    if not math.isfinite(pred):
-        return 0
-    if pred > thr_long:
-        return 1
-    if pred < -thr_short:
-        return -1
-    return 0
-
-
-def regime_gate(side: int, ema_slope: float, rel_vol: float, atr_pct: float) -> bool:
-    if side == 0:
-        return False
-    if atr_pct < 0.002:
-        return False
-    if side < 0 and (ema_slope > 0 or rel_vol < 1.0):
-        return False
-    return True
-
-
-def calibrate_tp_sl(
-    df: pd.DataFrame,
-    horizon: int = EXPIRY_HOURS,
-    timeframe_hours: float = 1.0,
-    quantile: float = 0.6,
-) -> Tuple[float, float]:
-    k = max(1, int(round(horizon / max(timeframe_hours, 1e-6))))
-    forward_high = df["high"].rolling(k).max().shift(-k)
-    forward_low = df["low"].rolling(k).min().shift(-k)
-    close = df["close"]
-
-    up_moves = (forward_high / close - 1.0).dropna()
-    down_moves = ((close / forward_low) - 1.0).dropna()
-
-    up_q = float(np.nanquantile(up_moves, quantile)) if not up_moves.empty else 0.01
-    down_q = float(np.nanquantile(down_moves, quantile)) if not down_moves.empty else 0.01
-    return max(0.005, up_q), max(0.005, down_q)
-
-
-def oos_metrics(
-    history: CoinReadoutHistory,
-    thr_long: float,
-    thr_short: float,
-    timeframe_hours: float,
-) -> Dict[str, float]:
-    preds = history.predicted_returns
-    signals = np.zeros_like(preds, dtype=int)
-    valid = ~np.isnan(preds)
-    signals[valid & (preds > thr_long)] = 1
-    signals[valid & (preds < -thr_short)] = -1
-
-    for idx in np.where(signals != 0)[0]:
-        if not regime_gate(
-            signals[idx],
-            history.ema_slope[idx],
-            history.relative_volume[idx],
-            history.atr_pct[idx],
-        ):
-            signals[idx] = 0
-
-    k = max(1, int(round(EXPIRY_HOURS / max(timeframe_hours, 1e-6))))
-    log_returns = history.log_returns
-    future_sum = pd.Series(log_returns).rolling(window=k, min_periods=k).sum().shift(-k + 1)
-    future_arr = future_sum.to_numpy()
-
-    active_mask = (signals != 0) & ~np.isnan(future_arr)
-    if not np.any(active_mask):
-        return {"n": 0, "win": float("nan"), "mean": float("nan"), "std": float("nan")}
-
-    realised_side = future_arr[active_mask] * signals[active_mask]
-    win_rate = float((realised_side > 0).mean()) if realised_side.size else float("nan")
-    return {
-        "n": int(active_mask.sum()),
-        "win": win_rate,
-        "mean": float(np.nanmean(realised_side)) if realised_side.size else float("nan"),
-        "std": float(np.nanstd(realised_side)) if realised_side.size else float("nan"),
-    }
 
 
 def _prepare_llm_candidates(df: pd.DataFrame, threshold: float) -> List[Dict[str, Any]]:
@@ -1007,14 +889,13 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         type=float,
         help="Minimum 24h volume (in quote currency units) required for inclusion.",
     )
-    parser.add_argument("--reservoir-size", type=int, default=400, help="Number of reservoir units.")
-    parser.add_argument("--alpha", type=float, default=0.25, help="Reservoir leak rate.")
+    parser.add_argument("--reservoir-size", type=int, default=1000, help="Number of reservoir units.")
+    parser.add_argument("--alpha", type=float, default=0.3, help="Reservoir leak rate.")
     parser.add_argument("--spectral-radius", type=float, default=0.9, help="Reservoir spectral radius.")
     parser.add_argument("--input-scaling", type=float, default=0.1, help="Reservoir input scaling.")
     parser.add_argument("--threshold", type=float, default=0.003, help="Return threshold for long/short signals.")
-    parser.add_argument("--short-threshold", type=float, help="Return threshold for short signals (default 1.5x long threshold).")
-    parser.add_argument("--ridge-alpha", type=float, default=5e-2, help="Ridge regression strength.")
-    parser.add_argument("--washout", type=int, help="Discarded initial states per coin (auto if omitted).")
+    parser.add_argument("--ridge-alpha", type=float, default=1e-4, help="Ridge regression strength.")
+    parser.add_argument("--washout", type=int, default=50, help="Discarded initial states per coin.")
     parser.add_argument("--seed", type=int, default=1337, help="Random seed for reservoir initialisation.")
     parser.add_argument(
         "--force-refresh",
@@ -1100,9 +981,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     quotes = _parse_quotes(args.quotes, profile_cfg.get("quotes", []))
     max_products = args.max_products if args.max_products is not None else profile_cfg.get("max_products")
     min_volume = args.min_volume if args.min_volume is not None else float(profile_cfg.get("min_volume", 0.0))
-    if args.washout is None:
-        args.washout = int(max(60, 3.0 / max(args.alpha, 1e-6)))
-    short_threshold = args.short_threshold if args.short_threshold is not None else max(args.threshold * 1.5, args.threshold + 0.001)
     use_llm_scoring = (
         bool(profile_cfg.get("use_llm_scoring", False))
         if args.use_llm_scoring is None
@@ -1230,10 +1108,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             df_raw=df_raw,
             feature_cols=feature_cols,
             threshold=args.threshold,
-            short_threshold=short_threshold,
             ridge_alpha=args.ridge_alpha,
             washout=args.washout,
-            timeframe_hours=timeframe_hours,
         )
         if trained is None:
             logger.warning("Skipping %s due to training failure", symbol)
@@ -1319,7 +1195,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     active_coins = set(results_df["coin"])
     filtered_histories = {k: v for k, v in histories.items() if k in active_coins}
 
-    metrics_df = evaluate_signals(filtered_histories, args.threshold, short_threshold, timeframe_hours)
+    metrics_df = evaluate_signals(filtered_histories, args.threshold, timeframe_hours)
     if not metrics_df.empty:
         metrics_path = args.output_csv.with_name(args.output_csv.stem + "_evaluation.csv")
         metrics_df.to_csv(metrics_path, index=False)

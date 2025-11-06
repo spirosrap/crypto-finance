@@ -13,7 +13,6 @@ Reservoir computing is a neural-forecasting technique where a large, randomly co
 - **Volatility-aware trade levels** – ATR% drives take-profit/stop-loss distances (2× / 1×) with a 24h expiry.
 - **Automatic discovery profiles** – scan Coinbase product lists by liquidity/quote via presets or custom filters.
 - **LLM-aware profile (optional)** – `focused_llm_100` mirrors the short-term finder’s LLM blend, layering an OpenAI “opinion” on top of reservoir scores.
-- **Walk-forward reservoir scoring** – per-coin scaling and stepwise readout refits keep predictions out-of-sample by construction.
 - **Signal-first ordering** – longs and shorts sorted together by absolute predicted return so the strongest conviction leads.
 - **Finder-compatible output** – ranked CSV diagnostics plus a `finder_short.txt` formatted for `add_position_from_finder.py`.
 - **Performance checks** – optional hit-rate and Sharpe summaries in `_evaluation.csv`.
@@ -45,23 +44,6 @@ python multi_coin_reservoir_daytrader.py \
   --washout 50
 ```
 
-### 15-minute Walk-Forward Profile (no LLM)
-
-```bash
-python multi_coin_reservoir_daytrader.py \
-  --timeframe 15m \
-  --lookback 2000 \
-  --profile oos_15m_focus \
-  --reservoir-size 400 \
-  --alpha 0.25 \
-  --spectral-radius 0.9 \
-  --input-scaling 0.08 \
-  --ridge-alpha 0.05 \
-  --threshold 0.003 \
-  --short-threshold 0.0045 \
-  --force-refresh
-```
-
 This command produces three main artifacts:
 
 | File | Description |
@@ -90,14 +72,13 @@ If evaluation metrics are available, a fourth file is emitted:
 | `--min-volume` | profile value | Minimum 24h volume required (quote units). |
 | `--timeframe` | `ONE_HOUR` | Coinbase granularity (`1h`, `15m`, `ONE_DAY`, etc.). |
 | `--lookback` | `720` | Number of candles per product. |
-| `--reservoir-size` | `400` | Echo state network hidden units. |
-| `--alpha` | `0.25` | Leak rate of the reservoir (a.k.a. `leaking_rate`). |
+| `--reservoir-size` | `1000` | Echo state network hidden units. |
+| `--alpha` | `0.3` | Leak rate of the reservoir (a.k.a. `leaking_rate`). |
 | `--spectral-radius` | `0.9` | Spectral radius scaling after random initialisation. |
 | `--input-scaling` | `0.1` | Weight scale applied to input connections. |
 | `--threshold` | `0.003` | Return cutoff for ±1 signals. |
-| `--short-threshold` | `1.5 × threshold` | Optional, higher hurdle for shorts to enter. |
-| `--ridge-alpha` | `0.05` | L2 penalty for the readout regression. |
-| `--washout` | auto (`≈ 3/leak_rate`) | Warm-up steps discarded before fitting (override if desired). |
+| `--ridge-alpha` | `1e-4` | L2 penalty for the readout regression. |
+| `--washout` | `50` | Warm-up steps discarded before fitting. |
 | `--force-refresh` | *off* | Bypass cached Coinbase candles. |
 | `--output-csv` | `signals/multi_coin_reservoir_daytrader_signals.csv` | Base path for CSV exports. |
 | `--plain-output` | `finder_short.txt` | Finder text path for execution scripts. |
@@ -114,7 +95,6 @@ If evaluation metrics are available, a fourth file is emitted:
 | `focused` | 20 | USDC | 5,000,000 | ✗ | Tight basket of USDC majors for faster execution. |
 | `focused_reservoir_100` | 100 | USDC | 5,000,000 | ✗ | Same universe as the LLM profile but ranked purely by reservoir scores. |
 | `focused_llm_100` | 100 | USDC | 5,000,000 | ✓ | Focused basket with OpenAI LLM blend (mirrors `focused_llm_100` from the short-term finder). |
-| `oos_15m_focus` | 40 | USDC | 2,000,000 | ✗ | Walk-forward friendly 15m preset for fast regime checks (LLM disabled). |
 
 Run `python multi_coin_reservoir_daytrader.py --list-profiles` to view these presets inside the CLI, or mix `--quotes`, `--max-products`, and `--min-volume` for custom discovery filters.
 
