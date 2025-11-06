@@ -91,7 +91,7 @@ RESERVOIR_PROFILES: Dict[str, Dict[str, Any]] = {
         "use_llm_scoring": False,
     },
     "oos_15m_focus": {
-        "max_products": 100,
+        "max_products": 40,
         "quotes": ["USDC"],
         "min_volume": 2_000_000.0,
         "use_llm_scoring": False,

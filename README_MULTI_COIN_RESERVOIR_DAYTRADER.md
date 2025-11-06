@@ -114,7 +114,7 @@ If evaluation metrics are available, a fourth file is emitted:
 | `focused` | 20 | USDC | 5,000,000 | ✗ | Tight basket of USDC majors for faster execution. |
 | `focused_reservoir_100` | 100 | USDC | 5,000,000 | ✗ | Same universe as the LLM profile but ranked purely by reservoir scores. |
 | `focused_llm_100` | 100 | USDC | 5,000,000 | ✓ | Focused basket with OpenAI LLM blend (mirrors `focused_llm_100` from the short-term finder). |
-| `oos_15m_focus` | 100 | USDC | 2,000,000 | ✗ | Walk-forward friendly 15m preset for fast regime checks (LLM disabled). |
+| `oos_15m_focus` | 40 | USDC | 2,000,000 | ✗ | Walk-forward friendly 15m preset for fast regime checks (LLM disabled). |
 
 Run `python multi_coin_reservoir_daytrader.py --list-profiles` to view these presets inside the CLI, or mix `--quotes`, `--max-products`, and `--min-volume` for custom discovery filters.
 
