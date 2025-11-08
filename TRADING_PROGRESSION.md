@@ -1,5 +1,22 @@
 # Trading Journal
 
+## November 8, 2025 - Returning to Short-Term Finder Discipline
+
+### Reservoir Takeaways
+- The multi-coin reservoir push fizzled: R/R = 2:1 on paper but live trades routinely hit the stop long before reaching target.
+- Winners like PROMPT closed quickly, yet most positions bled out well ahead of the 24h expiry, leaving the strategy net negative despite the theoretical edge.
+- Reordering risk checks and tinkering with ATR multipliers didn’t solve the early-stop problem, so the promised diversification never materialised.
+
+### Pivot Back to `short_term_crypto_finder.py`
+- Moving back to the finder workflow, which has historically been steadier and easier to reason about.
+- Key tweak: **must** let every finder trade run its full 24h evaluation window (unless the stop/TP is hit). Cutting them early to “lock” gains clearly ruined expectancy.
+- No LLM overlay for now; I’ll rely on the new `focused_no_llm_100` profile to keep scoring deterministic while I rebuild confidence.
+
+### Next Steps
+1. Run the finder daily with strict adherence to the 24h completion rule; review P/L only after the cycle ends.
+2. Track R/R vs realised outcomes in the Watchdog CSV to verify whether holding full-cycle restores the historical hit rate.
+3. Keep reservoir tooling in paper mode as a monitoring aid, but don’t let it override finder executions until its own metrics improve.
+
 ## November 7, 2025 - Watchdog P/L Snapshot & Guardrails
 
 ### What the CSV Shows
