@@ -17,14 +17,21 @@ set GTD for bracket orders.
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from dataclasses import dataclass
-from typing import Optional, Tuple, List
+from pathlib import Path
+from typing import Any, List, Optional, Set, Tuple
 
 from coinbaseservice import CoinbaseService
 from config import API_KEY_PERPS, API_SECRET_PERPS
+from perp_support import canonical_perp_symbol
+
+try:
+    from ccxt_trade_perp import get_market_meta, load_exchange
+except Exception:  # pragma: no cover - CCXT optional for dry runs
+    load_exchange = None
+    get_market_meta = None
 
 # Reuse helpers from trade_btc_perp
 try:
@@ -50,6 +57,9 @@ except Exception:
         return max(size_usd / max(current_price, 1e-9), 0.0)
 
 
+DERIVED_PERPS_PATH = Path(__file__).resolve().with_name("derived_perps_intx.txt")
+
+
 def _decimals_for_tick(tick: float) -> int:
     if tick <= 0:
         return 0
@@ -71,12 +81,65 @@ class ParsedFinder:
 
 
 def normalize_perp(symbol: str, prefer: str = "PERP-INTX") -> str:
-    s = (symbol or "").upper().strip()
-    if not s:
+    base = canonical_perp_symbol(symbol)
+    if not base:
         return ""
-    if prefer == "INTX-PERP":
-        return f"{s}-INTX-PERP"
-    return f"{s}-PERP-INTX"
+    suffix = "INTX-PERP" if prefer == "INTX-PERP" else "PERP-INTX"
+    return f"{base}-{suffix}"
+
+
+def load_supported_perps(path: Path = DERIVED_PERPS_PATH) -> Set[str]:
+    entries: Set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                value = line.strip().upper()
+                if not value or value.startswith("#"):
+                    continue
+                entries.add(value)
+    except FileNotFoundError:
+        return set()
+    except Exception as exc:
+        print(f"Warning: unable to read {path}: {exc}")
+        return set()
+    return entries
+
+
+def _prepare_exchange_for_filter() -> Optional[Any]:
+    if load_exchange is None:
+        return None
+    try:
+        return load_exchange()
+    except Exception as exc:
+        print(f"Warning: unable to load Coinbase markets via CCXT ({exc}); product verification limited to local list.")
+        return None
+
+
+def filter_supported_candidates(
+    candidates: List[ParsedFinder],
+    supported_perps: Set[str],
+    exchange: Optional[Any] = None,
+) -> Tuple[List[ParsedFinder], List[str]]:
+    """Return candidates that exist on Coinbase along with a list of skips."""
+    filtered: List[ParsedFinder] = []
+    skipped: List[str] = []
+    use_static_list = bool(supported_perps)
+    for cand in candidates:
+        product_id = normalize_perp(cand.symbol, prefer="PERP-INTX")
+        if not product_id:
+            skipped.append(cand.symbol)
+            continue
+        if use_static_list and product_id.upper() not in supported_perps:
+            skipped.append(product_id)
+            continue
+        if exchange is not None and get_market_meta is not None:
+            try:
+                get_market_meta(exchange, product_id)
+            except Exception:
+                skipped.append(product_id)
+                continue
+        filtered.append(cand)
+    return filtered, skipped
 
 
 def split_blocks(text: str) -> List[str]:
@@ -160,7 +223,12 @@ def setup_cb() -> CoinbaseService:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Create top-5 perp positions from finder text output (2L/2S + next best)")
     ap.add_argument("--file", type=str, help="Path to finder output text; omit to read stdin")
-    ap.add_argument("--portfolio-usd", type=float, required=True, help="Total portfolio value in USD")
+    ap.add_argument("--portfolio-usd", type=float, help="Total portfolio value in USD (required unless --position-usd is used)")
+    ap.add_argument(
+        "--position-usd",
+        type=float,
+        help="Fixed USD notional per trade (overrides finder percentage sizing).",
+    )
     ap.add_argument("--leverage", type=float, default=5.0, help="Leverage 1-20 (default 5)")
     ap.add_argument("--product-form", type=str, choices=["PERP-INTX", "INTX-PERP"], default="PERP-INTX", help="Perp suffix format to display")
     ap.add_argument("--order", type=str, choices=["market", "limit"], default="market", help="Order type")
@@ -168,6 +236,8 @@ def main() -> None:
     ap.add_argument("--expiry", type=str, choices=["12h", "24h", "30d"], default="30d", help="GTD expiry for bracket orders")
 
     args = ap.parse_args()
+    if (args.position_usd is None or args.position_usd <= 0) and (args.portfolio_usd is None or args.portfolio_usd <= 0):
+        ap.error("Provide --portfolio-usd (>0) to use finder percentages or set --position-usd for fixed sizing.")
 
     # Read text
     if args.file:
@@ -187,6 +257,22 @@ def main() -> None:
 
     if not parsed_items:
         print("No valid trades found in input.")
+        return
+
+    supported_perps = load_supported_perps()
+    if not supported_perps:
+        print(f"Warning: {DERIVED_PERPS_PATH.name} missing or empty; falling back to CCXT market verification only.")
+    exchange = _prepare_exchange_for_filter()
+    if not supported_perps and exchange is None:
+        print("Warning: Could not verify Coinbase product list (no derived file and CCXT unavailable); all parsed trades will be kept.")
+    elif supported_perps and exchange is None:
+        print("Warning: CCXT market metadata unavailable; using static derived list for product filtering.")
+    filtered_items, skipped_products = filter_supported_candidates(parsed_items, supported_perps, exchange)
+    if skipped_products:
+        print("Skipped unsupported Coinbase perps:", ", ".join(sorted(set(skipped_products))))
+    parsed_items = filtered_items
+    if not parsed_items:
+        print("No valid trades remain after removing unsupported Coinbase perps.")
         return
 
     # Rank: top 2 longs, top 2 shorts, then next best remaining by score
@@ -222,7 +308,14 @@ def main() -> None:
         display_pid = normalize_perp(p.symbol, prefer=args.product_form)
         api_pid = normalize_perp(p.symbol, prefer="PERP-INTX")
         side_perp = "SELL" if p.side == "SHORT" else "BUY"
-        size_usd = (args.portfolio_usd * (p.pos_size_pct / 100.0)) if p.pos_size_pct > 0 else (args.portfolio_usd * 0.05)
+        size_pct_display: Optional[float] = None
+        if args.position_usd is not None and args.position_usd > 0:
+            size_usd = float(args.position_usd)
+        else:
+            base_pct = p.pos_size_pct if p.pos_size_pct > 0 else 5.0
+            size_pct_display = base_pct
+            portfolio_base = args.portfolio_usd or 0.0
+            size_usd = portfolio_base * (base_pct / 100.0)
         tick = get_price_precision(api_pid)
         tp = round_to_precision(p.take_profit, tick)
         sl = round_to_precision(p.stop, tick)
@@ -266,9 +359,14 @@ def main() -> None:
         margin_usd = size_usd / max(args.leverage, 1e-9)
         reward_usd = reward_pct * size_usd
         risk_usd = risk_pct * size_usd
+        if size_pct_display is not None and args.portfolio_usd:
+            size_desc = f"{size_pct_display:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f}"
+        else:
+            size_desc = f"fixed ≈ ${size_usd:.2f}"
+
         summaries.append(
             f"Symbol: {p.symbol} Side: {p.side}  Score: {p.score:.2f}  Entry: ${entry_disp}  TP: ${tp_str}  SL: ${sl_str}\n"
-            f"Product: {display_pid} (API {api_pid})  Size: {p.pos_size_pct or 5.0:.2f}% of ${args.portfolio_usd:.2f} ≈ ${size_usd:.2f} (Margin ≈ ${margin_usd:.2f})  Expiry: {args.expiry}\n"
+            f"Product: {display_pid} (API {api_pid})  Size: {size_desc} (Margin ≈ ${margin_usd:.2f})  Expiry: {args.expiry}\n"
             f"PnL vs position: TP +${reward_usd:.2f} ({reward_pct * 100:.2f}%) | SL -${risk_usd:.2f} ({risk_pct * 100:.2f}%)"
         )
 
