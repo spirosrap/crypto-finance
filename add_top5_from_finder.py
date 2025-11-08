@@ -124,18 +124,31 @@ def filter_supported_candidates(
     filtered: List[ParsedFinder] = []
     skipped: List[str] = []
     use_static_list = bool(supported_perps)
+    check_ccxt = exchange is not None and get_market_meta is not None
+
+    def _ccxt_supports(product_id: str) -> bool:
+        if not check_ccxt:
+            return True
+        try:
+            get_market_meta(exchange, product_id)  # type: ignore[misc]
+            return True
+        except Exception:
+            return False
     for cand in candidates:
         product_id = normalize_perp(cand.symbol, prefer="PERP-INTX")
         if not product_id:
             skipped.append(cand.symbol)
             continue
         if use_static_list and product_id.upper() not in supported_perps:
-            skipped.append(product_id)
-            continue
-        if exchange is not None and get_market_meta is not None:
-            try:
-                get_market_meta(exchange, product_id)
-            except Exception:
+            if not _ccxt_supports(product_id):
+                skipped.append(product_id)
+                continue
+        elif not use_static_list:
+            if not _ccxt_supports(product_id):
+                skipped.append(product_id)
+                continue
+        elif use_static_list and check_ccxt:
+            if not _ccxt_supports(product_id):
                 skipped.append(product_id)
                 continue
         filtered.append(cand)
