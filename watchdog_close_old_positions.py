@@ -33,6 +33,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
+try:  # pragma: no cover - ccxt optional in some environments
+    import ccxt  # type: ignore
+except ImportError:  # pragma: no cover - defer failure until close requested
+    ccxt = None
+
 from coinbaseservice import CoinbaseService
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -54,6 +59,8 @@ except ModuleNotFoundError:
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
 from fills_pnl import fetch_fills
+
+CCXT_EXCHANGE: Optional["ccxt.Exchange"] = None
 
 
 LOG_HEADERS = [
@@ -108,6 +115,44 @@ def _breakeven_threshold() -> float:
             "Invalid WATCHDOG_BREAKEVEN_ABS=%r; defaulting to 1.0", raw
         )
         return 1.0
+
+
+def _ensure_ccxt_exchange() -> "ccxt.Exchange":
+    global CCXT_EXCHANGE
+    if CCXT_EXCHANGE is not None:
+        return CCXT_EXCHANGE
+    if ccxt is None:
+        raise RuntimeError("ccxt package is required to close positions; install ccxt and retry.")
+    env_key = os.getenv("COINBASE_PERP_API_KEY")
+    env_secret = os.getenv("COINBASE_PERP_API_SECRET")
+    cfg_key, cfg_secret = get_perps_credentials()
+    api_key = env_key or cfg_key
+    api_secret = env_secret or cfg_secret
+    if not api_key or not api_secret:
+        raise RuntimeError("Missing INTX API credentials for CCXT (set API_KEY_PERPS/API_SECRET_PERPS or env overrides).")
+    exchange = ccxt.coinbaseadvanced(
+        {
+            "apiKey": api_key,
+            "secret": api_secret,
+            "enableRateLimit": True,
+        }
+    )
+    exchange.load_markets()
+    CCXT_EXCHANGE = exchange
+    return exchange
+
+
+def _product_to_ccxt_symbol(product_id: str) -> str:
+    product = (product_id or "").strip().upper()
+    if not product:
+        raise ValueError("Empty product id cannot be mapped to CCXT symbol.")
+    if product.endswith("-PERP-INTX"):
+        base = product[: -len("-PERP-INTX")]
+    elif product.endswith("-INTX-PERP"):
+        base = product[: -len("-INTX-PERP")]
+    else:
+        raise ValueError(f"Unsupported INTX product id format: {product_id}")
+    return f"{base}/USDC:USDC"
 
 
 def _get_value(obj: Any, key: str) -> Any:
@@ -1817,26 +1862,46 @@ def _close_position(
     side = 'BUY' if position_side == 'FUTURES_POSITION_SIDE_SHORT' else 'SELL'
     close_size = abs(net_size)
 
-    # Cancel open orders for this product first
+    # Market IOC close via CCXT
+    try:
+        exchange = _ensure_ccxt_exchange()
+        ccxt_symbol = _product_to_ccxt_symbol(product_id)
+    except Exception as exc:
+        logger.error("Unable to initialise CCXT exchange: %s", exc)
+        return False, None, None
+
+    # Cancel open orders for this product first (Coinbase REST, then CCXT as fallback)
     try:
         cb.cancel_all_orders(product_id=product_id)
     except Exception as e:
-        logger.warning(f"Failed to cancel existing orders for {product_id}: {e}")
-
-    # Market IOC close
+        logger.warning(f"Failed to cancel existing orders for {product_id} via CoinbaseService: {e}")
     try:
-        client_order_id = f"close_{int(time.time())}"
-        order_config = {"market_market_ioc": {"base_size": str(close_size)}}
-        result = cb.client.create_order(
-            client_order_id=client_order_id,
-            product_id=product_id,
-            side=side,
-            order_configuration=order_config,
-            leverage=leverage,
-            margin_type="CROSS"
+        exchange.cancel_all_orders(ccxt_symbol)
+    except Exception:
+        # Not all CCXT backends support cancel_all_orders with symbol; ignore failures here.
+        pass
+
+    try:
+        params = {
+            "marginMode": "cross",
+            "timeInForce": "IOC",
+        }
+        if leverage:
+            params["leverage"] = str(leverage)
+        result = exchange.create_order(
+            ccxt_symbol,
+            "market",
+            side.lower(),
+            close_size,
+            None,
+            params,
         )
         order_id = _extract_order_id(result)
         fill_price = _extract_avg_filled_price(result)
+        if fill_price is None and isinstance(result, dict):
+            info = result.get("info")
+            if info:
+                fill_price = _extract_avg_filled_price(info)
         if _order_close_success(result):
             if fill_price is None:
                 fill_price = _lookup_order_fill_price(cb, order_id, product_id)
@@ -1848,10 +1913,10 @@ def _close_position(
                 f"price~{fill_price:.6f}" if fill_price is not None else "unknown price",
             )
             return True, fill_price, order_id
-        logger.error(f"Close order did not report success for {product_id}: {result}")
+        logger.error("Close order did not report success for %s: %s", product_id, result)
         return False, None, order_id
     except Exception as e:
-        logger.error(f"Error closing position for {product_id}: {e}")
+        logger.error(f"Error closing position for {product_id} via CCXT: {e}")
         return False, None, None
 
 
