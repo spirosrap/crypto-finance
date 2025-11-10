@@ -9,7 +9,6 @@ Launch with:
 from __future__ import annotations
 
 import math
-import json
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -52,9 +51,6 @@ from watchdog_metrics import build_snapshot
 
 UTC = timezone.utc
 AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 250
-
-FUTURE_BATCH_START = 161
-FUTURE_BATCH_PREVIOUS_END = FUTURE_BATCH_START - 1
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -515,43 +511,10 @@ def main() -> None:
     if isinstance(end_date_input, list):
         end_date_input = end_date_input[0] if end_date_input else None
 
-    batch_pref_path = Path('cache/watchdog_batch_pref.json')
-    default_batch_choice = 0
-    if batch_pref_path.exists():
-        try:
-            data = json.loads(batch_pref_path.read_text())
-            default_batch_choice = int(data.get('batch_choice', 0))
-        except Exception:
-            default_batch_choice = 0
-
     start_count = st.sidebar.number_input("Start count (1-based)", min_value=0, value=0, step=1)
     end_count = st.sidebar.number_input("End count (inclusive, 0 for none)", min_value=0, value=0, step=1)
     tail_last = st.sidebar.number_input("Last N trades (0 to ignore)", min_value=0, value=0, step=1)
     starting_equity = st.sidebar.number_input("Starting equity", min_value=0.0, value=1000.0, step=100.0)
-
-    future_pref_path = Path('cache/watchdog_future_batch.json')
-    future_pref = {
-        "start_timestamp": datetime.now(UTC).isoformat(),
-    }
-    if future_pref_path.exists():
-        try:
-            future_pref.update(json.loads(future_pref_path.read_text()))
-        except Exception:
-            future_pref_path.unlink(missing_ok=True)
-    if not future_pref_path.exists():
-        try:
-            future_pref_path.parent.mkdir(parents=True, exist_ok=True)
-            future_pref_path.write_text(json.dumps(future_pref))
-        except Exception:
-            pass
-
-    if st.sidebar.button("Rebase future batch to now"):
-        future_pref["start_timestamp"] = datetime.now(UTC).isoformat()
-        try:
-            future_pref_path.write_text(json.dumps(future_pref))
-        except Exception:
-            pass
-        st.experimental_rerun()
 
     if st.sidebar.button("Reset filters"):
         st.experimental_rerun()
@@ -573,9 +536,6 @@ def main() -> None:
     if max_trade_count is None:
         max_trade_count = int(trades_df.shape[0])
     max_trade_count = max(1, max_trade_count)
-    primary_default = 93
-    if max_trade_count <= primary_default + 1:
-        primary_default = max(1, max_trade_count - 2)
 
     try:
         pipeline_snapshot = build_snapshot(trades_df, include_unrealized=False)
@@ -590,66 +550,6 @@ def main() -> None:
         default=[],
         help="Filter summary and charts to selected instruments.",
     )
-
-    primary_split = st.sidebar.number_input(
-        "Trade split index #1",
-        min_value=1,
-        value=primary_default,
-        step=1,
-        help="Trades with count ≤ split #1 belong to Batch A.",
-    )
-    secondary_floor = primary_split + 1
-    secondary_ceiling = max(secondary_floor, max_trade_count - 1)
-    secondary_default = min(secondary_ceiling, max(primary_split + 40, secondary_floor))
-    secondary_split = st.sidebar.number_input(
-        "Trade split index #2",
-        min_value=int(secondary_floor),
-        max_value=int(secondary_ceiling),
-        value=int(secondary_default),
-        step=1,
-        help="Trades with count between split #1 and split #2 belong to Batch B.",
-    )
-    third_label_start = secondary_split + 2
-    third_label_end = FUTURE_BATCH_PREVIOUS_END
-    if third_label_end > max_trade_count:
-        third_label_end = max_trade_count
-    if third_label_start > third_label_end:
-        third_label_start = third_label_end + 1
-
-    second_label_end = min(secondary_split + 1, third_label_end)
-    if second_label_end < primary_split + 2:
-        second_label_end = max(primary_split + 1, min(secondary_split + 1, max_trade_count))
-
-    batch_filters: list[tuple[str, int, int]] = [
-        ("All trades", 0, 0),
-        (f"Trades 1–{primary_split + 1}", 1, primary_split + 1),
-        (f"Trades {primary_split + 2}–{second_label_end}", primary_split + 2, second_label_end),
-    ]
-
-    if third_label_start <= third_label_end:
-        batch_filters.append((f"Trades {third_label_start}–{third_label_end}", third_label_start, third_label_end))
-    else:
-        batch_filters.append((f"Trades {third_label_start}+", third_label_start, 0))
-
-    future_label_start = FUTURE_BATCH_START
-    batch_filters.append((f"Trades {future_label_start}+", future_label_start, 0))
-    future_batch_index = len(batch_filters) - 1
-
-    batch_options = [label for label, _, _ in batch_filters]
-    batch_choice_index = min(default_batch_choice, len(batch_options) - 1)
-    batch_choice = st.sidebar.radio(
-        "Trade batch",
-        options=batch_options,
-        index=batch_choice_index,
-        help="Quick toggle between batches.",
-    )
-    selected_index = batch_options.index(batch_choice)
-    st.session_state['batch_choice'] = selected_index
-    try:
-        batch_pref_path.parent.mkdir(parents=True, exist_ok=True)
-        batch_pref_path.write_text(json.dumps({'batch_choice': selected_index}))
-    except Exception:
-        pass
 
     start_str = start_date_input.isoformat() if start_date_input else None
     end_str = end_date_input.isoformat() if end_date_input else None
@@ -671,10 +571,6 @@ def main() -> None:
         end_str = preset_end.isoformat()
     filter_start_count = int(start_count)
     filter_end_count = int(end_count)
-    selected_filter = batch_filters[selected_index]
-    if selected_index != 0:
-        filter_start_count = int(selected_filter[1])
-        filter_end_count = int(selected_filter[2])
 
     filtered = apply_filters(
         trades_df,
@@ -686,25 +582,9 @@ def main() -> None:
         symbols=selected_products or None,
     )
 
-    is_future_batch = selected_index == future_batch_index
-    if filtered.empty and not is_future_batch:
+    if filtered.empty:
         st.warning("No trades match the selected filters.")
         st.stop()
-
-    if is_future_batch:
-        try:
-            future_start_ts = pd.to_datetime(future_pref.get("start_timestamp"), utc=True)
-        except Exception:
-            future_start_ts = None
-        if future_start_ts is None:
-            future_start_ts = pd.Timestamp(datetime.now(UTC))
-        timestamps = pd.to_datetime(filtered["closed_at"], errors="coerce", utc=True)
-        filtered = filtered.loc[timestamps >= future_start_ts].copy()
-        if filtered.empty:
-            st.info(
-                f"Awaiting new trades for {batch_options[selected_index]} "
-                f"(since {future_start_ts.strftime('%Y-%m-%d %H:%M UTC')})."
-            )
 
     daily, metrics = build_daily_equity(filtered, float(starting_equity))
 
@@ -715,8 +595,6 @@ def main() -> None:
         summary_notes.append(f"Preset window: {date_preset}")
     elif start_str or end_str:
         summary_notes.append("Custom date window")
-    if batch_choice != batch_options[0]:
-        summary_notes.append(batch_choice)
     if not filtered.empty:
         window_start = filtered["closed_at"].min()
         window_end = filtered["closed_at"].max()
