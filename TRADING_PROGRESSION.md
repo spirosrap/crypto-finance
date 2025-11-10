@@ -1,5 +1,11 @@
 # Trading Journal
 
+## November 10, 2025 - Finder Balancing Rules
+
+- Two full days of running `short_term_crypto_finder.py` to completion (no early exits before the 24h cycle closes) has made the equity curve noticeably calmer and expectancy positive again.
+- Execution rule going forward: **trade only when the finder surfaces at least five signals and they split 2L/3S or 2S/3L**. If the list is all longs, all shorts, or fewer than five total, I skip the entire session.
+- That directional balance keeps me from leaning into a single regime and avoids forcing trades on thin days when the universe isn’t offering enough quality.
+
 ## November 8, 2025 - Returning to Short-Term Finder Discipline
 
 ### Reservoir Takeaways
