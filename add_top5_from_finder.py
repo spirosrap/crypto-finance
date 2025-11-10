@@ -128,7 +128,7 @@ def filter_supported_candidates(
 
     def _ccxt_supports(product_id: str) -> bool:
         if not check_ccxt:
-            return True
+            return False
         try:
             get_market_meta(exchange, product_id)  # type: ignore[misc]
             return True
