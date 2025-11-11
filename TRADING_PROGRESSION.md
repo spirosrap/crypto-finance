@@ -1,5 +1,10 @@
 # Trading Journal
 
+## November 11, 2025 - Waiting the Full 24h Still Hurts
+
+- All five finder trades spent most of the session green—at one point the basket was up roughly $30—but every exit was an expiry/stop and I locked in a $10 net loss.
+- Staying disciplined with the 24h rule kept me out of worse chop, but it’s frustrating to watch solid intraday P/L vanish right before the deadline.
+
 ## November 10, 2025 - Finder Balancing Rules
 
 - Two full days of running `short_term_crypto_finder.py` to completion (no early exits before the 24h cycle closes) has made the equity curve noticeably calmer and expectancy positive again.
