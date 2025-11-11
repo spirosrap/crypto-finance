@@ -54,24 +54,20 @@ def parse_time(ts: Any) -> datetime:
     return datetime.now(tz=UTC)
 
 
-def fetch_fills(cb: CoinbaseService, limit: int = 500) -> List[Dict[str, Any]]:
-    # Use the underlying client directly; normalize to dict list
-    # Some SDKs expose get_fills instead of list_fills
-    if hasattr(cb.client, 'list_fills'):
-        resp = cb.client.list_fills(limit=limit)
-    else:
-        resp = cb.client.get_fills(limit=limit)
-    fills: List[Dict[str, Any]] = []
-    if isinstance(resp, dict) and 'fills' in resp:
-        raw_fills = resp['fills']
+def _extract_fills(resp: Any) -> tuple[list[Dict[str, Any]], Optional[str]]:
+    if isinstance(resp, dict):
+        raw = resp.get('fills', []) or []
+        cursor = resp.get('cursor')
     elif hasattr(resp, 'fills'):
-        raw_fills = resp.fills
+        raw = getattr(resp, 'fills', []) or []
+        cursor = getattr(resp, 'cursor', None)
     else:
-        raw_fills = []
-
-    for f in raw_fills:
+        raw = []
+        cursor = None
+    normalized: list[Dict[str, Any]] = []
+    for f in raw:
         d = f if isinstance(f, dict) else getattr(f, '__dict__', {})
-        fills.append({
+        normalized.append({
             'product_id': d.get('product_id') or d.get('symbol') or '',
             'side': (d.get('side') or '').upper(),
             'size': to_float(d.get('size') or d.get('base_size') or 0),
@@ -81,9 +77,30 @@ def fetch_fills(cb: CoinbaseService, limit: int = 500) -> List[Dict[str, Any]]:
             'order_id': d.get('order_id') or d.get('trade_id') or '',
             'time': parse_time(d.get('trade_time') or d.get('time') or d.get('created_time') or d.get('ts')),
         })
-    # Sort ascending time for FIFO
+    return normalized, cursor
+
+
+def fetch_fills(cb: CoinbaseService, limit: int = 500) -> List[Dict[str, Any]]:
+    """Return up to ``limit`` fills, paging through Coinbase responses if necessary."""
+
+    fills: List[Dict[str, Any]] = []
+    cursor: Optional[str] = None
+    remaining = max(int(limit), 0) or 500
+
+    while remaining > 0:
+        page_limit = min(remaining, 500)
+        if hasattr(cb.client, 'list_fills'):
+            resp = cb.client.list_fills(limit=page_limit, cursor=cursor)
+        else:
+            resp = cb.client.get_fills(limit=page_limit, cursor=cursor)
+        page_fills, cursor = _extract_fills(resp)
+        fills.extend(page_fills)
+        if not cursor or not page_fills:
+            break
+        remaining = limit - len(fills)
+
     fills.sort(key=lambda x: x['time'])
-    return fills
+    return fills[:limit]
 
 
 def compute_fifo_realized_pnl(fills: List[Dict[str, Any]], symbol: str = None, start: datetime = None) -> Dict[str, Any]:

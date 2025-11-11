@@ -1306,8 +1306,8 @@ def _cycle_to_record(
     return record
 
 
-def _active_net_sizes(cb: CoinbaseService) -> Dict[str, float]:
-    """Return current perp net sizes keyed by product symbol."""
+def _active_positions(cb: CoinbaseService) -> Dict[str, tuple[float, Optional[datetime]]]:
+    """Return current perp positions keyed by product symbol with net size and open time."""
 
     logger = logging.getLogger(__name__)
     portfolio_uuid = _get_portfolio_uuid(cb)
@@ -1326,7 +1326,7 @@ def _active_net_sizes(cb: CoinbaseService) -> Dict[str, float]:
     else:
         positions_raw = getattr(response, "positions", []) or []
 
-    nets: Dict[str, float] = {}
+    nets: Dict[str, tuple[float, Optional[datetime]]] = {}
     for pos in positions_raw:
         symbol, net_size, _, _ = _extract_symbol_and_size(pos)
         if not symbol:
@@ -1335,8 +1335,8 @@ def _active_net_sizes(cb: CoinbaseService) -> Dict[str, float]:
             net_float = float(net_size)
         except (TypeError, ValueError):
             continue
-        if abs(net_float) > 1e-6:
-            nets[symbol] = net_float
+        opened_at = _extract_position_open_time(pos)
+        nets[symbol] = (net_float, opened_at)
     return nets
 
 
@@ -1380,17 +1380,26 @@ def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -
         return compute_mae_mfe_from_history(cb=cb, **kwargs)
 
     appended = 0
-    active_net_sizes = _active_net_sizes(cb)
+    pending_cycles = 0
+    active_positions = _active_positions(cb)
+    latest_logged_cycle: Optional[Cycle] = None
     for cycle in new_cycles:
-        active_net = active_net_sizes.get(cycle.product_id)
-        if active_net is not None and abs(active_net) > 1e-6:
-            logger.info(
-                "Skipping TP/SL closure for %s at %s: net position still open (net_size=%s)",
-                cycle.product_id,
-                cycle.end_time.isoformat(),
-                active_net,
-            )
-            continue
+        active_entry = active_positions.get(cycle.product_id)
+        if active_entry is not None:
+            net_value, opened_at = active_entry
+            if abs(net_value) > 1e-6:
+                opened_ts = _as_utc(opened_at)
+                same_direction = (net_value > 0 and cycle.side == 'LONG') or (net_value < 0 and cycle.side == 'SHORT')
+                if same_direction and (opened_ts is None or opened_ts <= cycle.start_time + timedelta(seconds=1)):
+                    logger.info(
+                        "Deferring TP/SL closure for %s at %s: net position still open (net_size=%s, opened_at=%s)",
+                        cycle.product_id,
+                        cycle.end_time.isoformat(),
+                        net_value,
+                        opened_ts.isoformat() if opened_ts else "unknown",
+                    )
+                    pending_cycles += 1
+                    continue
 
         record = _cycle_to_record(cycle, threshold, mae_mfe_fetcher=_mae_mfe_fetcher)
         if _record_position_close_if_new(record):
@@ -1408,11 +1417,14 @@ def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -
                 cycle.product_id,
                 cycle.end_time.isoformat(),
             )
+        latest_logged_cycle = cycle
 
-    latest_logged = new_cycles[-1]
-    _store_checkpoint(latest_logged.end_time, latest_logged.closing_order_id)
+    if latest_logged_cycle is not None:
+        _store_checkpoint(latest_logged_cycle.end_time, latest_logged_cycle.closing_order_id)
     if appended:
         logger.info("TP/SL logging complete; appended %d new records", appended)
+    elif pending_cycles:
+        logger.info("TP/SL logging deferred %d cycle(s) because matching positions are still open.", pending_cycles)
     else:
         logger.info("TP/SL logging found no new rows after deduplication")
 
@@ -2066,7 +2078,7 @@ def main() -> None:
                     help="Recompute exit price/PnL for the most recent N logged closures and exit")
     ap.add_argument("--skip-close", action="store_true", help="Skip the age-based closing step")
     ap.add_argument("--log-fills", action="store_true", help="Log take-profit/stop-loss closures from recent fills")
-    ap.add_argument("--fills-limit", type=int, default=500, help="Number of recent fills to fetch when logging TP/SL closures")
+    ap.add_argument("--fills-limit", type=int, default=1500, help="Number of recent fills to fetch when logging TP/SL closures")
     ap.add_argument("--fills-interval", type=int, default=0, help="If >0, poll fills continuously every N seconds")
     ap.add_argument("--fills-bootstrap-existing", action="store_true",
                     help="On first run, log existing fill cycles instead of only new ones")
