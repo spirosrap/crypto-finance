@@ -69,6 +69,9 @@ def _decimals_for_tick(tick: float) -> int:
     return 0
 
 
+DEFAULT_EXCLUSION_FILE = Path("config/excluded_perps.txt")
+
+
 @dataclass
 class ParsedFinder:
     symbol: str
@@ -118,6 +121,7 @@ def _prepare_exchange_for_filter() -> Optional[Any]:
 def filter_supported_candidates(
     candidates: List[ParsedFinder],
     supported_perps: Set[str],
+    excluded_perps: Set[str],
     exchange: Optional[Any] = None,
 ) -> Tuple[List[ParsedFinder], List[str]]:
     """Return candidates that exist on Coinbase along with a list of skips."""
@@ -138,6 +142,9 @@ def filter_supported_candidates(
         product_id = normalize_perp(cand.symbol, prefer="PERP-INTX")
         if not product_id:
             skipped.append(cand.symbol)
+            continue
+        if excluded_perps and product_id.upper() in excluded_perps:
+            skipped.append(product_id)
             continue
         if use_static_list and product_id.upper() not in supported_perps:
             if not _ccxt_supports(product_id):
@@ -280,7 +287,20 @@ def main() -> None:
         print("Warning: Could not verify Coinbase product list (no derived file and CCXT unavailable); all parsed trades will be kept.")
     elif supported_perps and exchange is None:
         print("Warning: CCXT market metadata unavailable; using static derived list for product filtering.")
-    filtered_items, skipped_products = filter_supported_candidates(parsed_items, supported_perps, exchange)
+    excluded_products: Set[str] = set()
+    try:
+        content = DEFAULT_EXCLUSION_FILE.read_text(encoding="utf-8")
+        for raw in content.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            excluded_products.add(line.upper())
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        print(f"Warning: unable to read exclusion file {DEFAULT_EXCLUSION_FILE}: {exc}")
+
+    filtered_items, skipped_products = filter_supported_candidates(parsed_items, supported_perps, excluded_products, exchange)
     if skipped_products:
         print("Skipped unsupported Coinbase perps:", ", ".join(sorted(set(skipped_products))))
     parsed_items = filtered_items
