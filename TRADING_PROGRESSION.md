@@ -1,5 +1,10 @@
 # Trading Journal
 
+## November 13, 2025 - Red Day on the Sidelines
+
+- Market bled across the board and Bitcoin briefly fell below $100K, but I honored the ongoing pause and didn’t put on any trades.
+- Logging it anyway so the equity curve shows that the red day belonged to price action, not new execution mistakes.
+
 ## November 12, 2025 - Weird Tape
 
 - Another day where the five finder positions floated green for most of the 24h cycle and then two of them tagged their stops near the finish, flipping the basket into a loss. Market feels choppy: signals behave for 18+ hours and then reverse right before expiry. Keeping the 24h discipline, but it’s tough to sit through.
