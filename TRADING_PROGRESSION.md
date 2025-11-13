@@ -4,6 +4,9 @@
 
 - Another day where the five finder positions floated green for most of the 24h cycle and then two of them tagged their stops near the finish, flipping the basket into a loss. Market feels choppy: signals behave for 18+ hours and then reverse right before expiry. Keeping the 24h discipline, but it’s tough to sit through.
 
+### Trading Pause
+- String of back-to-back drawdowns has fried my focus. I’m stepping away from execution for a bit—no live trades until I reset and review the playbook with fresh eyes.
+
 ## November 11, 2025 - Waiting the Full 24h Still Hurts
 
 - All five finder trades spent most of the session green—at one point the basket was up roughly $30—but every exit was an expiry/stop and I locked in a $10 net loss.
