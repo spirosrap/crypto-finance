@@ -45,6 +45,11 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 - Graphical user interface for market analysis and trading
 - Automated trading with configurable parameters
 
+### Paper Finder Simulator & Dashboard
+- Run `python paper_finder_simulator.py init --initial-capital 25000` once to capture your baseline equity, then pipe new `short_term_crypto_finder.py` runs through `python paper_finder_simulator.py open --finder-output finder.txt --symbols BTC,NEAR`.
+- Periodically call `python paper_finder_simulator.py update` (optionally with `--override SYMBOL=PRICE`) to refresh marks, close trades that hit TP/SL/expiry, and keep `trade_logs/paper_finder_*.csv` in sync.
+- View simulated equity curves alongside live watchdog results by launching `streamlit run watchdog_dashboard.py` and selecting “Paper Finder” in the sidebar data-source picker.
+
 ## Prerequisites
 
 ### Python Environment Setup

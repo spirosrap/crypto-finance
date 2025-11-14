@@ -51,6 +51,8 @@ from watchdog_metrics import build_snapshot
 
 UTC = timezone.utc
 AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 250
+PAPER_CLOSED_CSV = Path("trade_logs/paper_finder_closed_positions.csv")
+PAPER_OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -248,6 +250,32 @@ def load_open_positions() -> Tuple[pd.DataFrame, float]:
     df["hours_open"] = df["hours_open"].round(2)
     df = df.sort_values("notional", ascending=False)
     total_unrealized = summary_total if summary_total or summary_total == 0.0 else float(df["unrealized_pnl"].sum())
+    return df, total_unrealized
+
+
+def load_paper_open_positions(path: Path) -> Tuple[pd.DataFrame, float]:
+    if not path.exists():
+        return pd.DataFrame(), 0.0
+    df = pd.read_csv(path)
+    date_cols = ["opened_at", "expires_at", "last_price_at"]
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
+    numeric_cols = [
+        "entry_price",
+        "last_price",
+        "take_profit",
+        "stop_loss",
+        "position_usd",
+        "unrealized_pnl",
+        "unrealized_pct",
+        "finder_score",
+        "finder_rank",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    total_unrealized = float(df["unrealized_pnl"].sum()) if "unrealized_pnl" in df.columns else 0.0
     return df, total_unrealized
 
 
@@ -492,7 +520,13 @@ def main() -> None:
 
     st.title("Watchdog Daily Equity Dashboard")
 
-    default_csv = Path("trade_logs/watchdog_closed_positions.csv")
+    source_choice = st.sidebar.selectbox(
+        "Log source",
+        options=("Live Watchdog", "Paper Finder"),
+        index=0,
+    )
+    source_mode = "paper" if source_choice == "Paper Finder" else "live"
+    default_csv = PAPER_CLOSED_CSV if source_mode == "paper" else Path("trade_logs/watchdog_closed_positions.csv")
     csv_path = st.sidebar.text_input("CSV path", str(default_csv))
     csv_path = csv_path.strip()
     data_path = Path(csv_path)
@@ -605,7 +639,10 @@ def main() -> None:
     if summary_notes:
         st.caption(" | ".join(summary_notes))
 
-    open_positions_df, total_unrealized = load_open_positions()
+    if source_mode == "paper":
+        open_positions_df, total_unrealized = load_paper_open_positions(PAPER_OPEN_CSV)
+    else:
+        open_positions_df, total_unrealized = load_open_positions()
 
     if pipeline_snapshot is not None:
         if total_unrealized is not None:
@@ -616,7 +653,9 @@ def main() -> None:
         pipeline_snapshot.open_positions = int(len(open_positions_df))
 
         health_col1, health_col2, health_col3 = st.columns([2, 1, 1])
-        if pipeline_snapshot.health_level == "ok":
+        if source_mode == "paper":
+            health_col1.info("Paper simulator metrics (no live routing).")
+        elif pipeline_snapshot.health_level == "ok":
             health_col1.success("Pipeline health: OK")
         else:
             msg = "Pipeline attention required"
@@ -638,7 +677,8 @@ def main() -> None:
     open_positions_count = int(len(open_positions_df))
     position_label = "open position" if open_positions_count == 1 else "open positions"
     summary_total_value = float(total_unrealized) if total_unrealized is not None else 0.0
-    exp_label_text = f"({open_positions_count}) Open positions (live) | P/L {summary_total_value:+.2f}"
+    pos_label = "live" if source_mode == "live" else "paper"
+    exp_label_text = f"({open_positions_count}) Open positions ({pos_label}) | P/L {summary_total_value:+.2f}"
     label_color = None
     if open_positions_count > 0:
         label_color = "green" if total_unrealized >= 0 else "red"
@@ -659,44 +699,89 @@ def main() -> None:
 
     with expander:
         if open_positions_df.empty:
-            st.caption("No open INTX positions detected.")
+            msg = "No open INTX positions detected." if source_mode == "live" else "No open paper trades logged."
+            st.caption(msg)
         else:
-            columns_to_use = [
-                "product_id",
-                "side",
-                "net_size",
-                "entry_price",
-                "mark_price",
-                "unrealized_pnl",
-                "notional",
-                "hours_open",
-            ]
-            display_df = open_positions_df[columns_to_use].copy()
-            display_df = display_df.rename(
-                columns={
-                    "product_id": "Product",
-                    "side": "Side",
-                    "net_size": "Quantity",
-                    "entry_price": "Entry",
-                    "mark_price": "Mark",
-                    "unrealized_pnl": "Unrealized",
-                    "notional": "Notional",
-                    "hours_open": "Hours",
-                }
-            )
-            st.dataframe(
-                display_df.style.format(
-                    {
-                        "Quantity": "{:.4f}",
-                        "Entry": "{:.4f}",
-                        "Mark": "{:.4f}",
-                        "Unrealized": "{:+.2f}",
-                        "Notional": "{:.2f}",
-                        "Hours": "{:.2f}",
+            if source_mode == "paper":
+                paper_cols = [
+                    "symbol",
+                    "position_side",
+                    "position_usd",
+                    "entry_price",
+                    "last_price",
+                    "take_profit",
+                    "stop_loss",
+                    "unrealized_pnl",
+                    "unrealized_pct",
+                    "expires_at",
+                ]
+                existing = [col for col in paper_cols if col in open_positions_df.columns]
+                display_df = open_positions_df[existing].copy()
+                display_df = display_df.rename(
+                    columns={
+                        "symbol": "Symbol",
+                        "position_side": "Side",
+                        "position_usd": "Size (USD)",
+                        "entry_price": "Entry",
+                        "last_price": "Last Price",
+                        "take_profit": "Take Profit",
+                        "stop_loss": "Stop Loss",
+                        "unrealized_pnl": "Unrealized",
+                        "unrealized_pct": "Unrealized %",
+                        "expires_at": "Expires",
                     }
-                ),
-                width="stretch",
-            )
+                )
+                st.dataframe(
+                    display_df.style.format(
+                        {
+                            "Size (USD)": "{:.2f}",
+                            "Entry": "{:.4f}",
+                            "Last Price": "{:.4f}",
+                            "Take Profit": "{:.4f}",
+                            "Stop Loss": "{:.4f}",
+                            "Unrealized": "{:+.2f}",
+                            "Unrealized %": "{:+.4f}%",
+                        }
+                    ),
+                    width="stretch",
+                )
+            else:
+                columns_to_use = [
+                    "product_id",
+                    "side",
+                    "net_size",
+                    "entry_price",
+                    "mark_price",
+                    "unrealized_pnl",
+                    "notional",
+                    "hours_open",
+                ]
+                display_df = open_positions_df[columns_to_use].copy()
+                display_df = display_df.rename(
+                    columns={
+                        "product_id": "Product",
+                        "side": "Side",
+                        "net_size": "Quantity",
+                        "entry_price": "Entry",
+                        "mark_price": "Mark",
+                        "unrealized_pnl": "Unrealized",
+                        "notional": "Notional",
+                        "hours_open": "Hours",
+                    }
+                )
+                st.dataframe(
+                    display_df.style.format(
+                        {
+                            "Quantity": "{:.4f}",
+                            "Entry": "{:.4f}",
+                            "Mark": "{:.4f}",
+                            "Unrealized": "{:+.2f}",
+                            "Notional": "{:.2f}",
+                            "Hours": "{:.2f}",
+                        }
+                    ),
+                    width="stretch",
+                )
 
     def format_compact(value: float) -> str:
         if value is None:
