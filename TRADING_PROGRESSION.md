@@ -1,5 +1,10 @@
 # Trading Journal
 
+## November 14, 2025 - Bear Market Pressure
+
+- Stayed flat for another session while Bitcoin legged lower and altcoins got demolished across the board.
+- Feels like the bear market is reasserting itself with more force, so I’m staying sidelined until the tape calms down.
+
 ## November 13, 2025 - Red Day on the Sidelines
 
 - Market bled across the board and Bitcoin briefly fell below $100K, but I honored the ongoing pause and didn’t put on any trades.
