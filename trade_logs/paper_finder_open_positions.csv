@@ -1,0 +1,1 @@
+trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
