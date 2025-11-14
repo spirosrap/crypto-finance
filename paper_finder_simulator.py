@@ -407,6 +407,73 @@ def _select_candidates(
     return unique
 
 
+def _open_selected_trades(
+    selected: List[FinderCandidate],
+    *,
+    portfolio_usd: float,
+    leverage: float,
+    expiry_hours: float,
+    default_pct: float,
+    tag: str,
+    note: str,
+    fixed_position_usd: Optional[float],
+    dry_run: bool,
+) -> None:
+    if not selected:
+        raise SystemExit("No finder candidates selected.")
+
+    open_df = _load_csv(OPEN_CSV, OPEN_COLUMNS)
+
+    for cand in selected:
+        product_id = _product_id(cand.parsed.symbol)
+        if not product_id:
+            logger.warning("Skipping %s (unsupported perp).", cand.parsed.symbol)
+            continue
+        trade_id = uuid.uuid4().hex[:10]
+        position_usd = _desired_position_usd(
+            parsed=cand.parsed,
+            portfolio_usd=portfolio_usd,
+            fixed_position_usd=fixed_position_usd,
+            default_pct=default_pct,
+        )
+        opened_at = datetime.now(tz=UTC)
+        expires_at = opened_at + timedelta(hours=expiry_hours)
+        row = {
+            "trade_id": trade_id,
+            "symbol": cand.parsed.symbol.upper(),
+            "product_id": product_id,
+            "position_side": cand.parsed.side.upper(),
+            "entry_price": cand.parsed.entry,
+            "stop_loss": cand.parsed.stop,
+            "take_profit": cand.parsed.take_profit,
+            "position_usd": round(position_usd, 2),
+            "leverage": leverage,
+            "opened_at": _isoformat(opened_at),
+            "expires_at": _isoformat(expires_at),
+            "status": "OPEN",
+            "last_price": cand.parsed.entry,
+            "last_price_at": _isoformat(opened_at),
+            "unrealized_pnl": 0.0,
+            "unrealized_pct": 0.0,
+            "finder_score": cand.score,
+            "finder_rank": cand.rank,
+            "recommended_position_pct": cand.parsed.pos_size_pct,
+            "tag": tag,
+            "notes": note,
+        }
+        row_df = pd.DataFrame([row])[OPEN_COLUMNS]
+        if open_df.empty:
+            open_df = row_df
+        else:
+            open_df = pd.concat([open_df, row_df], ignore_index=True)
+        logger.info("Opened paper trade %s (%s %s)", trade_id, cand.parsed.side, product_id)
+
+    if not dry_run:
+        _save_csv(open_df, OPEN_CSV, OPEN_COLUMNS)
+    else:
+        logger.info("Dry-run enabled; not writing open positions.")
+
+
 def _price_provider(overrides: Dict[str, float]) -> Callable[[str], float]:
     cache: Dict[str, float] = {}
     exchange = None
@@ -510,52 +577,17 @@ def handle_open(args: argparse.Namespace) -> None:
     note = args.notes or ""
     tag = args.tag or ""
 
-    open_df = _load_csv(OPEN_CSV, OPEN_COLUMNS)
-
-    for cand in selected:
-        product_id = _product_id(cand.parsed.symbol)
-        if not product_id:
-            logger.warning("Skipping %s (unsupported perp).", cand.parsed.symbol)
-            continue
-        trade_id = uuid.uuid4().hex[:10]
-        position_usd = _desired_position_usd(
-            parsed=cand.parsed,
-            portfolio_usd=portfolio_usd,
-            fixed_position_usd=args.fixed_position_usd,
-            default_pct=default_pct,
-        )
-        opened_at = datetime.now(tz=UTC)
-        expires_at = opened_at + timedelta(hours=expiry_hours)
-        row = {
-            "trade_id": trade_id,
-            "symbol": cand.parsed.symbol.upper(),
-            "product_id": product_id,
-            "position_side": cand.parsed.side.upper(),
-            "entry_price": cand.parsed.entry,
-            "stop_loss": cand.parsed.stop,
-            "take_profit": cand.parsed.take_profit,
-            "position_usd": round(position_usd, 2),
-            "leverage": leverage,
-            "opened_at": _isoformat(opened_at),
-            "expires_at": _isoformat(expires_at),
-            "status": "OPEN",
-            "last_price": cand.parsed.entry,
-            "last_price_at": _isoformat(opened_at),
-            "unrealized_pnl": 0.0,
-            "unrealized_pct": 0.0,
-            "finder_score": cand.score,
-            "finder_rank": cand.rank,
-            "recommended_position_pct": cand.parsed.pos_size_pct,
-            "tag": tag,
-            "notes": note,
-        }
-        open_df = pd.concat([open_df, pd.DataFrame([row])], ignore_index=True)
-        logger.info("Opened paper trade %s (%s %s)", trade_id, cand.parsed.side, product_id)
-
-    if not args.dry_run:
-        _save_csv(open_df, OPEN_CSV, OPEN_COLUMNS)
-    else:
-        logger.info("Dry-run enabled; not writing open positions.")
+    _open_selected_trades(
+        selected,
+        portfolio_usd=portfolio_usd,
+        leverage=leverage,
+        expiry_hours=expiry_hours,
+        default_pct=default_pct,
+        tag=tag,
+        note=note,
+        fixed_position_usd=args.fixed_position_usd,
+        dry_run=args.dry_run,
+    )
 
 
 def handle_update(args: argparse.Namespace) -> None:
@@ -592,7 +624,11 @@ def handle_update(args: argparse.Namespace) -> None:
 
     if closed_rows:
         closed_df = _load_csv(CLOSED_CSV, CLOSED_COLUMNS)
-        closed_df = pd.concat([closed_df, pd.DataFrame(closed_rows)], ignore_index=True)
+        rows_df = pd.DataFrame(closed_rows)[CLOSED_COLUMNS]
+        if closed_df.empty:
+            closed_df = rows_df
+        else:
+            closed_df = pd.concat([closed_df, rows_df], ignore_index=True)
         _save_csv(closed_df, CLOSED_CSV, CLOSED_COLUMNS)
         logger.info("Closed %s trades.", len(closed_rows))
         for row in closed_rows:
@@ -622,6 +658,38 @@ def handle_summary(args: argparse.Namespace) -> None:
     print(f"Equity (paper)  : {equity:.2f}")
     print(f"Open trades     : {len(open_df)}")
     print(f"Closed trades   : {len(closed_df)}")
+
+
+def handle_open_single(args: argparse.Namespace) -> None:
+    cfg = load_config()
+    text = Path(args.finder_output).read_text(encoding="utf-8")
+    candidates = gather_candidates(text)
+    if not candidates:
+        raise SystemExit("No finder candidates detected.")
+    index = max(1, int(args.block_index or 1))
+    if index > len(candidates):
+        raise SystemExit(f"Block index {index} exceeds total candidates ({len(candidates)}).")
+
+    selected = [candidates[index - 1]]
+
+    portfolio_usd = args.portfolio_usd or cfg["initial_capital"]
+    leverage = args.leverage or cfg["default_leverage"]
+    expiry_hours = args.expiry_hours or cfg["default_expiry_hours"]
+    default_pct = args.default_position_pct or cfg["default_position_pct"]
+    tag = args.tag or ""
+    note = args.notes or ""
+
+    _open_selected_trades(
+        selected,
+        portfolio_usd=portfolio_usd,
+        leverage=leverage,
+        expiry_hours=expiry_hours,
+        default_pct=default_pct,
+        tag=tag,
+        note=note,
+        fixed_position_usd=args.fixed_position_usd,
+        dry_run=args.dry_run,
+    )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:
@@ -655,6 +723,27 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     p_open.add_argument("--notes", help="Optional freeform note.")
     p_open.add_argument("--dry-run", action="store_true", help="Parse and display without writing CSVs.")
     p_open.set_defaults(func=handle_open)
+
+    p_single = sub.add_parser(
+        "open-single",
+        help="Open a single finder block (mirrors running add_position_from_finder.py for one trade).",
+    )
+    p_single.add_argument("--finder-output", required=True, help="Path to finder block text.")
+    p_single.add_argument(
+        "--block-index",
+        type=int,
+        default=1,
+        help="When finder-output contains multiple blocks, pick this 1-based index (default 1).",
+    )
+    p_single.add_argument("--portfolio-usd", type=float)
+    p_single.add_argument("--fixed-position-usd", type=float)
+    p_single.add_argument("--default-position-pct", type=float)
+    p_single.add_argument("--leverage", type=float)
+    p_single.add_argument("--expiry-hours", type=float)
+    p_single.add_argument("--tag")
+    p_single.add_argument("--notes")
+    p_single.add_argument("--dry-run", action="store_true")
+    p_single.set_defaults(func=handle_open_single)
 
     p_update = sub.add_parser("update", help="Refresh prices and close trades that hit TP/SL/expiry.")
     p_update.add_argument(

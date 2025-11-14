@@ -1,6 +1,11 @@
+import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from pathlib import Path
 
+import pandas as pd
+
+import paper_finder_simulator as sim
 from paper_finder_simulator import (
     UTC,
     _close_and_update_rows,
@@ -9,6 +14,7 @@ from paper_finder_simulator import (
     _maybe_close_reason,
     gather_candidates,
 )
+from add_position_from_finder import ParsedFinder
 
 
 SAMPLE_TEXT = """
@@ -29,6 +35,13 @@ Score: 81.5
 
 
 class PaperFinderSimulatorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        base = Path(self.tempdir.name)
+        sim.OPEN_CSV = base / "open.csv"
+        sim.CLOSED_CSV = base / "closed.csv"
+
     def test_gather_candidates_parses_blocks(self) -> None:
         candidates = gather_candidates(SAMPLE_TEXT)
         self.assertEqual(2, len(candidates))
@@ -113,6 +126,39 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         pnl_lookup = {row["product_id"]: row["profit_loss"] for row in closed}
         self.assertGreater(pnl_lookup["ALPHA-PERP-INTX"], 0)
         self.assertLess(pnl_lookup["BETA-PERP-INTX"], 0)
+
+    def test_open_selected_trades_appends_rows(self) -> None:
+        parsed = ParsedFinder(
+            symbol="ALPHA",
+            base_symbol="ALPHA",
+            side="LONG",
+            entry=10.0,
+            stop=9.0,
+            take_profit=12.0,
+            pos_size_pct=5.0,
+            entry_decimals=2,
+            stop_decimals=2,
+            take_profit_decimals=2,
+            predicted_return=None,
+        )
+        candidate = sim.FinderCandidate(rank=1, block="ALPHA", parsed=parsed, score=70.0)
+
+        sim._open_selected_trades(
+            [candidate],
+            portfolio_usd=10000.0,
+            leverage=3.0,
+            expiry_hours=24,
+            default_pct=5.0,
+            tag="unit",
+            note="single",
+            fixed_position_usd=None,
+            dry_run=False,
+        )
+
+        df = pd.read_csv(sim.OPEN_CSV)
+        self.assertEqual(1, len(df))
+        self.assertEqual("ALPHA-PERP-INTX", df.loc[0, "product_id"])
+        self.assertAlmostEqual(500.0, df.loc[0, "position_usd"])
 
 
 if __name__ == "__main__":
