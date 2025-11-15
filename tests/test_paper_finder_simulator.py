@@ -11,6 +11,7 @@ from paper_finder_simulator import (
     UTC,
     _close_and_update_rows,
     _compute_unrealized_pct,
+    _format_time_left,
     _isoformat,
     _maybe_close_reason,
     gather_candidates,
@@ -82,6 +83,13 @@ class PaperFinderSimulatorTests(unittest.TestCase):
             "expired_breakeven",
             _maybe_close_reason("SHORT", 100.0, 90.0, 110.0, expired, now),
         )
+
+    def test_format_time_left_outputs_human_readable(self) -> None:
+        now = datetime.now(tz=UTC)
+        expires_hours = now + timedelta(hours=5, minutes=30)
+        expires_days = now + timedelta(days=1, hours=3)
+        self.assertEqual("5h 30m", _format_time_left(_isoformat(expires_hours), now))
+        self.assertEqual("1d 3h", _format_time_left(_isoformat(expires_days), now))
 
     def test_close_and_update_rows_marks_closed_and_updates_remaining(self) -> None:
         now = datetime.now(tz=UTC)

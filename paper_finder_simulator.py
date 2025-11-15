@@ -324,6 +324,24 @@ def _build_closed_record(row: Dict[str, object], price: float, reason: str, now:
     }
 
 
+def _format_time_left(expires_value: object, now: datetime) -> str:
+    expires = _parse_iso(str(expires_value or ""))
+    if not expires:
+        return "n/a"
+    delta = expires - now
+    seconds = int(round(delta.total_seconds()))
+    if seconds <= 0:
+        return "expired"
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    minutes = int((seconds % 3600) // 60)
+    if days > 0:
+        return f"{days}d {hours}h"
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
 def _close_and_update_rows(
     open_rows: List[Dict[str, object]],
     price_lookup: Callable[[str], float],
@@ -690,12 +708,13 @@ def handle_update(args: argparse.Namespace) -> None:
     if updated_rows:
         for row in sorted(updated_rows, key=lambda r: str(r.get("product_id", ""))):
             logger.info(
-                "  %s %-5s last %.4f | P/L %+.2f (%+.4f%%)",
+                "  %s %-5s last %.4f | P/L %+.2f (%+.4f%%) | expires in %s",
                 row.get("product_id"),
                 (row.get("position_side") or "").upper(),
                 _safe_float(row.get("last_price"), 0.0),
                 _safe_float(row.get("unrealized_pnl"), 0.0),
                 _safe_float(row.get("unrealized_pct"), 0.0),
+                _format_time_left(row.get("expires_at"), now),
             )
 
 

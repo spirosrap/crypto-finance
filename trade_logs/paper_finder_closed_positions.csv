@@ -1,1 +1,2 @@
 closed_at,product_id,position_side,net_size,leverage,opened_at,closure_reason,entry_price,exit_price,profit_loss,profit_loss_pct,mae,mfe,duration_seconds
+2025-11-15T13:57:42Z,LTC-PERP-INTX,LONG,12.914557288976132,3.0,2025-11-14T19:13:01Z,take_profit,96.79,106.93,130.95,10.4763,,,67481
