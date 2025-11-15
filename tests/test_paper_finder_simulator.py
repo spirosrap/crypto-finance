@@ -161,6 +161,41 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         self.assertEqual("ALPHA-PERP-INTX", df.loc[0, "product_id"])
         self.assertAlmostEqual(500.0, df.loc[0, "position_usd"])
 
+    def test_balanced_top_selection_prioritises_sides(self) -> None:
+        def _candidate(symbol: str, side: str, score: float, rank: int) -> sim.FinderCandidate:
+            parsed = ParsedFinder(
+                symbol=symbol,
+                base_symbol=symbol,
+                side=side,
+                entry=10.0,
+                stop=9.0,
+                take_profit=12.0,
+                pos_size_pct=5.0,
+                entry_decimals=2,
+                stop_decimals=2,
+                take_profit_decimals=2,
+                predicted_return=None,
+            )
+            return sim.FinderCandidate(rank=rank, block=symbol, parsed=parsed, score=score)
+
+        candidates = [
+            _candidate("L1", "LONG", 90, 1),
+            _candidate("S1", "SHORT", 85, 2),
+            _candidate("L2", "LONG", 80, 3),
+            _candidate("S2", "SHORT", 75, 4),
+            _candidate("L3", "LONG", 70, 5),
+            _candidate("S3", "SHORT", 65, 6),
+        ]
+
+        picks = sim._select_balanced_top(candidates, total=5)
+        self.assertEqual(5, len(picks))
+        long_count = sum(1 for c in picks if c.parsed.side == "LONG")
+        short_count = sum(1 for c in picks if c.parsed.side == "SHORT")
+        self.assertGreaterEqual(long_count, 2)
+        self.assertGreaterEqual(short_count, 2)
+        symbols = [c.parsed.symbol for c in picks]
+        self.assertIn("L3", symbols)  # remaining best overall after 2+2
+
     def test_handle_update_tracks_unrealized_pnl(self) -> None:
         now = datetime.now(tz=UTC)
         open_row = {

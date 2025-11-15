@@ -370,41 +370,77 @@ def _close_and_update_rows(
     return updated, closed
 
 
+def _select_balanced_top(candidates: List[FinderCandidate], total: int) -> List[FinderCandidate]:
+    """Return up to ``total`` candidates prioritising 2 longs, 2 shorts, then best overall."""
+    if total <= 0 or not candidates:
+        return []
+
+    sorted_candidates = sorted(candidates, key=lambda c: c.score, reverse=True)
+    picks: List[FinderCandidate] = []
+
+    def _take_side(side: str, count: int) -> None:
+        for cand in sorted_candidates:
+            if cand in picks:
+                continue
+            if cand.parsed.side.upper() == side:
+                picks.append(cand)
+            if sum(1 for p in picks if p.parsed.side.upper() == side) >= count:
+                break
+
+    _take_side("LONG", min(2, total))
+    _take_side("SHORT", min(2, total))
+
+    for cand in sorted_candidates:
+        if cand in picks:
+            continue
+        picks.append(cand)
+        if len(picks) >= total:
+            break
+
+    return picks[:total]
+
+
 def _select_candidates(
     candidates: List[FinderCandidate],
     symbols: Optional[Sequence[str]],
     picks: Optional[Sequence[int]],
     top: int,
+    balanced_top: bool = False,
 ) -> List[FinderCandidate]:
     selected: List[FinderCandidate] = []
     symbol_set = {s.strip().upper() for s in symbols or [] if s.strip()}
     index_set = {int(p) for p in picks or [] if int(p) > 0}
 
+    def _add_candidate(cand: FinderCandidate) -> None:
+        key = cand.parsed.symbol.upper()
+        if key in seen_symbols or cand in selected:
+            return
+        seen_symbols.add(key)
+        selected.append(cand)
+
     if symbol_set:
         for cand in candidates:
             if cand.parsed.symbol.upper() in symbol_set:
-                selected.append(cand)
+                _add_candidate(cand)
 
     if index_set:
         for cand in candidates:
             if cand.rank in index_set and cand not in selected:
-                selected.append(cand)
+                _add_candidate(cand)
 
     if top > 0:
-        scored = sorted(candidates, key=lambda c: c.score, reverse=True)
-        for cand in scored[:top]:
-            if cand not in selected:
-                selected.append(cand)
+        remaining_slots = max(0, top - len(selected))
+        pool = [cand for cand in candidates if cand not in selected]
+        if balanced_top and remaining_slots > 0:
+            balanced = _select_balanced_top(pool, total=remaining_slots if top > len(selected) else top)
+            for cand in balanced:
+                _add_candidate(cand)
+        elif remaining_slots > 0:
+            scored = sorted(pool, key=lambda c: c.score, reverse=True)
+            for cand in scored[:remaining_slots]:
+                _add_candidate(cand)
 
-    seen_symbols = set()
-    unique: List[FinderCandidate] = []
-    for cand in selected:
-        key = cand.parsed.symbol.upper()
-        if key in seen_symbols:
-            continue
-        seen_symbols.add(key)
-        unique.append(cand)
-    return unique
+    return selected
 
 
 def _open_selected_trades(
@@ -566,6 +602,7 @@ def handle_open(args: argparse.Namespace) -> None:
         symbols=symbols,
         picks=args.pick,
         top=args.top,
+        balanced_top=args.balanced_top,
     )
     if not selected:
         raise SystemExit("No candidates selected (use --symbols/--pick/--top).")
@@ -731,6 +768,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     p_open.add_argument("--symbols", nargs="*", help="Symbols to pick (comma-separated chunks allowed).")
     p_open.add_argument("--pick", type=int, nargs="*", help="1-based finder ranks to pick.")
     p_open.add_argument("--top", type=int, default=0, help="Automatically pick the top-N candidates by score.")
+    p_open.add_argument(
+        "--balanced-top",
+        action="store_true",
+        help="When using --top, pick 2 longs, 2 shorts, and the next best remaining (mirrors add_top5).",
+    )
     p_open.add_argument("--portfolio-usd", type=float, help="Portfolio size used for sizing (defaults to initial capital).")
     p_open.add_argument("--fixed-position-usd", type=float, help="Override absolute USD per trade.")
     p_open.add_argument("--default-position-pct", type=float, help="Fallback %% of portfolio when finder lacks a recommendation.")
