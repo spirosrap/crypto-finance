@@ -95,6 +95,7 @@ CLOSED_COLUMNS = [
 
 THOUSAND_UNIT_BASES = {"SHIB", "BONK", "PEPE", "FLOKI"}
 _SUPPORTED_PERPS: Optional[Set[str]] = None
+_CCXT_PRODUCTS: Optional[Set[str]] = None
 
 
 def _isoformat(dt: datetime) -> str:
@@ -151,11 +152,50 @@ def _supported_perps() -> Set[str]:
     return _SUPPORTED_PERPS
 
 
+def _ccxt_products() -> Set[str]:
+    global _CCXT_PRODUCTS
+    if _CCXT_PRODUCTS is not None:
+        return _CCXT_PRODUCTS
+    products: Set[str] = set()
+    try:
+        import ccxt  # type: ignore
+    except ImportError:
+        logger.debug("ccxt not available; skipping live market verification.")
+        _CCXT_PRODUCTS = set()
+        return _CCXT_PRODUCTS
+    try:
+        exchange = ccxt.coinbaseadvanced({"enableRateLimit": True})
+        exchange.load_markets()
+    except Exception as exc:
+        logger.debug("Unable to load Coinbase markets via ccxt (%s); falling back to static list.", exc)
+        _CCXT_PRODUCTS = set()
+        return _CCXT_PRODUCTS
+    for market in exchange.markets.values():
+        if not market.get("contract"):
+            continue
+        symbol_ccxt = market.get("symbol") or ""
+        if ":USDC" not in symbol_ccxt:
+            continue
+        base = market.get("base") or ""
+        base = _canonical_symbol(str(base))
+        if not base:
+            continue
+        products.add(f"{base}-PERP-INTX")
+    _CCXT_PRODUCTS = products
+    return _CCXT_PRODUCTS
+
+
 def _is_supported_product(product_id: str) -> bool:
+    product_id = (product_id or "").upper()
+    if not product_id:
+        return False
+    ccxt_products = _ccxt_products()
+    if ccxt_products:
+        return product_id in ccxt_products
     products = _supported_perps()
-    if not products:
-        return True
-    return product_id.upper() in products
+    if products:
+        return product_id in products
+    return True
 
 
 def _ccxt_symbol(product_id: str) -> str:
