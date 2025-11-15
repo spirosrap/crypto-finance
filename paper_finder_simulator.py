@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import sys
 import re
@@ -329,7 +330,7 @@ def _format_time_left(expires_value: object, now: datetime) -> str:
     if not expires:
         return "n/a"
     delta = expires - now
-    seconds = int(round(delta.total_seconds()))
+    seconds = int(math.ceil(delta.total_seconds()))
     if seconds <= 0:
         return "expired"
     days = int(seconds // 86400)
@@ -426,6 +427,7 @@ def _select_candidates(
     balanced_top: bool = False,
 ) -> List[FinderCandidate]:
     selected: List[FinderCandidate] = []
+    seen_symbols: Set[str] = set()
     symbol_set = {s.strip().upper() for s in symbols or [] if s.strip()}
     index_set = {int(p) for p in picks or [] if int(p) > 0}
 
