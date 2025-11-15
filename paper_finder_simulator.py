@@ -644,6 +644,23 @@ def handle_update(args: argparse.Namespace) -> None:
     else:
         logger.info("Updated %s trades; none hit targets/stops yet.", len(updated_rows))
 
+    open_pnl_total = sum(_safe_float(row.get("unrealized_pnl"), 0.0) for row in updated_rows)
+    logger.info(
+        "Open paper trades: %d | unrealized P/L %+.2f",
+        len(updated_rows),
+        open_pnl_total,
+    )
+    if updated_rows:
+        for row in sorted(updated_rows, key=lambda r: str(r.get("product_id", ""))):
+            logger.info(
+                "  %s %-5s last %.4f | P/L %+.2f (%+.4f%%)",
+                row.get("product_id"),
+                (row.get("position_side") or "").upper(),
+                _safe_float(row.get("last_price"), 0.0),
+                _safe_float(row.get("unrealized_pnl"), 0.0),
+                _safe_float(row.get("unrealized_pct"), 0.0),
+            )
+
 
 def handle_summary(args: argparse.Namespace) -> None:
     cfg = load_config()

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -159,6 +160,40 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         self.assertEqual(1, len(df))
         self.assertEqual("ALPHA-PERP-INTX", df.loc[0, "product_id"])
         self.assertAlmostEqual(500.0, df.loc[0, "position_usd"])
+
+    def test_handle_update_tracks_unrealized_pnl(self) -> None:
+        now = datetime.now(tz=UTC)
+        open_row = {
+            "trade_id": "t-open",
+            "symbol": "ALPHA",
+            "product_id": "ALPHA-PERP-INTX",
+            "position_side": "LONG",
+            "entry_price": 10.0,
+            "stop_loss": 9.0,
+            "take_profit": 13.0,
+            "position_usd": 1000.0,
+            "leverage": 3.0,
+            "opened_at": _isoformat(now - timedelta(hours=1)),
+            "expires_at": _isoformat(now + timedelta(hours=23)),
+            "status": "OPEN",
+            "last_price": 10.0,
+            "last_price_at": _isoformat(now - timedelta(hours=1)),
+            "unrealized_pnl": 0.0,
+            "unrealized_pct": 0.0,
+            "finder_score": 70.0,
+            "finder_rank": 1,
+            "recommended_position_pct": 5.0,
+            "tag": "",
+            "notes": "",
+        }
+        pd.DataFrame([open_row]).to_csv(sim.OPEN_CSV, index=False)
+        pd.DataFrame(columns=sim.CLOSED_COLUMNS).to_csv(sim.CLOSED_CSV, index=False)
+
+        args = SimpleNamespace(override=["ALPHA=11"])
+        sim.handle_update(args)
+
+        df = pd.read_csv(sim.OPEN_CSV)
+        self.assertGreater(float(df.loc[0, "unrealized_pnl"]), 0.0)
 
 
 if __name__ == "__main__":
