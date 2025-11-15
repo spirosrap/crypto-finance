@@ -17,7 +17,6 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from coinbaseservice import CoinbaseService
 
@@ -487,17 +486,6 @@ def build_daily_equity(
 
 def main() -> None:
     st.set_page_config(page_title="Watchdog Daily Equity", layout="wide")
-    components.html(
-        f"""
-        <script>
-        const WATCHDOG_REFRESH_MS = {AUTO_REFRESH_INTERVAL_MS};
-        setInterval(() => {{
-            window.parent.location.reload();
-        }}, WATCHDOG_REFRESH_MS);
-        </script>
-        """,
-        height=0,
-    )
     st.markdown(
         """
         <style>
