@@ -49,6 +49,7 @@ This Bitcoin Trading Bot implements a sophisticated trading strategy using tradi
 - Run `python paper_finder_simulator.py init --initial-capital 25000` once to capture your baseline equity, then pipe new `short_term_crypto_finder.py` runs through `python paper_finder_simulator.py open --finder-output finder.txt --symbols BTC,NEAR`.
 - Use `python paper_finder_simulator.py open --top 5 --balanced-top` to mimic `add_top5_from_finder.py` (2 longs, 2 shorts, plus the next best overall) or `open-single` to log one block at a time.
 - Periodically call `python paper_finder_simulator.py update` (optionally with `--override SYMBOL=PRICE`) to refresh marks, close trades that hit TP/SL/expiry, and keep `trade_logs/paper_finder_*.csv` in sync. The command now also prints per-product unrealized P/L so you can glance at open risk in the terminal.
+- Tokens that lack a supported INTX perp on Coinbase are automatically skipped (with a warning) so unsupported assets like CBETH never enter the paper log.
 - View simulated equity curves alongside live watchdog results by launching `streamlit run watchdog_dashboard.py` and selecting “Paper Finder” in the sidebar data-source picker.
 
 ## Prerequisites

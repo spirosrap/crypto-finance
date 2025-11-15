@@ -26,7 +26,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Set
 
 import pandas as pd
 
@@ -43,6 +43,7 @@ UTC = timezone.utc
 DEFAULT_CONFIG_PATH = Path("trade_logs/paper_finder_config.json")
 OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
 CLOSED_CSV = Path("trade_logs/paper_finder_closed_positions.csv")
+DERIVED_PERPS_PATH = Path(__file__).resolve().with_name("derived_perps_intx.txt")
 
 DEFAULT_CONFIG = {
     "initial_capital": 25000.0,
@@ -93,6 +94,7 @@ CLOSED_COLUMNS = [
 ]
 
 THOUSAND_UNIT_BASES = {"SHIB", "BONK", "PEPE", "FLOKI"}
+_SUPPORTED_PERPS: Optional[Set[str]] = None
 
 
 def _isoformat(dt: datetime) -> str:
@@ -124,6 +126,36 @@ def _canonical_symbol(symbol: str) -> str:
 def _product_id(symbol: str) -> Optional[str]:
     base = _canonical_symbol(symbol)
     return f"{base}-PERP-INTX" if base else None
+
+
+def _load_supported_perps(path: Path = DERIVED_PERPS_PATH) -> Set[str]:
+    entries: Set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                value = line.strip().upper()
+                if not value or value.startswith("#"):
+                    continue
+                entries.add(value)
+    except FileNotFoundError:
+        logger.warning("Supported perps list %s not found; skipping symbol validation.", path)
+    except Exception as exc:
+        logger.warning("Unable to load supported perps from %s (%s)", path, exc)
+    return entries
+
+
+def _supported_perps() -> Set[str]:
+    global _SUPPORTED_PERPS
+    if _SUPPORTED_PERPS is None:
+        _SUPPORTED_PERPS = _load_supported_perps()
+    return _SUPPORTED_PERPS
+
+
+def _is_supported_product(product_id: str) -> bool:
+    products = _supported_perps()
+    if not products:
+        return True
+    return product_id.upper() in products
 
 
 def _ccxt_symbol(product_id: str) -> str:
@@ -201,6 +233,7 @@ class FinderCandidate:
     block: str
     parsed: ParsedFinder
     score: float
+    product_id: Optional[str] = None
 
 
 def gather_candidates(text: str) -> List[FinderCandidate]:
@@ -213,7 +246,8 @@ def gather_candidates(text: str) -> List[FinderCandidate]:
             logger.debug("Skipping block %s: %s", i, exc)
             continue
         score = _parse_score(block)
-        candidates.append(FinderCandidate(rank=i, block=block, parsed=parsed, score=score))
+        product_id = _product_id(parsed.symbol)
+        candidates.append(FinderCandidate(rank=i, block=block, parsed=parsed, score=score, product_id=product_id))
     return candidates
 
 
@@ -419,6 +453,21 @@ def _select_balanced_top(candidates: List[FinderCandidate], total: int) -> List[
     return picks[:total]
 
 
+def _filter_supported_candidates(candidates: List[FinderCandidate]) -> List[FinderCandidate]:
+    filtered: List[FinderCandidate] = []
+    for cand in candidates:
+        product_id = cand.product_id or _product_id(cand.parsed.symbol)
+        if not product_id:
+            logger.warning("Skipping %s (cannot derive perp symbol).", cand.parsed.symbol)
+            continue
+        cand.product_id = product_id
+        if not _is_supported_product(product_id):
+            logger.warning("Skipping %s (perp %s unsupported on Coinbase).", cand.parsed.symbol, product_id)
+            continue
+        filtered.append(cand)
+    return filtered
+
+
 def _select_candidates(
     candidates: List[FinderCandidate],
     symbols: Optional[Sequence[str]],
@@ -481,9 +530,12 @@ def _open_selected_trades(
     open_df = _load_csv(OPEN_CSV, OPEN_COLUMNS)
 
     for cand in selected:
-        product_id = _product_id(cand.parsed.symbol)
+        product_id = cand.product_id or _product_id(cand.parsed.symbol)
         if not product_id:
             logger.warning("Skipping %s (unsupported perp).", cand.parsed.symbol)
+            continue
+        if not _is_supported_product(product_id):
+            logger.warning("Skipping %s (perp %s unsupported on Coinbase).", cand.parsed.symbol, product_id)
             continue
         trade_id = uuid.uuid4().hex[:10]
         position_usd = _desired_position_usd(
@@ -612,6 +664,10 @@ def handle_open(args: argparse.Namespace) -> None:
     candidates = gather_candidates(text)
     if not candidates:
         raise SystemExit("No finder candidates detected.")
+
+    candidates = _filter_supported_candidates(candidates)
+    if not candidates:
+        raise SystemExit("No supported perps found in finder output.")
 
     symbols = []
     if args.symbols:
@@ -746,6 +802,10 @@ def handle_open_single(args: argparse.Namespace) -> None:
         raise SystemExit(f"Block index {index} exceeds total candidates ({len(candidates)}).")
 
     selected = [candidates[index - 1]]
+    cand = selected[0]
+    product_id = cand.product_id or _product_id(cand.parsed.symbol)
+    if not product_id or not _is_supported_product(product_id):
+        raise SystemExit(f"{cand.parsed.symbol} perp is not supported on Coinbase.")
 
     portfolio_usd = args.portfolio_usd or cfg["initial_capital"]
     leverage = args.leverage or cfg["default_leverage"]

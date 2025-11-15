@@ -11,6 +11,7 @@ from paper_finder_simulator import (
     UTC,
     _close_and_update_rows,
     _compute_unrealized_pct,
+    _filter_supported_candidates,
     _format_time_left,
     _isoformat,
     _maybe_close_reason,
@@ -43,6 +44,7 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         base = Path(self.tempdir.name)
         sim.OPEN_CSV = base / "open.csv"
         sim.CLOSED_CSV = base / "closed.csv"
+        sim._SUPPORTED_PERPS = set()
 
     def test_gather_candidates_parses_blocks(self) -> None:
         candidates = gather_candidates(SAMPLE_TEXT)
@@ -57,6 +59,12 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         self.assertEqual("SHORT", second.parsed.side)
         self.assertAlmostEqual(81.5, second.score)
 
+    def test_filter_supported_candidates_skips_unknown_products(self) -> None:
+        sim._SUPPORTED_PERPS = {"ALPHA-PERP-INTX"}
+        candidates = gather_candidates(SAMPLE_TEXT)
+        filtered = _filter_supported_candidates(candidates)
+        self.assertEqual(1, len(filtered))
+        self.assertEqual("ALPHA", filtered[0].parsed.symbol)
     def test_compute_unrealized_pct_handles_long_and_short(self) -> None:
         self.assertAlmostEqual(10.0, _compute_unrealized_pct("LONG", 100.0, 110.0))
         self.assertAlmostEqual(-10.0, _compute_unrealized_pct("LONG", 100.0, 90.0))
