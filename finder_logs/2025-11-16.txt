@@ -1,0 +1,47 @@
+
+====================================================================================================
+SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
+====================================================================================================
+Generated on (UTC): 2025-11-16 18:07:32Z
+Total opportunities listed: 1
+====================================================================================================
+
+1. SYRUP (Maple Finance) — SHORT
+--------------------------------------------------
+Data Timestamp (UTC): 2025-11-16 00:00:00Z
+Price: $0.459700
+Market Cap: $520,223,690 (Rank #157)
+24h Volume: $52,238,518
+24h Change: 1.21%
+7d Change: -1.46%
+30d Change: 24.51%
+ATH: $0.65 (Date: 2025-06-25)
+ATL: $0.085229 (Date: 2025-04-07)
+Volatility (30d, ann.): 97.2%
+Sharpe Ratio: 0.93
+Sortino Ratio: 1.73
+Max Drawdown: -42.21%
+RSI (14): 61.4
+MACD Signal: BEARISH
+BB Position: NEUTRAL
+Trend Strength: 0.16% per day
+Momentum Score: 6.0/100
+Fundamental Score: 86.5/100
+Technical Score: 59.7/100
+Risk Score: 43.3/100
+Risk Level: MEDIUM
+Overall Score: 59.22/100
+
+💼 TRADING LEVELS (SHORT):
+Entry Price: $0.459700
+Stop Loss: $0.480386
+Take Profit: $0.414190
+Risk:Reward Ratio: 2.1:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $99.00 (9.90%)
+Potential SL P&L: $-45.00 (-4.50%)
+
+Short-Line Summaries
+--------------------------------------------------
+1. Summary: SYRUP short – score 59.22, 2.1× RR; RSI 61; bearish MACD momentum; risk medium; trend +0.16%/d.
