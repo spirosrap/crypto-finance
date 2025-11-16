@@ -4,7 +4,7 @@ This doc explains how to capture daily `short_term_crypto_finder.py` output and 
 
 ## 1. Capture Finder Output Daily
 
-Run the provided helper once per day (cron/systemd/task scheduler):
+Run the provided helper (`scripts/archive_finder_output.sh`) once per day (cron/systemd/task scheduler):
 
 ```bash
 /home/spiros/crypto-finance/scripts/archive_finder_output.sh \
@@ -23,13 +23,27 @@ python short_term_crypto_finder.py \
 
 Each invocation writes exactly one plain-text finder report to `finder_logs/`. The `--force-refresh` flag matches the manual workflow (always pull fresh candles), and the `--suppress-console-logs` flag keeps cron output clean. If the finder cannot reach Coinbase/other APIs, the script exits non‑zero; check `logs/finder_archive.log` to diagnose network or credential issues.
 
-### Cron Example
+### Cron Setup
 
-```
-15 12 * * * /home/spiros/crypto-finance/scripts/archive_finder_output.sh >> /home/spiros/crypto-finance/logs/finder_archive.log 2>&1
-```
+1. Ensure the helper is executable:
 
-Adjust the minute/hour to suit your preferred daily run. The only requirement is to run it consistently so each UTC day has exactly one entry in `finder_logs/`.
+   ```bash
+   chmod +x /home/spiros/crypto-finance/scripts/archive_finder_output.sh
+   ```
+
+2. Edit your user crontab:
+
+   ```bash
+   crontab -e
+   ```
+
+3. Add a daily entry (example: 12:15 UTC) and save:
+
+   ```
+   15 12 * * * /home/spiros/crypto-finance/scripts/archive_finder_output.sh >> /home/spiros/crypto-finance/logs/finder_archive.log 2>&1
+   ```
+
+Adjust the minute/hour to suit your preferred run window. The only requirement is to run it consistently so each UTC day has exactly one entry in `finder_logs/`.
 
 ## 2. Replay History With `paper_finder_backtest.py`
 
