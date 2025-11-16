@@ -5,6 +5,12 @@
 - Stayed flat for another session while Bitcoin legged lower and altcoins got demolished across the board.
 - Feels like the bear market is reasserting itself with more force, so I’m staying sidelined until the tape calms down.
 
+## November 16, 2025 - Paper Trading Continues + Finder Archive
+
+- Resumed the daily paper-trade cycle with the short-term finder, keeping the “5 balanced trades held for 24h” rule intact.
+- Added `scripts/archive_finder_output.sh` so every finder run saves a dated text file under `finder_logs/`. That way, once I have ~30 days of logs I can replay the exact signals with `paper_finder_backtest.py` instead of relying solely on forward paper trading.
+- Plan: keep logging the five trades per day via `paper_finder_simulator.py` while the archiver builds the data set for a more comprehensive backtest next month.
+
 ## November 13, 2025 - Red Day on the Sidelines
 
 - Market bled across the board and Bitcoin briefly fell below $100K, but I honored the ongoing pause and didn’t put on any trades.
