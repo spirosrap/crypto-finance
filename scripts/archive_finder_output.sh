@@ -14,14 +14,41 @@ cd "$REPO_ROOT"
 STAMP="$(date -u +%Y-%m-%d)"
 OUT_DIR="$REPO_ROOT/finder_logs"
 OUT_FILE="$OUT_DIR/${STAMP}.txt"
+OK_FILE="$OUT_DIR/${STAMP}.ok"
+
+MAX_RETRIES="${FINDER_ARCHIVE_MAX_RETRIES:-3}"
+RETRY_DELAY="${FINDER_ARCHIVE_RETRY_DELAY:-120}"
 
 mkdir -p "$OUT_DIR"
 
-echo "[${STAMP}T$(date -u +%H:%M:%S)Z] Running short_term_crypto_finder..."
-python short_term_crypto_finder.py \
-    --profile focused_no_llm_100 \
-    --plain-output "$OUT_FILE" \
-    --force-refresh \
-    --suppress-console-logs
+attempt=1
+success=0
+rm -f "$OK_FILE"
 
-echo "[${STAMP}T$(date -u +%H:%M:%S)Z] Finder output archived to $OUT_FILE"
+while [[ $attempt -le $MAX_RETRIES ]]; do
+    echo "[${STAMP}T$(date -u +%H:%M:%S)Z] Finder run attempt ${attempt}/${MAX_RETRIES}..."
+    if python short_term_crypto_finder.py \
+        --profile focused_no_llm_100 \
+        --plain-output "$OUT_FILE" \
+        --force-refresh \
+        --suppress-console-logs
+    then
+        success=1
+        break
+    fi
+    echo "[${STAMP}T$(date -u +%H:%M:%S)Z] Finder run failed (attempt ${attempt})."
+    if [[ $attempt -lt $MAX_RETRIES ]]; then
+        echo "Sleeping ${RETRY_DELAY}s before retry..."
+        sleep "$RETRY_DELAY"
+    fi
+    attempt=$((attempt + 1))
+done
+
+if [[ $success -eq 1 ]]; then
+    echo "[${STAMP}T$(date -u +%H:%M:%S)Z] Finder output archived to $OUT_FILE"
+    printf "ok %s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OK_FILE"
+else
+    echo "[${STAMP}T$(date -u +%H:%M:%S)Z] Finder archiving FAILED after ${MAX_RETRIES} attempts." >&2
+    rm -f "$OUT_FILE"
+    exit 1
+fi

@@ -45,6 +45,15 @@ Each invocation writes exactly one plain-text finder report to `finder_logs/`. T
 
 Adjust the minute/hour to suit your preferred run window. The only requirement is to run it consistently so each UTC day has exactly one entry in `finder_logs/`.
 
+The helper retries up to `FINDER_ARCHIVE_MAX_RETRIES` times (default 3, 120s spacing) and drops a success marker `finder_logs/YYYY-MM-DD.ok`. Use `scripts/check_finder_archive.sh` after the archive window to verify success and trigger an email if the `.ok` file is missing:
+
+```bash
+# Environment variable FINDER_ARCHIVE_ALERT_EMAIL must be set, and `mail` installed.
+FINDER_ARCHIVE_ALERT_EMAIL="you@example.com" /home/spiros/crypto-finance/scripts/check_finder_archive.sh
+```
+
+Wire that check into cron as well (for example, 5–10 minutes after the archive job) so you’re alerted immediately when the finder run fails.
+
 ## 2. Replay History With `paper_finder_backtest.py`
 
 Once you have a few days of archived files, you can re-run the workflow offline:
