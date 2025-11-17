@@ -1,2 +1,4 @@
 closed_at,product_id,position_side,net_size,leverage,opened_at,closure_reason,entry_price,exit_price,profit_loss,profit_loss_pct,mae,mfe,duration_seconds
 2025-11-17T18:11:55Z,JASMY-PERP-INTX,LONG,59031.87721369539,3.0,2025-11-17T09:54:53Z,stop_loss,0.00847,0.008045,-25.09,-5.0177,,,29822
+2025-11-17T19:12:25Z,CRV-PERP-INTX,LONG,1165.7729074376311,3.0,2025-11-17T09:54:53Z,stop_loss,0.4289,0.4078,-24.6,-4.9196,,,33452
+2025-11-17T19:12:25Z,ETC-PERP-INTX,LONG,33.11258278145696,3.0,2025-11-17T09:54:53Z,stop_loss,15.1,14.364,-24.37,-4.8742,,,33452
