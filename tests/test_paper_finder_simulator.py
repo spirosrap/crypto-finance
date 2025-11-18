@@ -16,6 +16,7 @@ from paper_finder_simulator import (
     _isoformat,
     _maybe_close_reason,
     gather_candidates,
+    handle_close,
 )
 from add_position_from_finder import ParsedFinder
 
@@ -186,6 +187,51 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         self.assertEqual(1, len(df))
         self.assertEqual("ALPHA-PERP-INTX", df.loc[0, "product_id"])
         self.assertAlmostEqual(500.0, df.loc[0, "position_usd"])
+
+    def test_handle_close_moves_trade_to_closed_csv(self) -> None:
+        parsed = ParsedFinder(
+            symbol="ALPHA",
+            base_symbol="ALPHA",
+            side="LONG",
+            entry=10.0,
+            stop=9.0,
+            take_profit=12.0,
+            pos_size_pct=5.0,
+            entry_decimals=2,
+            stop_decimals=2,
+            take_profit_decimals=2,
+            predicted_return=None,
+        )
+        candidate = sim.FinderCandidate(rank=1, block="ALPHA", parsed=parsed, score=70.0)
+        sim._SUPPORTED_PERPS = {"ALPHA-PERP-INTX"}
+        sim._open_selected_trades(
+            [candidate],
+            portfolio_usd=10000.0,
+            leverage=3.0,
+            expiry_hours=24,
+            default_pct=5.0,
+            tag="test",
+            note="manual",
+            fixed_position_usd=None,
+            dry_run=False,
+        )
+        open_df = pd.read_csv(sim.OPEN_CSV)
+        trade_id = open_df.loc[0, "trade_id"]
+        args = SimpleNamespace(
+            trade_id=[trade_id],
+            product_id=None,
+            symbol=None,
+            all=False,
+            price=11.0,
+            reason="manual_close",
+            dry_run=False,
+        )
+        handle_close(args)
+        open_df = pd.read_csv(sim.OPEN_CSV)
+        closed_df = pd.read_csv(sim.CLOSED_CSV)
+        self.assertEqual(0, len(open_df))
+        self.assertEqual(1, len(closed_df))
+        self.assertAlmostEqual(50.0, closed_df.loc[0, "profit_loss"])
 
     def test_balanced_top_selection_prioritises_sides(self) -> None:
         def _candidate(symbol: str, side: str, score: float, rank: int) -> sim.FinderCandidate:

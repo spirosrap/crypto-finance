@@ -849,6 +849,92 @@ def handle_update(args: argparse.Namespace) -> None:
             )
 
 
+def handle_close(args: argparse.Namespace) -> None:
+    open_df = _load_csv(OPEN_CSV, OPEN_COLUMNS)
+    if open_df.empty:
+        logger.info("No open paper trades to close.")
+        return
+
+    def _split(values: Optional[Sequence[str]]) -> List[str]:
+        items: List[str] = []
+        for chunk in values or []:
+            for part in chunk.split(","):
+                val = part.strip()
+                if val:
+                    items.append(val)
+        return items
+
+    trade_ids = {tid.strip() for tid in _split(args.trade_id) if tid.strip()}
+    product_ids = {pid.strip().upper() for pid in _split(args.product_id) if pid.strip()}
+    symbols = {sym.strip().upper() for sym in _split(args.symbol) if sym.strip()}
+    if not (trade_ids or product_ids or symbols or args.all):
+        raise SystemExit("Provide --trade-id/--product-id/--symbol or --all to choose trades to close.")
+
+    open_rows = open_df.to_dict("records")
+    selected: List[Dict[str, object]] = []
+    remaining: List[Dict[str, object]] = []
+    for row in open_rows:
+        tid = str(row.get("trade_id") or "")
+        pid = str(row.get("product_id") or "").upper()
+        sym = str(row.get("symbol") or "").upper()
+        match = False
+        if trade_ids and tid in trade_ids:
+            match = True
+        if product_ids and pid in product_ids:
+            match = True
+        if symbols and sym in symbols:
+            match = True
+        if args.all:
+            match = True
+        (selected if match else remaining).append(row)
+
+    if not selected:
+        raise SystemExit("No matching open trades found for the provided filters.")
+
+    exit_price_override = args.price
+    reason = args.reason or "manual_close"
+    now = datetime.now(tz=UTC)
+    closed_rows: List[Dict[str, object]] = []
+    for row in selected:
+        exit_price = exit_price_override
+        if exit_price is None:
+            exit_price = _safe_float(row.get("last_price"), _safe_float(row.get("entry_price"), 0.0))
+        closed_rows.append(_build_closed_record(row, float(exit_price), reason, now))
+
+    if args.dry_run:
+        logger.info("Dry run: would close %s trades.", len(selected))
+        for row in closed_rows:
+            logger.info(
+                "  %s %s exit %.4f P/L %+.2f (%+.4f%%)",
+                row["product_id"],
+                row["position_side"],
+                row["exit_price"],
+                row["profit_loss"],
+                row["profit_loss_pct"],
+            )
+        return
+
+    _save_csv(pd.DataFrame(remaining), OPEN_CSV, OPEN_COLUMNS)
+    closed_df = _load_csv(CLOSED_CSV, CLOSED_COLUMNS)
+    rows_df = pd.DataFrame(closed_rows)[CLOSED_COLUMNS]
+    if closed_df.empty:
+        closed_df = rows_df
+    else:
+        closed_df = pd.concat([closed_df, rows_df], ignore_index=True)
+    _save_csv(closed_df, CLOSED_CSV, CLOSED_COLUMNS)
+
+    logger.info("Closed %s trades via %s.", len(closed_rows), reason)
+    for row in closed_rows:
+        logger.info(
+            "  %s %s exit %.4f P/L %+.2f (%+.4f%%)",
+            row["product_id"],
+            row["position_side"],
+            row["exit_price"],
+            row["profit_loss"],
+            row["profit_loss_pct"],
+        )
+
+
 def handle_summary(args: argparse.Namespace) -> None:
     cfg = load_config()
     open_df = _load_csv(OPEN_CSV, OPEN_COLUMNS)
@@ -968,6 +1054,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     p_summary = sub.add_parser("summary", help="Display equity snapshot for paper trades.")
     p_summary.set_defaults(func=handle_summary)
+
+    p_close = sub.add_parser("close", help="Manually close open paper trades.")
+    p_close.add_argument("--trade-id", action="append", help="Trade IDs to close (comma-separated chunks allowed).")
+    p_close.add_argument("--product-id", action="append", help="Product IDs to close (comma-separated).")
+    p_close.add_argument("--symbol", action="append", help="Symbols to close (comma-separated).")
+    p_close.add_argument("--all", action="store_true", help="Close all open trades.")
+    p_close.add_argument("--price", type=float, help="Exit price to apply (defaults to last mark or entry).")
+    p_close.add_argument("--reason", default="manual_close", help="Closure reason stored in the CSV.")
+    p_close.add_argument("--dry-run", action="store_true", help="Preview the closure without modifying CSVs.")
+    p_close.set_defaults(func=handle_close)
 
     args = parser.parse_args(argv)
     logger.setLevel(getattr(logging, args.log_level.upper(), logging.INFO))
