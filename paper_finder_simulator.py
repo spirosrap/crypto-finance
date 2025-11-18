@@ -44,6 +44,7 @@ DEFAULT_CONFIG_PATH = Path("trade_logs/paper_finder_config.json")
 OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
 CLOSED_CSV = Path("trade_logs/paper_finder_closed_positions.csv")
 DERIVED_PERPS_PATH = Path(__file__).resolve().with_name("derived_perps_intx.txt")
+DEFAULT_EXCLUDED_PERPS_PATH = Path("config/excluded_perps.txt")
 
 DEFAULT_CONFIG = {
     "initial_capital": 25000.0,
@@ -96,6 +97,7 @@ CLOSED_COLUMNS = [
 THOUSAND_UNIT_BASES = {"SHIB", "BONK", "PEPE", "FLOKI"}
 _SUPPORTED_PERPS: Optional[Set[str]] = None
 _CCXT_PRODUCTS: Optional[Set[str]] = None
+_EXCLUDED_PERPS: Optional[Set[str]] = None
 
 
 def _isoformat(dt: datetime) -> str:
@@ -196,6 +198,29 @@ def _is_supported_product(product_id: str) -> bool:
     if products:
         return product_id in products
     return True
+
+
+def _load_excluded_perps(path: Path = DEFAULT_EXCLUDED_PERPS_PATH) -> Set[str]:
+    entries: Set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                value = line.strip().upper()
+                if not value or value.startswith("#"):
+                    continue
+                entries.add(value)
+    except FileNotFoundError:
+        return set()
+    except Exception as exc:
+        logger.warning("Unable to read excluded perps from %s (%s)", path, exc)
+    return entries
+
+
+def _excluded_perps() -> Set[str]:
+    global _EXCLUDED_PERPS
+    if _EXCLUDED_PERPS is None:
+        _EXCLUDED_PERPS = _load_excluded_perps()
+    return _EXCLUDED_PERPS
 
 
 def _ccxt_symbol(product_id: str) -> str:
@@ -493,14 +518,22 @@ def _select_balanced_top(candidates: List[FinderCandidate], total: int) -> List[
     return picks[:total]
 
 
-def _filter_supported_candidates(candidates: List[FinderCandidate]) -> List[FinderCandidate]:
+def _filter_supported_candidates(
+    candidates: List[FinderCandidate],
+    excluded_perps: Optional[Set[str]] = None,
+) -> List[FinderCandidate]:
     filtered: List[FinderCandidate] = []
+    excluded_lookup = {p.upper() for p in excluded_perps} if excluded_perps is not None else _excluded_perps()
     for cand in candidates:
         product_id = cand.product_id or _product_id(cand.parsed.symbol)
         if not product_id:
             logger.warning("Skipping %s (cannot derive perp symbol).", cand.parsed.symbol)
             continue
         cand.product_id = product_id
+        pid_upper = product_id.upper()
+        if excluded_lookup and pid_upper in excluded_lookup:
+            logger.info("Skipping %s (perp %s is excluded).", cand.parsed.symbol, product_id)
+            continue
         if not _is_supported_product(product_id):
             logger.warning("Skipping %s (perp %s unsupported on Coinbase).", cand.parsed.symbol, product_id)
             continue

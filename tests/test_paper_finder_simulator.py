@@ -45,6 +45,8 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         sim.OPEN_CSV = base / "open.csv"
         sim.CLOSED_CSV = base / "closed.csv"
         sim._SUPPORTED_PERPS = set()
+        sim._CCXT_PRODUCTS = set()
+        sim._EXCLUDED_PERPS = set()
 
     def test_gather_candidates_parses_blocks(self) -> None:
         candidates = gather_candidates(SAMPLE_TEXT)
@@ -65,6 +67,14 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         filtered = _filter_supported_candidates(candidates)
         self.assertEqual(1, len(filtered))
         self.assertEqual("ALPHA", filtered[0].parsed.symbol)
+
+    def test_filter_supported_candidates_skips_excluded(self) -> None:
+        sim._SUPPORTED_PERPS = {"ALPHA-PERP-INTX", "BETA-PERP-INTX"}
+        sim._EXCLUDED_PERPS = {"BETA-PERP-INTX"}
+        candidates = gather_candidates(SAMPLE_TEXT)
+        filtered = _filter_supported_candidates(candidates)
+        symbols = [cand.parsed.symbol for cand in filtered]
+        self.assertEqual(["ALPHA"], symbols)
     def test_compute_unrealized_pct_handles_long_and_short(self) -> None:
         self.assertAlmostEqual(10.0, _compute_unrealized_pct("LONG", 100.0, 110.0))
         self.assertAlmostEqual(-10.0, _compute_unrealized_pct("LONG", 100.0, 90.0))
