@@ -11,6 +11,15 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+PYTHON_BIN="${PYTHON_BIN:-/home/spiros/anaconda3/envs/trade/bin/python}"
+if [[ ! -x "$PYTHON_BIN" ]]; then
+    PYTHON_BIN="$(command -v python || true)"
+fi
+if [[ -z "$PYTHON_BIN" ]]; then
+    echo "No python interpreter found. Set PYTHON_BIN before running." >&2
+    exit 1
+fi
+
 STAMP="$(date -u +%Y-%m-%d)"
 OUT_DIR="$REPO_ROOT/finder_logs"
 OUT_FILE="$OUT_DIR/${STAMP}.txt"
@@ -27,7 +36,7 @@ rm -f "$OK_FILE"
 
 while [[ $attempt -le $MAX_RETRIES ]]; do
     echo "[${STAMP}T$(date -u +%H:%M:%S)Z] Finder run attempt ${attempt}/${MAX_RETRIES}..."
-    if python short_term_crypto_finder.py \
+    if "$PYTHON_BIN" short_term_crypto_finder.py \
         --profile focused_no_llm_100 \
         --plain-output "$OUT_FILE" \
         --force-refresh \

@@ -4,9 +4,10 @@ This doc explains how to capture daily `short_term_crypto_finder.py` output and 
 
 ## 1. Capture Finder Output Daily
 
-Run the provided helper (`scripts/archive_finder_output.sh`) once per day (cron/systemd/task scheduler):
+Run the provided helper (`scripts/archive_finder_output.sh`) once per day (cron/systemd/task scheduler). The script expects a working Python interpreter; set `PYTHON_BIN` if cron runs in a minimal environment:
 
 ```bash
+PYTHON_BIN=/home/spiros/anaconda3/envs/trade/bin/python \
 /home/spiros/crypto-finance/scripts/archive_finder_output.sh \
   >> /home/spiros/crypto-finance/logs/finder_archive.log 2>&1
 ```
@@ -40,7 +41,7 @@ Each invocation writes exactly one plain-text finder report to `finder_logs/`. T
 3. Add a daily entry (example: 12:15 UTC) and save:
 
    ```
-   15 12 * * * /home/spiros/crypto-finance/scripts/archive_finder_output.sh >> /home/spiros/crypto-finance/logs/finder_archive.log 2>&1
+   15 12 * * * PYTHON_BIN=/home/spiros/anaconda3/envs/trade/bin/python /home/spiros/crypto-finance/scripts/archive_finder_output.sh >> /home/spiros/crypto-finance/logs/finder_archive.log 2>&1
    ```
 
 Adjust the minute/hour to suit your preferred run window. The only requirement is to run it consistently so each UTC day has exactly one entry in `finder_logs/`.
