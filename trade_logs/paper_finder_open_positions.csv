@@ -1,3 +1,1 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
-fbf3033e21,PAXG,PAXG-PERP-INTX,LONG,4070.49,3979.5525,4270.5525,500.0,3.0,2025-11-17T09:54:53Z,2025-11-18T09:54:53Z,OPEN,4049.64,2025-11-17T19:12:25Z,-2.56,-0.5122,75.73,1,5.0,finder_run,
-5ac953493b,LTC,LTC-PERP-INTX,LONG,96.44,92.3175,105.5095,500.0,3.0,2025-11-17T09:54:53Z,2025-11-18T09:54:53Z,OPEN,92.7,2025-11-17T19:12:25Z,-19.39,-3.8781,32.22,3,5.0,finder_run,
