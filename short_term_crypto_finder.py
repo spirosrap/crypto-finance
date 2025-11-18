@@ -163,7 +163,12 @@ def build_short_term_config() -> CryptoFinderConfig:
 
     cfg = CryptoFinderConfig.from_env()
 
-    cfg.analysis_days = _env_override("SHORT_ANALYSIS_DAYS", 120, int)
+    default_analysis_days = cfg.analysis_days if cfg.analysis_days else 120
+    default_analysis_days = min(90, default_analysis_days)
+    cfg.analysis_days = max(
+        45,
+        _env_override("SHORT_ANALYSIS_DAYS", default_analysis_days, int),
+    )
     cfg.min_market_cap = _env_override("SHORT_MIN_MARKET_CAP", max(cfg.min_market_cap, 50_000_000), int)
     cfg.max_results = _env_override("SHORT_MAX_RESULTS", cfg.max_results, int)
     cfg.request_delay = _env_override("SHORT_REQUEST_DELAY", cfg.request_delay, float)
@@ -178,10 +183,14 @@ def build_short_term_config() -> CryptoFinderConfig:
     )
     cfg.risk_free_rate = _env_override("SHORT_RISK_FREE_RATE", 0.01, float)
     cfg.force_refresh_candles = _env_flag("SHORT_FORCE_REFRESH_CANDLES", True)
-    cfg.min_volume_24h = _env_override("SHORT_MIN_VOLUME_24H", cfg.min_volume_24h, float)
+    current_min_volume = float(cfg.min_volume_24h or 0.0)
+    default_min_volume = max(current_min_volume, 15_000_000.0)
+    cfg.min_volume_24h = _env_override("SHORT_MIN_VOLUME_24H", default_min_volume, float)
+    current_vmc_ratio = float(cfg.min_volume_market_cap_ratio or 0.0)
+    default_vmc_ratio = max(current_vmc_ratio, 0.025)
     cfg.min_volume_market_cap_ratio = _env_override(
         "SHORT_MIN_VMC_RATIO",
-        cfg.min_volume_market_cap_ratio,
+        default_vmc_ratio,
         float,
     )
     cfg.intraday_granularity = _env_override(
@@ -438,16 +447,62 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         returns = df['close'].pct_change().dropna()
         bars_per_6h = max(int(round(6.0 / candle_hours)), 1)
         bars_per_24h = max(int(round(24.0 / candle_hours)), bars_per_6h)
+        bars_per_1h = max(int(round(1.0 / candle_hours)), 1)
+        bars_per_30m = max(int(round(0.5 / candle_hours)), 1)
 
-        vol6 = float(np.std(returns.tail(bars_per_6h), ddof=0)) if len(returns) >= 1 else 0.0
-        vol24 = float(np.std(returns.tail(bars_per_24h), ddof=0)) if len(returns) >= 1 else vol6
+        def _volatility_tail(window: int) -> float:
+            if window <= 0 or len(returns) == 0:
+                return 0.0
+            sample = returns.tail(max(window, 1))
+            if sample.empty:
+                return 0.0
+            return float(np.std(sample, ddof=0))
+
+        vol6 = _volatility_tail(bars_per_6h)
+        vol24 = _volatility_tail(bars_per_24h) or vol6
+        vol1h = _volatility_tail(bars_per_1h) or vol6
+        vol30m = _volatility_tail(bars_per_30m) or vol1h
+
+        last_close = float(df['close'].iloc[-1])
+        lookback_slice = df.tail(bars_per_24h)
+        intraday_volume_24h = float(lookback_slice['volume'].sum())
+        intraday_high = float(lookback_slice['high'].max()) if not lookback_slice.empty else float(df['high'].iloc[-1])
+        intraday_low = float(lookback_slice['low'].min()) if not lookback_slice.empty else float(df['low'].iloc[-1])
+        range_span = max(intraday_high - intraday_low, 1e-9)
+        range_pct = (intraday_high / intraday_low - 1.0) if intraday_low > 0 else 0.0
+        range_pos = np.clip((last_close - intraday_low) / range_span, 0.0, 1.0)
+
+        vwap_price = last_close
+        if intraday_volume_24h > 0:
+            price_volume = float((lookback_slice['close'] * lookback_slice['volume']).sum())
+            if price_volume > 0:
+                vwap_price = price_volume / intraday_volume_24h
+        vwap_distance = (last_close / vwap_price - 1.0) if vwap_price > 0 else 0.0
+
+        volume_series = df['volume']
+        recent_window = max(bars_per_1h, 1)
+        recent_volume = float(volume_series.tail(recent_window).sum())
+        prior_slice = volume_series.iloc[:-recent_window] if len(volume_series) > recent_window else volume_series.iloc[:0]
+        prior_volume = float(prior_slice.tail(recent_window).sum()) if not prior_slice.empty else recent_volume
+        volume_rate = recent_volume / max(prior_volume, 1e-9) if recent_volume > 0 else 1.0
 
         metrics = {
+            'intraday_return_30m': ShortTermCryptoFinder._window_return(df['close'], bars_per_30m),
+            'intraday_return_1h': ShortTermCryptoFinder._window_return(df['close'], bars_per_1h),
             'intraday_return_6h': ShortTermCryptoFinder._window_return(df['close'], bars_per_6h),
             'intraday_return_24h': ShortTermCryptoFinder._window_return(df['close'], bars_per_24h),
+            'intraday_volatility_30m': vol30m,
+            'intraday_volatility_1h': vol1h,
             'intraday_volatility_6h': vol6,
             'intraday_volatility_24h': vol24,
-            'intraday_volume_24h': float(df['volume'].tail(bars_per_24h).sum()),
+            'intraday_volume_24h': intraday_volume_24h,
+            'intraday_volume_rate_of_change': float(np.clip(volume_rate, 0.0, 5.0)),
+            'intraday_vwap_price': float(vwap_price),
+            'intraday_vwap_distance': float(np.clip(vwap_distance, -0.5, 0.5)),
+            'intraday_range_pct': float(np.clip(range_pct, 0.0, 5.0)),
+            'intraday_range_position': float(range_pos),
+            'intraday_high_lookback': float(intraday_high),
+            'intraday_low_lookback': float(intraday_low),
         }
 
         return metrics
@@ -632,6 +687,27 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
                     ratio = intraday_volume_sum / last_daily_volume
                     metrics['intraday_volume_ratio'] = float(np.clip(ratio, 0.0, 12.0))
 
+            extra_intraday_keys = (
+                'intraday_return_30m',
+                'intraday_return_1h',
+                'intraday_volatility_30m',
+                'intraday_volatility_1h',
+                'intraday_volume_rate_of_change',
+                'intraday_vwap_distance',
+                'intraday_vwap_price',
+                'intraday_range_pct',
+                'intraday_range_position',
+                'intraday_high_lookback',
+                'intraday_low_lookback',
+            )
+            for key in extra_intraday_keys:
+                if key not in df.columns:
+                    continue
+                value = df[key].iloc[-1]
+                if pd.isna(value):
+                    continue
+                metrics[key] = float(value)
+
         except Exception as exc:
             logger.warning("Failed to enrich short-term indicators: %s", exc)
 
@@ -768,6 +844,21 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             if breakout_bonus > 0:
                 score += float(np.clip(breakout_bonus * 400.0, 0.0, 6.0))
 
+            intraday_ret30 = float(technical_metrics.get('intraday_return_30m', 0.0) or 0.0)
+            score += float(np.clip(5.0 * np.tanh(intraday_ret30 / 0.01), -5.0, 5.0))
+
+            intraday_ret1h = float(technical_metrics.get('intraday_return_1h', 0.0) or 0.0)
+            score += float(np.clip(4.0 * np.tanh(intraday_ret1h / 0.015), -4.0, 4.0))
+
+            vwap_distance = float(technical_metrics.get('intraday_vwap_distance', 0.0) or 0.0)
+            score += float(np.clip(3.0 * np.tanh(vwap_distance / 0.008), -4.0, 4.0))
+
+            range_pos = self._range_position(technical_metrics)
+            score += float(np.clip(3.5 * np.tanh((0.7 - range_pos) / 0.2), -4.0, 4.0))
+
+            volume_rate = float(technical_metrics.get('intraday_volume_rate_of_change', 1.0) or 1.0)
+            score += float(np.clip(4.0 * np.tanh((volume_rate - 1.0) / 0.5), -4.0, 4.0))
+
             return float(np.clip(score, 0.0, 100.0))
         except Exception as exc:
             logger.error(f"Short-term technical score failed: {exc}")
@@ -867,10 +958,76 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
                 hist = float(technical_metrics.get('macd_hist', 0.0) or 0.0)
                 score += 4 if hist < 0 else -4
 
+            intraday_ret30 = float(technical_metrics.get('intraday_return_30m', 0.0) or 0.0)
+            score += float(np.clip(5.0 * np.tanh((-intraday_ret30) / 0.01), -5.0, 5.0))
+
+            intraday_ret1h = float(technical_metrics.get('intraday_return_1h', 0.0) or 0.0)
+            score += float(np.clip(4.0 * np.tanh((-intraday_ret1h) / 0.015), -4.0, 4.0))
+
+            vwap_distance = float(technical_metrics.get('intraday_vwap_distance', 0.0) or 0.0)
+            score += float(np.clip(3.0 * np.tanh((-vwap_distance) / 0.008), -4.0, 4.0))
+
+            range_pos = self._range_position(technical_metrics)
+            score += float(np.clip(3.5 * np.tanh((range_pos - 0.3) / 0.2), -4.0, 4.0))
+
+            volume_rate = float(technical_metrics.get('intraday_volume_rate_of_change', 1.0) or 1.0)
+            score += float(np.clip(4.0 * np.tanh((volume_rate - 1.0) / 0.5), -4.0, 4.0))
+
             return float(np.clip(score, 0.0, 100.0))
         except Exception as exc:
             logger.error(f"Short-term short-score failed: {exc}")
             return 50.0
+
+    def _volatility_ratio(self, technical_metrics: Dict) -> float:
+        daily_vol = float(technical_metrics.get('daily_vol_30d', 0.0) or 0.0)
+        intraday_vol = float(technical_metrics.get('intraday_volatility_6h', 0.0) or 0.0)
+        if daily_vol <= 0:
+            return 1.0
+        ratio = intraday_vol / max(daily_vol, 1e-6)
+        return float(np.clip(ratio, 0.4, 2.5))
+
+    def _range_position(self, technical_metrics: Dict) -> float:
+        pos = float(technical_metrics.get('intraday_range_position', 0.5) or 0.5)
+        return float(np.clip(pos, 0.0, 1.0))
+
+    def _dynamic_pct_buffer(self, technical_metrics: Dict, is_long: bool) -> float:
+        vol_ratio = self._volatility_ratio(technical_metrics)
+        buffer = 0.032 if vol_ratio < 1.0 else 0.04
+        if vol_ratio > 1.4:
+            buffer = 0.05
+        range_pos = self._range_position(technical_metrics)
+        if is_long:
+            if range_pos > 0.75:
+                buffer += 0.007
+            elif range_pos < 0.4:
+                buffer -= 0.004
+        else:
+            if range_pos < 0.25:
+                buffer += 0.007
+            elif range_pos > 0.6:
+                buffer -= 0.004
+        return float(np.clip(buffer, 0.02, 0.06))
+
+    def _atr_multiplier(self, base: float, technical_metrics: Dict, is_long: bool) -> float:
+        vol_ratio = self._volatility_ratio(technical_metrics)
+        if vol_ratio < 0.9:
+            return base * 0.85
+        if vol_ratio > 1.4:
+            return base * 1.25
+        # Scale smoothly within the band to avoid jumps.
+        scaled = base * (0.9 + 0.2 * (vol_ratio - 0.9))
+        return float(np.clip(scaled, base * 0.75, base * 1.35))
+
+    def _dynamic_rr_target(self, technical_metrics: Dict, is_long: bool) -> float:
+        rr = float(self.RR_TARGET)
+        vol_ratio = self._volatility_ratio(technical_metrics)
+        range_pos = self._range_position(technical_metrics)
+        rr += 0.15 * (vol_ratio - 1.0)
+        if is_long and range_pos > 0.8:
+            rr -= 0.3
+        elif not is_long and range_pos < 0.2:
+            rr -= 0.3
+        return float(np.clip(rr, 1.5, 2.6))
 
     # ------------------------------------------------------------------
     # Trading levels: tighter ATR stops and nearer swing targets
@@ -879,23 +1036,35 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         try:
             entry_price = current_price
             atr_raw = float(technical_metrics.get('atr', 0.0) or 0.0)
+            atr_mult = self._atr_multiplier(self.ATR_STOP_MULT_LONG, technical_metrics, is_long=True)
 
             stop_candidates = []
             if atr_raw > 0:
-                stop_candidates.append(entry_price - self.ATR_STOP_MULT_LONG * atr_raw)
+                stop_candidates.append(entry_price - atr_mult * atr_raw)
             if len(df) >= 6:
                 swing_low = float(df['low'].tail(6).min())
                 stop_candidates.append(swing_low * 0.99)
 
-            daily_vol = float(technical_metrics.get('daily_vol_30d', 0.0) or 0.0)
-            pct_buffer = 0.035 if daily_vol <= 0.03 else 0.045
+            intraday_low = float(technical_metrics.get('intraday_low_lookback', 0.0) or 0.0)
+            if intraday_low > 0:
+                stop_candidates.append(intraday_low * 0.995)
+
+            vwap_price = float(technical_metrics.get('intraday_vwap_price', 0.0) or 0.0)
+            if vwap_price > 0:
+                stop_candidates.append(vwap_price * 0.985)
+
+            pct_buffer = self._dynamic_pct_buffer(technical_metrics, is_long=True)
             stop_candidates.append(entry_price * (1 - pct_buffer))
 
             stop_loss_price = max(stop_candidates) if stop_candidates else entry_price * 0.97
             stop_loss_price = min(stop_loss_price, entry_price * 0.998)
 
-            risk_amount = max(entry_price - stop_loss_price, entry_price * 0.001)
-            tp_candidates = [entry_price + risk_amount * self.RR_TARGET]
+            vol_ratio = self._volatility_ratio(technical_metrics)
+            min_risk = entry_price * (0.0008 + max(vol_ratio - 1.0, 0.0) * 0.0006)
+            risk_amount = max(entry_price - stop_loss_price, min_risk)
+
+            rr_target = self._dynamic_rr_target(technical_metrics, is_long=True)
+            tp_candidates = [entry_price + risk_amount * rr_target]
 
             if len(df) >= 10:
                 swing_high = float(df['high'].tail(10).max())
@@ -905,7 +1074,15 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
                 recent_close = float(df['price'].tail(30).max())
                 tp_candidates.append(max(recent_close * 1.02, entry_price + risk_amount))
 
-            take_profit_price = max(entry_price * 1.01, min(tp_candidates))
+            intraday_high = float(technical_metrics.get('intraday_high_lookback', 0.0) or 0.0)
+            if intraday_high > 0:
+                tp_candidates.append(max(intraday_high * 0.998, entry_price + risk_amount * 0.8))
+
+            base_take_profit = min(tp_candidates)
+            if self._range_position(technical_metrics) > 0.85:
+                base_take_profit = min(base_take_profit, entry_price * 1.03)
+
+            take_profit_price = max(entry_price * 1.005, base_take_profit)
             take_profit_price = max(take_profit_price, entry_price * 1.001)
 
             rr = self._risk_reward_ratio(entry_price, stop_loss_price, take_profit_price, atr_raw, is_long=True)
@@ -932,23 +1109,35 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         try:
             entry_price = current_price
             atr_raw = float(technical_metrics.get('atr', 0.0) or 0.0)
+            atr_mult = self._atr_multiplier(self.ATR_STOP_MULT_SHORT, technical_metrics, is_long=False)
 
             stop_candidates = []
             if atr_raw > 0:
-                stop_candidates.append(entry_price + self.ATR_STOP_MULT_SHORT * atr_raw)
+                stop_candidates.append(entry_price + atr_mult * atr_raw)
             if len(df) >= 6:
                 swing_high = float(df['high'].tail(6).max())
                 stop_candidates.append(swing_high * 1.01)
 
-            daily_vol = float(technical_metrics.get('daily_vol_30d', 0.0) or 0.0)
-            pct_buffer = 0.035 if daily_vol <= 0.03 else 0.045
+            intraday_high = float(technical_metrics.get('intraday_high_lookback', 0.0) or 0.0)
+            if intraday_high > 0:
+                stop_candidates.append(intraday_high * 1.005)
+
+            vwap_price = float(technical_metrics.get('intraday_vwap_price', 0.0) or 0.0)
+            if vwap_price > 0:
+                stop_candidates.append(vwap_price * 1.015)
+
+            pct_buffer = self._dynamic_pct_buffer(technical_metrics, is_long=False)
             stop_candidates.append(entry_price * (1 + pct_buffer))
 
             stop_loss_price = min(stop_candidates) if stop_candidates else entry_price * 1.03
             stop_loss_price = max(stop_loss_price, entry_price * 1.001)
 
-            risk_amount = max(stop_loss_price - entry_price, entry_price * 0.001)
-            tp_candidates = [entry_price - risk_amount * self.RR_TARGET]
+            vol_ratio = self._volatility_ratio(technical_metrics)
+            min_risk = entry_price * (0.0008 + max(vol_ratio - 1.0, 0.0) * 0.0006)
+            risk_amount = max(stop_loss_price - entry_price, min_risk)
+
+            rr_target = self._dynamic_rr_target(technical_metrics, is_long=False)
+            tp_candidates = [entry_price - risk_amount * rr_target]
 
             if len(df) >= 10:
                 swing_low = float(df['low'].tail(10).min())
@@ -958,7 +1147,15 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
                 recent_close = float(df['price'].tail(30).min())
                 tp_candidates.append(min(recent_close * 0.98, entry_price - risk_amount))
 
-            take_profit_price = min(entry_price * 0.99, max(tp_candidates))
+            intraday_low = float(technical_metrics.get('intraday_low_lookback', 0.0) or 0.0)
+            if intraday_low > 0:
+                tp_candidates.append(min(intraday_low * 1.002, entry_price - risk_amount * 0.8))
+
+            base_take_profit = max(tp_candidates)
+            if self._range_position(technical_metrics) < 0.15:
+                base_take_profit = max(base_take_profit, entry_price * 0.97)
+
+            take_profit_price = min(entry_price * 0.995, base_take_profit)
             take_profit_price = min(take_profit_price, entry_price * 0.999)
 
             rr = self._risk_reward_ratio(entry_price, stop_loss_price, take_profit_price, atr_raw, is_long=False)
