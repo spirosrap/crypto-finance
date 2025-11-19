@@ -2,194 +2,194 @@
 ====================================================================================================
 SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
 ====================================================================================================
-Generated on (UTC): 2025-11-18 04:57:02Z
+Generated on (UTC): 2025-11-18 10:17:40Z
 Total opportunities listed: 5
 ====================================================================================================
 
-1. YFI (yearn.finance) — LONG
+1. USD1 (USD1) — LONG
 --------------------------------------------------
 Data Timestamp (UTC): 2025-11-18 00:00:00Z
-Price: $4282.120000
-Market Cap: $145,015,559 (Rank #355)
-24h Volume: $27,876,064
-24h Change: -8.31%
-7d Change: -10.24%
-30d Change: -11.22%
+Price: $0.998700
+Market Cap: $2,735,749,740 (Rank #51)
+24h Volume: $540,612,134
+24h Change: 0.02%
+7d Change: -0.03%
+30d Change: -0.11%
+ATH: $1.02 (Date: 2025-05-12)
+ATL: $0.989633 (Date: 2025-10-01)
+Volatility (30d, ann.): 0.6%
+Sharpe Ratio: -1.91
+Sortino Ratio: -2.75
+Max Drawdown: -0.29%
+RSI (14): 100.0
+MACD Signal: BULLISH
+BB Position: NEUTRAL
+Trend Strength: -0.00% per day
+Momentum Score: 1.3/100
+Fundamental Score: 83.5/100
+Technical Score: 52.5/100
+Risk Score: 22.6/100
+Risk Level: LOW
+Overall Score: 65.23/100
+
+💼 TRADING LEVELS (LONG):
+Entry Price: $0.998700
+Stop Loss: $0.996703
+Take Profit: $1.008687
+Risk:Reward Ratio: 5.0:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $10.00 (1.00%)
+Potential SL P&L: $-2.00 (-0.20%)
+
+2. YFI (yearn.finance) — LONG
+--------------------------------------------------
+Data Timestamp (UTC): 2025-11-18 00:00:00Z
+Price: $4353.240000
+Market Cap: $148,187,479 (Rank #347)
+24h Volume: $29,016,814
+24h Change: -6.29%
+7d Change: -8.97%
+30d Change: -9.96%
 ATH: $90787.00 (Date: 2021-05-12)
 ATL: $31.650000 (Date: 2020-07-18)
-Volatility (30d, ann.): 69.0%
-Sharpe Ratio: -1.23
-Sortino Ratio: -1.99
+Volatility (30d, ann.): 70.9%
+Sharpe Ratio: -1.13
+Sortino Ratio: -1.83
 Max Drawdown: -30.72%
-RSI (14): 29.8
+RSI (14): 34.2
 MACD Signal: BEARISH
 BB Position: NEUTRAL
 Trend Strength: -0.29% per day
-Momentum Score: 4.2/100
-Fundamental Score: 86.5/100
-Technical Score: 44.4/100
-Risk Score: 31.3/100
+Momentum Score: 4.4/100
+Fundamental Score: 91.5/100
+Technical Score: 52.1/100
+Risk Score: 35.1/100
 Risk Level: MEDIUM_LOW
-Overall Score: 48.90/100
+Overall Score: 37.15/100
 
 💼 TRADING LEVELS (LONG):
-Entry Price: $4282.120000
-Stop Loss: $4133.388600
-Take Profit: $4609.329080
-Risk:Reward Ratio: 2.1:1
-Recommended Position Size: 5.0% of portfolio
-Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
-Potential TP P&L: $76.41 (7.64%)
-Potential SL P&L: $-34.73 (-3.47%)
-
-2. ZRO (LayerZero) — LONG
---------------------------------------------------
-Data Timestamp (UTC): 2025-11-18 00:00:00Z
-Price: $1.421000
-Market Cap: $342,389,336 (Rank #230)
-24h Volume: $46,047,842
-24h Change: -1.18%
-7d Change: -7.05%
-30d Change: -17.63%
-ATH: $7.47 (Date: 2024-12-06)
-ATL: $1.120000 (Date: 2025-10-10)
-Volatility (30d, ann.): 92.2%
-Sharpe Ratio: -0.77
-Sortino Ratio: -1.17
-Max Drawdown: -42.98%
-RSI (14): 37.8
-MACD Signal: BEARISH
-BB Position: NEUTRAL
-Trend Strength: -0.84% per day
-Momentum Score: 0.1/100
-Fundamental Score: 86.5/100
-Technical Score: 47.2/100
-Risk Score: 41.3/100
-Risk Level: MEDIUM
-Overall Score: 47.41/100
-
-💼 TRADING LEVELS (LONG):
-Entry Price: $1.421000
-Stop Loss: $1.361250
-Take Profit: $1.552450
+Entry Price: $4353.240000
+Stop Loss: $4157.344200
+Take Profit: $4784.210760
 Risk:Reward Ratio: 2.2:1
 Recommended Position Size: 5.0% of portfolio
 Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
-Potential TP P&L: $92.51 (9.25%)
-Potential SL P&L: $-42.05 (-4.20%)
+Potential TP P&L: $99.00 (9.90%)
+Potential SL P&L: $-45.00 (-4.50%)
 
 3. PAXG (PAX Gold) — LONG
 --------------------------------------------------
 Data Timestamp (UTC): 2025-11-18 00:00:00Z
-Price: $3996.960000
-Market Cap: $1,333,496,280 (Rank #80)
-24h Volume: $249,916,425
-24h Change: -1.12%
-7d Change: -4.34%
-30d Change: -8.39%
+Price: $4033.280000
+Market Cap: $1,343,018,621 (Rank #80)
+24h Volume: $250,144,641
+24h Change: -0.73%
+7d Change: -3.47%
+30d Change: -7.56%
 ATH: $4448.72 (Date: 2025-10-16)
 ATL: $1399.640000 (Date: 2019-11-18)
-Volatility (30d, ann.): 24.5%
-Sharpe Ratio: 3.39
-Sortino Ratio: 3.99
+Volatility (30d, ann.): 24.3%
+Sharpe Ratio: 3.56
+Sortino Ratio: 4.12
 Max Drawdown: -11.53%
-RSI (14): 36.1
+RSI (14): 42.5
 MACD Signal: BEARISH
 BB Position: NEUTRAL
 Trend Strength: 0.12% per day
-Momentum Score: 35.2/100
+Momentum Score: 36.4/100
 Fundamental Score: 83.5/100
-Technical Score: 65.7/100
-Risk Score: 8.2/100
+Technical Score: 64.4/100
+Risk Score: 12.5/100
 Risk Level: LOW
-Overall Score: 32.93/100
+Overall Score: 36.60/100
 
 💼 TRADING LEVELS (LONG):
-Entry Price: $3996.960000
+Entry Price: $4033.280000
 Stop Loss: $3953.010600
-Take Profit: $4093.648680
+Take Profit: $4209.872680
 Risk:Reward Ratio: 2.2:1
 Recommended Position Size: 5.0% of portfolio
 Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
-Potential TP P&L: $24.19 (2.42%)
-Potential SL P&L: $-11.00 (-1.10%)
+Potential TP P&L: $43.78 (4.38%)
+Potential SL P&L: $-19.90 (-1.99%)
 
 4. SUI (Sui) — LONG
 --------------------------------------------------
 Data Timestamp (UTC): 2025-11-18 00:00:00Z
-Price: $1.630100
-Market Cap: $5,975,335,839 (Rank #33)
-24h Volume: $1,291,894,577
-24h Change: -4.52%
-7d Change: -16.89%
-30d Change: -36.51%
+Price: $1.648300
+Market Cap: $6,079,691,593 (Rank #33)
+24h Volume: $1,329,101,188
+24h Change: -4.27%
+7d Change: -16.23%
+30d Change: -36.00%
 ATH: $5.35 (Date: 2025-01-04)
 ATL: $0.364846 (Date: 2023-10-19)
-Volatility (30d, ann.): 83.6%
-Sharpe Ratio: -2.74
-Sortino Ratio: -4.16
+Volatility (30d, ann.): 83.7%
+Sharpe Ratio: -2.70
+Sortino Ratio: -4.10
 Max Drawdown: -62.66%
-RSI (14): 21.4
+RSI (14): 23.4
 MACD Signal: BEARISH
 BB Position: NEUTRAL
 Trend Strength: -1.23% per day
 Momentum Score: 0.0/100
-Fundamental Score: 83.5/100
-Technical Score: 50.9/100
-Risk Score: 49.4/100
+Fundamental Score: 88.5/100
+Technical Score: 62.6/100
+Risk Score: 51.8/100
 Risk Level: MEDIUM
-Overall Score: 27.79/100
+Overall Score: 32.26/100
 
 💼 TRADING LEVELS (LONG):
-Entry Price: $1.630100
-Stop Loss: $1.561626
-Take Profit: $1.780743
-Risk:Reward Ratio: 2.0:1
+Entry Price: $1.648300
+Stop Loss: $1.574126
+Take Profit: $1.811482
+Risk:Reward Ratio: 2.2:1
 Recommended Position Size: 5.0% of portfolio
 Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
-Potential TP P&L: $92.41 (9.24%)
-Potential SL P&L: $-42.01 (-4.20%)
+Potential TP P&L: $99.00 (9.90%)
+Potential SL P&L: $-45.00 (-4.50%)
 
-5. CRV (Curve DAO) — LONG
+5. LTC (Litecoin) — LONG
 --------------------------------------------------
 Data Timestamp (UTC): 2025-11-18 00:00:00Z
-Price: $0.413900
-Market Cap: $583,116,454 (Rank #143)
-24h Volume: $129,551,585
-24h Change: -2.84%
-7d Change: -7.88%
-30d Change: -24.76%
-ATH: $15.37 (Date: 2020-08-14)
-ATL: $0.180354 (Date: 2024-08-05)
-Volatility (30d, ann.): 102.9%
-Sharpe Ratio: -1.67
-Sortino Ratio: -2.65
-Max Drawdown: -62.98%
-RSI (14): 35.4
+Price: $95.550000
+Market Cap: $7,348,150,756 (Rank #29)
+24h Volume: $943,574,636
+24h Change: -0.96%
+7d Change: -2.23%
+30d Change: 1.48%
+ATH: $410.26 (Date: 2021-05-10)
+ATL: $1.150000 (Date: 2015-01-14)
+Volatility (30d, ann.): 88.8%
+Sharpe Ratio: -0.43
+Sortino Ratio: -0.60
+Max Drawdown: -34.93%
+RSI (14): 46.7
 MACD Signal: BEARISH
 BB Position: NEUTRAL
-Trend Strength: -1.05% per day
-Momentum Score: 0.1/100
-Fundamental Score: 89.5/100
-Technical Score: 48.1/100
-Risk Score: 50.4/100
-Risk Level: MEDIUM
-Overall Score: 26.43/100
+Trend Strength: -0.30% per day
+Momentum Score: 16.0/100
+Fundamental Score: 93.5/100
+Technical Score: 42.0/100
+Risk Score: 38.9/100
+Risk Level: MEDIUM_LOW
+Overall Score: 31.19/100
 
 💼 TRADING LEVELS (LONG):
-Entry Price: $0.413900
-Stop Loss: $0.395703
-Take Profit: $0.453933
-Risk:Reward Ratio: 2.0:1
+Entry Price: $95.550000
+Stop Loss: $91.250250
+Take Profit: $105.009450
+Risk:Reward Ratio: 2.2:1
 Recommended Position Size: 5.0% of portfolio
 Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
-Potential TP P&L: $96.72 (9.67%)
-Potential SL P&L: $-43.96 (-4.40%)
+Potential TP P&L: $99.00 (9.90%)
+Potential SL P&L: $-45.00 (-4.50%)
 
 Short-Line Summaries
 --------------------------------------------------
-1. Summary: YFI long – score 48.90, 2.1× RR; RSI 30; bearish MACD rebound; risk medium low; trend -0.29%/d.
-2. Summary: ZRO long – score 47.41, 2.2× RR; RSI 38; bearish MACD rebound; risk medium; trend -0.84%/d.
-3. Summary: PAXG long – score 32.93, 2.2× RR; RSI 36; bearish MACD rebound; risk low; trend +0.12%/d.
-4. Summary: SUI long – score 27.79, 2.0× RR; RSI 21; bearish MACD rebound; risk medium; trend -1.23%/d.
-5. Summary: CRV long – score 26.43, 2.0× RR; RSI 35; bearish MACD rebound; risk medium; trend -1.05%/d.
+1. Summary: USD1 long – score 65.23, 5.0× RR; RSI 100; bullish MACD support; risk low.
+2. Summary: YFI long – score 37.15, 2.2× RR; RSI 34; bearish MACD rebound; risk medium low; trend -0.29%/d.
+3. Summary: PAXG long – score 36.60, 2.2× RR; RSI 42; bearish MACD rebound; risk low; trend +0.12%/d.
+4. Summary: SUI long – score 32.26, 2.2× RR; RSI 23; bearish MACD rebound; risk medium; trend -1.23%/d.
+5. Summary: LTC long – score 31.19, 2.2× RR; RSI 47; bearish MACD rebound; risk medium low; trend -0.30%/d.

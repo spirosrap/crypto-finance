@@ -1,3 +1,1 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
-48b7f4cc18,LTC,LTC-PERP-INTX,LONG,95.23,90.94465,104.65777,500.0,3.0,2025-11-18T10:35:42Z,2025-11-19T10:35:42Z,OPEN,93.48,2025-11-19T06:48:17Z,-9.19,-1.8377,31.19,3,5.0,finder_run,
-195ddf533d,CRV,CRV-PERP-INTX,LONG,0.4289,0.4096,0.471361,500.0,3.0,2025-11-18T10:35:42Z,2025-11-19T10:35:42Z,OPEN,0.4262,2025-11-19T06:48:17Z,-3.15,-0.6295,31.1,4,5.0,finder_run,
