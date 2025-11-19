@@ -1724,6 +1724,21 @@ def main() -> None:
 
     if not results:
         print("No short-term opportunities found. Adjust filters or broaden the symbol universe.")
+
+        # Preserve daily archive determinism: when no candidates survive, still write
+        # an empty/plain report so downstream scripts (cron + backtests) have a file.
+        if args.plain_output:
+            placeholder = "\n".join([
+                "=" * 100,
+                self.REPORT_TITLE,
+                "=" * 100,
+                f"Generated on (UTC): {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%SZ')}",
+                "Total opportunities listed: 0",
+                "=" * 100,
+                "",
+                "No qualifying candidates for the current filters.",
+            ])
+            save_plain_report(args.plain_output, placeholder, notify=False)
         return
 
     def save_plain_report(path: Path, content: str, notify: bool = True, status_stream: TextIO = sys.stdout) -> None:
