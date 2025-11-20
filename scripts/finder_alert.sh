@@ -13,6 +13,12 @@ ALERT_EMAIL="${FINDER_ALERT_EMAIL:-}"  # set in the crontab entry
 OUT_FILE="${FINDER_ALERT_OUT_FILE:-$REPO_ROOT/finder_short.txt}"
 LOG_FILE="${FINDER_ALERT_LOG_FILE:-$REPO_ROOT/logs/finder_alert.log}"
 MIN_OPPS="${FINDER_ALERT_MIN_OPPS:-5}"
+SMTP_HOST="${FINDER_ALERT_SMTP_HOST:-}"
+SMTP_PORT="${FINDER_ALERT_SMTP_PORT:-587}"
+SMTP_USER="${FINDER_ALERT_SMTP_USER:-}"
+SMTP_PASS="${FINDER_ALERT_SMTP_PASS:-}"
+SMTP_FROM="${FINDER_ALERT_FROM:-}"
+SMTP_STARTTLS="${FINDER_ALERT_SMTP_STARTTLS:-1}"
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
     PYTHON_BIN="$(command -v python || true)"
@@ -47,13 +53,65 @@ fi
 
 if (( opps_count >= MIN_OPPS )); then
     subject="Finder: $opps_count opportunities (focused_no_llm_100)"
+
+    # Prefer SMTP if credentials are provided; fall back to local mail otherwise.
+    if [[ -n "$SMTP_HOST" && -n "$SMTP_USER" && -n "$SMTP_PASS" ]]; then
+        FINDER_ALERT_SUBJECT="$subject" \
+        FINDER_ALERT_BODY_PATH="$OUT_FILE" \
+        FINDER_ALERT_FROM="${SMTP_FROM:-$SMTP_USER}" \
+        FINDER_ALERT_EMAIL="$ALERT_EMAIL" \
+        FINDER_ALERT_SMTP_HOST="$SMTP_HOST" \
+        FINDER_ALERT_SMTP_PORT="$SMTP_PORT" \
+        FINDER_ALERT_SMTP_USER="$SMTP_USER" \
+        FINDER_ALERT_SMTP_PASS="$SMTP_PASS" \
+        FINDER_ALERT_SMTP_STARTTLS="$SMTP_STARTTLS" \
+        "$PYTHON_BIN" - <<'PY'
+import os
+import smtplib
+import ssl
+
+host = os.environ["FINDER_ALERT_SMTP_HOST"]
+port = int(os.environ.get("FINDER_ALERT_SMTP_PORT", "587"))
+user = os.environ["FINDER_ALERT_SMTP_USER"]
+password = os.environ["FINDER_ALERT_SMTP_PASS"]
+recipient = os.environ["FINDER_ALERT_EMAIL"]
+sender = os.environ.get("FINDER_ALERT_FROM", user)
+subject = os.environ["FINDER_ALERT_SUBJECT"]
+body_path = os.environ["FINDER_ALERT_BODY_PATH"]
+starttls = os.environ.get("FINDER_ALERT_SMTP_STARTTLS", "1").lower() not in {"0", "false"}
+
+with open(body_path, "r", encoding="utf-8") as handle:
+    body = handle.read()
+
+message = f"From: {sender}\nTo: {recipient}\nSubject: {subject}\n\n{body}".encode("utf-8")
+
+context = ssl.create_default_context()
+with smtplib.SMTP(host, port, timeout=30) as server:
+    if starttls:
+        server.starttls(context=context)
+    server.login(user, password)
+    server.sendmail(sender, [recipient], message)
+PY
+        status=$?
+        if [[ $status -eq 0 ]]; then
+            echo "[$run_stamp] Sent alert via SMTP to $ALERT_EMAIL (opps=$opps_count)" >> "$LOG_FILE"
+            exit 0
+        else
+            echo "[$run_stamp] SMTP send failed (status $status); will try local mail." >> "$LOG_FILE"
+        fi
+    fi
+
     if command -v mail >/dev/null 2>&1; then
         mail -s "$subject" "$ALERT_EMAIL" < "$OUT_FILE"
-        echo "[$run_stamp] Sent alert to $ALERT_EMAIL (opps=$opps_count)" >> "$LOG_FILE"
+        rc=$?
+        if [[ $rc -eq 0 ]]; then
+            echo "[$run_stamp] Sent alert via mail to $ALERT_EMAIL (opps=$opps_count)" >> "$LOG_FILE"
+        else
+            echo "[$run_stamp] mail send failed (status $rc)" >> "$LOG_FILE"
+        fi
     else
         echo "[$run_stamp] mail command not found; cannot send email (opps=$opps_count)" >> "$LOG_FILE"
     fi
 else
     echo "[$run_stamp] Opportunities below threshold (opps=$opps_count, min=$MIN_OPPS); no email." >> "$LOG_FILE"
 fi
-
