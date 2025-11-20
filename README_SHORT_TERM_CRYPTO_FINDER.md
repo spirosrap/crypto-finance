@@ -8,10 +8,13 @@ stops and closer profit targets.
 ## Highlights
 
 ### ⚡ Faster Technical Pulse
-- **Condensed Lookback**: Defaults to ~120 daily bars and recent hourly data
-  to spotlight momentum shifts.
+- **Condensed Lookback**: Now defaults to ≤90 daily bars (env overrideable) plus
+  recent hourly data to spotlight momentum shifts.
 - **High-Frequency Indicators**: Shorter RSI (7), MACD (8/21/5), and ATR (7)
   to respond quickly to volatility regime changes.
+- **Richer Intraday Read**: Adds 30m/1h returns, multi-window vol, VWAP drift,
+  range position, and volume acceleration into the technical score—helpful for
+  near-term breakouts/breakdowns.
 - **Volume Confirmation**: Volume spike heuristics and rolling 3-vs-15 day
   volume thrust sit inside the technical composite score.
 - **Impulse & Breakout Context**: Fresh 3/10/21-day return differentials,
@@ -38,8 +41,10 @@ stops and closer profit targets.
 
 ### 🎯 Trade Planning
 - **Entry**: Current price snapshot.
-- **Stops**: 1.3× ATR baseline with swing-high/low and volatility clamps.
-- **Targets**: Default 2.2× risk multiple, blended with recent swing extremes.
+- **Stops**: ATR baselines plus swing-high/low, intraday VWAP/extrema, and
+  volatility clamps to tighten in calm regimes and ease in noisy ones.
+- **Targets**: Risk multiple adapted by intraday range positioning and swing
+  structure; includes near-term intraday highs/lows as candidate targets.
 - **Sizing**: Reuses the shared ATR-based position sizing helper (respects
   `CRYPTO_RISK_PER_TRADE`, `CRYPTO_POS_CAP_PCT`, etc.).
 - **Short-Line Summaries**: Each candidate ends with a concise one-liner for
@@ -189,6 +194,8 @@ The tool mirrors the same filters as `watchdog_reporting.py` / `watchdog_stats.p
 - `focused_llm`: Concentrates on liquidity-plus momentum swings (`limit` 200, `top_per_side` 5, OpenAI scoring enabled, ≥$5M 24h volume, ≥3% volume/market-cap ratio, 20-day intraday lookback, `unique_by_symbol`, `max_risk_level` MEDIUM); pair with `--plain-output` to persist the run.
 - `focused_llm_400`: Same scaffolding as `focused_llm` but widens the scan (`limit` 400) so the LLM layer can sift a much larger universe while keeping the identical liquidity and risk guardrails.
 - `focused_llm_100`: Mirrors `focused_llm` but trims the universe (`limit` 100) for faster refreshes while keeping the same OpenAI-assisted filters and risk guardrails.
+- `focused_no_llm_400`: Mirrors `focused_llm_400` but skips LLM scoring; same liquidity/risk guardrails and top-per-side capping (`limit` 400, `top_per_side` 5, no OpenAI).
+- `focused_no_llm_200`: Mirrors `focused_llm` but skips LLM scoring; same liquidity/risk guardrails and top-per-side capping (`limit` 200, `top_per_side` 5, no OpenAI).
 - `loose`: High-variance exploration profile (`limit` 400, minimal liquidity filters, allows VERY_HIGH risk level, disables LLM scoring) that surfaces as many ideas as possible—intended for research, not production trading.
 
 Even when other constraints shrink the candidate list—say only `3S + 1L` or
