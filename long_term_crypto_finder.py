@@ -702,10 +702,20 @@ class LongTermCryptoFinder:
             # Best-effort: ignore if dotenv is not installed
             pass
 
+        def _normalize_secret(secret: str) -> str:
+            """Return a cleaned PEM string (handles literal \\n and stray quotes)."""
+            if not secret:
+                return ""
+            s = secret.strip().strip('"').strip("'")
+            if "\\n" in s:
+                s = s.replace("\\n", "\n")
+            return s
+
         def _secret_parses(secret: str) -> bool:
             """Validate that a PEM secret can be parsed; avoid passing bad keys to ccxt."""
             if not secret:
                 return False
+            clean = _normalize_secret(secret)
             try:
                 from ccxt.static_dependencies import ecdsa  # type: ignore
             except Exception:
@@ -714,7 +724,7 @@ class LongTermCryptoFinder:
                 except Exception:
                     return True  # cannot validate without ecdsa; assume ok
             try:
-                ecdsa.SigningKey.from_pem(secret.encode())
+                ecdsa.SigningKey.from_pem(clean.encode())
                 return True
             except Exception:
                 return False
@@ -724,7 +734,7 @@ class LongTermCryptoFinder:
 
         if env_key and env_secret:
             if _secret_parses(env_secret):
-                return env_key, env_secret
+                return env_key, _normalize_secret(env_secret)
             else:
                 logger.warning("API_SECRET present but failed PEM parse; retrying .env override")
 
@@ -736,13 +746,16 @@ class LongTermCryptoFinder:
                 env_key = os.getenv('API_KEY')
                 env_secret = os.getenv('API_SECRET')
                 if env_key and env_secret and _secret_parses(env_secret):
-                    return env_key, env_secret
+                    return env_key, _normalize_secret(env_secret)
         except Exception:
             pass
 
         key, secret = get_primary_credentials()
         if key and secret:
-            return key, secret
+            if _secret_parses(secret):
+                return key, _normalize_secret(secret)
+            logger.error("API_SECRET from config.py failed PEM parse")
+            raise RuntimeError("Invalid API_SECRET: failed PEM parse. Please update your credentials.")
 
         logger.warning("API credentials not found in environment or config.py; public endpoints may still work.")
         return None, None

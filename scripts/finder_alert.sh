@@ -56,6 +56,8 @@ if (( opps_count >= MIN_OPPS )); then
 
     # Prefer SMTP if credentials are provided; fall back to local mail otherwise.
     if [[ -n "$SMTP_HOST" && -n "$SMTP_USER" && -n "$SMTP_PASS" ]]; then
+        # Allow SMTP failures to fall through to local mail; log any stack traces.
+        set +e
         FINDER_ALERT_SUBJECT="$subject" \
         FINDER_ALERT_BODY_PATH="$OUT_FILE" \
         FINDER_ALERT_FROM="${SMTP_FROM:-$SMTP_USER}" \
@@ -65,7 +67,7 @@ if (( opps_count >= MIN_OPPS )); then
         FINDER_ALERT_SMTP_USER="$SMTP_USER" \
         FINDER_ALERT_SMTP_PASS="$SMTP_PASS" \
         FINDER_ALERT_SMTP_STARTTLS="$SMTP_STARTTLS" \
-        "$PYTHON_BIN" - <<'PY'
+        "$PYTHON_BIN" - <<'PY' 2>>"$LOG_FILE"
 import os
 import smtplib
 import ssl
@@ -93,6 +95,7 @@ with smtplib.SMTP(host, port, timeout=30) as server:
     server.sendmail(sender, [recipient], message)
 PY
         status=$?
+        set -e
         if [[ $status -eq 0 ]]; then
             echo "[$run_stamp] Sent alert via SMTP to $ALERT_EMAIL (opps=$opps_count)" >> "$LOG_FILE"
             exit 0
