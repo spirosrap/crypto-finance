@@ -1739,7 +1739,13 @@ def main() -> None:
                 "",
                 "No qualifying candidates for the current filters.",
             ])
-            save_plain_report(args.plain_output, placeholder, notify=False)
+
+            tmp_path = Path(f"{args.plain_output}.tmp.{os.getpid()}.{int(datetime.now().timestamp()*1000)}")
+            out_path = Path(args.plain_output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp_path, 'w', encoding='utf-8') as handle:
+                handle.write(placeholder)
+            os.replace(tmp_path, out_path)
         return
 
     def save_plain_report(path: Path, content: str, notify: bool = True, status_stream: TextIO = sys.stdout) -> None:
