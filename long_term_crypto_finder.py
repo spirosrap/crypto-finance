@@ -702,11 +702,43 @@ class LongTermCryptoFinder:
             # Best-effort: ignore if dotenv is not installed
             pass
 
+        def _secret_parses(secret: str) -> bool:
+            """Validate that a PEM secret can be parsed; avoid passing bad keys to ccxt."""
+            if not secret:
+                return False
+            try:
+                from ccxt.static_dependencies import ecdsa  # type: ignore
+            except Exception:
+                try:
+                    import ecdsa  # type: ignore
+                except Exception:
+                    return True  # cannot validate without ecdsa; assume ok
+            try:
+                ecdsa.SigningKey.from_pem(secret.encode())
+                return True
+            except Exception:
+                return False
+
         env_key = os.getenv('API_KEY')
         env_secret = os.getenv('API_SECRET')
 
         if env_key and env_secret:
-            return env_key, env_secret
+            if _secret_parses(env_secret):
+                return env_key, env_secret
+            else:
+                logger.warning("API_SECRET present but failed PEM parse; retrying .env override")
+
+        # If nothing was loaded, retry with override=True to clobber stale/empty exports
+        try:
+            from dotenv import load_dotenv  # type: ignore
+
+            if load_dotenv(override=True):
+                env_key = os.getenv('API_KEY')
+                env_secret = os.getenv('API_SECRET')
+                if env_key and env_secret and _secret_parses(env_secret):
+                    return env_key, env_secret
+        except Exception:
+            pass
 
         key, secret = get_primary_credentials()
         if key and secret:
