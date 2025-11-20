@@ -1728,9 +1728,10 @@ def main() -> None:
         # Preserve daily archive determinism: when no candidates survive, still write
         # an empty/plain report so downstream scripts (cron + backtests) have a file.
         if args.plain_output:
+            title = getattr(finder, 'REPORT_TITLE', 'SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS')
             placeholder = "\n".join([
                 "=" * 100,
-                self.REPORT_TITLE,
+                title,
                 "=" * 100,
                 f"Generated on (UTC): {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%SZ')}",
                 "Total opportunities listed: 0",
