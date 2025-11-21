@@ -2289,6 +2289,12 @@ class LongTermCryptoFinder:
     def _get_crypto_name(self, symbol: str) -> str:
         """Get readable asset name using CoinGecko index; fallback to symbol."""
         sym = (symbol or '').upper()
+        hard = {
+            'BTC': 'Bitcoin',
+            'ETH': 'Ethereum',
+        }
+        if sym in hard:
+            return hard[sym]
         # ensure list/index loaded
         _ = self._load_coingecko_list()
         item = None
