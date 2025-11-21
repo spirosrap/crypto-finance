@@ -1612,6 +1612,13 @@ class LongTermCryptoFinder:
     def _coingecko_id_for_symbol(self, symbol: str) -> Optional[str]:
         """Resolve CoinGecko id from symbol. Prefer highest-market-cap id on collisions."""
         sym = (symbol or '').upper()
+        # Hard overrides for top assets to avoid mis-mapping to wrapped/derivative tickers
+        _hard_map = {
+            'BTC': 'bitcoin',
+            'ETH': 'ethereum',
+        }
+        if sym in _hard_map:
+            return _hard_map[sym]
         # memo hit (thread-safe)
         with self._cg_lock:
             if sym in self._cg_id_cache:
