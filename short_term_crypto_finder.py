@@ -1085,7 +1085,14 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             take_profit_price = max(entry_price * 1.005, base_take_profit)
             take_profit_price = max(take_profit_price, entry_price * 1.001)
 
-            rr = self._risk_reward_ratio(entry_price, stop_loss_price, take_profit_price, atr_raw, is_long=True)
+            rr = self._risk_reward_ratio(
+                entry_price,
+                stop_loss_price,
+                take_profit_price,
+                atr_raw,
+                is_long=True,
+                fee_slp_bps=technical_metrics.get('fee_slp_bps'),
+            )
             pos_pct = self._position_size_percentage(entry_price, stop_loss_price, atr_raw)
 
             return {
@@ -1158,7 +1165,14 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             take_profit_price = min(entry_price * 0.995, base_take_profit)
             take_profit_price = min(take_profit_price, entry_price * 0.999)
 
-            rr = self._risk_reward_ratio(entry_price, stop_loss_price, take_profit_price, atr_raw, is_long=False)
+            rr = self._risk_reward_ratio(
+                entry_price,
+                stop_loss_price,
+                take_profit_price,
+                atr_raw,
+                is_long=False,
+                fee_slp_bps=technical_metrics.get('fee_slp_bps'),
+            )
             pos_pct = self._position_size_percentage(entry_price, stop_loss_price, atr_raw)
 
             return {

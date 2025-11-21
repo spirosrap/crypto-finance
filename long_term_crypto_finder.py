@@ -593,6 +593,7 @@ class LongTermCryptoFinder:
         self.trend_weight = float(
             np.clip(getattr(self.config, 'trend_weight', self.DEFAULT_TREND_WEIGHT), 0.0, 0.5)
         )
+        self._live_spread_warned = False
 
         self.llm_scorer: Optional[LLMScorer] = None
         if getattr(self.config, 'use_openai_scoring', False):
@@ -886,7 +887,15 @@ class LongTermCryptoFinder:
         except Exception:
             return 1.0
 
-    def _risk_reward_ratio(self, entry_price: float, stop_loss_price: float, take_profit_price: float, atr_raw: float, is_long: bool) -> float:
+    def _risk_reward_ratio(
+        self,
+        entry_price: float,
+        stop_loss_price: float,
+        take_profit_price: float,
+        atr_raw: float,
+        is_long: bool,
+        fee_slp_bps: Optional[float] = None,
+    ) -> float:
         """Compute risk/reward ratio with ATR floor and fee/slippage add-on.
 
         - dist incorporates min tick (0.1%), ATR floor, and fees/slippage.
@@ -894,9 +903,11 @@ class LongTermCryptoFinder:
         - clamps to [0, 10].
         """
         try:
-            fee_bps = float(os.getenv("CRYPTO_FEE_BPS", "10"))
-            slp_bps = float(os.getenv("CRYPTO_SLIPPAGE_BPS", "10"))
-            fee_add = (fee_bps + slp_bps) / 10000.0 * entry_price
+            if fee_slp_bps is None:
+                fee_bps = float(os.getenv("CRYPTO_FEE_BPS", "10"))
+                slp_bps = float(os.getenv("CRYPTO_SLIPPAGE_BPS", "10"))
+                fee_slp_bps = fee_bps + slp_bps
+            fee_add = float(fee_slp_bps) / 10000.0 * entry_price
             atr_floor_mult = float(os.getenv("CRYPTO_ATR_SL_MULT", "0.5"))
 
             raw_risk = abs(entry_price - stop_loss_price)
@@ -910,6 +921,24 @@ class LongTermCryptoFinder:
             return float(min(10.0, (reward / dist) if dist > 0 else 0.0))
         except Exception:
             return 0.0
+
+    def _effective_fee_bps(self, coin_data: Optional[Dict] = None) -> float:
+        """Combine taker + slippage + live spread (if enabled) into a single bps cost."""
+        base_fee = float(os.getenv("CRYPTO_FEE_BPS", "10"))
+        slp_bps = float(os.getenv("CRYPTO_SLIPPAGE_BPS", "10"))
+        use_live = os.getenv("CRYPTO_USE_LIVE_SPREAD", "1").lower() not in {"0", "false"}
+        spread = None
+        if coin_data:
+            try:
+                spread = float(coin_data.get("spread_bps")) if coin_data.get("spread_bps") is not None else None
+            except Exception:
+                spread = None
+        if use_live and spread and spread > 0:
+            return float(base_fee + slp_bps + spread)
+        if use_live and not self._live_spread_warned:
+            logger.warning("Live spread unavailable; falling back to static fee/slippage bps.")
+            self._live_spread_warned = True
+        return float(base_fee + slp_bps)
 
     def _apply_risk_haircut(self, analyzed_candidates: List["CryptoMetrics"]) -> None:
         """Compute cross-sectional ranks and continuous risk haircut in-place for candidates."""
@@ -1991,7 +2020,10 @@ class LongTermCryptoFinder:
                 data_ts = datetime.fromtimestamp(ts, UTC).strftime('%Y-%m-%d %H:%M:%SZ') if ts else ''
             except Exception:
                 data_ts = ''
-            
+
+            # Live spread estimate (bps) for fee/slippage calcs
+            spread_bps = self._fetch_ccxt_spread_bps(product_id) if self._ccxt else None
+
             if current_price <= 0:
                 logger.warning(f"Invalid price for {product_id}: {current_price}")
                 return None
@@ -2063,7 +2095,8 @@ class LongTermCryptoFinder:
                 'atl_date': cg.get('atl_date', ''),
                 'price_change_percentage_7d_in_currency': float(cg.get('price_change_7d_pct', 0) or 0),
                 'price_change_percentage_30d_in_currency': float(cg.get('price_change_30d_pct', 0) or 0),
-                'data_timestamp_utc': data_ts
+                'data_timestamp_utc': data_ts,
+                'spread_bps': spread_bps,
             }
 
             # Validate the complete crypto info
@@ -2527,6 +2560,23 @@ class LongTermCryptoFinder:
                 }
             )
         return candles
+
+    def _fetch_ccxt_spread_bps(self, product_id: str) -> Optional[float]:
+        """Fetch live bid/ask spread (bps) for a product via CCXT ticker."""
+        if not self._ccxt:
+            return None
+        try:
+            symbol = product_id.replace('-', '/')
+            ticker = self._ccxt.fetch_ticker(symbol)
+            bid = ticker.get('bid')
+            ask = ticker.get('ask')
+            if bid and ask and bid > 0 and ask > 0:
+                mid = (bid + ask) / 2.0
+                if mid > 0:
+                    return float((ask - bid) / mid * 10000.0)
+        except Exception as exc:
+            logger.debug("Spread fetch failed for %s: %s", product_id, exc)
+        return None
 
     def _get_ccxt_historical_dataframe(self, product_id: str, days: int) -> Optional[pd.DataFrame]:
         if not self._ccxt:
@@ -3291,12 +3341,16 @@ class LongTermCryptoFinder:
     def _build_long_metrics(self, coin_data: Dict, df: pd.DataFrame, technical_metrics: Dict, momentum_score: float, price_changes: Dict[str, float]) -> Optional[CryptoMetrics]:
         """Build a CryptoMetrics object for the LONG side using precomputed data."""
         try:
+            fee_bps = self._effective_fee_bps(coin_data)
+            tech = dict(technical_metrics)
+            tech['fee_slp_bps'] = fee_bps
+
             fundamental_score = self.calculate_fundamental_score(coin_data)
-            technical_score = self._calculate_technical_score(technical_metrics, momentum_score)
-            risk_score, risk_level = self.calculate_risk_score({**technical_metrics, 'fundamental_score': fundamental_score})
+            technical_score = self._calculate_technical_score(tech, momentum_score)
+            risk_score, risk_level = self.calculate_risk_score({**tech, 'fundamental_score': fundamental_score})
             # Overall score is computed cross-sectionally in find_best_opportunities
             overall_score = 0.0
-            trading_levels = self.calculate_trading_levels(df, coin_data.get('current_price', 0), technical_metrics)
+            trading_levels = self.calculate_trading_levels(df, coin_data.get('current_price', 0), tech)
             try:
                 ts_idx = df.index.max()
                 ts_str = ts_idx.strftime('%Y-%m-%d %H:%M:%SZ') if ts_idx is not None else ''
@@ -3346,12 +3400,16 @@ class LongTermCryptoFinder:
     def _build_short_metrics(self, coin_data: Dict, df: pd.DataFrame, technical_metrics: Dict, long_momentum: float, price_changes: Dict[str, float]) -> Optional[CryptoMetrics]:
         """Build a CryptoMetrics object for the SHORT side using precomputed data."""
         try:
-            short_tech_score = self._calculate_technical_score_short(technical_metrics, long_momentum)
+            fee_bps = self._effective_fee_bps(coin_data)
+            tech = dict(technical_metrics)
+            tech['fee_slp_bps'] = fee_bps
+
+            short_tech_score = self._calculate_technical_score_short(tech, long_momentum)
             fundamental_score = self.calculate_fundamental_score(coin_data)
-            risk_score, risk_level = self.calculate_risk_score({**technical_metrics, 'fundamental_score': fundamental_score})
+            risk_score, risk_level = self.calculate_risk_score({**tech, 'fundamental_score': fundamental_score})
             # Overall score is computed cross-sectionally in find_best_opportunities
             short_overall = 0.0
-            short_levels = self.calculate_short_trading_levels(df, coin_data.get('current_price', 0), technical_metrics)
+            short_levels = self.calculate_short_trading_levels(df, coin_data.get('current_price', 0), tech)
             try:
                 ts_idx = df.index.max()
                 ts_str = ts_idx.strftime('%Y-%m-%d %H:%M:%SZ') if ts_idx is not None else ''
