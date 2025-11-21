@@ -48,10 +48,25 @@ def _print_side(label: str, metric) -> None:
     if not metric:
         print(f"{label}: n/a")
         return
+
+    def _price_prec(entry: float) -> int:
+        try:
+            val = float(entry)
+        except Exception:
+            return 4
+        if val < 1:
+            return 6
+        if val < 10:
+            return 4
+        if val < 1000:
+            return 3
+        return 2
+
+    price_prec = _price_prec(metric.entry_price)
     print(f"{label}: RR={_fmt(metric.risk_reward_ratio, 2)}  "
-          f"entry={_fmt(metric.entry_price, 2)}  "
-          f"SL={_fmt(metric.stop_loss_price, 2)}  "
-          f"TP={_fmt(metric.take_profit_price, 2)}  "
+          f"entry={_fmt(metric.entry_price, price_prec)}  "
+          f"SL={_fmt(metric.stop_loss_price, price_prec)}  "
+          f"TP={_fmt(metric.take_profit_price, price_prec)}  "
           f"RSI14={_fmt(metric.rsi_14, 1)}  "
           f"trend={_fmt(metric.trend_strength, 3)}%/d  "
           f"mom={_fmt(metric.momentum_score, 2)}")
