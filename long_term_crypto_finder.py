@@ -1618,6 +1618,15 @@ class LongTermCryptoFinder:
             'ETH': 'ethereum',
             'SOL': 'solana',
             'XRP': 'ripple',
+            'ADA': 'cardano',
+            'DOT': 'polkadot',
+            'AVAX': 'avalanche-2',
+            'MATIC': 'matic-network',
+            'LINK': 'chainlink',
+            'LTC': 'litecoin',
+            'DOGE': 'dogecoin',
+            'USDT': 'tether',
+            'USDC': 'usd-coin',
         }
         if sym in _hard_map:
             return _hard_map[sym]
@@ -2296,6 +2305,15 @@ class LongTermCryptoFinder:
             'ETH': 'Ethereum',
             'SOL': 'Solana',
             'XRP': 'XRP',
+            'ADA': 'Cardano',
+            'DOT': 'Polkadot',
+            'AVAX': 'Avalanche',
+            'MATIC': 'Polygon',
+            'LINK': 'Chainlink',
+            'LTC': 'Litecoin',
+            'DOGE': 'Dogecoin',
+            'USDT': 'Tether',
+            'USDC': 'USD Coin',
         }
         if sym in hard:
             return hard[sym]
