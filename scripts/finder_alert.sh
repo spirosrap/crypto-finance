@@ -45,6 +45,7 @@ fi
 
 opps_line=$(grep -E '^Total opportunities listed:' "$OUT_FILE" || true)
 opps_count=$(echo "$opps_line" | awk '{print $4+0}' 2>/dev/null || echo 0)
+echo "[$run_stamp] Finder completed: opportunities=$opps_count output=$OUT_FILE" >> "$LOG_FILE"
 
 if [[ -z "$ALERT_EMAIL" ]]; then
     echo "[$run_stamp] ALERT_EMAIL not set; skipping email. Opportunities: $opps_count" >> "$LOG_FILE"
