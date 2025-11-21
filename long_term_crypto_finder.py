@@ -1616,6 +1616,8 @@ class LongTermCryptoFinder:
         _hard_map = {
             'BTC': 'bitcoin',
             'ETH': 'ethereum',
+            'SOL': 'solana',
+            'XRP': 'ripple',
         }
         if sym in _hard_map:
             return _hard_map[sym]
@@ -2292,6 +2294,8 @@ class LongTermCryptoFinder:
         hard = {
             'BTC': 'Bitcoin',
             'ETH': 'Ethereum',
+            'SOL': 'Solana',
+            'XRP': 'XRP',
         }
         if sym in hard:
             return hard[sym]
