@@ -692,3 +692,9 @@ The strategy is implemented in `btc_buy_stop_strategy.py` with the following key
 3. Consider adding multiple timeframe analysis
 4. Implement backtesting capabilities
 5. Add performance tracking and reporting 
+
+## November 22, 2025 - Tight Filters, Few Setups
+
+- After tightening `short_term_crypto_finder.py` (RR ≥ 2:1, liquidity/risk caps), the last few days show 0–1 viable setups.
+- Market is high-volatility and choppy near range lows; stops widen and TPs stay close, so RR falls below 2:1 even on big movers.
+- Mapping fixes for majors (BTC/ETH/SOL/XRP/USDT/USDC/etc.) are in; lack of signals is due to conditions, not data gaps.
