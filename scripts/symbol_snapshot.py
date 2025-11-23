@@ -102,10 +102,17 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
 
         print("=" * 80)
         print(f"{coin['symbol']} ({coin.get('name','n/a')})  product={product_id}")
+        vol = coin.get('volume_24h')
+        mc = coin.get('market_cap')
+        cg_warn = False
+        if (vol is None or vol == 0) or (mc is None or mc == 0):
+            cg_warn = True
         print(f"Price={_fmt(coin.get('current_price'), 2)}  "
-              f"Vol24h={_fmt(coin.get('volume_24h'), 0)}  "
-              f"MCAP={_fmt(coin.get('market_cap'), 0)}  "
+              f"Vol24h={_fmt(vol, 0)}  "
+              f"MCAP={_fmt(mc, 0)}  "
               f"Rank={coin.get('market_cap_rank', 'n/a')}")
+        if cg_warn:
+            print("WARNING: Missing/zero volume or market cap (CoinGecko/MC feed unavailable); liquidity checks may be incomplete.")
         ts = coin.get("data_timestamp_utc") or getattr(long_m, "data_timestamp_utc", "")
         if ts:
             print(f"Data TS (UTC): {ts}")
