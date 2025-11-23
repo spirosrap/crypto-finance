@@ -6,6 +6,13 @@
 - Market is high-volatility and choppy near range lows; stops widen and TPs stay close, so RR falls below 2:1 even on big movers.
 - Mapping fixes for majors (BTC/ETH/SOL/XRP/USDT/USDC/etc.) are in; lack of signals is due to conditions, not data gaps.
 
+## November 23, 2025 - ATR(7) Too High to Clear RR Gate
+
+- Snapshots for majors (BTC/ETH/SOL/XRP) still show RR well below 2:1 (BTC ~0.17/0.80; ETH ~0.14/0.61) because daily ATR(7) is elevated.
+- Daily ATR(7) on BTC is ~4.3k (≈5% of price), versus the ~1–2k range from quieter months; wide stops + TPs clamped near recent range keep reward/risk < 2.
+- Liquidity/score filters aren’t the blocker; mapping is fixed and volume data is present. The primary gate is the 2:1 RR failing under high-vol chop near lows.
+- Visual cue: on the 1D chart with ATR set to length 7, ATR needs to cool toward prior ~1–2k levels and/or price break cleanly so TP can sit farther from entry. Until then, expect 0–1 candidates.
+
 ## November 16, 2025 - Paper Trading Continues + Finder Archive
 
 - Resumed the daily paper-trade cycle with the short-term finder, keeping the “5 balanced trades held for 24h” rule intact.
