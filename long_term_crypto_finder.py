@@ -2126,6 +2126,10 @@ class LongTermCryptoFinder:
         dropped_low_volume = 0
         dropped_low_ratio = 0
         dropped_missing_mc = 0
+        major_symbols = {
+            'BTC', 'ETH', 'SOL', 'XRP', 'USDT', 'USDC',
+            'ADA', 'AVAX', 'LINK', 'DOGE', 'LTC', 'DOT', 'MATIC',
+        }
 
         for record in candidates:
             try:
@@ -2153,9 +2157,11 @@ class LongTermCryptoFinder:
                     continue
 
                 ratio = volume_usd / market_cap if market_cap > 0 else 0.0
-                if ratio < min_ratio:
-                    dropped_low_ratio += 1
-                    continue
+                sym = str(record.get('symbol') or '').upper()
+                if sym not in major_symbols:
+                    if ratio < min_ratio:
+                        dropped_low_ratio += 1
+                        continue
 
             kept.append(record)
 
