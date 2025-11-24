@@ -116,6 +116,10 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         ts = coin.get("data_timestamp_utc") or getattr(long_m, "data_timestamp_utc", "")
         if ts:
             print(f"Data TS (UTC): {ts}")
+        print(f"ATR7={_fmt(tech.get('atr'), 2)}  daily_vol_30d={_fmt(tech.get('daily_vol_30d'), 4)}  "
+              f"intraday_range_pos={_fmt(tech.get('intraday_range_position'), 3)}  "
+              f"intraday_vol_6h={_fmt(tech.get('intraday_volatility_6h'), 4)}  "
+              f"spread_bps={_fmt(coin.get('spread_bps'), 3)}")
         _print_side("LONG", long_m)
         _print_side("SHORT", short_m)
         print()
