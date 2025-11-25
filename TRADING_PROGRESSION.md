@@ -4,6 +4,7 @@
 
 - BTC ATR(7) is starting to edge down but remains far above the ~1–2k “quiet” band; likely weeks away from that zone at the current pace.
 - RR remains sub-2:1 across majors; primary gate is still wide stops vs. close TPs. Continue watching ATR(7) drift lower before expecting a meaningful increase in setups.
+- Insight: the strict RR gate is forcing “no trade” during high-vol chop—use this as discipline training to avoid chasing marginal setups until the edge returns.
 
 ## November 23, 2025 - ATR(7) Too High to Clear RR Gate
 
