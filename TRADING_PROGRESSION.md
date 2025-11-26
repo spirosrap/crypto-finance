@@ -6,6 +6,12 @@
 - RR remains sub-2:1 across majors; primary gate is still wide stops vs. close TPs. Continue watching ATR(7) drift lower before expecting a meaningful increase in setups.
 - Insight: the strict RR gate is forcing “no trade” during high-vol chop—use this as discipline training to avoid chasing marginal setups until the edge returns.
 
+## November 26, 2025 - BTC ATR7 Easing Further
+
+- Snapshot: BTC price ~87,374; ATR7=3,720.86 (daily_vol_30d=0.0222), intraday_range_pos=0.71, intraday_vol_6h=0.0053, spread_bps ~0.001.
+- ATR7 continues to ease (from ~4.6k toward 3.7k) but is still above the ~1–2k zone; RR remains sub-2:1 (0.23 long / 0.80 short).
+- Volume/liquidity intact (Vol24h ~63.8B, MCAP ~1.74T), so the RR gate is still the blocker; keep waiting for ATR to cool further.
+
 ## November 23, 2025 - ATR(7) Too High to Clear RR Gate
 
 - Snapshots for majors (BTC/ETH/SOL/XRP) still show RR well below 2:1 (BTC ~0.17/0.80; ETH ~0.14/0.61) because daily ATR(7) is elevated.
