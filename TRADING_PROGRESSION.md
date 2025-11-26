@@ -1,16 +1,16 @@
 # Trading Journal
 
+## November 26, 2025 - BTC ATR7 Easing Further
+
+- Snapshot (focused_no_llm_100): BTC price 87,373.77; ATR7=3,720.86; daily_vol_30d=0.0222; intraday_range_pos=0.71; intraday_vol_6h=0.0053; spread_bps≈0.001.
+- RR still sub-2:1 (0.23 long / 0.80 short) despite ATR drifting lower; stops remain wide while TPs sit close to recent lows.
+- Volume/liquidity solid (Vol24h ~63.8B; MCAP ~1.744T); the ATR-driven RR gate is the blocker. Need ATR7 to cool toward ~1–2k before expecting more setups.
+
 ## November 24, 2025 - ATR7 Easing, Still Elevated
 
 - BTC ATR(7) is starting to edge down but remains far above the ~1–2k “quiet” band; likely weeks away from that zone at the current pace.
 - RR remains sub-2:1 across majors; primary gate is still wide stops vs. close TPs. Continue watching ATR(7) drift lower before expecting a meaningful increase in setups.
 - Insight: the strict RR gate is forcing “no trade” during high-vol chop—use this as discipline training to avoid chasing marginal setups until the edge returns.
-
-## November 26, 2025 - BTC ATR7 Easing Further
-
-- Snapshot: BTC price ~87,374; ATR7=3,720.86 (daily_vol_30d=0.0222), intraday_range_pos=0.71, intraday_vol_6h=0.0053, spread_bps ~0.001.
-- ATR7 continues to ease (from ~4.6k toward 3.7k) but is still above the ~1–2k zone; RR remains sub-2:1 (0.23 long / 0.80 short).
-- Volume/liquidity intact (Vol24h ~63.8B, MCAP ~1.74T), so the RR gate is still the blocker; keep waiting for ATR to cool further.
 
 ## November 23, 2025 - ATR(7) Too High to Clear RR Gate
 
@@ -18,6 +18,7 @@
 - Daily ATR(7) on BTC is ~4.3k (≈5% of price), versus the ~1–2k range from quieter months; wide stops + TPs clamped near recent range keep reward/risk < 2.
 - Liquidity/score filters aren’t the blocker; mapping is fixed and volume data is present. The primary gate is the 2:1 RR failing under high-vol chop near lows.
 - Visual cue: on the 1D chart with ATR set to length 7, ATR needs to cool toward prior ~1–2k levels and/or price break cleanly so TP can sit farther from entry. Until then, expect 0–1 candidates.
+
 ## November 22, 2025 - Tight Filters, Few Setups
 
 - After tightening `short_term_crypto_finder.py` (RR ≥ 2:1, liquidity/risk caps), the last few days show 0–1 viable setups.
