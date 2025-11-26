@@ -1,0 +1,47 @@
+
+====================================================================================================
+SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
+====================================================================================================
+Generated on (UTC): 2025-11-24 10:17:45Z
+Total opportunities listed: 1
+====================================================================================================
+
+1. USDT (Tether) — LONG
+--------------------------------------------------
+Data Timestamp (UTC): 2025-11-24 00:00:00Z
+Price: $0.999700
+Market Cap: $184,316,188,285 (Rank #3)
+24h Volume: $86,008,048,924
+24h Change: -0.01%
+7d Change: -0.01%
+30d Change: -0.04%
+ATH: $1.32 (Date: 2018-07-24)
+ATL: $0.572521 (Date: 2015-03-02)
+Volatility (30d, ann.): 0.7%
+Sharpe Ratio: -2.40
+Sortino Ratio: -3.71
+Max Drawdown: -0.29%
+RSI (14): 54.5
+MACD Signal: BULLISH
+BB Position: NEUTRAL
+Trend Strength: -0.00% per day
+Momentum Score: 0.0/100
+Fundamental Score: 89.5/100
+Technical Score: 57.3/100
+Risk Score: 20.2/100
+Risk Level: LOW
+Overall Score: 29.02/100
+
+💼 TRADING LEVELS (LONG):
+Entry Price: $0.999700
+Stop Loss: $0.997701
+Take Profit: $1.004698
+Risk:Reward Ratio: 2.4:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $5.00 (0.50%)
+Potential SL P&L: $-2.00 (-0.20%)
+
+Short-Line Summaries
+--------------------------------------------------
+1. Summary: USDT long – score 29.02, 2.4× RR; RSI 54; bullish MACD support; risk low.
