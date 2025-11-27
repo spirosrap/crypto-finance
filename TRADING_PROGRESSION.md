@@ -1,5 +1,11 @@
 # Trading Journal
 
+## November 27, 2025 - Zero Setups Is Expected in High ATR Chop
+
+- With the stricter RR ≥ 2:1 gate, it’s normal to see zero qualified setups for weeks across the full Coinbase perps universe (~200 assets) when ATR7 is elevated and ranges are tight.
+- Elevated ATR7 widens stops while TPs stay near recent extremes, keeping RR < 2 even on majors; liquidity filters aren’t the blocker.
+- Until volatility cools and trends allow TPs to sit farther from entry, the model will keep printing “no opportunities,” which is an intended safety feature, not a data failure.
+
 ## November 26, 2025 - BTC ATR7 Easing Further
 
 - Snapshot (focused_no_llm_100): BTC price 87,373.77; ATR7=3,720.86; daily_vol_30d=0.0222; intraday_range_pos=0.71; intraday_vol_6h=0.0053; spread_bps≈0.001.
