@@ -1,5 +1,11 @@
 # Trading Journal
 
+## November 28, 2025 - ATR7 Drifting Down, Still Sub-2 RRs
+
+- Snapshot (focused_no_llm_100): BTC 91,566.18; ATR7=3,454.74 (continuing downward, early signs of stabilising); daily_vol_30d=0.0236; intraday_range_pos=0.28; intraday_vol_6h=0.0232; spread_bps≈0.001.
+- RR remains below 2:1 (long 0.80 / short 0.27); tighter ATR helps but TP/SL geometry still fails the gate.
+- Liquidity solid (Vol24h ~51.7B; MCAP ~1.826T). Momentum/RSI modest (RSI14 ~53), trend still negative (~-0.55%/d); need further ATR cooling or cleaner trend to open up entries.
+
 ## November 27, 2025 - Zero Setups Is Expected in High ATR Chop
 
 - With the stricter RR ≥ 2:1 gate, it’s normal to see zero qualified setups for weeks across the full Coinbase perps universe (~200 assets) when ATR7 is elevated and ranges are tight.
