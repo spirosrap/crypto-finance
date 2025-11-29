@@ -1,5 +1,11 @@
 # Trading Journal
 
+## November 29, 2025 - ATR7 Continues Lower, RR Edging Up
+
+- Snapshot (focused_no_llm_100): BTC 90,585.15; ATR7=3,286.35 (downtrend intact); daily_vol_30d=0.0234; intraday_range_pos=0.522; intraday_vol_6h=0.0061; spread_bps≈0.001.
+- RR creeping closer to 2:1 but still short (long 0.80 / short 0.28); falling ATR is helping but TP/SL geometry remains too tight to clear the gate.
+- Liquidity solid (Vol24h ~59.3B; MCAP ~1.806T); RSI14 ~48 with a mild negative trend (-0.566%/d). Need further ATR cooling or a cleaner directional move to unlock valid entries.
+
 ## November 28, 2025 - ATR7 Drifting Down, Still Sub-2 RRs
 
 - Snapshot (focused_no_llm_100): BTC 91,566.18; ATR7=3,454.74 (continuing downward, early signs of stabilising); daily_vol_30d=0.0236; intraday_range_pos=0.28; intraday_vol_6h=0.0232; spread_bps≈0.001.
