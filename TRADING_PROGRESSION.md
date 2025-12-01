@@ -1,5 +1,11 @@
 # Trading Journal
 
+## December 1, 2025 - ATR7 Tick Up on BTC, RR Still < 2:1
+
+- Snapshot (focused_no_llm_100): BTC 86,146.33; ATR7=3,324.63 (picked up vs yesterday); daily_vol_30d=0.0243; intraday_range_pos=0.897; intraday_vol_6h=0.0030; spread_bps≈0.001.
+- RR remains below 2:1 (long 0.80 / short 1.08); short-side geometry improved but still not clearing the gate.
+- Liquidity strong (Vol24h ~63.8B; MCAP ~1.722T); RSI14 ~30 with a negative trend (-0.578%/d). Await lower ATR and/or cleaner trend to re-open qualifying setups.
+
 ## November 30, 2025 - ATR7 Near 3k, Conditions Calming
 
 - Snapshot (focused_no_llm_100): BTC 91,457.78; ATR7=3,006.34 (still drifting lower, signalling stabilisation); daily_vol_30d=0.0233; intraday_range_pos=0.435; intraday_vol_6h=0.0031; spread_bps≈0.001.
