@@ -1,5 +1,11 @@
 # Trading Journal
 
+## December 2, 2025 - RR Improving, Still Below 2:1
+
+- Snapshot (focused_no_llm_100): BTC 87,118.43; ATR7=3,271.40; daily_vol_30d=0.0243; intraday_range_pos=0.761; intraday_vol_6h=0.0103; spread_bps≈0.001.
+- RR has picked up: long 1.18 / short 1.05 (first time above 1 recently), but still below the 2:1 gate.
+- Liquidity strong (Vol24h ~76.1B; MCAP ~1.746T); RSI14 ~35.7 with a negative trend (-0.58%/d); momentum split (mom ~0 vs 100). Need further ATR easing and/or a cleaner trend break to clear the RR threshold.
+
 ## December 1, 2025 - ATR7 Tick Up on BTC, RR Still < 2:1
 
 - Snapshot (focused_no_llm_100): BTC 86,146.33; ATR7=3,324.63 (picked up vs yesterday); daily_vol_30d=0.0243; intraday_range_pos=0.897; intraday_vol_6h=0.0030; spread_bps≈0.001.
