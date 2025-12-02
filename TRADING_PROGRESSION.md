@@ -1,5 +1,11 @@
 # Trading Journal
 
+## December 2, 2025 (Late) - Big Green Candle, ATR7 Jumps Back Toward 4k
+
+- Snapshot (focused_no_llm_100): BTC 92,023.64; ATR7=3,937.20; daily_vol_30d=0.0271; intraday_range_pos=0.539; intraday_vol_6h=0.0004; spread_bps≈0.001.
+- Large daily candle lifted price and volatility; RR deteriorated again (long 0.70 / short 0.23), well below the 2:1 gate.
+- Liquidity strong (Vol24h ~83.1B; MCAP ~1.836T); RSI14 ~55.8 with still-negative trend (-0.571%/d). Need ATR to cool back down to resume RR improvements seen earlier in the day.
+
 ## December 2, 2025 - RR Improving, Still Below 2:1
 
 - Snapshot (focused_no_llm_100): BTC 87,118.43; ATR7=3,271.40; daily_vol_30d=0.0243; intraday_range_pos=0.761; intraday_vol_6h=0.0103; spread_bps≈0.001.
