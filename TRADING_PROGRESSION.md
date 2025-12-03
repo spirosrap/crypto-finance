@@ -1,5 +1,11 @@
 # Trading Journal
 
+## December 3, 2025 - ATR Still High, Restart Pushed Back
+
+- Snapshot (focused_no_llm_100): BTC 92,848.59; ATR7=3,807.43 (elevated again); daily_vol_30d=0.0262; intraday_range_pos=0.528; intraday_vol_6h=0.0036; spread_bps≈0.001.
+- RR remains weak (long 0.70 / short 0.24), so the “day to restart trading” is pushed back until ATR cools and RR clears 2:1.
+- Liquidity strong (Vol24h ~91.3B; MCAP ~1.856T); RSI14 ~58.7 with a negative trend (-0.563%/d). Momentum still split (mom ~0.01 vs 99.99), reinforcing a wait-and-see stance.
+
 ## December 2, 2025 - RR Improving, Still Below 2:1
 
 - Snapshot (focused_no_llm_100): BTC 87,118.43; ATR7=3,271.40; daily_vol_30d=0.0243; intraday_range_pos=0.761; intraday_vol_6h=0.0103; spread_bps≈0.001.
