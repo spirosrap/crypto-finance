@@ -223,6 +223,7 @@ def build_short_term_config() -> CryptoFinderConfig:
     cfg.macd_fast = _env_override("SHORT_MACD_FAST", 8, int)
     cfg.macd_slow = _env_override("SHORT_MACD_SLOW", 21, int)
     cfg.macd_signal = _env_override("SHORT_MACD_SIGNAL", 5, int)
+    cfg.max_atr_usd = _env_override("SHORT_MAX_ATR_USD", cfg.max_atr_usd or 3000.0, float)
 
     max_risk_env = os.getenv("SHORT_MAX_RISK_LEVEL")
     if max_risk_env:
@@ -1036,6 +1037,9 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         try:
             entry_price = current_price
             atr_raw = float(technical_metrics.get('atr', 0.0) or 0.0)
+            atr_cap = getattr(self.config, 'max_atr_usd', None)
+            if atr_cap and atr_cap > 0:
+                atr_raw = min(atr_raw, float(atr_cap))
             atr_mult = self._atr_multiplier(self.ATR_STOP_MULT_LONG, technical_metrics, is_long=True)
 
             stop_candidates = []
@@ -1116,6 +1120,9 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         try:
             entry_price = current_price
             atr_raw = float(technical_metrics.get('atr', 0.0) or 0.0)
+            atr_cap = getattr(self.config, 'max_atr_usd', None)
+            if atr_cap and atr_cap > 0:
+                atr_raw = min(atr_raw, float(atr_cap))
             atr_mult = self._atr_multiplier(self.ATR_STOP_MULT_SHORT, technical_metrics, is_long=False)
 
             stop_candidates = []

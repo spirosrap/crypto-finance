@@ -130,6 +130,7 @@ class CryptoFinderConfig:
     incremental_cache_path: str = "cache/incremental_metrics.json"
     exchange_backend: str = "ccxt"  # ccxt or coinbase
     ccxt_exchange_id: str = "coinbaseadvanced"  # default CCXT exchange when backend=ccxt
+    max_atr_usd: Optional[float] = None  # optional cap on ATR used for stops/TP sizing
 
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -221,6 +222,7 @@ class CryptoFinderConfig:
             incremental_cache_path=os.getenv('CRYPTO_INCREMENTAL_CACHE_PATH', 'cache/incremental_metrics.json'),
             exchange_backend=os.getenv('CRYPTO_EXCHANGE_BACKEND', 'ccxt').strip().lower(),
             ccxt_exchange_id=os.getenv('CRYPTO_CCXT_EXCHANGE', 'coinbaseadvanced').strip(),
+            max_atr_usd=_optional_float_env('CRYPTO_MAX_ATR_USD'),
         )
 
     def to_dict(self) -> Dict:
@@ -270,6 +272,7 @@ class CryptoFinderConfig:
             'incremental_cache_path': self.incremental_cache_path,
             'exchange_backend': self.exchange_backend,
             'ccxt_exchange_id': self.ccxt_exchange_id,
+            'max_atr_usd': self.max_atr_usd,
         }
 
 # Configure enhanced logging with file rotation
