@@ -1,5 +1,13 @@
 # Trading Journal
 
+## December 4, 2025 - Spreads Spiking, ATR Still High, RR Weak
+
+- Snapshots (focused_no_llm_100):
+  - BTC 93,208.07; ATR7=3,488.42; daily_vol_30d=0.0255; intraday_range_pos=0.934; intraday_vol_6h=0.0191; spread_bps≈0.121.
+  - ETH 3,203.39; ATR7=167.54; daily_vol_30d=0.0402; intraday_range_pos=0.930; intraday_vol_6h=0.0162; spread_bps≈0.031.
+- Spreads flared versus usual ~0.001 bps, and ATRs remain elevated; RRs deteriorated (BTC long/short 0.53/0.27, ETH 0.57/0.19). The restart window is pushed back again.
+- Liquidity strong (BTC Vol24h ~77.3B; MCAP ~1.857T; ETH Vol24h ~31.8B; MCAP ~385B). RSI14s ~59 (BTC) and ~65 (ETH) with mildly negative trends (~-0.55% to -0.75%/d); momentum split (~0 vs 100), reinforcing a stay-flat stance until volatility and spreads cool.
+
 ## December 3, 2025 - ATR Still High, Restart Pushed Back
 
 - Snapshot (focused_no_llm_100): BTC 92,848.59; ATR7=3,807.43 (elevated again); daily_vol_30d=0.0262; intraday_range_pos=0.528; intraday_vol_6h=0.0036; spread_bps≈0.001.
