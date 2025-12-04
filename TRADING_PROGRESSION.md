@@ -7,6 +7,7 @@
   - ETH 3,203.39; ATR7=167.54; daily_vol_30d=0.0402; intraday_range_pos=0.930; intraday_vol_6h=0.0162; spread_bps≈0.031.
 - Spreads flared versus usual ~0.001 bps, and ATRs remain elevated; RRs deteriorated (BTC long/short 0.53/0.27, ETH 0.57/0.19). The restart window is pushed back again.
 - Liquidity strong (BTC Vol24h ~77.3B; MCAP ~1.857T; ETH Vol24h ~31.8B; MCAP ~385B). RSI14s ~59 (BTC) and ~65 (ETH) with mildly negative trends (~-0.55% to -0.75%/d); momentum split (~0 vs 100), reinforcing a stay-flat stance until volatility and spreads cool.
+- Adjustment: implemented a 3k USD ATR cap in the short-term finder (configurable via SHORT_MAX_ATR_USD) so stops/TP sizing won’t be blown out by extreme ATR; goal is to let RR recover sooner while keeping the RR ≥ 2 gate.
 
 ## December 3, 2025 - ATR Still High, Restart Pushed Back
 
