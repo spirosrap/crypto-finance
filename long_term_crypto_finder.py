@@ -638,27 +638,60 @@ class LongTermCryptoFinder:
         self._validate_api_credentials()
 
     def _init_ccxt_backend(self) -> None:
-        """Initialise CCXT exchange client when backend is set to 'ccxt'."""
+        """Initialise CCXT exchange client when backend is set to 'ccxt'.
+
+        Falls back to Kraken if the primary exchange fails to load markets.
+        """
         if ccxt is None:
             raise RuntimeError(
                 "ccxt package is required for exchange_backend='ccxt'. Install via 'pip install ccxt'."
             )
-        exchange_id = (self.ccxt_exchange_id or 'coinbaseadvanced').lower()
-        try:
-            exchange_cls = getattr(ccxt, exchange_id)
-        except AttributeError as exc:
-            raise RuntimeError(f"Unsupported CCXT exchange id '{exchange_id}'.") from exc
 
-        params = {"enableRateLimit": True}
-        if self.api_key and self.api_secret:
-            params["apiKey"] = self.api_key
-            params["secret"] = self.api_secret
-        try:
-            self._ccxt = exchange_cls(params)
-            self._ccxt.load_markets()
-            logger.info("CCXT exchange '%s' initialised for long-term finder", exchange_id)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to initialise CCXT exchange '{exchange_id}': {exc}") from exc
+        primary_exchange = (self.ccxt_exchange_id or 'coinbaseadvanced').lower()
+        fallbacks = ['kraken']
+        tried = []
+        last_exc: Optional[Exception] = None
+
+        for exchange_id in [primary_exchange] + [fx for fx in fallbacks if fx != primary_exchange]:
+            tried.append(exchange_id)
+            try:
+                exchange_cls = getattr(ccxt, exchange_id)
+            except AttributeError:
+                last_exc = RuntimeError(f"Unsupported CCXT exchange id '{exchange_id}'.")
+                continue
+
+            params = {"enableRateLimit": True}
+            if self.api_key and self.api_secret:
+                params["apiKey"] = self.api_key
+                params["secret"] = self.api_secret
+
+            attempts = 3
+            base_delay = 5.0
+            for attempt in range(attempts):
+                try:
+                    self._ccxt = exchange_cls(params)
+                    self._ccxt.timeout = 30000  # ms
+                    self._ccxt.load_markets()
+                    logger.info("CCXT exchange '%s' initialised for long-term finder", exchange_id)
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt == attempts - 1:
+                        break
+                    wait = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "CCXT init failed for %s (attempt %s/%s): %s; retrying in %.1fs",
+                        exchange_id,
+                        attempt + 1,
+                        attempts,
+                        exc,
+                        wait,
+                    )
+                    time.sleep(wait)
+
+            logger.warning("CCXT init exhausted for %s, trying next fallback if available.", exchange_id)
+
+        raise RuntimeError(f"Failed to initialise CCXT exchanges {tried}: {last_exc}") from last_exc
 
     def _normalize_ts(self, t) -> int:
         """Return epoch seconds from seconds/ms/us or ISO string; 0 on failure."""
