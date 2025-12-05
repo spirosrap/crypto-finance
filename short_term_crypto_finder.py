@@ -263,6 +263,9 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
     ATR_STOP_MULT_LONG = 1.3
     ATR_STOP_MULT_SHORT = 1.3
     RR_TARGET = 2.2
+    HIGH_VOL_TREND_RR = 1.8
+    HIGH_VOL_TREND_THRESHOLD = 1.0  # trend_strength (approx 0.0-1.0+)
+    HIGH_VOL_ATR_BPS = 400  # consider high-vol if ATR/price > 4%
 
     def __init__(self, config: Optional[CryptoFinderConfig] = None):
         cfg = config or build_short_term_config()
@@ -1028,6 +1031,13 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             rr -= 0.3
         elif not is_long and range_pos < 0.2:
             rr -= 0.3
+        # High-vol trend mode: if ATR is high but trend is strong, allow a lower RR floor to surface cleaner moves.
+        atr_raw = float(technical_metrics.get('atr', 0.0) or 0.0)
+        price = float(technical_metrics.get('price', 0.0) or 0.0)
+        trend_strength = float(technical_metrics.get('trend_strength', 0.0) or 0.0)
+        high_vol = price > 0 and (atr_raw / price) * 10_000 >= self.HIGH_VOL_ATR_BPS  # ATR in bps
+        if high_vol and trend_strength >= self.HIGH_VOL_TREND_THRESHOLD:
+            rr = max(rr, self.HIGH_VOL_TREND_RR)
         return float(np.clip(rr, 1.5, 2.6))
 
     # ------------------------------------------------------------------
@@ -1040,6 +1050,18 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             atr_cap = getattr(self.config, 'max_atr_usd', None)
             if atr_cap and atr_cap > 0:
                 atr_raw = min(atr_raw, float(atr_cap))
+            # Log high-vol trend mode when engaged
+            trend_strength = float(technical_metrics.get('trend_strength', 0.0) or 0.0)
+            price = float(technical_metrics.get('price', entry_price) or entry_price)
+            high_vol = price > 0 and (atr_raw / price) * 10_000 >= self.HIGH_VOL_ATR_BPS
+            hv_flag = high_vol and trend_strength >= self.HIGH_VOL_TREND_THRESHOLD
+            if hv_flag:
+                logger.debug(
+                    "High-vol trend mode (long) active: atr_bps=%.1f, trend_strength=%.3f, rr_floor=%.2f",
+                    (atr_raw / price) * 10_000 if price > 0 else 0.0,
+                    trend_strength,
+                    self.HIGH_VOL_TREND_RR,
+                )
             atr_mult = self._atr_multiplier(self.ATR_STOP_MULT_LONG, technical_metrics, is_long=True)
 
             stop_candidates = []
@@ -1123,6 +1145,18 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             atr_cap = getattr(self.config, 'max_atr_usd', None)
             if atr_cap and atr_cap > 0:
                 atr_raw = min(atr_raw, float(atr_cap))
+            # Log high-vol trend mode when engaged
+            trend_strength = float(technical_metrics.get('trend_strength', 0.0) or 0.0)
+            price = float(technical_metrics.get('price', entry_price) or entry_price)
+            high_vol = price > 0 and (atr_raw / price) * 10_000 >= self.HIGH_VOL_ATR_BPS
+            hv_flag = high_vol and trend_strength >= self.HIGH_VOL_TREND_THRESHOLD
+            if hv_flag:
+                logger.debug(
+                    "High-vol trend mode (short) active: atr_bps=%.1f, trend_strength=%.3f, rr_floor=%.2f",
+                    (atr_raw / price) * 10_000 if price > 0 else 0.0,
+                    trend_strength,
+                    self.HIGH_VOL_TREND_RR,
+                )
             atr_mult = self._atr_multiplier(self.ATR_STOP_MULT_SHORT, technical_metrics, is_long=False)
 
             stop_candidates = []
