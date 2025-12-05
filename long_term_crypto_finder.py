@@ -661,9 +661,17 @@ class LongTermCryptoFinder:
                 continue
 
             params = {"enableRateLimit": True}
-            if self.api_key and self.api_secret:
-                params["apiKey"] = self.api_key
-                params["secret"] = self.api_secret
+            # Use primary keys for primary exchange; use Kraken-specific keys when falling back.
+            if exchange_id == primary_exchange:
+                if self.api_key and self.api_secret:
+                    params["apiKey"] = self.api_key
+                    params["secret"] = self.api_secret
+            elif exchange_id == "kraken":
+                kraken_key = os.getenv("KRAKEN_API_KEY")
+                kraken_secret = os.getenv("KRAKEN_API_SECRET")
+                if kraken_key and kraken_secret:
+                    params["apiKey"] = kraken_key
+                    params["secret"] = kraken_secret
 
             attempts = 3
             base_delay = 5.0
