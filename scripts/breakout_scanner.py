@@ -9,6 +9,7 @@ import argparse
 import math
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import ccxt  # type: ignore
@@ -151,6 +152,7 @@ def main() -> None:
     parser.add_argument("--timeframe", type=str, default="4h", help="CCXT timeframe (e.g., 1h,4h,1d)")
     parser.add_argument("--lookback", type=int, default=50, help="Lookback bars for swing high/low")
     parser.add_argument("--exchange", type=str, default="coinbaseadvanced", help="Primary CCXT exchange id")
+    parser.add_argument("--out", type=str, default="finder_breakout.txt", help="Output file path (finder format)")
     args = parser.parse_args()
 
     base_symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
@@ -211,16 +213,35 @@ def main() -> None:
     # Rank: higher RR, then higher vol_thrust, then higher ADX
     cands.sort(key=lambda c: (c.rr, c.vol_thrust, c.adx_val), reverse=True)
 
-    print("================================================================")
-    print(f"Breakout candidates (tf={args.timeframe}, lookback={args.lookback})")
-    print("================================================================")
-    for c in cands:
-        print(f"{c.symbol} {c.side.upper()}  ts={c.ts}  RR={c.rr:.2f}")
-        print(
-            f" entry={c.entry:.4f}  stop={c.stop:.4f}  tp={c.tp:.4f}  "
-            f"vol_thrust={c.vol_thrust:.2f}  trend={c.trend:.3f}  adx={c.adx_val:.1f}"
+    def _fmt(v: float) -> str:
+        if v >= 1000:
+            return f"{v:,.2f}"
+        if v >= 10:
+            return f"{v:,.3f}"
+        return f"{v:,.5f}"
+
+    lines: List[str] = []
+    lines.append("================================================================")
+    lines.append(f"Breakout candidates (tf={tf}, lookback={args.lookback})")
+    lines.append("================================================================")
+    for idx, c in enumerate(cands, start=1):
+        lines.append(f"{idx}. {c.symbol} — {c.side.upper()}")
+        lines.append(f"Data Timestamp (UTC): {c.ts}")
+        lines.append(f"TRADING LEVELS ({c.side.upper()})")
+        lines.append(f"Entry Price: ${_fmt(c.entry)}")
+        lines.append(f"Stop Loss: ${_fmt(c.stop)}")
+        lines.append(f"Take Profit: ${_fmt(c.tp)}")
+        lines.append("Recommended Position Size: 0.0%")
+        lines.append(
+            f"RR={c.rr:.2f}  vol_thrust={c.vol_thrust:.2f}  "
+            f"trend={c.trend:.3f}  adx={c.adx_val:.1f}"
         )
-        print("----------------------------------------------------------------")
+        lines.append("----------------------------------------------------------------")
+
+    out_path = Path(args.out)
+    out_path.write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
+    print(f"\nSaved to {out_path}")
 
 
 if __name__ == "__main__":
