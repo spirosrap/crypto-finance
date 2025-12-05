@@ -142,27 +142,68 @@ def scan_symbols(exchange: ccxt.Exchange, symbols: List[str], tf: str, lookback:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Trend breakout scanner")
-    parser.add_argument("--symbols", type=str, default="BTC/USDT,ETH/USDT,SOL/USDT", help="Comma-separated symbols")
+    parser.add_argument(
+        "--symbols",
+        type=str,
+        default="BTC,ETH,SOL,XRP,ADA,DOT,AVAX,MATIC,LINK,LTC,DOGE,USDT,USDC",
+        help="Comma-separated symbols (e.g., BTC,ETH or BTC/USDC)",
+    )
     parser.add_argument("--timeframe", type=str, default="4h", help="CCXT timeframe (e.g., 1h,4h,1d)")
     parser.add_argument("--lookback", type=int, default=50, help="Lookback bars for swing high/low")
+    parser.add_argument("--exchange", type=str, default="coinbaseadvanced", help="Primary CCXT exchange id")
     args = parser.parse_args()
 
-    symbols = [s.strip().upper().replace("-", "/") for s in args.symbols.split(",") if s.strip()]
+    base_symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    # Default to USDC quote if not specified
+    symbols = [sym if "/" in sym else f"{sym}/USDC" for sym in base_symbols]
 
-    exc = ccxt.kraken({"enableRateLimit": True})
-    kr_key = exc.safe_value({}, "apiKey")
-    # If env vars exist, ccxt picks them up via constructor params; pass explicitly:
-    if exc.apiKey == "" and exc.secret == "":
-        import os
+    import os
 
-        k = os.getenv("KRAKEN_API_KEY")
-        s = os.getenv("KRAKEN_API_SECRET")
-        if k and s:
-            exc.apiKey = k
-            exc.secret = s
-    exc.timeout = 30000
+    def init_exchange(primary: str) -> ccxt.Exchange:
+        fallbacks = ["kraken"]
+        tried = []
+        last_exc = None
+        for ex_id in [primary] + [fx for fx in fallbacks if fx != primary]:
+            tried.append(ex_id)
+            params = {"enableRateLimit": True}
+            if ex_id == "coinbaseadvanced":
+                api = os.getenv("API_KEY")
+                secret = os.getenv("API_SECRET")
+                if api and secret:
+                    params["apiKey"] = api
+                    params["secret"] = secret
+            if ex_id == "kraken":
+                api = os.getenv("KRAKEN_API_KEY")
+                secret = os.getenv("KRAKEN_API_SECRET")
+                if api and secret:
+                    params["apiKey"] = api
+                    params["secret"] = secret
+            try:
+                exc = getattr(ccxt, ex_id)(params)
+                exc.timeout = 30000
+                exc.load_markets()
+                print(f"[info] using exchange={ex_id}")
+                return exc
+            except Exception as exc:  # type: ignore
+                last_exc = exc
+                print(f"[warn] init failed for {ex_id}: {exc}", file=sys.stderr)
+                continue
+        raise RuntimeError(f"Failed to init exchanges {tried}: {last_exc}")
 
-    cands = scan_symbols(exc, symbols, args.timeframe, args.lookback)
+    exc = init_exchange(args.exchange.lower())
+    tf = args.timeframe.lower()
+    if hasattr(exc, "timeframes") and exc.timeframes:
+        if tf not in exc.timeframes:
+            fallback_tf = "1h" if "1h" in exc.timeframes else list(exc.timeframes.keys())[0]
+            print(f"[warn] timeframe {tf} not supported on {exc.id}; using {fallback_tf}")
+            tf = fallback_tf
+    else:
+        tf = args.timeframe
+
+    # Filter out self-quotes like USDC/USDC
+    symbols = [s for s in symbols if s.split("/")[0] != s.split("/")[-1]]
+
+    cands = scan_symbols(exc, symbols, tf, args.lookback)
     if not cands:
         print("No breakouts found.")
         return
