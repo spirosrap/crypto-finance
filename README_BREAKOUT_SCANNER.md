@@ -45,6 +45,15 @@ RR=2.00  vol_thrust=1.35  trend=0.012  adx=24.5
 ```
 You can feed this file to `add_position_from_finder.py` to prepare orders.
 
+## Optional auto-runner
+- `scripts/run_breakout_autotrade.py` can scan BTC and, if RR ≥ 2, call `add_position_from_finder.py` with your settings.
+- It writes a lock file `.breakout_lock.json` to avoid multiple trades; lock expires after 24h.
+- Default is dry-run; pass `--execute` to actually place the order.
+Example:
+```bash
+python scripts/run_breakout_autotrade.py --timeframe 1h --lookback 50 --portfolio-usd 500 --leverage 50 --out finder_breakout.txt
+```
+
 ## Keys and exchanges
 - Coinbase Advanced (primary): uses `API_KEY` / `API_SECRET` from `.env` if present.
 - Kraken (fallback): uses `KRAKEN_API_KEY` / `KRAKEN_API_SECRET` from `.env` if present.
@@ -54,4 +63,3 @@ You can feed this file to `add_position_from_finder.py` to prepare orders.
 - This scanner enforces a fixed 2R target; adjust the code if you want different RR.
 - It does not apply the full scoring/filters of `short_term_crypto_finder.py`; it’s a lightweight breakout-only view.
 - Results depend on the exchange’s supported timeframes and available markets.
-
