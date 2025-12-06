@@ -1,5 +1,11 @@
 # Trading Journal
 
+## December 6, 2025 - Added Breakout Autotrader
+
+- Built and scheduled an hourly breakout auto-runner scanning USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with 1h lookback; it writes finder-style output and places $500/50x trades when RR≥2.
+- Coinbase auth now normalizes PEM secrets; falls back to Kraken. Current runs show no signals today, but this strategy should fire more often than the strict short-term finder.
+- Hourly cron is active; lock file prevents multiple concurrent trades (24h).
+
 ## December 4, 2025 - Spreads Spiking, ATR Still High, RR Weak
 
 - Snapshots (focused_no_llm_100):
