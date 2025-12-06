@@ -178,6 +178,9 @@ def main() -> None:
                     v = val.strip().strip('"').strip("'")
                     if v.lower().startswith("your_api_key"):
                         return None
+                    # Normalize PEM secrets containing literal \n
+                    if "\\n" in v:
+                        v = v.replace("\\n", "\n")
                     return v
                 # Match finder behavior: primary API_KEY/API_SECRET first, then perps.
                 api = _clean(os.getenv("API_KEY")) or _clean(os.getenv("API_KEY_PERPS"))
