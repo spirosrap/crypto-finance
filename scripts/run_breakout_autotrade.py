@@ -47,7 +47,7 @@ def run_scanner(out_path: Path, timeframe: str, lookback: int) -> int:
         sys.executable,
         "scripts/breakout_scanner.py",
         "--symbols",
-        "BTC",
+        "BTC,ETH,SOL,XRP,ADA,DOT,AVAX,MATIC,LINK,LTC,DOGE,OP,ARB,ATOM,UNI,AAVE,MKR,INJ,USDT,USDC",
         "--timeframe",
         timeframe,
         "--lookback",
