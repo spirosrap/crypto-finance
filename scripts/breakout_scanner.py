@@ -155,6 +155,9 @@ def main() -> None:
     parser.add_argument("--out", type=str, default="finder_breakout.txt", help="Output file path (finder format)")
     args = parser.parse_args()
 
+    from datetime import datetime, timezone
+    print(f"[info] run start {datetime.now(timezone.utc).isoformat()}")
+
     base_symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     # Default to USDC quote if not specified
     symbols = [sym if "/" in sym else f"{sym}/USDC" for sym in base_symbols]
