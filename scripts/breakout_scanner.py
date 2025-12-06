@@ -189,6 +189,18 @@ def main() -> None:
             except Exception as exc:  # type: ignore
                 last_exc = exc
                 print(f"[warn] init failed for {ex_id}: {exc}", file=sys.stderr)
+                # For coinbaseadvanced, retry once unauthenticated before falling back
+                if ex_id == "coinbaseadvanced" and (params.get("apiKey") or params.get("secret")):
+                    try:
+                        exc2 = getattr(ccxt, ex_id)({"enableRateLimit": True})
+                        exc2.timeout = 30000
+                        exc2.load_markets()
+                        print(f"[info] using exchange={ex_id} (unauthenticated fallback)")
+                        return exc2
+                    except Exception as exc_inner:  # type: ignore
+                        last_exc = exc_inner
+                        print(f"[warn] unauth init failed for {ex_id}: {exc_inner}", file=sys.stderr)
+                        continue
                 continue
         raise RuntimeError(f"Failed to init exchanges {tried}: {last_exc}")
 
