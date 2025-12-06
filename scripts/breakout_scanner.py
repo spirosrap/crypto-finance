@@ -179,8 +179,9 @@ def main() -> None:
                     if v.lower().startswith("your_api_key"):
                         return None
                     return v
-                api = _clean(os.getenv("API_KEY_PERPS")) or _clean(os.getenv("API_KEY"))
-                secret = _clean(os.getenv("API_SECRET_PERPS")) or _clean(os.getenv("API_SECRET"))
+                # Match finder behavior: primary API_KEY/API_SECRET first, then perps.
+                api = _clean(os.getenv("API_KEY")) or _clean(os.getenv("API_KEY_PERPS"))
+                secret = _clean(os.getenv("API_SECRET")) or _clean(os.getenv("API_SECRET_PERPS"))
                 if api and secret:
                     params["apiKey"] = api
                     params["secret"] = secret
