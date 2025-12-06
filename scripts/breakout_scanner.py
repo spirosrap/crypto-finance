@@ -172,8 +172,15 @@ def main() -> None:
             tried.append(ex_id)
             params = {"enableRateLimit": True}
             if ex_id == "coinbaseadvanced":
-                api = os.getenv("API_KEY")
-                secret = os.getenv("API_SECRET")
+                def _clean(val: Optional[str]) -> Optional[str]:
+                    if not val:
+                        return None
+                    v = val.strip().strip('"').strip("'")
+                    if v.lower().startswith("your_api_key"):
+                        return None
+                    return v
+                api = _clean(os.getenv("API_KEY_PERPS")) or _clean(os.getenv("API_KEY"))
+                secret = _clean(os.getenv("API_SECRET_PERPS")) or _clean(os.getenv("API_SECRET"))
                 if api and secret:
                     params["apiKey"] = api
                     params["secret"] = secret
