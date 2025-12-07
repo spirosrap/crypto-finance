@@ -1,5 +1,11 @@
 # Trading Journal
 
+## December 7, 2025 - Breakout Autotrader Observability
+
+- Breakout scanner/auth: normalized Coinbase PEM secrets; autotrader now authenticates reliably and falls back to Kraken if needed.
+- Added near-breakout logging (±0.5% to swing highs/lows) to `breakout_scanner.py` so cron logs show when setups are close even if no trade triggers.
+- Autotrader scans USDC majors hourly with RR=2:1, $500/50x, 24h lock; still no signals today, but alerts will show when price is kissing breakout levels.
+
 ## December 6, 2025 - Added Breakout Autotrader
 
 - Built and scheduled an hourly breakout auto-runner scanning USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with 1h lookback; it writes finder-style output and places $500/50x trades when RR≥2.
