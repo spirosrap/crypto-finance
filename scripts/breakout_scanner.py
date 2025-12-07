@@ -88,8 +88,9 @@ class BreakoutCandidate:
     ts: pd.Timestamp
 
 
-def scan_symbols(exchange: ccxt.Exchange, symbols: List[str], tf: str, lookback: int) -> List[BreakoutCandidate]:
+def scan_symbols(exchange: ccxt.Exchange, symbols: List[str], tf: str, lookback: int) -> Tuple[List[BreakoutCandidate], List[str]]:
     out: List[BreakoutCandidate] = []
+    near: List[str] = []
     for sym in symbols:
         try:
             df = load_ohlcv(exchange, sym, tf, limit=max(lookback + 20, 120))
@@ -109,6 +110,22 @@ def scan_symbols(exchange: ccxt.Exchange, symbols: List[str], tf: str, lookback:
         for side in ("long", "short"):
             br = latest_breakout(df, lookback=lookback, side=side)
             if not br:
+                # Near-breakout logging
+                if len(df) >= lookback:
+                    last_close = float(df["close"].iloc[-1])
+                    window = df.iloc[-lookback:]
+                    if side == "long":
+                        swing_high = float(window["high"].max())
+                        if swing_high > 0 and last_close > 0:
+                            dist = (last_close / swing_high) - 1.0
+                            if -0.005 <= dist <= 0.005:
+                                near.append(f"{sym} near LONG breakout (dist={dist*100:.2f}%)")
+                    else:
+                        swing_low = float(window["low"].min())
+                        if swing_low > 0 and last_close > 0:
+                            dist = (last_close / swing_low) - 1.0
+                            if -0.005 <= dist <= 0.005:
+                                near.append(f"{sym} near SHORT breakdown (dist={dist*100:.2f}%)")
                 continue
             level, opp_level = br
             entry = float(df["close"].iloc[-1])
@@ -138,7 +155,7 @@ def scan_symbols(exchange: ccxt.Exchange, symbols: List[str], tf: str, lookback:
                     ts=last_ts,
                 )
             )
-    return out
+    return out, near
 
 
 def main() -> None:
@@ -231,7 +248,12 @@ def main() -> None:
     # Filter out self-quotes like USDC/USDC
     symbols = [s for s in symbols if s.split("/")[0] != s.split("/")[-1]]
 
-    cands = scan_symbols(exc, symbols, tf, args.lookback)
+    cands, near = scan_symbols(exc, symbols, tf, args.lookback)
+    if near:
+        print("Near-breakouts:")
+        for msg in near:
+            print(f"  {msg}")
+        print("----------------------------------------------------------------")
     if not cands:
         print("No breakouts found.")
         return
