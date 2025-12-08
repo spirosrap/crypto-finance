@@ -11,6 +11,12 @@
 - Hourly breakout autotrader logs show multiple near-long breakouts (BTC, ETH, SOL, AVAX, LINK, UNI, INJ, etc.) and one near-short breakdown (MKR) within ±0.5% of swing levels, but none have closed through to trigger trades.
 - All runs (through 06:00 UTC) ended with “No breakouts found / No qualifying breakout found,” so no positions were opened yet. Staying strict with RR=2:1 and the 24h lock.
 
+## December 7, 2025 - Identity Check: Short-Term, Selective, Systematic
+
+- My style is a niche, rules-based short-term approach (intraday-to-24h) with strict RR/ATR gates and a willingness to sit flat for days. Not classic day trading (no daily trade mandate) and not multi-day swing; more “short-term systematic” with rare entries.
+- Breakout autotrader + short-term finder both enforce hard SL/TP and (optionally) a 24h timeout; downtime is a feature for risk control, not a bug.
+- Expect low frequency; when conditions line up, execute mechanically and let the process, not impatience, drive action.
+
 ## December 6, 2025 - Added Breakout Autotrader
 
 - Built and scheduled an hourly breakout auto-runner scanning USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with 1h lookback; it writes finder-style output and places $500/50x trades when RR≥2.

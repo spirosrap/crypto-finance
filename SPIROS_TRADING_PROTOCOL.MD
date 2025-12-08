@@ -79,6 +79,16 @@
 - Cash is a position; flat is acceptable when clarity fades.
 - Trade what is happening, not what should happen.
 
+## 11. Current Style (Dec 2025)
+- Identity: short-term systematic trader (intraday-to-24h), strict RR/ATR gates, willing to sit flat for days. Not classic day trading; not multi-day swing.
+- Playbooks: short_term_crypto_finder (RR>=2, ATR gate) and breakout_autotrade (fixed 2R structure). Both use hard SL/TP; optional 24h timeout for closes.
+- Frequency: low by design. No trades if conditions are poor; downtime is acceptable.
+
+## Historical Notes
+- Prior iterations leaned on short_term_crypto_finder with 24h hold rule and balanced 5-trade baskets; tightened RR/ATR filters in late 2025.
+- November 2025: introduced deterministic profiles (focused_no_llm_100) and stopped forcing trades when fewer than five signals appeared.
+- December 2025: added breakout autotrader (USDC majors) with RR=2:1, fallback exchanges, near-breakout logging.
+
 ## 11. Reset Protocol
 - If daily or circuit breaker stop triggered: review trade log, annotate charts, schedule SIM session.
 - After weekly maintenance changes: update playbooks in `docs/` and communicate adjustments to accountability partner.
