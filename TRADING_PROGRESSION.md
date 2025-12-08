@@ -4,6 +4,7 @@
 
 - Hourly breakout autotrader logs show multiple near-long breakouts (BTC, ETH, SOL, AVAX, LINK, UNI, INJ, etc.) and one near-short breakdown (MKR) within ±0.5% of swing levels, but none have closed through to trigger trades.
 - All runs (through 06:00 UTC) ended with “No breakouts found / No qualifying breakout found,” so no positions were opened yet. Staying strict with RR=2:1 and the 24h lock.
+- Backtest check since autotrader start (Dec 6) shows brief breakouts on Dec 7–8 (e.g., BTC/USDC 2025-12-07 18:00 UTC, ETH/SOL/DOGE/OP/ARB/UNI/INJ 2025-12-08 09:00 UTC, AAVE 2025-12-08 14:00 UTC). Cron runs didn’t catch sustained closes through the swing levels—signals were fleeting and didn’t align with the hourly run/close. Market conditions: shallow pushes to swing levels without follow-through, reinforcing a wait stance.
 
 ## December 8, 2025 - Identity Check: Short-Term, Selective, Systematic
 
