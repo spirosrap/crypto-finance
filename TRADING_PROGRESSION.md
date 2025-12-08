@@ -6,6 +6,11 @@
 - Added near-breakout logging (±0.5% to swing highs/lows) to `breakout_scanner.py` so cron logs show when setups are close even if no trade triggers.
 - Autotrader scans USDC majors hourly with RR=2:1, $500/50x, 24h lock; still no signals today, but alerts will show when price is kissing breakout levels.
 
+## December 8, 2025 - Breakout Signals Close, No Fills Yet
+
+- Hourly breakout autotrader logs show multiple near-long breakouts (BTC, ETH, SOL, AVAX, LINK, UNI, INJ, etc.) and one near-short breakdown (MKR) within ±0.5% of swing levels, but none have closed through to trigger trades.
+- All runs (through 06:00 UTC) ended with “No breakouts found / No qualifying breakout found,” so no positions were opened yet. Staying strict with RR=2:1 and the 24h lock.
+
 ## December 6, 2025 - Added Breakout Autotrader
 
 - Built and scheduled an hourly breakout auto-runner scanning USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with 1h lookback; it writes finder-style output and places $500/50x trades when RR≥2.
