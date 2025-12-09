@@ -68,8 +68,8 @@ python scripts/install_requirements.py --skip-pip
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/bitcoin-trading-bot.git
-   cd bitcoin-trading-bot
+git clone https://github.com/spirosrap/crypto-finance.git
+cd crypto-finance
    ```
 
 2. Install the required dependencies (handles TA-Lib automatically):
