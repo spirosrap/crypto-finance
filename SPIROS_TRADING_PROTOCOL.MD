@@ -95,6 +95,11 @@
 - Active: Sections 0–5 (risk, entry/exit discipline), 6–9 (logging/review), Section 11 (current style/automation).
 - Historical/optional: Balanced 5-trade baskets and mandatory 24h holds from earlier finder practice are no longer required; apply 24h timeout only for breakout_autotrade or when explicitly configured.
 
+### Retired/Not In Use
+- Mandatory daily trading or “must take X trades”: no longer applicable; flat is acceptable.
+- Balanced 5-trade baskets and forced 24h holds across all strategies: retired; only use 24h timeout where explicitly configured (e.g., breakout_autotrade lock).
+- Reservoir/multi-basket experiments: not active; stick to current short-term finder and breakout playbooks.
+
 ## 11. Reset Protocol
 - If daily or circuit breaker stop triggered: review trade log, annotate charts, schedule SIM session.
 - After weekly maintenance changes: update playbooks in `docs/` and communicate adjustments to accountability partner.
