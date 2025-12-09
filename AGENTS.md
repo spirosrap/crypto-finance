@@ -75,9 +75,36 @@
 - Visualization: helpers in `trading/visualization.py`, matplotlib scripts under the repository root (for example `plot_atr_histogram.py`).
 - Additional context: review notebooks and summaries in `docs/` and prior analyses in `README_*.md` files.
 
+## Current Operational Pipelines
+- **Short-Term Finder**
+  - Inputs: CoinbaseAdvanced (auth via `API_KEY`/`API_SECRET` or `API_KEY_PERPS`/`API_SECRET_PERPS`), fallback Kraken keys (`KRAKEN_API_KEY`/`KRAKEN_API_SECRET`), PEM secrets normalize `\\n`.
+  - Gates: ATR7 USD cap (currently ~3000), RR >= 2, swing close must break the level; liquidity filter (vol and vol/mcap), min mcap $100M.
+  - Cron: daily finder writing `finder_short.txt`; trades placed via `add_position_from_finder.py` or `add_top5_from_finder.py`; logs at `logs/short_term_crypto_finder/`.
+  - Commands: `python scripts/symbol_snapshot.py --symbols BTC,ETH,SOL,... --profile focused_no_llm_100`.
+- **Breakout Autotrade**
+  - Scan cadence: hourly; symbols: BTC,ETH,SOL,XRP,ADA,DOT,AVAX,LINK,LTC,DOGE,OP,ARB,ATOM,UNI,AAVE,MKR,INJ (USDC quotes).
+  - Gates: swing close must clear trigger; RR >= 2; 24h lock after a trade (`.breakout_lock.json`); notional $500, 50x; near-breakout logging within ±0.5%.
+  - Exchange: primary `coinbaseadvanced` with auth; automatic unauth retry; fallback to Kraken with keys; timeout 30s.
+  - Outputs/logs: `finder_breakout.txt`, `logs/breakout_autotrade.log`; run via `python scripts/run_breakout_autotrade.py --timeframe 1h --lookback 50 --portfolio-usd 500 --leverage 50 --out finder_breakout.txt [--execute]`.
+
 ## Communication and Delivery Expectations
 - Be explicit about assumptions, especially around time ranges and data availability.
 - Reference paths with filenames and line numbers when flagging issues or proposing edits.
 - Surface risks early (data staleness, long-running backtests, TA-Lib availability).
 - Favor incremental pull-request sized changes; document follow-ups if scope must be split.
 - End deliverables with next-step suggestions (tests to run, deployment actions, monitoring reminders).
+
+## Gate Definitions (quick reference)
+- ATR gate: ATR7 USD cap (current default ~3000) blocks symbols with larger recent ranges.
+- RR gate: RR >= 2 required to accept a breakout; RR is logged per candidate, with PASS/SKIP.
+- Breakout condition: candle close must be strictly beyond swing high/low (dist=0% is only a touch).
+- Near-breakout: |dist| <= 0.5% from swing trigger; logged but not tradable.
+
+## Operational Triage
+- If no symbols: check liquidity filters, ATR cap, exchange connectivity; see logs in `logs/short_term_crypto_finder/` or `logs/breakout_autotrade.log`.
+- Exchange errors: CoinbaseAdvanced may time out; code retries unauthenticated then falls back to Kraken with keys; confirm env vars present.
+- RR skips: Scanner prints “RR-skipped” block when a level breaks but RR < threshold.
+
+## Legacy / Not in Active Pipeline
+- Legacy bots/tools (kept for reference, not maintained): `base.py`, `simplified_trading_bot*.py` (v1.2.x), older HFT/mean-reversion runners, `backtest_trading_bot_past`, and other retired helpers under `retired_tools/`.
+- These are outside the current finder + breakout pipelines and should not be modified unless explicitly requested.
