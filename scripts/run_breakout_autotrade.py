@@ -42,7 +42,7 @@ def set_lock(hours: int = 24) -> None:
     LOCK_PATH.write_text(json.dumps({"expires_at": exp.isoformat()}))
 
 
-def run_scanner(out_path: Path, timeframe: str, lookback: int) -> int:
+def run_scanner(out_path: Path, timeframe: str, lookback: int, rr_threshold: float) -> int:
     cmd = [
         sys.executable,
         "scripts/breakout_scanner.py",
@@ -54,6 +54,8 @@ def run_scanner(out_path: Path, timeframe: str, lookback: int) -> int:
         str(lookback),
         "--out",
         str(out_path),
+        "--rr-threshold",
+        str(rr_threshold),
     ]
     return subprocess.call(cmd)
 
@@ -111,7 +113,7 @@ def main() -> None:
         print("Active lock present (trade in flight). Exiting.")
         sys.exit(0)
 
-    rc = run_scanner(out_path, args.timeframe, args.lookback)
+    rc = run_scanner(out_path, args.timeframe, args.lookback, args.rr_threshold)
     if rc != 0:
         print(f"Scanner failed with code {rc}")
         sys.exit(rc)

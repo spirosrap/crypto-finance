@@ -86,9 +86,16 @@ class BreakoutCandidate:
     trend: float
     adx_val: float
     ts: pd.Timestamp
+    meets_rr: bool
 
 
-def scan_symbols(exchange: ccxt.Exchange, symbols: List[str], tf: str, lookback: int) -> Tuple[List[BreakoutCandidate], List[str]]:
+def scan_symbols(
+    exchange: ccxt.Exchange,
+    symbols: List[str],
+    tf: str,
+    lookback: int,
+    rr_threshold: float,
+) -> Tuple[List[BreakoutCandidate], List[str]]:
     out: List[BreakoutCandidate] = []
     near: List[str] = []
     for sym in symbols:
@@ -141,6 +148,7 @@ def scan_symbols(exchange: ccxt.Exchange, symbols: List[str], tf: str, lookback:
                 rr = (entry - tp) / risk if risk > 0 else 0.0
 
             adx_val = float(df["adx"].iloc[-1] or 0.0)
+            meets_rr = rr >= rr_threshold if rr_threshold > 0 else True
             out.append(
                 BreakoutCandidate(
                     symbol=sym,
@@ -153,6 +161,7 @@ def scan_symbols(exchange: ccxt.Exchange, symbols: List[str], tf: str, lookback:
                     trend=float(df["trend"].iloc[-1]),
                     adx_val=adx_val,
                     ts=last_ts,
+                    meets_rr=meets_rr,
                 )
             )
     return out, near
@@ -169,6 +178,7 @@ def main() -> None:
     parser.add_argument("--timeframe", type=str, default="4h", help="CCXT timeframe (e.g., 1h,4h,1d)")
     parser.add_argument("--lookback", type=int, default=50, help="Lookback bars for swing high/low")
     parser.add_argument("--exchange", type=str, default="coinbaseadvanced", help="Primary CCXT exchange id")
+    parser.add_argument("--rr-threshold", type=float, default=2.0, help="RR needed to mark a breakout as tradable (set 0 to disable)")
     parser.add_argument("--out", type=str, default="finder_breakout.txt", help="Output file path (finder format)")
     args = parser.parse_args()
 
@@ -248,14 +258,17 @@ def main() -> None:
     # Filter out self-quotes like USDC/USDC
     symbols = [s for s in symbols if s.split("/")[0] != s.split("/")[-1]]
 
-    cands, near = scan_symbols(exc, symbols, tf, args.lookback)
+    cands, near = scan_symbols(exc, symbols, tf, args.lookback, args.rr_threshold)
     if near:
         print("Near-breakouts:")
         for msg in near:
             print(f"  {msg}")
         print("----------------------------------------------------------------")
     if not cands:
-        print("No breakouts found.")
+        if near:
+            print("No breakouts found (no candle closed through the swing trigger).")
+        else:
+            print("No breakouts found.")
         return
 
     # Rank: higher RR, then higher vol_thrust, then higher ADX
@@ -284,7 +297,18 @@ def main() -> None:
             f"RR={c.rr:.2f}  vol_thrust={c.vol_thrust:.2f}  "
             f"trend={c.trend:.3f}  adx={c.adx_val:.1f}"
         )
+        if args.rr_threshold > 0:
+            status = "PASS" if c.meets_rr else f"SKIP (RR {c.rr:.2f} < {args.rr_threshold:.2f})"
+            lines.append(f"Status: {status}")
         lines.append("----------------------------------------------------------------")
+
+    if args.rr_threshold > 0:
+        skipped = [c for c in cands if not c.meets_rr]
+        if skipped:
+            print("RR-skipped candidates (broke level but below threshold):")
+            for c in skipped:
+                print(f"  {c.symbol} {c.side.upper()} RR={c.rr:.2f} < {args.rr_threshold:.2f}")
+            print("----------------------------------------------------------------")
 
     out_path = Path(args.out)
     out_path.write_text("\n".join(lines) + "\n")
