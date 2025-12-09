@@ -84,6 +84,7 @@
 - Playbooks: short_term_crypto_finder (RR>=2, ATR gate) and breakout_autotrade (fixed 2R structure). Both use hard SL/TP; optional 24h timeout for closes.
 - Frequency: low by design. No trades if conditions are poor; downtime is acceptable.
 - Automation: breakout_autotrade runs hourly on USDC majors with $500 notional/50x, RR=2, 24h lock to avoid stacking. Near-breakouts are logged; no trade unless conditions trigger.
+- Discipline: boredom is part of the edge. Waiting is intentional; do not loosen gates out of impatience. Flat is a valid position.
 
 ## Historical Notes
 - Prior iterations leaned on short_term_crypto_finder with 24h hold rule and balanced 5-trade baskets; tightened RR/ATR filters in late 2025.
