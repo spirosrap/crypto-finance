@@ -1,56 +1,39 @@
-# Bitcoin Trading Bot
+# Crypto Finance — Current Pipeline (Dec 2025)
 
-## Overview
+## Current Focus
+- **Short-Term Crypto Finder (`short_term_crypto_finder.py`)**: Strict RR ≥ 2, ATR(7) gated (capped at ~3k USD), hard SL/TP. Runs on USDC pairs; logs to `logs/short_term_crypto_finder/`.
+- **Breakout Autotrade (`scripts/run_breakout_autotrade.py`)**: Hourly scan of USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with fixed 2R structure, $500 notional / 50x, 24h lock to avoid stacking. Writes finder-format output; uses Coinbase primary with Kraken fallback. Near-breakouts are logged.
+- **Safety First**: Downtime is expected; no trades when RR/ATR gates fail. Flat is acceptable.
 
-This Bitcoin Trading Bot implements a sophisticated trading strategy using traditional technical analysis signals, machine learning models (XGBoost), and advanced market analysis techniques for price prediction. It offers both backtesting capabilities and live trading simulations, with support for high-frequency trading and AI-powered market analysis.
+## Active Tools
+- **Finders**: `short_term_crypto_finder.py`, `scripts/symbol_snapshot.py` for targeted snapshots.
+- **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock).
+- **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).
+- **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text.
 
-## Key Components
+## What’s Retired/Optional
+- Forced daily trading or balanced 5-trade baskets—no longer required.
+- Mandatory 24h holds across all strategies—used only when explicitly configured (e.g., breakout autotrade lock).
+- Reservoir/multi-basket experiments—on pause; sticking to finder + breakout playbooks.
 
-1. **Backtester**: Allows historical performance analysis and live trading simulations.
-2. **Technical Analysis**: Implements various technical indicators and analysis methods.
-3. **CoinbaseService**: Handles interactions with the Coinbase API.
-4. **HistoricalData**: Manages retrieval and storage of historical price data.
-5. **API**: Provides an interface for external interactions with the trading bot.
-6. **MLSignal**: Implements machine learning models for price prediction and signal generation.
-7. **BitcoinPredictionModel**: A specialized model for Bitcoin price prediction.
-8. **HighFrequencyStrategy**: Implements high-frequency trading strategies.
-9. **MarketAnalyzer**: Advanced market analysis with multi-timeframe support.
-10. **ScalpingAnalyzer**: Specialized tool for high-frequency trading.
-11. **MemeAnalyzer**: Tool for analyzing memecoin opportunities.
-12. **PerformanceAnalyzer**: Trading performance tracking and analysis.
+## Quick Start (Current Flow)
+1) Run snapshots: `python scripts/symbol_snapshot.py --symbols BTC,ETH --profile focused_no_llm_100`
+2) Let breakout autotrade cron handle hourly scans; check `logs/breakout_autotrade.log` for near-breakouts/triggers.
+3) Optional: enforce a 24h timeout on positions with `watchdog_close_old_positions.py`.
 
-## Features
+## Environment & Requirements
+- Python 3.11, ccxt ≥ 4.2, pandas ≥ 2.3, numpy ≥ 1.24, TA-Lib ≥ 0.6.7, openai ≥ 1.109.1 (installed), full list in `requirements.txt`.
+- Configure API keys in `.env` (Coinbase primary: `API_KEY`/`API_SECRET`; Kraken fallback: `KRAKEN_API_KEY`/`KRAKEN_API_SECRET`). PEM secrets normalize `\\n`.
 
-### Core Features
-- Backtesting over specified date ranges
-- Live (paper) trading simulations
-- Multiple technical indicators (RSI, MACD, Bollinger Bands, etc.)
-- Advanced market condition analysis (Bull/Bear market detection)
-- Dynamic trade sizing based on market conditions and volatility
-- Risk management with trailing stop-loss and ATR-based position sizing
-- State persistence for continuous operation
-- Visual trade and balance history plots
-- Machine learning integration for enhanced prediction accuracy
-- High-frequency trading capabilities
-- Sentiment analysis integration
-- Daily trade routing where `add_top5_from_finder.py` pulls the top five candidates (top two longs, top two shorts, plus the highest remaining score regardless of side) surfaced by `short_term_crypto_finder.py`, keeping execution systematic rather than discretionary.
+## Install/Setup
 
-### Advanced Features
-- AI-powered market analysis with multiple model support (GPT-4, DeepSeek, Grok)
-- Real-time scalping analysis with order book depth integration
-- Memecoin opportunity detection and analysis
-- Multi-timeframe pattern recognition
-- Advanced risk metrics (VaR, Sharpe Ratio, Sortino Ratio)
-- Comprehensive performance tracking and analysis
-- Graphical user interface for market analysis and trading
-- Automated trading with configurable parameters
+```bash
+conda create -n trade python=3.11
+conda activate trade
+python scripts/install_requirements.py
+```
 
-### Paper Finder Simulator & Dashboard
-- Run `python paper_finder_simulator.py init --initial-capital 25000` once to capture your baseline equity, then pipe new `short_term_crypto_finder.py` runs through `python paper_finder_simulator.py open --finder-output finder.txt --symbols BTC,NEAR`.
-- Use `python paper_finder_simulator.py open --top 5 --balanced-top` to mimic `add_top5_from_finder.py` (2 longs, 2 shorts, plus the next best overall) or `open-single` to log one block at a time.
-- Periodically call `python paper_finder_simulator.py update` (optionally with `--override SYMBOL=PRICE`) to refresh marks, close trades that hit TP/SL/expiry, and keep `trade_logs/paper_finder_*.csv` in sync. The command now also prints per-product unrealized P/L so you can glance at open risk in the terminal.
-- Tokens that lack a supported INTX perp on Coinbase are automatically skipped (with a warning) so unsupported assets like CBETH never enter the paper log.
-- View simulated equity curves alongside live watchdog results by launching `streamlit run watchdog_dashboard.py` and selecting “Paper Finder” in the sidebar data-source picker.
+> macOS: needs Homebrew for TA-Lib; Windows: install TA-Lib manually.
 
 ## Prerequisites
 
