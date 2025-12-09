@@ -812,6 +812,13 @@ The tool provides clear, actionable trading recommendations in the following for
 - Market analyzer dependencies
 - Python 3.11 or higher
 
+
+# Legacy Tools (Not Maintained)
+
+# Legacy Tools (Not Maintained)
+
+The sections below (Prompt Market, Memecoin Analyzer, simplified bots, UI experiments) are legacy/not part of the current short-term finder + breakout pipeline. Keep them for reference only. API keys can also be set via `config.py` if you use these tools, but they are not actively maintained.
+
 # Memecoin Analyzer
 
 A Python-based tool for analyzing and monitoring memecoin opportunities in the cryptocurrency market. This tool tracks social metrics, price movements, and various other indicators to help identify potential memecoin trading opportunities.
