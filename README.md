@@ -362,6 +362,8 @@ A cryptocurrency trading bot that focuses on BTC-USDC trading using RSI, EMA, an
 - Performance optimizations for faster execution
 - Added new filter to reject RSI dip entries in strong bearish trends with weak volume
 
+> Legacy/Not in current pipeline: The v1.2.1f simplified bot is maintained for historical reference only and is not part of the active short-term finder/breakout pipeline described above.
+
 ### Usage
 
 ```bash
