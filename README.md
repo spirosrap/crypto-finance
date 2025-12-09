@@ -18,8 +18,11 @@
 
 ## Quick Start (Current Flow)
 1) Run snapshots: `python scripts/symbol_snapshot.py --symbols BTC,ETH --profile focused_no_llm_100`
-2) Let breakout autotrade cron handle hourly scans; check `logs/breakout_autotrade.log` for near-breakouts/triggers.
-3) Optional: enforce a 24h timeout on positions with `watchdog_close_old_positions.py`.
+2) Let cron handle:
+   - `short_term_crypto_finder.py` (daily) → feed results to `add_position_from_finder.py` or `add_top5_from_finder.py` to stage/execute trades.
+   - `run_breakout_autotrade.py` (hourly) for 2R breakouts on USDC majors.
+3) Check `logs/breakout_autotrade.log` for near-breakouts/triggers; finder logs under `logs/short_term_crypto_finder/`.
+4) Optional: enforce a 24h timeout on positions with `watchdog_close_old_positions.py`.
 
 ## Environment & Requirements
 - Python 3.11, ccxt ≥ 4.2, pandas ≥ 2.3, numpy ≥ 1.24, TA-Lib ≥ 0.6.7, openai ≥ 1.109.1 (installed), full list in `requirements.txt`.
