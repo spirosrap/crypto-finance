@@ -15,6 +15,7 @@
 - Forced daily trading or balanced 5-trade baskets—no longer required.
 - Mandatory 24h holds across all strategies—used only when explicitly configured (e.g., breakout autotrade lock).
 - Reservoir/multi-basket experiments—on pause; sticking to finder + breakout playbooks.
+- Legacy bots/tools (not maintained): simplified_trading_bot v1.2.1f, simplified_trading_bot_v1.2.2.py, reservoir/multi-basket scripts. Kept for reference only.
 
 ## Quick Start (Current Flow)
 1) Run snapshots: `python scripts/symbol_snapshot.py --symbols BTC,ETH --profile focused_no_llm_100`
