@@ -224,7 +224,8 @@ def build_short_term_config() -> CryptoFinderConfig:
     cfg.macd_slow = _env_override("SHORT_MACD_SLOW", 21, int)
     cfg.macd_signal = _env_override("SHORT_MACD_SIGNAL", 5, int)
     cfg.max_atr_usd = _env_override("SHORT_MAX_ATR_USD", cfg.max_atr_usd or 3000.0, float)
-    cfg.max_atr_bps = _env_override("SHORT_MAX_ATR_BPS", getattr(cfg, "max_atr_bps", 0.0) or 0.0, float)
+    # Default bps cap: 400 bps (4% of price), keeps ATR binding for alts without impacting BTC/ETH USD cap
+    cfg.max_atr_bps = _env_override("SHORT_MAX_ATR_BPS", getattr(cfg, "max_atr_bps", 400.0) or 400.0, float)
 
     max_risk_env = os.getenv("SHORT_MAX_RISK_LEVEL")
     if max_risk_env:
