@@ -7,6 +7,11 @@
 ## December 2025
 **State at a glance (latest):** ATR7 cooling but still >3k on BTC; RR remains sub-2 on majors; zero trades taken; autotrader logging near-breakouts only.
 
+## December 10, 2025 (Evening) - Finder Finally Surfaced Trades
+- First valid finder_short.txt in ~1 month (7 opps). Took two trades: ZK PERP short, FARTCOIN PERP long (both ~2.1R brackets). Unsure if the tiered ATR bps cap change tipped it, but signals reappeared.
+- List highlights: mix of alts (ZK, FARTCOIN, JASMY, POPCAT, ZORA), a SOL short, and even USDT short. ATR caps now bind across assets; RR=2+ printed for all seven.
+- Action: holding ZK/FARTCOIN per plan; monitor the rest if risk budget allows. Stay strict on stops/TPs.
+
 ## December 10, 2025 (Later) - Tiered ATR Caps Rolled Out
 - Metrics: ATR7=3,408 (BTC); top RR long/short ~0.80/0.31 (BTC); trades taken=0.
 - Change: Added tiered ATR bps caps on top of the 3k USD cap — BTC/mega caps ≈325 bps, large caps ≈350 bps, majors ≈400 bps, small alts ≈450 bps. Stops/TPs now bind sensibly across prices; ATR gate no longer “not binding” for alts. RR gate remains 2:1.
