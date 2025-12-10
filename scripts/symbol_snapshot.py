@@ -83,11 +83,26 @@ def _print_gates(
 ) -> None:
     atr_raw = float(tech.get("atr") or 0.0)
     atr_note = ""
+    # Tiered dynamic bps (mirror finder logic)
+    def _dyn_bps(p: float) -> float:
+        if p >= 20000:
+            return 325.0
+        if p >= 2000:
+            return 350.0
+        if p >= 200:
+            return 400.0
+        return 450.0
     caps: List[float] = []
     if atr_cap_usd and atr_cap_usd > 0:
         caps.append(float(atr_cap_usd))
-    if atr_cap_bps and atr_cap_bps > 0 and price and price > 0:
-        caps.append(float(price) * float(atr_cap_bps) / 10000.0)
+    if price and price > 0:
+        tier_bps = _dyn_bps(price)
+        eff_bps = None
+        if atr_cap_bps and atr_cap_bps > 0:
+            eff_bps = min(float(atr_cap_bps), tier_bps)
+        else:
+            eff_bps = tier_bps
+        caps.append(float(price) * float(eff_bps) / 10000.0)
     if caps:
         cap_val = min(caps)
         headroom = cap_val - atr_raw
