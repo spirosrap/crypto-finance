@@ -86,6 +86,9 @@
   - Gates: swing close must clear trigger; RR >= 2; 24h lock after a trade (`.breakout_lock.json`); notional $500, 50x; near-breakout logging within ±0.5%.
   - Exchange: primary `coinbaseadvanced` with auth; automatic unauth retry; fallback to Kraken with keys; timeout 30s.
   - Outputs/logs: `finder_breakout.txt`, `logs/breakout_autotrade.log`; run via `python scripts/run_breakout_autotrade.py --timeframe 1h --lookback 50 --portfolio-usd 500 --leverage 50 --out finder_breakout.txt [--execute]`.
+- **Monitors / Housekeeping**
+  - `watchdog_close_old_positions.py`: enforces 24h expiry on open positions (optional `--no-log-closures`); use in cron alongside finder/autotrader to avoid stale trades.
+  - `watchdog_dashboard.py`: status/metrics dashboard; keep it in sync with current pipelines for visibility over active trades and cron health.
 
 ## Communication and Delivery Expectations
 - Be explicit about assumptions, especially around time ranges and data availability.
