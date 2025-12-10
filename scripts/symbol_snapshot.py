@@ -72,12 +72,20 @@ def _print_side(label: str, metric) -> None:
           f"mom={_fmt(metric.momentum_score, 2)}")
 
 
-def _print_gates(long_m, short_m, tech: Dict, rr_target: float, atr_cap: Optional[float]) -> None:
+def _print_gates(long_m, short_m, tech: Dict, rr_target: float, atr_cap: Optional[float], price: Optional[float]) -> None:
     atr_raw = float(tech.get("atr") or 0.0)
     atr_note = ""
     if atr_cap and atr_cap > 0:
         headroom = atr_cap - atr_raw
-        atr_note = f" | ATR headroom to cap: {headroom:+.0f}"
+        atr_note = f" | ATR headroom to cap: {headroom:+.2f}"
+        if price and price > 0:
+            headroom_bps = headroom / price * 10_000
+            cap_bps = atr_cap / price * 10_000
+            # If the cap is far above current ATR relative to price, call it non-binding
+            if headroom_bps > 20_000:
+                atr_note = " | ATR cap not binding"
+            else:
+                atr_note += f" ({headroom_bps:+.0f} bps to cap)"
     def _rr_gap(m) -> str:
         if not m:
             return "n/a"
@@ -151,7 +159,14 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
               f"intraday_range_pos={_fmt(tech.get('intraday_range_position'), 3)}  "
               f"intraday_vol_6h={_fmt(tech.get('intraday_volatility_6h'), 4)}  "
               f"spread_bps={_fmt(coin.get('spread_bps'), 3)}")
-        _print_gates(long_m, short_m, tech, rr_target=2.0, atr_cap=getattr(cfg, "max_atr_usd", None))
+        _print_gates(
+            long_m,
+            short_m,
+            tech,
+            rr_target=2.0,
+            atr_cap=getattr(cfg, "max_atr_usd", None),
+            price=coin.get("current_price"),
+        )
         _print_side("LONG", long_m)
         _print_side("SHORT", short_m)
         print()
