@@ -1,6 +1,14 @@
 # Trading Journal
 
+## Quick Links
+- [December 2025](#december-2025)
+- [November 2025](#november-2025)
+
+## December 2025
+**State at a glance (latest):** ATR7 cooling but still >3k on BTC; RR remains sub-2 on majors; zero trades taken; autotrader logging near-breakouts only.
+
 ## December 10, 2025 - ATR Stalling Just Above 3k, RR Still Sub-2
+- Metrics: ATR7=3,285.60 (BTC); top RR long/short=0.80/0.31 (BTC); near-breakouts (today)=yes (logged via autotrader); trades taken=0.
 
 - Snapshot (focused_no_llm_100): BTC 92,737.99; ATR7=3,285.60 (hovering just above the 3k cap), RR long/short 0.80/0.31; intraday_range_pos ~0.94; daily_vol_30d ~0.0237; spread ~0.001 bps.
 - ETH: 3,325.21; ATR7=171.07; RR 0.77/0.19; RSI14 ~71 (overbought), trend still negative (~-0.65%/d); volatility elevated intraday (~0.0304 over 6h).
@@ -9,11 +17,13 @@
 - Takeaway: BTC ATR7 has stalled above the 3k cap, keeping RR suppressed; none of the majors clear the RR ≥ 2 gate. XRP short is the nearest at 1.70 but still a skip. Stay flat until ATR eases further or RR expands.
 
 ## December 9, 2025 - Near-Breakouts Faded Overnight
+- Metrics: ATR7 ~3.1–3.3k (BTC); top RR long/short ~0.8/0.3; near-breakouts=none after 00–08 UTC; trades taken=0.
 
 - Latest hourly logs (00:00–08:00 UTC) show no near-breakouts; prior LTC/ATOM near-long flags (22:00–23:00 UTC on Dec 8) faded as price backed away from swing levels.
 - Autotrader continues hourly on USDC majors, flat until a bar actually closes through a swing level with RR=2.
 
 ## December 8, 2025 - Breakout Signals Close, No Fills Yet
+- Metrics: ATR7 ~3.2–3.4k (BTC); top RR long/short ~0.8/0.3; near-breakouts=multiple per hour within ±0.5%; trades taken=0.
 
 - Hourly breakout autotrader logs show multiple near-long breakouts (BTC, ETH, SOL, AVAX, LINK, UNI, INJ, etc.) and one near-short breakdown (MKR) within ±0.5% of swing levels, but none have closed through to trigger trades.
 - All runs (through 06:00 UTC) ended with “No breakouts found / No qualifying breakout found,” so no positions were opened yet. Staying strict with RR=2:1 and the 24h lock.
