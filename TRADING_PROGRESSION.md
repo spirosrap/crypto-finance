@@ -19,11 +19,6 @@
 - All runs (through 06:00 UTC) ended with “No breakouts found / No qualifying breakout found,” so no positions were opened yet. Staying strict with RR=2:1 and the 24h lock.
 - Backtest check since autotrader start (Dec 6) shows brief breakouts on Dec 7–8 (e.g., BTC/USDC 2025-12-07 18:00 UTC, ETH/SOL/DOGE/OP/ARB/UNI/INJ 2025-12-08 09:00 UTC, AAVE 2025-12-08 14:00 UTC). Cron runs didn’t catch sustained closes through the swing levels—signals were fleeting and didn’t align with the hourly run/close. Market conditions: shallow pushes to swing levels without follow-through, reinforcing a wait stance.
 
-## December 9, 2025 - Near-Breakouts Faded Overnight
-
-- Latest hourly logs (00:00–08:00 UTC) show no near-breakouts; prior LTC/ATOM near-long flags (22:00–23:00 UTC on Dec 8) faded as price backed away from swing levels.
-- Autotrader continues hourly on USDC majors, flat until a bar actually closes through a swing level with RR=2.
-
 ## December 8, 2025 - Identity Check: Short-Term, Selective, Systematic
 
 - My style is a niche, rules-based short-term approach (intraday-to-24h) with strict RR/ATR gates and a willingness to sit flat for days. Not classic day trading (no daily trade mandate) and not multi-day swing; more “short-term systematic” with rare entries.
