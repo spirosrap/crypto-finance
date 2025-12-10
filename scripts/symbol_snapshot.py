@@ -72,20 +72,34 @@ def _print_side(label: str, metric) -> None:
           f"mom={_fmt(metric.momentum_score, 2)}")
 
 
-def _print_gates(long_m, short_m, tech: Dict, rr_target: float, atr_cap: Optional[float], price: Optional[float]) -> None:
+def _print_gates(
+    long_m,
+    short_m,
+    tech: Dict,
+    rr_target: float,
+    atr_cap_usd: Optional[float],
+    atr_cap_bps: Optional[float],
+    price: Optional[float],
+) -> None:
     atr_raw = float(tech.get("atr") or 0.0)
     atr_note = ""
-    if atr_cap and atr_cap > 0:
-        headroom = atr_cap - atr_raw
-        atr_note = f" | ATR headroom to cap: {headroom:+.2f}"
+    caps: List[float] = []
+    if atr_cap_usd and atr_cap_usd > 0:
+        caps.append(float(atr_cap_usd))
+    if atr_cap_bps and atr_cap_bps > 0 and price and price > 0:
+        caps.append(float(price) * float(atr_cap_bps) / 10000.0)
+    if caps:
+        cap_val = min(caps)
+        headroom = cap_val - atr_raw
         if price and price > 0:
             headroom_bps = headroom / price * 10_000
-            cap_bps = atr_cap / price * 10_000
-            # If the cap is far above current ATR relative to price, call it non-binding
-            if headroom_bps > 20_000:
+            cap_bps = cap_val / price * 10_000
+            if headroom_bps > 5000:  # >50% of price
                 atr_note = " | ATR cap not binding"
             else:
-                atr_note += f" ({headroom_bps:+.0f} bps to cap)"
+                atr_note = f" | ATR headroom to cap: {headroom:+.2f} ({headroom_bps:+.0f} bps; cap={cap_bps:.0f} bps)"
+        else:
+            atr_note = f" | ATR headroom to cap: {headroom:+.2f}"
     def _rr_gap(m) -> str:
         if not m:
             return "n/a"
@@ -164,7 +178,8 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
             short_m,
             tech,
             rr_target=2.0,
-            atr_cap=getattr(cfg, "max_atr_usd", None),
+            atr_cap_usd=getattr(cfg, "max_atr_usd", None),
+            atr_cap_bps=getattr(cfg, "max_atr_bps", None),
             price=coin.get("current_price"),
         )
         _print_side("LONG", long_m)

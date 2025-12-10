@@ -131,6 +131,8 @@ class CryptoFinderConfig:
     exchange_backend: str = "ccxt"  # ccxt or coinbase
     ccxt_exchange_id: str = "coinbaseadvanced"  # default CCXT exchange when backend=ccxt
     max_atr_usd: Optional[float] = None  # optional cap on ATR used for stops/TP sizing
+    max_atr_bps: Optional[float] = None  # optional cap on ATR in basis points of price
+    max_atr_bps: Optional[float] = None  # optional cap on ATR in basis points of price
 
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -223,6 +225,7 @@ class CryptoFinderConfig:
             exchange_backend=os.getenv('CRYPTO_EXCHANGE_BACKEND', 'ccxt').strip().lower(),
             ccxt_exchange_id=os.getenv('CRYPTO_CCXT_EXCHANGE', 'coinbaseadvanced').strip(),
             max_atr_usd=_optional_float_env('CRYPTO_MAX_ATR_USD'),
+            max_atr_bps=_optional_float_env('CRYPTO_MAX_ATR_BPS'),
         )
 
     def to_dict(self) -> Dict:
@@ -273,6 +276,7 @@ class CryptoFinderConfig:
             'exchange_backend': self.exchange_backend,
             'ccxt_exchange_id': self.ccxt_exchange_id,
             'max_atr_usd': self.max_atr_usd,
+            'max_atr_bps': self.max_atr_bps,
         }
 
 # Configure enhanced logging with file rotation

@@ -224,6 +224,7 @@ def build_short_term_config() -> CryptoFinderConfig:
     cfg.macd_slow = _env_override("SHORT_MACD_SLOW", 21, int)
     cfg.macd_signal = _env_override("SHORT_MACD_SIGNAL", 5, int)
     cfg.max_atr_usd = _env_override("SHORT_MAX_ATR_USD", cfg.max_atr_usd or 3000.0, float)
+    cfg.max_atr_bps = _env_override("SHORT_MAX_ATR_BPS", getattr(cfg, "max_atr_bps", 0.0) or 0.0, float)
 
     max_risk_env = os.getenv("SHORT_MAX_RISK_LEVEL")
     if max_risk_env:
@@ -1040,6 +1041,17 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
             rr = max(rr, self.HIGH_VOL_TREND_RR)
         return float(np.clip(rr, 1.5, 2.6))
 
+    def _cap_atr_value(self, atr_raw: float, price: float) -> float:
+        """Apply USD and bps caps to ATR."""
+        capped = float(atr_raw)
+        usd_cap = getattr(self.config, 'max_atr_usd', None)
+        if usd_cap and usd_cap > 0:
+            capped = min(capped, float(usd_cap))
+        bps_cap = getattr(self.config, 'max_atr_bps', None)
+        if bps_cap and bps_cap > 0 and price > 0:
+            capped = min(capped, float(price) * float(bps_cap) / 10000.0)
+        return capped
+
     # ------------------------------------------------------------------
     # Trading levels: tighter ATR stops and nearer swing targets
     # ------------------------------------------------------------------
@@ -1047,9 +1059,7 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         try:
             entry_price = current_price
             atr_raw = float(technical_metrics.get('atr', 0.0) or 0.0)
-            atr_cap = getattr(self.config, 'max_atr_usd', None)
-            if atr_cap and atr_cap > 0:
-                atr_raw = min(atr_raw, float(atr_cap))
+            atr_raw = self._cap_atr_value(atr_raw, current_price)
             # Log high-vol trend mode when engaged
             trend_strength = float(technical_metrics.get('trend_strength', 0.0) or 0.0)
             price = float(technical_metrics.get('price', entry_price) or entry_price)
@@ -1142,9 +1152,7 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         try:
             entry_price = current_price
             atr_raw = float(technical_metrics.get('atr', 0.0) or 0.0)
-            atr_cap = getattr(self.config, 'max_atr_usd', None)
-            if atr_cap and atr_cap > 0:
-                atr_raw = min(atr_raw, float(atr_cap))
+            atr_raw = self._cap_atr_value(atr_raw, current_price)
             # Log high-vol trend mode when engaged
             trend_strength = float(technical_metrics.get('trend_strength', 0.0) or 0.0)
             price = float(technical_metrics.get('price', entry_price) or entry_price)
