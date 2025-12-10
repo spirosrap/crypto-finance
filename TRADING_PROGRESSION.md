@@ -7,6 +7,11 @@
 ## December 2025
 **State at a glance (latest):** ATR7 cooling but still >3k on BTC; RR remains sub-2 on majors; zero trades taken; autotrader logging near-breakouts only.
 
+## December 10, 2025 (Later) - Tiered ATR Caps Rolled Out
+- Metrics: ATR7=3,408 (BTC); top RR long/short ~0.80/0.31 (BTC); trades taken=0.
+- Change: Added tiered ATR bps caps on top of the 3k USD cap — BTC/mega caps ≈325 bps, large caps ≈350 bps, majors ≈400 bps, small alts ≈450 bps. Stops/TPs now bind sensibly across prices; ATR gate no longer “not binding” for alts. RR gate remains 2:1.
+- Impact: BTC still above cap (~-44 bps headroom); ETH/DOT/SOL/XRP now show ATR headroom in bps, making the cap meaningful. RRs remain <2, so no trades. Safety intact, clearer gating info in `symbol_snapshot`.
+
 ## December 10, 2025 - ATR Stalling Just Above 3k, RR Still Sub-2
 - Metrics: ATR7=3,285.60 (BTC); top RR long/short=0.80/0.31 (BTC); near-breakouts (today)=yes (logged via autotrader); trades taken=0.
 
