@@ -1,5 +1,13 @@
 # Trading Journal
 
+## December 10, 2025 - ATR Stalling Just Above 3k, RR Still Sub-2
+
+- Snapshot (focused_no_llm_100): BTC 92,737.99; ATR7=3,285.60 (hovering just above the 3k cap), RR long/short 0.80/0.31; intraday_range_pos ~0.94; daily_vol_30d ~0.0237; spread ~0.001 bps.
+- ETH: 3,325.21; ATR7=171.07; RR 0.77/0.19; RSI14 ~71 (overbought), trend still negative (~-0.65%/d); volatility elevated intraday (~0.0304 over 6h).
+- XRP: 2.0851; ATR7=0.10; RR long/short 0.61/1.70 — closest to gate but still below 2:1; intraday_range_pos ~0.95; spread ~0.48 bps.
+- SOL: 139.12; ATR7=8.17; RR 0.77/0.17; intraday_range_pos ~0.96; spread ~0.72 bps.
+- Takeaway: BTC ATR7 has stalled above the 3k cap, keeping RR suppressed; none of the majors clear the RR ≥ 2 gate. XRP short is the nearest at 1.70 but still a skip. Stay flat until ATR eases further or RR expands.
+
 ## December 8, 2025 - Breakout Signals Close, No Fills Yet
 
 - Hourly breakout autotrader logs show multiple near-long breakouts (BTC, ETH, SOL, AVAX, LINK, UNI, INJ, etc.) and one near-short breakdown (MKR) within ±0.5% of swing levels, but none have closed through to trigger trades.
