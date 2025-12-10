@@ -84,6 +84,7 @@
 - Playbooks: short_term_crypto_finder (RR>=2, ATR gate) and breakout_autotrade (fixed 2R structure). Both use hard SL/TP; optional 24h timeout for closes.
 - Frequency: low by design. No trades if conditions are poor; downtime is acceptable.
 - Automation: breakout_autotrade runs hourly on USDC majors with $500 notional/50x, RR=2, 24h lock to avoid stacking. Near-breakouts are logged; no trade unless conditions trigger.
+- Housekeeping: `watchdog_close_old_positions.py` runs (or can run) alongside to enforce 24h expiry on open positions; `watchdog_dashboard.py` provides status/metrics visibility on active trades and cron health.
 - Discipline: boredom is part of the edge. Waiting is intentional; do not loosen gates out of impatience. Flat is a valid position.
 
 ## Historical Notes
