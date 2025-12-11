@@ -17,11 +17,6 @@
 - List highlights: mix of alts (ZK, FARTCOIN, JASMY, POPCAT, ZORA), a SOL short, and even USDT short. ATR caps now bind across assets; RR=2+ printed for all seven.
 - Action: holding ZK/FARTCOIN per plan; monitor the rest if risk budget allows. Stay strict on stops/TPs.
 
-## December 10, 2025 (Night) - Two Trades Closed
-- FARTCOIN-PERP long: TP hit (opened 17:52Z, closed 19:00Z) at ~4.75R on notional (+11.8% of position); clean exit per plan.
-- ZK-PERP short: SL hit (opened 17:49Z, closed 20:17Z) at -3.08% of position (~-7.7 bps on notional); taken per plan.
-- Net: one TP, one SL from the first batch after a month of no signals. ATR tiering may have helped surface these; continue to monitor if more alts meet gates.
-
 ## December 10, 2025 (Later) - Tiered ATR Caps Rolled Out
 - Metrics: ATR7=3,408 (BTC); top RR long/short ~0.80/0.31 (BTC); trades taken=0.
 - Change: Added tiered ATR bps caps on top of the 3k USD cap — BTC/mega caps ≈325 bps, large caps ≈350 bps, majors ≈400 bps, small alts ≈450 bps. Stops/TPs now bind sensibly across prices; ATR gate no longer “not binding” for alts. RR gate remains 2:1.
