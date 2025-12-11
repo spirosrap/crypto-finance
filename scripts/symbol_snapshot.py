@@ -140,6 +140,31 @@ def _print_gates(
     print(f"Distances: long {_dist(long_m)} | short {_dist(short_m)}")
 
 
+def _dynamic_bps(price: float) -> float:
+    if price >= 20000:
+        return 325.0
+    if price >= 2000:
+        return 350.0
+    if price >= 200:
+        return 400.0
+    return 450.0
+
+
+def _effective_atr_cap(price: float, atr_cap_usd: Optional[float], atr_cap_bps: Optional[float]) -> Optional[float]:
+    caps: List[float] = []
+    if atr_cap_usd and atr_cap_usd > 0:
+        caps.append(float(atr_cap_usd))
+    if price and price > 0:
+        dyn_bps = _dynamic_bps(price)
+        eff_bps = None
+        if atr_cap_bps and atr_cap_bps > 0:
+            eff_bps = min(float(atr_cap_bps), dyn_bps)
+        else:
+            eff_bps = dyn_bps
+        caps.append(float(price) * float(eff_bps) / 10000.0)
+    return min(caps) if caps else None
+
+
 def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bool) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
@@ -202,11 +227,84 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         print()
 
 
+def gate_scan(profile: str, disable_liquidity: bool, top: int, rr_target: float) -> None:
+    cfg = build_short_term_config()
+    apply_profile_overrides(cfg, profile)
+    cfg.symbols = None  # scan the profile universe
+    cfg.force_refresh_candles = True
+    if disable_liquidity:
+        cfg.min_volume_24h = 0
+        cfg.min_volume_market_cap_ratio = 0
+
+    finder = ShortTermCryptoFinder(config=cfg)
+    coins = finder.get_cryptocurrencies_to_analyze(limit=None, symbols=None)
+    if not coins:
+        print("No symbols retrieved (check connectivity or liquidity filters).")
+        return
+
+    rows = []
+    for coin in coins:
+        product_id = coin["product_id"]
+        df = finder.get_historical_data(product_id, days=cfg.analysis_days)
+        if df is None or df.empty:
+            continue
+        tech = finder.calculate_technical_indicators(df)
+        mom = finder.calculate_momentum_score(df)
+        chg = finder._calculate_price_changes_from_history(df)
+        long_m = finder._build_long_metrics(coin, df, tech, mom, chg)
+        short_m = finder._build_short_metrics(coin, df, tech, mom, chg)
+        price = float(coin.get("current_price") or 0.0)
+        cap = _effective_atr_cap(price, getattr(cfg, "max_atr_usd", None), getattr(cfg, "max_atr_bps", None))
+        atr = float(tech.get("atr") or 0.0)
+        atr_bps = (atr / price * 10_000) if price > 0 else None
+        cap_bps = (cap / price * 10_000) if (cap and price > 0) else None
+        headroom_bps = (cap_bps - atr_bps) if (cap_bps is not None and atr_bps is not None) else None
+        def _rr_gap(m):
+            if not m:
+                return None
+            try:
+                rr = float(m.risk_reward_ratio)
+                return max(0.0, rr_target - rr)
+            except Exception:
+                return None
+        gaps = [
+            ("LONG", _rr_gap(long_m), getattr(long_m, "risk_reward_ratio", None)),
+            ("SHORT", _rr_gap(short_m), getattr(short_m, "risk_reward_ratio", None)),
+        ]
+        gaps = [g for g in gaps if g[1] is not None]
+        if not gaps:
+            continue
+        gaps.sort(key=lambda x: x[1])
+        best_side, best_gap, best_rr = gaps[0]
+        rows.append({
+            "symbol": coin["symbol"],
+            "product": product_id,
+            "best_side": best_side,
+            "rr_gap": best_gap,
+            "rr": best_rr,
+            "headroom_bps": headroom_bps,
+            "atr_bps": atr_bps,
+            "cap_bps": cap_bps,
+        })
+
+    rows.sort(key=lambda r: (r["rr_gap"] if r["rr_gap"] is not None else 1e9,
+                             -(r["headroom_bps"] if r["headroom_bps"] is not None else -1e9)))
+    print(f"Top {min(top, len(rows))} closest to RR {rr_target}:")
+    for row in rows[:top]:
+        hr = row["headroom_bps"]
+        hr_txt = "n/a"
+        if hr is not None:
+            hr_txt = f"{hr:+.0f} bps"
+        cap_txt = f"{row['cap_bps']:.0f} bps" if row['cap_bps'] is not None else "n/a"
+        atr_txt = f"{row['atr_bps']:.0f} bps" if row['atr_bps'] is not None else "n/a"
+        print(f"{row['symbol']} ({row['product']}) {row['best_side']} RR={row['rr']:.2f} (gap {row['rr_gap']:.2f}) | "
+              f"ATR {atr_txt}, cap {cap_txt}, headroom {hr_txt}")
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Print snapshot metrics for specific symbols.")
     parser.add_argument(
         "--symbols",
-        required=True,
+        required=False,
         help="Comma-separated symbols (e.g., BTC,ETH).",
     )
     parser.add_argument(
@@ -220,8 +318,31 @@ def main() -> None:
         action="store_true",
         help="Disable liquidity filters (min_volume, volume/market-cap ratio).",
     )
+    parser.add_argument(
+        "--gate-scan",
+        action="store_true",
+        help="Scan entire profile universe and print top symbols closest to RR/ATR gates (ignores --symbols).",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=15,
+        help="How many symbols to show in gate-scan mode (default: 15).",
+    )
+    parser.add_argument(
+        "--rr-target",
+        type=float,
+        default=2.0,
+        help="RR target used for gate-scan gap calculations (default: 2.0).",
+    )
     args = parser.parse_args()
 
+    if args.gate_scan:
+        gate_scan(profile=args.profile, disable_liquidity=args.no_liquidity_filter, top=args.top, rr_target=args.rr_target)
+        return
+
+    if not args.symbols:
+        parser.error("No symbols provided after parsing.")
     syms = _parse_symbols(args.symbols)
     if not syms:
         parser.error("No symbols provided after parsing.")
