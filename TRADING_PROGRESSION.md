@@ -12,6 +12,12 @@
 - breakout_autotrade: multiple near SHORT breakdowns logged, but no trigger (price hasn’t closed through the swing with RR≥2).
 - Snapshot (07:00 UTC): BTC 90,156; ATR7=3,458 (cap binding, -59 bps headroom); ETH 3,201; ATR7=187 (cap binding, -234 bps headroom); XRP ATR7 ~0.10 (-111 bps headroom); SOL ATR7 ~8.58 (-254 bps headroom). RRs still sub-2 across the board.
 
+## December 10, 2025 (Night) - Two Trades Closed
+- FARTCOIN-PERP long: TP hit (opened 17:52Z, closed 19:00Z) at ~4.75R on notional (+11.8% of position); clean exit per plan.
+- ZK-PERP short: SL hit (opened 17:49Z, closed 20:17Z) at -3.08% of position (~-7.7 bps on notional); taken per plan.
+- Net: one TP, one SL from the first batch after a month of no signals. ATR tiering may have helped surface these; continue to monitor if more alts meet gates.
+
+
 ## December 10, 2025 (Evening) - Finder Finally Surfaced Trades
 - First valid finder_short.txt in ~1 month (7 opps). Took two trades: ZK PERP short, FARTCOIN PERP long (both ~2.1R brackets). Unsure if the tiered ATR bps cap change tipped it, but signals reappeared.
 - List highlights: mix of alts (ZK, FARTCOIN, JASMY, POPCAT, ZORA), a SOL short, and even USDT short. ATR caps now bind across assets; RR=2+ printed for all seven.
@@ -35,10 +41,6 @@
 - List highlights: mix of alts (ZK, FARTCOIN, JASMY, POPCAT, ZORA), a SOL short, and even USDT short. ATR caps now bind across assets; RR=2+ printed for all seven.
 - Action: holding ZK/FARTCOIN per plan; monitor the rest if risk budget allows. Stay strict on stops/TPs.
 
-## December 10, 2025 (Night) - Two Trades Closed
-- FARTCOIN-PERP long: TP hit (opened 17:52Z, closed 19:00Z) at ~4.75R on notional (+11.8% of position); clean exit per plan.
-- ZK-PERP short: SL hit (opened 17:49Z, closed 20:17Z) at -3.08% of position (~-7.7 bps on notional); taken per plan.
-- Net: one TP, one SL from the first batch after a month of no signals. ATR tiering may have helped surface these; continue to monitor if more alts meet gates.
 
 ## December 11, 2025 - Signals Surge, RRs Still Sub-2
 - short_term_crypto_finder: Email batch overnight with >5 candidates (finder_short.txt now lists 7 opps). RR remains <2 on majors (BTC long/short 0.31/0.80; ETH 0.78/0.29; XRP 0.25/0.60; SOL 0.25/0.80). ATR caps binding (e.g., BTC cap ~325 bps; ETH cap ~350 bps; alts ~400 bps), but RR geometry still the blocker.
