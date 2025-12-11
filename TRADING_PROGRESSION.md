@@ -12,6 +12,7 @@
 - breakout_autotrade: multiple near SHORT breakdowns logged, but no trigger (price hasn’t closed through the swing with RR≥2).
 - Snapshot (07:00 UTC): BTC 90,156; ATR7=3,458 (cap binding, -59 bps headroom); ETH 3,201; ATR7=187 (cap binding, -234 bps headroom); XRP ATR7 ~0.10 (-111 bps headroom); SOL ATR7 ~8.58 (-254 bps headroom). RRs still sub-2 across the board.
 - Added observability: `scripts/symbol_snapshot.py --gate-scan` now surfaces the closest symbols to RR/ATR gates across the profile, so we can see when the universe is near tradable without touching filters.
+- Gate-scan takeaways: the only symbols clearing both gates were stables (USDT/USD1) — treat as non-actionable. A couple of alts (KITE, FARTCOIN) had RR≥2 but ATR was ~800–1000 bps over cap, so volatility still blocks them. The rest of the “closest 15” were still 0.5–1.2 RR away and mostly above ATR caps, meaning most of the universe remains far from true tradable conditions.
 
 ## December 10, 2025 (Night) - Two Trades Closed
 - FARTCOIN-PERP long: TP hit (opened 17:52Z, closed 19:00Z) at ~4.75R on notional (+11.8% of position); clean exit per plan.
