@@ -85,6 +85,7 @@
 - Frequency: low by design. No trades if conditions are poor; downtime is acceptable.
 - Automation: breakout_autotrade runs hourly on USDC majors with $500 notional/50x, RR=2, 24h lock to avoid stacking. Near-breakouts are logged; no trade unless conditions trigger.
 - Housekeeping: `watchdog_close_old_positions.py` runs (or can run) alongside to enforce 24h expiry on open positions; `watchdog_dashboard.py` provides status/metrics visibility on active trades and cron health.
+- Observability: `scripts/symbol_snapshot.py --gate-scan` surfaces which symbols are closest to clearing RR/ATR gates (uses tiered ATR caps and RR target; defaults RR=2, top=15) to gauge how near the universe is to tradable conditions.
 - Discipline: boredom is part of the edge. Waiting is intentional; do not loosen gates out of impatience. Flat is a valid position.
 
 ## Historical Notes

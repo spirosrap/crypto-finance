@@ -89,6 +89,8 @@
 - **Monitors / Housekeeping**
   - `watchdog_close_old_positions.py`: enforces 24h expiry on open positions (optional `--no-log-closures`); use in cron alongside finder/autotrader to avoid stale trades.
   - `watchdog_dashboard.py`: status/metrics dashboard; keep it in sync with current pipelines for visibility over active trades and cron health.
+- **Observability / Scanning**
+  - `scripts/symbol_snapshot.py --gate-scan`: scans the profile universe and prints the closest symbols to the RR/ATR gates (uses finder-tiered ATR caps and RR target; defaults RR=2, top=15). Helps see which assets are nearest to qualifying without editing filters.
 
 ## Communication and Delivery Expectations
 - Be explicit about assumptions, especially around time ranges and data availability.

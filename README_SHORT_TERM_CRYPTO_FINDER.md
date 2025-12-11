@@ -49,6 +49,7 @@ stops and closer profit targets.
   `CRYPTO_RISK_PER_TRADE`, `CRYPTO_POS_CAP_PCT`, etc.).
 - **Short-Line Summaries**: Each candidate ends with a concise one-liner for
   quick triage.
+- **Gate Proximity Scan**: Use `scripts/symbol_snapshot.py --gate-scan --profile focused_no_llm_100 --top 15` to see which symbols are closest to clearing the RR/ATR gates (tiered ATR caps applied). Helpful to gauge when conditions are near tradable without loosening filters.
 
 ## Installation
 
