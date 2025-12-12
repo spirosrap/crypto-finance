@@ -11,6 +11,7 @@
 - The repeated >5‑opportunity email batches from `short_term_crypto_finder.py` have tapered off again after yesterday’s burst, so the ATR bps tiering probably wasn’t the only driver of signals returning.
 - BTC ATR7 continues to hover above 3k (cap still binding), suggesting volatility is still sticky and high‑quality windows may remain rare.
 - Mindset: fewer but cleaner trade windows should be less stressful and more profitable than forcing daily trades, while accepting that some risk is unavoidable even with strict gates.
+- Clarified tooling: finder profiles set filter/score presets and a default scan breadth, but don’t hard‑code products. In gate‑scan mode, `--scan-limit N` is just a speed knob to scan only the top N symbols from the profile‑filtered universe.
 
 ## December 11, 2025 - Signals Surge, RRs Still Sub-2
 - short_term_crypto_finder: Email batch overnight with >5 candidates (finder_short.txt now lists 7 opps). RR remains <2 on majors (BTC long/short 0.31/0.80; ETH 0.78/0.29; XRP 0.25/0.60; SOL 0.25/0.80). ATR caps binding (e.g., BTC cap ~325 bps; ETH cap ~350 bps; alts ~400 bps), but RR geometry still the blocker.
