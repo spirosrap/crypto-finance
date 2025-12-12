@@ -43,6 +43,7 @@
 - XRP: 2.0851; ATR7=0.10; RR long/short 0.61/1.70 — closest to gate but still below 2:1; intraday_range_pos ~0.95; spread ~0.48 bps.
 - SOL: 139.12; ATR7=8.17; RR 0.77/0.17; intraday_range_pos ~0.96; spread ~0.72 bps.
 - Takeaway: BTC ATR7 has stalled above the 3k cap, keeping RR suppressed; none of the majors clear the RR ≥ 2 gate. XRP short is the nearest at 1.70 but still a skip. Stay flat until ATR eases further or RR expands.
+
 ## December 9, 2025 - Near-Breakouts Faded Overnight
 - Metrics: ATR7 ~3.1–3.3k (BTC); top RR long/short ~0.8/0.3; near-breakouts=none after 00–08 UTC; trades taken=0.
 
