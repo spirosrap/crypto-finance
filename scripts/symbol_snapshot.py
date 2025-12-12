@@ -227,7 +227,13 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         print()
 
 
-def gate_scan(profile: str, disable_liquidity: bool, top: int, rr_target: float) -> None:
+def gate_scan(
+    profile: str,
+    disable_liquidity: bool,
+    top: int,
+    rr_target: float,
+    scan_limit: Optional[int],
+) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
     cfg.symbols = None  # scan the profile universe
@@ -237,7 +243,7 @@ def gate_scan(profile: str, disable_liquidity: bool, top: int, rr_target: float)
         cfg.min_volume_market_cap_ratio = 0
 
     finder = ShortTermCryptoFinder(config=cfg)
-    coins = finder.get_cryptocurrencies_to_analyze(limit=None, symbols=None)
+    coins = finder.get_cryptocurrencies_to_analyze(limit=scan_limit, symbols=None)
     if not coins:
         print("No symbols retrieved (check connectivity or liquidity filters).")
         return
@@ -335,10 +341,22 @@ def main() -> None:
         default=2.0,
         help="RR target used for gate-scan gap calculations (default: 2.0).",
     )
+    parser.add_argument(
+        "--scan-limit",
+        type=int,
+        default=None,
+        help="Limit how many symbols to scan in gate-scan mode (e.g., 100 or 200). Default scans full profile universe.",
+    )
     args = parser.parse_args()
 
     if args.gate_scan:
-        gate_scan(profile=args.profile, disable_liquidity=args.no_liquidity_filter, top=args.top, rr_target=args.rr_target)
+        gate_scan(
+            profile=args.profile,
+            disable_liquidity=args.no_liquidity_filter,
+            top=args.top,
+            rr_target=args.rr_target,
+            scan_limit=args.scan_limit,
+        )
         return
 
     if not args.symbols:
