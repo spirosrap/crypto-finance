@@ -1,12 +1,12 @@
 # Crypto Finance — Current Pipeline (Dec 2025)
 
 ## Current Focus
-- **Short-Term Crypto Finder (`short_term_crypto_finder.py`)**: Strict RR ≥ 2, ATR(7) gated (capped at ~3k USD), hard SL/TP. Runs on USDC pairs; logs to `logs/short_term_crypto_finder/`.
+- **Short-Term Crypto Finder (`short_term_crypto_finder.py`)**: Strict RR ≥ 2, ATR(7) gated with tiered caps (3k USD plus bps tiers ≈325/350/400/450 by price bands; tighter cap wins), hard SL/TP. Runs on USDC pairs; logs to `logs/short_term_crypto_finder/`.
 - **Breakout Autotrade (`scripts/run_breakout_autotrade.py`)**: Hourly scan of USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with fixed 2R structure, $500 notional / 50x, 24h lock to avoid stacking. Writes finder-format output; uses Coinbase primary with Kraken fallback. Near-breakouts are logged.
 - **Safety First**: Downtime is expected; no trades when RR/ATR gates fail. Flat is acceptable.
 
 ## Active Tools
-- **Finders**: `short_term_crypto_finder.py`, `scripts/symbol_snapshot.py` for targeted snapshots.
+- **Finders**: `short_term_crypto_finder.py`, `scripts/symbol_snapshot.py` for targeted snapshots. `scripts/symbol_snapshot.py --gate-scan [--scan-limit N]` shows which symbols are closest to clearing RR/ATR gates without loosening filters.
 - **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock).
 - **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).
 - **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text.
@@ -19,6 +19,7 @@
 
 ## Quick Start (Current Flow)
 1) Run snapshots: `python scripts/symbol_snapshot.py --symbols BTC,ETH --profile focused_no_llm_100`
+   - Gate proximity view (optional): `python scripts/symbol_snapshot.py --gate-scan --profile focused_no_llm_100 --top 15 --scan-limit 100`
 2) Let cron handle:
    - `short_term_crypto_finder.py` (daily) → feed results to `add_position_from_finder.py` or `add_top5_from_finder.py` to stage/execute trades.
    - `run_breakout_autotrade.py` (hourly) for 2R breakouts on USDC majors.
