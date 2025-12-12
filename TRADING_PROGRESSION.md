@@ -5,7 +5,12 @@
 - [November 2025](#november-2025)
 
 ## December 2025
-**State at a glance (latest):** ATR7 cooling but still >3k on BTC; RR remains sub-2 on majors; zero trades taken; autotrader logging near-breakouts only.
+**State at a glance (latest):** Signals returned briefly (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only.
+
+## December 12, 2025 - Email Burst Faded, Volatility Still Sticky
+- The repeated >5‑opportunity email batches from `short_term_crypto_finder.py` have tapered off again after yesterday’s burst, so the ATR bps tiering probably wasn’t the only driver of signals returning.
+- BTC ATR7 continues to hover above 3k (cap still binding), suggesting volatility is still sticky and high‑quality windows may remain rare.
+- Mindset: fewer but cleaner trade windows should be less stressful and more profitable than forcing daily trades, while accepting that some risk is unavoidable even with strict gates.
 
 ## December 11, 2025 - Signals Surge, RRs Still Sub-2
 - short_term_crypto_finder: Email batch overnight with >5 candidates (finder_short.txt now lists 7 opps). RR remains <2 on majors (BTC long/short 0.31/0.80; ETH 0.78/0.29; XRP 0.25/0.60; SOL 0.25/0.80). ATR caps binding (e.g., BTC cap ~325 bps; ETH cap ~350 bps; alts ~400 bps), but RR geometry still the blocker.
@@ -13,8 +18,6 @@
 - Snapshot (07:00 UTC): BTC 90,156; ATR7=3,458 (cap binding, -59 bps headroom); ETH 3,201; ATR7=187 (cap binding, -234 bps headroom); XRP ATR7 ~0.10 (-111 bps headroom); SOL ATR7 ~8.58 (-254 bps headroom). RRs still sub-2 across the board.
 - Added observability: `scripts/symbol_snapshot.py --gate-scan` now surfaces the closest symbols to RR/ATR gates across the profile, so we can see when the universe is near tradable without touching filters.
 - Gate-scan takeaways: the only symbols clearing both gates were stables (USDT/USD1) — treat as non-actionable. A couple of alts (KITE, FARTCOIN) had RR≥2 but ATR was ~800–1000 bps over cap, so volatility still blocks them. The rest of the “closest 15” were still 0.5–1.2 RR away and mostly above ATR caps, meaning most of the universe remains far from true tradable conditions.
-- Later update: the repeated >5‑opportunity email batches tapered off again, so the ATR bps tiering probably wasn’t the only driver of yesterday’s burst. BTC ATR7 is still hovering above 3k, suggesting volatility remains sticky.
-- Mindset: fewer but cleaner windows should be less stressful and (hopefully) more profitable than forcing daily trades; still keeping humility that risk is always there even with strict gates.
 
 ## December 10, 2025 (Night) - Two Trades Closed
 - FARTCOIN-PERP long: TP hit (opened 17:52Z, closed 19:00Z) at ~4.75R on notional (+11.8% of position); clean exit per plan.
