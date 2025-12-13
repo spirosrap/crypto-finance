@@ -1,0 +1,121 @@
+
+====================================================================================================
+SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
+====================================================================================================
+Generated on (UTC): 2025-12-13 10:17:32Z
+Total opportunities listed: 3
+====================================================================================================
+
+1. USDT (Tether) — SHORT
+--------------------------------------------------
+Data Timestamp (UTC): 2025-12-13 00:00:00Z
+Price: $1.000100
+Market Cap: $186,244,305,763 (Rank #3)
+24h Volume: $62,810,351,251
+24h Change: 0.00%
+7d Change: 0.00%
+30d Change: 0.07%
+ATH: $1.32 (Date: 2018-07-24)
+ATL: $0.572521 (Date: 2015-03-02)
+Volatility (30d, ann.): 0.5%
+Sharpe Ratio: -2.27
+Sortino Ratio: -3.52
+Max Drawdown: -0.29%
+RSI (14): 45.3
+MACD Signal: BEARISH
+BB Position: NEUTRAL
+Trend Strength: -0.00% per day
+Momentum Score: 9.3/100
+Fundamental Score: 89.5/100
+Technical Score: 56.8/100
+Risk Score: 30.0/100
+Risk Level: MEDIUM_LOW
+Overall Score: 43.41/100
+
+💼 TRADING LEVELS (SHORT):
+Entry Price: $1.000100
+Stop Loss: $1.001100
+Take Profit: $0.995100
+Risk:Reward Ratio: 2.4:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $5.00 (0.50%)
+Potential SL P&L: $-1.00 (-0.10%)
+
+2. FARTCOIN (Fartcoin) — SHORT
+--------------------------------------------------
+Data Timestamp (UTC): 2025-12-13 00:00:00Z
+Price: $0.362800
+Market Cap: $363,235,687 (Rank #190)
+24h Volume: $117,077,971
+24h Change: -7.26%
+7d Change: -2.00%
+30d Change: 55.22%
+ATH: $2.48 (Date: 2025-01-19)
+ATL: $0.020029 (Date: 2024-10-30)
+Volatility (30d, ann.): 155.0%
+Sharpe Ratio: -0.69
+Sortino Ratio: -1.03
+Max Drawdown: -77.58%
+RSI (14): 54.0
+MACD Signal: BEARISH
+BB Position: NEUTRAL
+Trend Strength: -0.13% per day
+Momentum Score: 7.5/100
+Fundamental Score: 91.5/100
+Technical Score: 38.8/100
+Risk Score: 47.1/100
+Risk Level: MEDIUM
+Overall Score: 39.50/100
+
+💼 TRADING LEVELS (SHORT):
+Entry Price: $0.362800
+Stop Loss: $0.371445
+Take Profit: $0.344559
+Risk:Reward Ratio: 2.1:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $50.28 (5.03%)
+Potential SL P&L: $-23.83 (-2.38%)
+
+3. USD1 (USD1) — SHORT
+--------------------------------------------------
+Data Timestamp (UTC): 2025-12-13 00:00:00Z
+Price: $0.999100
+Market Cap: $2,718,916,868 (Rank #49)
+24h Volume: $284,645,478
+24h Change: 0.00%
+7d Change: 0.00%
+30d Change: 0.08%
+ATH: $1.02 (Date: 2025-05-12)
+ATL: $0.989633 (Date: 2025-10-01)
+Volatility (30d, ann.): 0.6%
+Sharpe Ratio: -1.94
+Sortino Ratio: -3.01
+Max Drawdown: -0.29%
+RSI (14): 49.8
+MACD Signal: BEARISH
+BB Position: NEUTRAL
+Trend Strength: -0.00% per day
+Momentum Score: 39.6/100
+Fundamental Score: 83.5/100
+Technical Score: 60.2/100
+Risk Score: 41.1/100
+Risk Level: MEDIUM
+Overall Score: 33.30/100
+
+💼 TRADING LEVELS (SHORT):
+Entry Price: $0.999100
+Stop Loss: $1.000099
+Take Profit: $0.994104
+Risk:Reward Ratio: 2.4:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $5.00 (0.50%)
+Potential SL P&L: $-1.00 (-0.10%)
+
+Short-Line Summaries
+--------------------------------------------------
+1. Summary: USDT short – score 43.41, 2.4× RR; RSI 45; bearish MACD momentum; risk medium low.
+2. Summary: FARTCOIN short – score 39.50, 2.1× RR; RSI 54; bearish MACD momentum; risk medium; trend -0.13%/d.
+3. Summary: USD1 short – score 33.30, 2.4× RR; RSI 50; bearish MACD momentum; risk medium.

@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class SimpleChatGPTTradesAnalyzer:
-    def __init__(self, csv_file_path: str = "chatgpt_trades.csv"):
+    def __init__(self, csv_file_path: str = "trade_logs/chatgpt_trades.csv"):
         self.csv_file_path = csv_file_path
         self.trades_df = None
         self.analyzed_trades = []

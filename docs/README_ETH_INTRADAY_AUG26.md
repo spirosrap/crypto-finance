@@ -78,26 +78,26 @@ This document describes the ETH intraday trading strategy implemented in `crypto
 - **Secondary Timeframe**: 15-minute candles for analysis
 - **Volume Period**: 20-period SMA for volume confirmation
 - **State Tracking**: JSON files for each strategy to prevent duplicate triggers
-- **Logging**: All trades logged to `chatgpt_trades.csv`
+- **Logging**: All trades logged to `trade_logs/chatgpt_trades.csv`
 
 ## Usage
 ```bash
 # Monitor both LONG and SHORT strategies (default)
-python crypto_alert_monitor_eth.py
+python retired_tools/crypto_alert_monitor_eth.py
 
 # Monitor only LONG strategies
-python crypto_alert_monitor_eth.py --direction LONG
+python retired_tools/crypto_alert_monitor_eth.py --direction LONG
 
 # Monitor only SHORT strategies
-python crypto_alert_monitor_eth.py --direction SHORT
+python retired_tools/crypto_alert_monitor_eth.py --direction SHORT
 
 # Test CSV logging functionality
-python crypto_alert_monitor_eth.py --test-csv
+python retired_tools/crypto_alert_monitor_eth.py --test-csv
 ```
 
 ## Files
-- **Main Script**: `crypto_alert_monitor_eth.py`
-- **Trade Log**: `chatgpt_trades.csv`
+- **Main Script**: `retired_tools/crypto_alert_monitor_eth.py`
+- **Trade Log**: `trade_logs/chatgpt_trades.csv`
 - **Alert Log**: `eth_alert_debug.log`
 - **State Files**: 
   - `eth_breakout_trigger_state.json`

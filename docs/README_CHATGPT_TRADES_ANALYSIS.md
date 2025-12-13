@@ -1,10 +1,10 @@
 # ChatGPT Trades Analysis
 
-This repository contains two programs to analyze trades from `chatgpt_trades.csv` and determine if they were wins or losses based on whether the price action (including wicks) reached the take profit or stop loss levels.
+This repository contains two legacy programs to analyze trades from `trade_logs/chatgpt_trades.csv` and determine if they were wins or losses based on whether the price action (including wicks) reached the take profit or stop loss levels.
 
 ## Programs Overview
 
-### 1. Simple Analyzer (`analyze_chatgpt_trades_simple.py`)
+### 1. Simple Analyzer (`retired_tools/analyze_chatgpt_trades_simple.py`)
 - **Purpose**: Basic analysis without requiring API access
 - **Features**: 
   - Loads and analyzes trades from CSV
@@ -13,7 +13,7 @@ This repository contains two programs to analyze trades from `chatgpt_trades.csv
   - Exports results to CSV
 - **Use Case**: When you want quick analysis without historical price data
 
-### 2. Full Analyzer (`analyze_chatgpt_trades.py`)
+### 2. Full Analyzer (`retired_tools/analyze_chatgpt_trades.py`)
 - **Purpose**: Complete analysis with actual historical price data
 - **Features**:
   - Fetches historical candle data for each trade
@@ -57,7 +57,7 @@ API_SECRET_PERPS = "your_api_secret"
 Run the simple analyzer to get basic statistics and simulations:
 
 ```bash
-python analyze_chatgpt_trades_simple.py
+python retired_tools/analyze_chatgpt_trades_simple.py
 ```
 
 **Output**:
@@ -69,7 +69,7 @@ python analyze_chatgpt_trades_simple.py
 Run the full analyzer to get actual trade outcomes based on historical data:
 
 ```bash
-python analyze_chatgpt_trades.py
+python retired_tools/analyze_chatgpt_trades.py
 ```
 
 **Output**:
@@ -79,7 +79,7 @@ python analyze_chatgpt_trades.py
 
 ## CSV File Format
 
-The programs expect a CSV file named `chatgpt_trades.csv` with the following columns:
+The programs expect a CSV file at `trade_logs/chatgpt_trades.csv` with the following columns:
 
 | Column | Description | Example |
 |--------|-------------|---------|
