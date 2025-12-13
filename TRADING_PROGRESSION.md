@@ -13,6 +13,7 @@
 - SOL: RR remains far (LONG 0.25 / SHORT 0.80) with ATR above cap (-193 bps headroom); not near.
 - XRP: RR still far (LONG 0.31 / SHORT 0.80) with ATR slightly above cap (-55 bps headroom); not near.
 - Takeaway: majors are mostly still blocked, but BTC is trending toward a tradable window if ATR continues easing and RR can push above 2.
+- Execution: today’s `short_term_crypto_finder.py` cron surfaced a FARTCOIN short in `finder_short.txt`, and I took the trade per plan.
 
 ## December 12, 2025 - Email Burst Faded, Volatility Still Sticky
 - The repeated >5‑opportunity email batches from `short_term_crypto_finder.py` have tapered off again after yesterday’s burst, so the ATR bps tiering probably wasn’t the only driver of signals returning.
