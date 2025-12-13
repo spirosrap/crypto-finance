@@ -13,6 +13,13 @@
 - Mindset: fewer but cleaner trade windows should be less stressful and more profitable than forcing daily trades, while accepting that some risk is unavoidable even with strict gates.
 - Clarified tooling: finder profiles set filter/score presets and a default scan breadth, but don’t hard‑code products. In gate‑scan mode, `--scan-limit N` is just a speed knob to scan only the top N symbols from the profile‑filtered universe.
 
+## December 13, 2025 - BTC RR Rebounds as ATR7 Drifts Toward 3k
+- BTC: ATR7=3,190 (only ~-28 bps over the 325 bps cap) and RR has improved sharply (LONG 1.42 / SHORT 1.47), now within ~0.5–0.6 of the 2:1 gate. This is the closest BTC has been to qualifying in weeks, suggesting conditions are stabilising.
+- ETH: ATR still well above its cap (-210 bps headroom) and RRs remain below 2 (LONG 0.98 / SHORT 0.57) despite momentum picking up; still not close.
+- SOL: RR remains far (LONG 0.25 / SHORT 0.80) with ATR above cap (-193 bps headroom); not near.
+- XRP: RR still far (LONG 0.31 / SHORT 0.80) with ATR slightly above cap (-55 bps headroom); not near.
+- Takeaway: majors are mostly still blocked, but BTC is trending toward a tradable window if ATR continues easing and RR can push above 2.
+
 ## December 11, 2025 - Signals Surge, RRs Still Sub-2
 - short_term_crypto_finder: Email batch overnight with >5 candidates (finder_short.txt now lists 7 opps). RR remains <2 on majors (BTC long/short 0.31/0.80; ETH 0.78/0.29; XRP 0.25/0.60; SOL 0.25/0.80). ATR caps binding (e.g., BTC cap ~325 bps; ETH cap ~350 bps; alts ~400 bps), but RR geometry still the blocker.
 - breakout_autotrade: multiple near SHORT breakdowns logged, but no trigger (price hasn’t closed through the swing with RR≥2).
