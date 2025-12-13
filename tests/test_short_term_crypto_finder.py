@@ -112,6 +112,19 @@ class ShortTermCryptoFinderTests(unittest.TestCase):
         self.assertIn('intraday_return_24h', metrics)
         self.assertGreater(metrics['intraday_volume_24h'], 0.0)
 
+    def test_filter_unwanted_products_excludes_stable_bases(self) -> None:
+        raw = [
+            {"product_id": "BTC-USDC", "symbol": "BTC"},
+            {"product_id": "USDT-USDC", "symbol": "USDT"},
+            {"product_id": "USD1-USDC", "symbol": "USD1"},
+            {"product_id": "DAI-USDC", "symbol": "DAI"},
+        ]
+
+        filtered = ShortTermCryptoFinder._filter_unwanted_products(raw)
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["product_id"], "BTC-USDC")
+
 
 class ShortTermFinderCLITests(unittest.TestCase):
     def setUp(self) -> None:
