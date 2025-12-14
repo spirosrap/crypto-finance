@@ -13,6 +13,7 @@
 - Trade: `SYRUP-PERP-INTX` LONG — entry `0.2775`, TP `0.29371`, SL `0.26982`.
 - Size: `5%` of `$5,000` (≈ `$250` position notional), leverage `50x`, expiry `30d`.
 - Planned PnL vs position: TP `+$14.60` (`+5.84%`) | SL `-$6.92` (`-2.77%`).
+- Outcome: SL hit (loss).
 
 ## December 13, 2025 - BTC RR Rebounds as ATR7 Drifts Toward 3k
 - BTC: ATR7=3,190 (only ~-28 bps over the 325 bps cap) and RR has improved sharply (LONG 1.42 / SHORT 1.47), now within ~0.5–0.6 of the 2:1 gate. This is the closest BTC has been to qualifying in weeks, suggesting conditions are stabilising.
