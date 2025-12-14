@@ -14,6 +14,17 @@
 - Size: `5%` of `$5,000` (≈ `$250` position notional), leverage `50x`, expiry `30d`.
 - Planned PnL vs position: TP `+$14.60` (`+5.84%`) | SL `-$6.92` (`-2.77%`).
 - Outcome: SL hit (loss).
+- Gate-scan (top 10 closest to RR 2.0): several alts are near/at RR, but most are still blocked by ATR being far above cap (headroom negative). This suggests the market has “almost tradable” RR geometry, but volatility is still too elevated for the strict ATR filter to allow most of these.
+  - XCN (XCN-USDC) SHORT RR=2.25 (gap 0.00) | ATR 1210 bps, cap 400 bps, headroom -810 bps
+  - BARD (BARD-USDC) LONG RR=1.79 (gap 0.21) | ATR 1210 bps, cap 400 bps, headroom -810 bps
+  - ZORA (ZORA-USDC) LONG RR=1.25 (gap 0.75) | ATR 833 bps, cap 400 bps, headroom -433 bps
+  - PAXG (PAXG-USDC) LONG RR=0.80 (gap 1.20) | ATR 125 bps, cap 350 bps, headroom +225 bps
+  - LINK (LINK-USDC) SHORT RR=0.80 (gap 1.20) | ATR 614 bps, cap 400 bps, headroom -214 bps
+  - SUI (SUI-USDC) LONG RR=0.80 (gap 1.20) | ATR 718 bps, cap 400 bps, headroom -318 bps
+  - CRV (CRV-USDC) SHORT RR=0.80 (gap 1.20) | ATR 741 bps, cap 400 bps, headroom -341 bps
+  - AAVE (AAVE-USDC) LONG RR=0.80 (gap 1.20) | ATR 681 bps, cap 400 bps, headroom -281 bps
+  - SYRUP (SYRUP-USDC) SHORT RR=0.80 (gap 1.20) | ATR 961 bps, cap 400 bps, headroom -561 bps
+  - FARTCOIN (FARTCOIN-USDC) SHORT RR=0.80 (gap 1.20) | ATR 1135 bps, cap 400 bps, headroom -735 bps
 
 ## December 13, 2025 - BTC RR Rebounds as ATR7 Drifts Toward 3k
 - BTC: ATR7=3,190 (only ~-28 bps over the 325 bps cap) and RR has improved sharply (LONG 1.42 / SHORT 1.47), now within ~0.5–0.6 of the 2:1 gate. This is the closest BTC has been to qualifying in weeks, suggesting conditions are stabilising.
