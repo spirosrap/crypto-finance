@@ -731,7 +731,7 @@ def main() -> None:
                             "Unrealized %": "{:+.4f}%",
                         }
                     ),
-                    width="stretch",
+                    use_container_width=True,
                 )
             else:
                 columns_to_use = [
@@ -768,7 +768,7 @@ def main() -> None:
                             "Hours": "{:.2f}",
                         }
                     ),
-                    width="stretch",
+                    use_container_width=True,
                 )
 
     def format_compact(value: float) -> str:
@@ -883,13 +883,13 @@ def main() -> None:
     st.markdown("---")
     st.subheader("Charts")
     chart_df = daily.set_index("date")
-    st.line_chart(chart_df["equity"], height=280, width='stretch')
-    st.area_chart(chart_df["drawdown"], height=280, width='stretch')
-    st.bar_chart(chart_df["daily_pnl"], height=280, width='stretch')
+    st.line_chart(chart_df["equity"], height=280, use_container_width=True)
+    st.area_chart(chart_df["drawdown"], height=280, use_container_width=True)
+    st.bar_chart(chart_df["daily_pnl"], height=280, use_container_width=True)
 
     st.markdown("---")
     st.subheader("Daily table")
-    st.dataframe(chart_df, width='stretch')
+    st.dataframe(chart_df, use_container_width=True)
 
     csv_bytes = chart_df.to_csv().encode("utf-8")
     st.download_button(
