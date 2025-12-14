@@ -5,7 +5,14 @@
 - [November 2025](#november-2025)
 
 ## December 2025
-**State at a glance (latest):** Signals returned briefly (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only.
+**State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only.
+
+## December 14, 2025 - Cron Surfaced a SYRUP Long
+- `short_term_crypto_finder.py` cron surfaced a new SYRUP long in `finder_short.txt`.
+- Executed via: `python add_position_from_finder.py --file finder_short.txt --portfolio-usd 5000 --leverage 50 --order market`.
+- Trade: `SYRUP-PERP-INTX` LONG — entry `0.2775`, TP `0.29371`, SL `0.26982`.
+- Size: `5%` of `$5,000` (≈ `$250` position notional), leverage `50x`, expiry `30d`.
+- Planned PnL vs position: TP `+$14.60` (`+5.84%`) | SL `-$6.92` (`-2.77%`).
 
 ## December 13, 2025 - BTC RR Rebounds as ATR7 Drifts Toward 3k
 - BTC: ATR7=3,190 (only ~-28 bps over the 325 bps cap) and RR has improved sharply (LONG 1.42 / SHORT 1.47), now within ~0.5–0.6 of the 2:1 gate. This is the closest BTC has been to qualifying in weeks, suggesting conditions are stabilising.
