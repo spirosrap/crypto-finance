@@ -1,0 +1,47 @@
+
+====================================================================================================
+SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
+====================================================================================================
+Generated on (UTC): 2025-12-15 10:17:29Z
+Total opportunities listed: 1
+====================================================================================================
+
+1. FET (Artificial Superintelligence Alliance) — SHORT
+--------------------------------------------------
+Data Timestamp (UTC): 2025-12-15 00:00:00Z
+Price: $0.239600
+Market Cap: $554,768,202 (Rank #133)
+24h Volume: $66,244,887
+24h Change: -0.08%
+7d Change: -9.07%
+30d Change: -12.27%
+ATH: $3.45 (Date: 2024-03-28)
+ATL: $0.008170 (Date: 2020-03-13)
+Volatility (30d, ann.): 102.2%
+Sharpe Ratio: -3.57
+Sortino Ratio: -5.97
+Max Drawdown: -68.90%
+RSI (14): 44.1
+MACD Signal: BULLISH
+BB Position: NEUTRAL
+Trend Strength: -0.11% per day
+Momentum Score: 84.2/100
+Fundamental Score: 94.5/100
+Technical Score: 70.6/100
+Risk Score: 43.3/100
+Risk Level: MEDIUM
+Overall Score: 39.98/100
+
+💼 TRADING LEVELS (SHORT):
+Entry Price: $0.239600
+Stop Loss: $0.244455
+Take Profit: $0.228764
+Risk:Reward Ratio: 2.2:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $45.23 (4.52%)
+Potential SL P&L: $-20.26 (-2.03%)
+
+Short-Line Summaries
+--------------------------------------------------
+1. Summary: FET short – score 39.98, 2.2× RR; RSI 44; bullish MACD fade; risk medium; trend -0.11%/d.
