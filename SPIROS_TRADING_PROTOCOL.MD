@@ -81,12 +81,19 @@
 
 ## 11. Current Style (Dec 2025)
 - Identity: short-term systematic trader (intraday-to-24h), strict RR/ATR gates, willing to sit flat for days. Not classic day trading; not multi-day swing.
-- Playbooks: short_term_crypto_finder (RR>=2, ATR gate) and breakout_autotrade (fixed 2R structure). Both use hard SL/TP; optional 24h timeout for closes.
+- Playbooks: short_term_crypto_finder (RR>=2 with ATR clipping cap) and breakout_autotrade (fixed 2R structure). Both use hard SL/TP; optional 24h timeout for closes.
 - Frequency: low by design. No trades if conditions are poor; downtime is acceptable.
 - Automation: breakout_autotrade runs hourly on USDC majors with $500 notional/50x, RR=2, 24h lock to avoid stacking. Near-breakouts are logged; no trade unless conditions trigger.
 - Housekeeping: `watchdog_close_old_positions.py` runs (or can run) alongside to enforce 24h expiry on open positions; `watchdog_dashboard.py` provides status/metrics visibility on active trades and cron health.
 - Observability: `scripts/symbol_snapshot.py --gate-scan` surfaces which symbols are closest to clearing RR/ATR gates (uses tiered ATR caps and RR target; defaults RR=2, top=15) to gauge how near the universe is to tradable conditions.
 - Discipline: boredom is part of the edge. Waiting is intentional; do not loosen gates out of impatience. Flat is a valid position.
+- ATR handling (important):
+  - Timeframe: the strategy uses **daily ATR(7)** (ATR computed on daily candles with `atr_period=7`), not intraday ATR.
+  - “Cap” vs “gate”: the short-term finder does **not** reject trades because ATR is high. Instead it **clips** ATR before using it in stop/TP sizing and RR math:
+    - Conceptually: `atr_used = min(atr_raw, SHORT_MAX_ATR_USD, price * eff_bps / 10_000)`.
+    - `eff_bps` is tiered by price (≈325 bps for BTC, 350 bps for ETH, 400 bps for mid/large alts, 450 bps for small alts) and bounded by `SHORT_MAX_ATR_BPS` if set.
+  - Meaning: if ATR is above cap, the model uses the capped ATR value. This can prevent “ATR spikes” from making everything look untradable, but it also means stops/TPs can be tight relative to real volatility, increasing stop-out risk.
+  - Practical read: in `scripts/symbol_snapshot.py --gate-scan`, **ATR within cap** means raw ATR <= cap; **ATR CLIPPED** means raw ATR > cap (the model is relying on the cap).
 
 ## Historical Notes
 - Prior iterations leaned on short_term_crypto_finder with 24h hold rule and balanced 5-trade baskets; tightened RR/ATR filters in late 2025.
@@ -121,7 +128,7 @@
 - **Short-Term Finder**: uses daily candles plus 3/10/21-day pulses and 1.3× ATR stops; expect holds of 3–15 trading days. Runs rely on the current daily candle, so reruns intraday introduce noise until the UTC session closes.
 - **Daily Rotation Guardrails**: it is acceptable to close a short-term idea inside a day and replace it with fresher momentum, provided (a) the updated scan shows a lower score/risk reclassification or better risk-reward elsewhere, (b) the instrument remains liquid (tight spread, stable depth), and (c) costs (spread + fees) stay within plan. Avoid churning purely because the list reshuffled.
 - **Refresh Rhythm**: anchor one scan just after the Coinbase daily bar (≈00:00 UTC); optional midday check is fine for fast conditions. Document every forced exit reason in `trade_logs/` and respect existing stop/target discipline when holding between refreshes.
-- **ATR Gatekeeper**: The short-term finder’s hard RR≥2:1 gate is dominated by daily ATR (default ATR7 on daily candles). Elevated ATR (wide stops) + capped TP near range extremes will block most trades. Expect more candidates when ATR7 cools toward ~1–2k on BTC (historical quieter range) and price isn’t pinned at the range edge.
+- **ATR “Gatekeeper” (nuance)**: The RR≥2:1 filter is influenced by daily ATR because ATR affects stop sizing and the RR risk-distance floor. However, the short-term finder uses an ATR **clip** (USD + bps caps) rather than a hard “reject if ATR too high” rule. True favorable conditions show up when many symbols have RR≥2 **and** ATR is **within cap** (not clipped) across the universe.
 - **RR Confirmation**: Use `scripts/symbol_snapshot.py` as a spot check; only re-engage sizing when multiple symbols show RR≥2.0 with current filters, not just one-off stables or odd tickers.
 
 ## 13. Current Short-Term Execution (Nov 2025)
