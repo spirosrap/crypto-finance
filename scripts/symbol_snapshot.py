@@ -298,13 +298,16 @@ def gate_scan(
     print(f"Top {min(top, len(rows))} closest to RR {rr_target}:")
     for row in rows[:top]:
         hr = row["headroom_bps"]
-        hr_txt = "n/a"
-        if hr is not None:
-            hr_txt = f"{hr:+.0f} bps"
         cap_txt = f"{row['cap_bps']:.0f} bps" if row['cap_bps'] is not None else "n/a"
         atr_txt = f"{row['atr_bps']:.0f} bps" if row['atr_bps'] is not None else "n/a"
+        if hr is None:
+            atr_gate_txt = "ATR cap n/a"
+        elif hr < 0:
+            atr_gate_txt = f"ATR CLIPPED (over cap by {abs(hr):.0f} bps)"
+        else:
+            atr_gate_txt = f"ATR within cap (+{hr:.0f} bps headroom)"
         print(f"{row['symbol']} ({row['product']}) {row['best_side']} RR={row['rr']:.2f} (gap {row['rr_gap']:.2f}) | "
-              f"ATR {atr_txt}, cap {cap_txt}, headroom {hr_txt}")
+              f"ATR {atr_txt}, cap {cap_txt}, {atr_gate_txt}")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Print snapshot metrics for specific symbols.")
