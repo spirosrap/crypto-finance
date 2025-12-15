@@ -7,6 +7,10 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only.
 
+## December 15, 2025 - FET Trade Taken; Signals Still Sparse
+- This morning I checked the finder logs and a FET trade surfaced; I took it.
+- Observation: only ~1–2 trades/day are surfacing now, which suggests conditions are still less favorable than they used to be (the stricter gates are doing their job).
+
 ## December 14, 2025 - Cron Surfaced a SYRUP Long
 - `short_term_crypto_finder.py` cron surfaced a new SYRUP long in `finder_short.txt`.
 - Executed via: `python add_position_from_finder.py --file finder_short.txt --portfolio-usd 5000 --leverage 50 --order market`.
