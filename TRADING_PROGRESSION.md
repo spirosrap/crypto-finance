@@ -12,6 +12,7 @@
 - Observation: only ~1–2 trades/day are surfacing now, which suggests conditions are still less favorable than they used to be (the stricter gates are doing their job).
 - Insight: when only 1–2 trades pass the filters, it’s often a sign the overall market regime is still “unfriendly” to the strategy (most symbols are failing ATR/RR/liquidity gates). The few that sneak through can be borderline and more prone to stop-outs. It may be safer to treat “opportunities ≥ 5” as a regime/breadth confirmation before taking trades, but this should be validated with log stats before hard-coding any gate.
 - Gate-scan now shows early signs of a regime shift: ATR headroom is getting closer to zero on majors and RR gaps are shrinking (e.g., BTC ATR is only slightly above its cap, and SOL is within ~0.2 RR of the 2.0 gate). Many alts still fail the ATR cap even when RR looks good, but overall the market appears to be moving toward more “tradable” conditions.
+- Clarified ATR behavior: the “ATR gate” is not an explicit reject/allow filter. The correct term is **ATR clipping**: when raw ATR is above the cap, the finder uses the capped ATR value in stop/TP sizing and in the RR calculation. That means trades can still be suggested even when raw ATR is above the cap, because the RR gate is evaluated using the clipped ATR (and other geometry/fee inputs).
 
 ## December 14, 2025 - Cron Surfaced a SYRUP Long
 - `short_term_crypto_finder.py` cron surfaced a new SYRUP long in `finder_short.txt`.
