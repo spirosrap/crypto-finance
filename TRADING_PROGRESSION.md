@@ -9,6 +9,7 @@
 
 ## December 15, 2025 - FET Trade Taken; Signals Still Sparse
 - This morning I checked the finder logs and a FET trade surfaced; I took it.
+- Outcome: the FET trade hit TP (win).
 - Observation: only ~1–2 trades/day are surfacing now, which suggests conditions are still less favorable than they used to be (the stricter gates are doing their job).
 - Insight: when only 1–2 trades pass the filters, it’s often a sign the overall market regime is still “unfriendly” to the strategy (most symbols are failing ATR/RR/liquidity gates). The few that sneak through can be borderline and more prone to stop-outs. It may be safer to treat “opportunities ≥ 5” as a regime/breadth confirmation before taking trades, but this should be validated with log stats before hard-coding any gate.
 - Gate-scan now shows early signs of a regime shift: ATR headroom is getting closer to zero on majors and RR gaps are shrinking (e.g., BTC ATR is only slightly above its cap, and SOL is within ~0.2 RR of the 2.0 gate). Many alts still fail the ATR cap even when RR looks good, but overall the market appears to be moving toward more “tradable” conditions.
