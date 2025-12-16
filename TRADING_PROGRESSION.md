@@ -7,6 +7,11 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only.
 
+## December 16, 2025 - Breakout Scanner Long Bias; BTC ATR Near 3K Despite Dip
+- `scripts/breakout_scanner.py`: a LONG setup is close to triggering — `KTA (KTA-USDC) LONG RR=1.77 (gap 0.23) | ATR 1635 bps, cap 400 bps, ATR CLIPPED (over cap by 1235 bps)`. Notable because it’s a different directional bias than yesterday’s near-signals.
+- BTC snapshot: price `86,357.91`, ATR7 `3,133.03` and still slightly above the tiered cap (`-38 bps` headroom vs `325 bps` cap). RR is still sub-2 (`LONG 0.31`, `SHORT 0.75`), but ATR continues drifting closer to the “tradable” zone.
+- Takeaway: even with yesterday’s sharp BTC decline, ATR staying near ~3k suggests volatility may still be stabilising; if RR expands while ATR continues easing, windows should reopen.
+
 ## December 15, 2025 - FET Trade Taken; Signals Still Sparse
 - This morning I checked the finder logs and a FET trade surfaced; I took it.
 - Outcome: the FET trade hit TP (win).
