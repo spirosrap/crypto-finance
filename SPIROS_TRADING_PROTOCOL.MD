@@ -94,6 +94,13 @@
     - `eff_bps` is tiered by price (≈325 bps for BTC, 350 bps for ETH, 400 bps for mid/large alts, 450 bps for small alts) and bounded by `SHORT_MAX_ATR_BPS` if set.
   - Meaning: if ATR is above cap, the model uses the capped ATR value. This can prevent “ATR spikes” from making everything look untradable, but it also means stops/TPs can be tight relative to real volatility, increasing stop-out risk.
   - Practical read: in `scripts/symbol_snapshot.py --gate-scan`, **ATR within cap** means raw ATR <= cap; **ATR CLIPPED** means raw ATR > cap (the model is relying on the cap).
+  - Clipping tolerance by risk mode (rule-of-thumb):
+    - Compute `ratio = ATR_bps / cap_bps` (or use the “over cap by X bps” number from gate-scan).
+    - Safe: `ratio ≤ 1.25` (≈ over-cap ≤ 25% of cap).
+    - Medium: `ratio ≤ 1.5`.
+    - Aggressive: `ratio ≤ 2.0`.
+    - If `ratio > 2.0`, treat as heavy clipping and usually skip (stop-outs/slippage risk rises quickly).
+  - Current risk stance: **medium or safer** until the system proves itself across a larger sample; do not take heavily clipped trades just because RR prints ≥2.
 
 ## Historical Notes
 - Prior iterations leaned on short_term_crypto_finder with 24h hold rule and balanced 5-trade baskets; tightened RR/ATR filters in late 2025.
