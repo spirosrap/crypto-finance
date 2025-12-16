@@ -11,6 +11,7 @@
 - `scripts/breakout_scanner.py`: a LONG setup is close to triggering — `KTA (KTA-USDC) LONG RR=1.77 (gap 0.23) | ATR 1635 bps, cap 400 bps, ATR CLIPPED (over cap by 1235 bps)`. Notable because it’s a different directional bias than yesterday’s near-signals.
 - BTC snapshot: price `86,357.91`, ATR7 `3,133.03` and still slightly above the tiered cap (`-38 bps` headroom vs `325 bps` cap). RR is still sub-2 (`LONG 0.31`, `SHORT 0.75`), but ATR continues drifting closer to the “tradable” zone.
 - Takeaway: even with yesterday’s sharp BTC decline, ATR staying near ~3k suggests volatility may still be stabilising; if RR expands while ATR continues easing, windows should reopen.
+- Decision: ZEC surfaced as a candidate (briefly showing RR near/above 2 on one side), but I skipped it because raw ATR was far above the clipping cap (heavy ATR clipping), which implies higher real stop-out risk than the RR number suggests.
 
 ## December 15, 2025 - FET Trade Taken; Signals Still Sparse
 - This morning I checked the finder logs and a FET trade surfaced; I took it.
