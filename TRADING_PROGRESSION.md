@@ -13,6 +13,7 @@
   - `ATR7/ATR21 > 1`: short-term volatility is hotter than the last ~month (possible spike).
   - `TR1/ATR7 < 1`: the most recent candle is calmer than the recent average (possible cooling).
 - This is a sanity-check signal only (not a gate): heavy ATR clipping can still hide real stop-out/slippage risk, but these ratios help judge whether that risk might be reverting.
+- Decision rule (for safety): only consult these ratios when ATR is **near the cap** (or mildly clipped within my risk tolerance). If ATR is **far above cap** (heavy clipping), treat it as a no-trade regardless of ratios and stay flat until ATR cools back toward the cap.
 
 ## December 16, 2025 - Breakout Scanner Long Bias; BTC ATR Near 3K Despite Dip
 - `scripts/breakout_scanner.py`: a LONG setup is close to triggering — `KTA (KTA-USDC) LONG RR=1.77 (gap 0.23) | ATR 1635 bps, cap 400 bps, ATR CLIPPED (over cap by 1235 bps)`. Notable because it’s a different directional bias than yesterday’s near-signals.

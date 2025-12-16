@@ -100,6 +100,13 @@
     - Medium: `ratio ≤ 1.5`.
     - Aggressive: `ratio ≤ 2.0`.
     - If `ratio > 2.0`, treat as heavy clipping and usually skip (stop-outs/slippage risk rises quickly).
+  - Volatility regime ratios (only useful near the cap):
+    - I only look at `ATR7/ATR21` and `TR1/ATR7` when ATR is **within cap** or only **mildly clipped** (within my risk tolerance). If ATR is heavily clipped, I skip regardless of ratios.
+    - When near-cap, use the ratios as context/timing:
+      - `ATR7/ATR21 > 1` → volatility is expanding (spike/heating); be cautious.
+      - `ATR7/ATR21 < 1` → volatility is easing vs the last ~month; safer timing.
+      - `TR1/ATR7 > 1` → latest candle is larger than the recent average (still hot).
+      - `TR1/ATR7 < 1` → latest candle is calmer than the recent average (cooling).
   - Current risk stance: **medium or safer** until the system proves itself across a larger sample; do not take heavily clipped trades just because RR prints ≥2.
 
 ## Historical Notes
