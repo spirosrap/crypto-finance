@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+import pandas as pd
+
 # Ensure repository root on sys.path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -42,6 +44,28 @@ def _fmt(value, precision: int = 2) -> str:
         return f"{float(value):.{precision}f}"
     except Exception:
         return "n/a"
+
+
+def _true_range_last(df: pd.DataFrame) -> Optional[float]:
+    """Compute the last candle true range (TR1) using high/low and previous close."""
+    if df is None or len(df) < 2:
+        return None
+    try:
+        high = float(df["high"].iloc[-1])
+        low = float(df["low"].iloc[-1])
+        prev_close = float(df["price"].iloc[-2])
+        return float(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    except Exception:
+        return None
+
+
+def _vol_regime_ratios(
+    atr7: float, atr21: float, tr1: Optional[float]
+) -> tuple[Optional[float], Optional[float]]:
+    """Return (ATR7/ATR21, TR1/ATR7) ratios to help judge volatility regime."""
+    atr7_to_21 = (atr7 / atr21) if (atr21 and atr21 > 0) else None
+    tr1_to_atr7 = (tr1 / atr7) if (tr1 is not None and atr7 > 0) else None
+    return atr7_to_21, tr1_to_atr7
 
 
 def _print_side(label: str, metric) -> None:
@@ -209,10 +233,18 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         ts = coin.get("data_timestamp_utc") or getattr(long_m, "data_timestamp_utc", "")
         if ts:
             print(f"Data TS (UTC): {ts}")
+
+        atr21 = finder._calculate_atr(df, period=21) if len(df) >= 22 else 0.0
+        atr7 = float(tech.get("atr") or 0.0)
+        tr1 = _true_range_last(df)
+        atr7_to_21, tr1_to_atr7 = _vol_regime_ratios(atr7, atr21, tr1)
         print(f"ATR7={_fmt(tech.get('atr'), 2)}  daily_vol_30d={_fmt(tech.get('daily_vol_30d'), 4)}  "
               f"intraday_range_pos={_fmt(tech.get('intraday_range_position'), 3)}  "
               f"intraday_vol_6h={_fmt(tech.get('intraday_volatility_6h'), 4)}  "
               f"spread_bps={_fmt(coin.get('spread_bps'), 3)}")
+        print(
+            f"Vol regime: ATR21={_fmt(atr21, 2)}  ATR7/ATR21={_fmt(atr7_to_21, 2)}  TR1/ATR7={_fmt(tr1_to_atr7, 2)}"
+        )
         _print_gates(
             long_m,
             short_m,
@@ -262,6 +294,9 @@ def gate_scan(
         price = float(coin.get("current_price") or 0.0)
         cap = _effective_atr_cap(price, getattr(cfg, "max_atr_usd", None), getattr(cfg, "max_atr_bps", None))
         atr = float(tech.get("atr") or 0.0)
+        atr21 = finder._calculate_atr(df, period=21) if len(df) >= 22 else 0.0
+        tr1 = _true_range_last(df)
+        atr7_to_21, tr1_to_atr7 = _vol_regime_ratios(atr, atr21, tr1)
         atr_bps = (atr / price * 10_000) if price > 0 else None
         cap_bps = (cap / price * 10_000) if (cap and price > 0) else None
         headroom_bps = (cap_bps - atr_bps) if (cap_bps is not None and atr_bps is not None) else None
@@ -291,6 +326,8 @@ def gate_scan(
             "headroom_bps": headroom_bps,
             "atr_bps": atr_bps,
             "cap_bps": cap_bps,
+            "atr7_to_21": atr7_to_21,
+            "tr1_to_atr7": tr1_to_atr7,
         })
 
     rows.sort(key=lambda r: (r["rr_gap"] if r["rr_gap"] is not None else 1e9,
@@ -307,7 +344,8 @@ def gate_scan(
         else:
             atr_gate_txt = f"ATR within cap (+{hr:.0f} bps headroom)"
         print(f"{row['symbol']} ({row['product']}) {row['best_side']} RR={row['rr']:.2f} (gap {row['rr_gap']:.2f}) | "
-              f"ATR {atr_txt}, cap {cap_txt}, {atr_gate_txt}")
+              f"ATR {atr_txt}, cap {cap_txt}, {atr_gate_txt} | "
+              f"ATR7/ATR21={_fmt(row.get('atr7_to_21'), 2)} TR1/ATR7={_fmt(row.get('tr1_to_atr7'), 2)}")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Print snapshot metrics for specific symbols.")

@@ -1,0 +1,47 @@
+
+====================================================================================================
+SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
+====================================================================================================
+Generated on (UTC): 2025-12-16 10:17:41Z
+Total opportunities listed: 1
+====================================================================================================
+
+1. ZEC (Zcash) — SHORT
+--------------------------------------------------
+Data Timestamp (UTC): 2025-12-16 00:00:00Z
+Price: $382.950000
+Market Cap: $6,278,251,719 (Rank #29)
+24h Volume: $940,298,576
+24h Change: -6.77%
+7d Change: -5.66%
+30d Change: -37.41%
+ATH: $3191.93 (Date: 2016-10-29)
+ATL: $16.080000 (Date: 2024-07-05)
+Volatility (30d, ann.): 163.4%
+Sharpe Ratio: 4.66
+Sortino Ratio: 10.96
+Max Drawdown: -55.11%
+RSI (14): 40.0
+MACD Signal: BULLISH
+BB Position: NEUTRAL
+Trend Strength: 0.41% per day
+Momentum Score: 95.5/100
+Fundamental Score: 97.5/100
+Technical Score: 36.1/100
+Risk Score: 37.5/100
+Risk Level: MEDIUM_LOW
+Overall Score: 30.99/100
+
+💼 TRADING LEVELS (SHORT):
+Entry Price: $382.950000
+Stop Loss: $393.672600
+Take Profit: $360.325314
+Risk:Reward Ratio: 2.1:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $59.08 (5.91%)
+Potential SL P&L: $-28.00 (-2.80%)
+
+Short-Line Summaries
+--------------------------------------------------
+1. Summary: ZEC short – score 30.99, 2.1× RR; RSI 40; bullish MACD fade; risk medium low; trend +0.41%/d.
