@@ -5,7 +5,14 @@
 - [November 2025](#november-2025)
 
 ## December 2025
-**State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only.
+**State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) to help judge if volatility spikes are cooling or persistent.
+
+## December 16, 2025 - Added Volatility Regime Readout to Snapshots
+- Updated `scripts/symbol_snapshot.py` (and `--gate-scan`) to print a quick “volatility regime” line: `ATR21`, `ATR7/ATR21`, and `TR1/ATR7`.
+- Purpose: help tell whether volatility is *temporarily spiking* vs *persistently elevated*:
+  - `ATR7/ATR21 > 1`: short-term volatility is hotter than the last ~month (possible spike).
+  - `TR1/ATR7 < 1`: the most recent candle is calmer than the recent average (possible cooling).
+- This is a sanity-check signal only (not a gate): heavy ATR clipping can still hide real stop-out/slippage risk, but these ratios help judge whether that risk might be reverting.
 
 ## December 16, 2025 - Breakout Scanner Long Bias; BTC ATR Near 3K Despite Dip
 - `scripts/breakout_scanner.py`: a LONG setup is close to triggering — `KTA (KTA-USDC) LONG RR=1.77 (gap 0.23) | ATR 1635 bps, cap 400 bps, ATR CLIPPED (over cap by 1235 bps)`. Notable because it’s a different directional bias than yesterday’s near-signals.
