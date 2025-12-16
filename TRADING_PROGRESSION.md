@@ -5,7 +5,15 @@
 - [November 2025](#november-2025)
 
 ## December 2025
-**State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) to help judge if volatility spikes are cooling or persistent.
+**State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
+
+## December 16, 2025 - Added Baseline Backtest CSV Generator (Watchdog Trades)
+- Added `scripts/watchdog_baseline_backtest.py` to replay entries from `trade_logs/watchdog_closed_positions.csv` with a simple baseline exit model: ATR(7)-based SL, 2R TP, and a 24h expiry.
+- The script writes a dashboard-compatible CSV so I can compare equity curves in `watchdog_dashboard.py` by switching the sidebar “CSV path” to the baseline file.
+- Baseline modes:
+  - `--mode atr_raw`: uses raw ATR(7) (no cap).
+  - `--mode atr_clipped`: uses ATR(7) clipped by the same USD + tiered bps caps as the short-term finder, so I can isolate the effect of clipping vs “geometry” (level-based TP/SL rules).
+- Goal: establish a realistic benchmark before changing gates/rules again, so I’m not mistaking regime noise for strategy improvement.
 
 ## December 16, 2025 - Added Volatility Regime Readout to Snapshots
 - Updated `scripts/symbol_snapshot.py` (and `--gate-scan`) to print a quick “volatility regime” line: `ATR21`, `ATR7/ATR21`, and `TR1/ATR7`.
