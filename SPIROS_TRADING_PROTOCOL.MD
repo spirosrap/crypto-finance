@@ -110,6 +110,10 @@
     - Medium: `ratio ≤ 1.5`.
     - Aggressive: `ratio ≤ 2.0`.
     - If `ratio > 2.0`, treat as heavy clipping and usually skip (stop-outs/slippage risk rises quickly).
+    - Example (cap = `400 bps`):
+      - Safe: raw ATR `< 500 bps`
+      - Medium: raw ATR `< 600 bps`
+      - Aggressive/high-risk: raw ATR `< 800 bps`
   - Volatility regime ratios (only useful near the cap):
     - I only look at `ATR7/ATR21` and `TR1/ATR7` when ATR is **within cap** or only **mildly clipped** (within my risk tolerance). If ATR is heavily clipped, I skip regardless of ratios.
     - When near-cap, use the ratios as context/timing:
