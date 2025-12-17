@@ -424,7 +424,6 @@ def gate_scan(
         # Liquidity + spread context (informational)
         vol_txt = _fmt_usd_compact(row.get("vol24h"))
         liq_mult = _fmt_mult(row.get("vol_mult")) if min_volume > 0 else "n/a"
-        vol_src = row.get("volume_source") or ""
         vmc_ratio = row.get("vmc_ratio")
         if vmc_ratio is None:
             vmc_txt = "n/a"
@@ -449,7 +448,7 @@ def gate_scan(
 
         print(f"{row['symbol']} ({row['product']}) {row['best_side']} RR={row['rr']:.2f} (gap {row['rr_gap']:.2f}) | "
               f"ATR {atr_txt}, cap {cap_txt}, {atr_gate_txt} | "
-              f"liq vol={vol_txt} ({liq_mult} vs min={_fmt_usd_compact(min_volume)}{f', src={vol_src}' if vol_src else ''}) "
+              f"liq vol={vol_txt} ({liq_mult} vs min={_fmt_usd_compact(min_volume)}) "
               f"vmc={vmc_txt} ({vmc_gap_txt} vs {min_ratio * 100:.1f}%) | "
               f"spr={spr_txt} | "
               f"ATR7/ATR21={_fmt(row.get('atr7_to_21'), 2)} TR1/ATR7={_fmt(row.get('tr1_to_atr7'), 2)}")
