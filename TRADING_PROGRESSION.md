@@ -17,6 +17,7 @@
   - ≥ `$100M` vol/day → cap `5 bps`
   - otherwise → cap `10 bps`
 - How I read it (safe-first): prefer symbols where volume and VMC both clear their mins **and** spread headroom is positive (spread below cap). Negative headroom means the spread is wider than the acceptable range, so costs/slippage risk are higher even if RR/ATR look good.
+- VMC quick read: `vmc` is “volume / market cap”. If `vmc` is above the minimum (e.g., `7.49%` vs `3.0%`), that ratio is healthy and the VMC liquidity check is passing.
 
 ## December 16, 2025 - Added Baseline Backtest CSV Generator (Watchdog Trades)
 - Added `scripts/watchdog_baseline_backtest.py` to replay entries from `trade_logs/watchdog_closed_positions.csv` with a simple baseline exit model: ATR(7)-based SL, 2R TP, and a 24h expiry.

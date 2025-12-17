@@ -98,6 +98,7 @@
 - Observability: `scripts/symbol_snapshot.py --gate-scan` surfaces which symbols are closest to clearing RR/ATR gates (uses tiered ATR caps and RR target; defaults RR=2, top=15) and now also includes quick liquidity/spread “distance” readouts:
   - `liq vol=... (x... vs min=..., src=...)`: 24h USD volume, how many times above `min_volume_24h`, and the data source (typically CoinGecko).
   - `vmc=...% (...pp vs X%)`: volume/market-cap ratio and its gap vs `min_volume_market_cap_ratio` (majors may show `(exempt)`).
+    - VMC quick read: if `vmc` is above the minimum (positive pp gap), the VMC liquidity check is passing.
   - `spr=... bps (...; cap=...)`: current spread in bps and headroom vs a heuristic “acceptable” spread cap (3/5/10 bps by volume tier). This is informational, not a hard gate.
   - Safe-first read: prefer `x>=1`, VMC gap positive, and spread headroom positive; negative spread headroom means the spread is wider than the acceptable range (higher cost/slippage risk).
 - Discipline: boredom is part of the edge. Waiting is intentional; do not loosen gates out of impatience. Flat is a valid position.
