@@ -46,6 +46,37 @@ def _fmt(value, precision: int = 2) -> str:
         return "n/a"
 
 
+def _fmt_usd_compact(value: Optional[float]) -> str:
+    """Format a USD-ish number as 12.3K/4.5M/6.7B/1.2T."""
+    if value is None:
+        return "n/a"
+    try:
+        num = float(value)
+    except Exception:
+        return "n/a"
+    num = abs(num)
+    if not (num >= 0):  # NaN
+        return "n/a"
+    for unit, denom in (("T", 1e12), ("B", 1e9), ("M", 1e6), ("K", 1e3)):
+        if num >= denom:
+            return f"{num / denom:.2f}{unit}"
+    return f"{num:.0f}"
+
+
+def _fmt_mult(value: Optional[float]) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        num = float(value)
+    except Exception:
+        return "n/a"
+    if num >= 100:
+        return f"x{num:.0f}"
+    if num >= 10:
+        return f"x{num:.1f}"
+    return f"x{num:.2f}"
+
+
 def _true_range_last(df: pd.DataFrame) -> Optional[float]:
     """Compute the last candle true range (TR1) using high/low and previous close."""
     if df is None or len(df) < 2:
@@ -280,6 +311,21 @@ def gate_scan(
         print("No symbols retrieved (check connectivity or liquidity filters).")
         return
 
+    min_volume = float(getattr(cfg, "min_volume_24h", 0.0) or 0.0)
+    min_ratio = float(getattr(cfg, "min_volume_market_cap_ratio", 0.0) or 0.0)
+    major_symbols = {
+        "BTC", "ETH", "SOL", "XRP", "USDT", "USDC",
+        "ADA", "AVAX", "LINK", "DOGE", "LTC", "DOT", "MATIC",
+    }
+
+    def _spread_cap_bps(volume_usd: float) -> float:
+        """Heuristic 'acceptable' spread cap for reporting (not a hard gate)."""
+        if volume_usd >= 1e9:
+            return 3.0
+        if volume_usd >= 1e8:
+            return 5.0
+        return 10.0
+
     rows = []
     for coin in coins:
         product_id = coin["product_id"]
@@ -300,6 +346,27 @@ def gate_scan(
         atr_bps = (atr / price * 10_000) if price > 0 else None
         cap_bps = (cap / price * 10_000) if (cap and price > 0) else None
         headroom_bps = (cap_bps - atr_bps) if (cap_bps is not None and atr_bps is not None) else None
+
+        try:
+            vol24h = float(coin.get("volume_24h") or 0.0)
+        except Exception:
+            vol24h = 0.0
+        try:
+            market_cap = float(coin.get("market_cap") or 0.0)
+        except Exception:
+            market_cap = 0.0
+        ratio = (vol24h / market_cap) if market_cap > 0 else None
+        ratio_gap_pp = ((ratio - min_ratio) * 100.0) if (ratio is not None and min_ratio > 0) else None
+        vol_mult = (vol24h / min_volume) if (min_volume > 0 and vol24h >= 0) else None
+
+        spread_bps = None
+        try:
+            spread_bps = float(coin.get("spread_bps")) if coin.get("spread_bps") is not None else None
+        except Exception:
+            spread_bps = None
+        spread_cap = _spread_cap_bps(vol24h) if vol24h > 0 else 10.0
+        spread_headroom = (spread_cap - spread_bps) if (spread_bps is not None and spread_bps > 0) else None
+
         def _rr_gap(m):
             if not m:
                 return None
@@ -328,6 +395,16 @@ def gate_scan(
             "cap_bps": cap_bps,
             "atr7_to_21": atr7_to_21,
             "tr1_to_atr7": tr1_to_atr7,
+            "vol24h": vol24h,
+            "market_cap": market_cap,
+            "vmc_ratio": ratio,
+            "vmc_gap_pp": ratio_gap_pp,
+            "vol_mult": vol_mult,
+            "spread_bps": spread_bps,
+            "spread_cap_bps": spread_cap,
+            "spread_headroom_bps": spread_headroom,
+            "vmc_exempt": (coin.get("symbol") or "").upper() in major_symbols,
+            "volume_source": str(coin.get("volume_24h_source") or "").strip(),
         })
 
     rows.sort(key=lambda r: (r["rr_gap"] if r["rr_gap"] is not None else 1e9,
@@ -343,8 +420,38 @@ def gate_scan(
             atr_gate_txt = f"ATR CLIPPED (over cap by {abs(hr):.0f} bps)"
         else:
             atr_gate_txt = f"ATR within cap (+{hr:.0f} bps headroom)"
+
+        # Liquidity + spread context (informational)
+        vol_txt = _fmt_usd_compact(row.get("vol24h"))
+        liq_mult = _fmt_mult(row.get("vol_mult")) if min_volume > 0 else "n/a"
+        vol_src = row.get("volume_source") or ""
+        vmc_ratio = row.get("vmc_ratio")
+        if vmc_ratio is None:
+            vmc_txt = "n/a"
+            vmc_gap_txt = "n/a"
+        else:
+            vmc_txt = f"{vmc_ratio * 100.0:.2f}%"
+            if min_ratio > 0 and row.get("vmc_gap_pp") is not None:
+                vmc_gap_txt = f"{row['vmc_gap_pp']:+.2f}pp"
+                if row.get("vmc_exempt") and row["vmc_gap_pp"] < 0:
+                    vmc_gap_txt += " (exempt)"
+            else:
+                vmc_gap_txt = "n/a"
+
+        spr = row.get("spread_bps")
+        if spr is None or spr <= 0:
+            spr_txt = "n/a"
+        else:
+            spr_cap = float(row.get("spread_cap_bps") or 0.0)
+            spr_hr = row.get("spread_headroom_bps")
+            spr_hr_txt = f"{spr_hr:+.2f} bps" if spr_hr is not None else "n/a"
+            spr_txt = f"{spr:.2f} bps ({spr_hr_txt}; cap={spr_cap:.0f})"
+
         print(f"{row['symbol']} ({row['product']}) {row['best_side']} RR={row['rr']:.2f} (gap {row['rr_gap']:.2f}) | "
               f"ATR {atr_txt}, cap {cap_txt}, {atr_gate_txt} | "
+              f"liq vol={vol_txt} ({liq_mult} vs min={_fmt_usd_compact(min_volume)}{f', src={vol_src}' if vol_src else ''}) "
+              f"vmc={vmc_txt} ({vmc_gap_txt} vs {min_ratio * 100:.1f}%) | "
+              f"spr={spr_txt} | "
               f"ATR7/ATR21={_fmt(row.get('atr7_to_21'), 2)} TR1/ATR7={_fmt(row.get('tr1_to_atr7'), 2)}")
 
 def main() -> None:

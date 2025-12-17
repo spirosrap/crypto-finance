@@ -7,6 +7,17 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
 
+## December 17, 2025 - Gate-Scan Now Shows Liquidity + Spread “Distance to Acceptable”
+- `scripts/symbol_snapshot.py --gate-scan` now prints three quick “can I actually trade this?” lines alongside RR/ATR:
+  - `liq vol=... (x... vs min=..., src=...)`: 24h USD volume, how many times above `min_volume_24h` it is, and the volume source (typically CoinGecko).
+  - `vmc=...% (...pp vs 3.0%)`: volume/market-cap ratio and its gap vs `min_volume_market_cap_ratio` (3% on my focused profile). Majors can be marked `(exempt)` from the ratio rule.
+  - `spr=... bps (...; cap=...)`: current spread in bps and the “headroom” vs a heuristic acceptable spread cap.
+- Spread cap meaning: this “cap” is **not a hard gate**; it’s a quick safety heuristic based on liquidity tier:
+  - ≥ `$1B` vol/day → cap `3 bps`
+  - ≥ `$100M` vol/day → cap `5 bps`
+  - otherwise → cap `10 bps`
+- How I read it (safe-first): prefer symbols where volume and VMC both clear their mins **and** spread headroom is positive (spread below cap). Negative headroom means the spread is wider than the acceptable range, so costs/slippage risk are higher even if RR/ATR look good.
+
 ## December 16, 2025 - Added Baseline Backtest CSV Generator (Watchdog Trades)
 - Added `scripts/watchdog_baseline_backtest.py` to replay entries from `trade_logs/watchdog_closed_positions.csv` with a simple baseline exit model: ATR(7)-based SL, 2R TP, and a 24h expiry.
 - The script writes a dashboard-compatible CSV so I can compare equity curves in `watchdog_dashboard.py` by switching the sidebar “CSV path” to the baseline file.
