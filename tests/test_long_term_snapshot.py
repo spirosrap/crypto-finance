@@ -46,6 +46,7 @@ class LongTermSnapshotHelpersTest(unittest.TestCase):
     def test_is_stable_symbol(self) -> None:
         self.assertTrue(_is_stable_symbol("usdt"))
         self.assertTrue(_is_stable_symbol("USD1"))
+        self.assertTrue(_is_stable_symbol("eurc"))
         self.assertFalse(_is_stable_symbol("BTC"))
 
     def test_profile_limit(self) -> None:

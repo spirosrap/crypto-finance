@@ -31,6 +31,7 @@ STABLE_SYMBOLS = {
     "USDT",
     "USDC",
     "USD1",
+    "EURC",
     "DAI",
     "TUSD",
     "USDP",

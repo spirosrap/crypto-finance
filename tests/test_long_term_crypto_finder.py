@@ -69,6 +69,7 @@ class LongTermCryptoFinderRiskFilterTests(unittest.TestCase):
 
     def test_filter_by_max_risk_level_respects_threshold(self):
         config = CryptoFinderConfig(max_risk_level='MEDIUM', offline=True)
+        config.exchange_backend = 'coinbase'
         finder = LongTermCryptoFinder(config=config)
 
         low = self._make_metrics('LOW', RiskLevel.LOW)
@@ -81,6 +82,7 @@ class LongTermCryptoFinderRiskFilterTests(unittest.TestCase):
 
     def test_filter_by_max_risk_level_no_limit_returns_all(self):
         config = CryptoFinderConfig(max_risk_level=None, offline=True)
+        config.exchange_backend = 'coinbase'
         finder = LongTermCryptoFinder(config=config)
 
         metrics = [
@@ -95,6 +97,7 @@ class LongTermCryptoFinderRiskFilterTests(unittest.TestCase):
 
     def test_invalid_risk_level_configuration_is_ignored(self):
         config = CryptoFinderConfig(max_risk_level='not_a_level', offline=True)
+        config.exchange_backend = 'coinbase'
         finder = LongTermCryptoFinder(config=config)
 
         self.assertIsNone(finder._max_risk_level)
@@ -105,6 +108,7 @@ class LongTermCryptoFinderRiskFilterTests(unittest.TestCase):
             min_volume_market_cap_ratio=0.02,
             offline=True,
         )
+        config.exchange_backend = 'coinbase'
         finder = LongTermCryptoFinder(config=config)
 
         candidates = [

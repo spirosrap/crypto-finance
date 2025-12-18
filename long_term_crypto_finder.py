@@ -4360,6 +4360,13 @@ PROFILE_PRESETS = {
         "max_workers": 12,
         "analysis_days": 90,
     },
+    "focused_llm_100": {
+        "limit": 100,
+        "max_results": 10,
+        "use_openai_scoring": True,
+        "min_volume_24h": 5_000_000,
+        "min_volume_market_cap_ratio": 0.03,
+    },
 }
 
 
@@ -4456,7 +4463,7 @@ def build_cli_parser(
     parser.add_argument(
         '--min-volume',
         type=_positive_float,
-        default=env_defaults.min_volume_24h,
+        default=None,
         help=(
             "Minimum 24h USD volume required (default: "
             f"${env_defaults.min_volume_24h:,.0f})"
@@ -4569,7 +4576,7 @@ def build_cli_parser(
     parser.add_argument(
         '--min-vmc-ratio',
         type=_positive_float,
-        default=env_defaults.min_volume_market_cap_ratio,
+        default=None,
         help=(
             "Minimum volume-to-market-cap ratio (e.g., 0.03 for 3%) "
             f"(default: {env_defaults.min_volume_market_cap_ratio})"
@@ -4587,8 +4594,8 @@ def build_cli_parser(
     parser.add_argument(
         '--use-openai-scoring',
         action=argparse.BooleanOptionalAction,
-        default=env_defaults.use_openai_scoring,
-        help='Blend scores with OpenAI model output (default: %(default)s; override env/CRYPTO_* if set)',
+        default=None,
+        help='Blend scores with OpenAI model output (default: env/profile; override env/CRYPTO_* if set)',
     )
     parser.add_argument(
         '--openai-weight',
@@ -4668,6 +4675,21 @@ def main():
     final_analysis_days = (
         args.analysis_days if args.analysis_days is not None else profile_overrides.get('analysis_days', env_defaults.analysis_days)
     )
+    final_min_volume = (
+        args.min_volume
+        if args.min_volume is not None
+        else profile_overrides.get('min_volume_24h', env_defaults.min_volume_24h)
+    )
+    final_min_vmc_ratio = (
+        args.min_vmc_ratio
+        if args.min_vmc_ratio is not None
+        else profile_overrides.get('min_volume_market_cap_ratio', env_defaults.min_volume_market_cap_ratio)
+    )
+    final_use_openai_scoring = (
+        args.use_openai_scoring
+        if args.use_openai_scoring is not None
+        else profile_overrides.get('use_openai_scoring', env_defaults.use_openai_scoring)
+    )
 
     if args.suppress_console_logs:
         for handler in list(logger.handlers):
@@ -4685,11 +4707,11 @@ def main():
     config.max_workers = final_max_workers
     config.risk_free_rate = args.risk_free_rate
     config.analysis_days = final_analysis_days
-    config.min_volume_24h = args.min_volume
-    config.min_volume_market_cap_ratio = args.min_vmc_ratio
+    config.min_volume_24h = final_min_volume
+    config.min_volume_market_cap_ratio = final_min_vmc_ratio
     config.max_risk_level = args.max_risk_level if args.max_risk_level is not None else config.max_risk_level
     config.force_refresh_candles = args.force_refresh
-    config.use_openai_scoring = args.use_openai_scoring
+    config.use_openai_scoring = bool(final_use_openai_scoring)
     if args.openai_weight is not None:
         config.openai_weight = float(args.openai_weight)
     if args.openai_model:
