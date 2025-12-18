@@ -10,6 +10,8 @@
 ## December 18, 2025 - Long-Term Snapshot Tool (Daily Metrics)
 - Added `scripts/long_term_snapshot.py` as a long-horizon companion to `scripts/symbol_snapshot.py`.
 - It uses `LongTermCryptoFinder` (daily candles + long-term indicators like ATR(14), Sharpe, max drawdown) and prints LONG/SHORT entry/SL/TP plus risk level, so I can sanity-check long-term candidates without relying on short-term intraday readouts.
+- Added `--gate-scan` to rank the profile universe by closeness to an RR target (default 2.0) using long-term metrics, so I can see when the long-horizon side is improving without forcing trades.
+- Gate-scan excludes stablecoins by default (USDT/USDC/USD1/etc) to avoid meaningless “best RR” rows; use `--include-stables` only if needed.
 - Reminder: spread + liquidity still matter for long-term trades (execution cost + exit ability), but short-term intraday fields (range position / 6h vol) are mostly entry-timing noise for multi-day holds.
 
 ## December 18, 2025 - BTC Whipsaw Candles; Relief Rally Talk

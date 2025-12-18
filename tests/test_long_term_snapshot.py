@@ -1,7 +1,15 @@
 import unittest
 from types import SimpleNamespace
 
-from scripts.long_term_snapshot import _fmt_usd_compact, _format_side, _parse_symbols, _price_precision
+from scripts.long_term_snapshot import (
+    _fmt_usd_compact,
+    _format_side,
+    _is_stable_symbol,
+    _parse_symbols,
+    _price_precision,
+    _profile_limit,
+    _risk_rank,
+)
 
 
 class LongTermSnapshotHelpersTest(unittest.TestCase):
@@ -35,7 +43,20 @@ class LongTermSnapshotHelpersTest(unittest.TestCase):
         self.assertIn("RR=2.00", text)
         self.assertIn("risk=MEDIUM", text)
 
+    def test_is_stable_symbol(self) -> None:
+        self.assertTrue(_is_stable_symbol("usdt"))
+        self.assertTrue(_is_stable_symbol("USD1"))
+        self.assertFalse(_is_stable_symbol("BTC"))
+
+    def test_profile_limit(self) -> None:
+        self.assertEqual(_profile_limit("wide"), 400)
+        self.assertIsNone(_profile_limit("default"))
+
+    def test_risk_rank_orders_levels(self) -> None:
+        self.assertLess(_risk_rank("LOW"), _risk_rank("MEDIUM"))
+        self.assertLess(_risk_rank("MEDIUM"), _risk_rank("HIGH"))
+        self.assertEqual(_risk_rank("unknown"), 99)
+
 
 if __name__ == "__main__":
     unittest.main()
-

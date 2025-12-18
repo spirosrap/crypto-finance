@@ -9,6 +9,7 @@
 - **Finders**: `short_term_crypto_finder.py`, `long_term_crypto_finder.py`.
   - Short-horizon snapshot: `scripts/symbol_snapshot.py` (includes short-term gates + intraday context).
   - Long-horizon snapshot: `scripts/long_term_snapshot.py` (daily candles + long-term indicators like ATR(14)/Sharpe/drawdown).
+    - Gate scan (long-term): `python scripts/long_term_snapshot.py --gate-scan --profile wide --top 15 --scan-limit 200`
   - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N]`.
 - **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock).
 - **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).
@@ -24,6 +25,7 @@
 1) Run snapshots: `python scripts/symbol_snapshot.py --symbols BTC,ETH --profile focused_no_llm_100`
    - Gate proximity view (optional): `python scripts/symbol_snapshot.py --gate-scan --profile focused_no_llm_100 --top 15 --scan-limit 100`
    - Long-term sanity check (optional): `python scripts/long_term_snapshot.py --symbols BTC,ETH --profile default`
+   - Long-term gate scan (optional): `python scripts/long_term_snapshot.py --gate-scan --profile wide --top 15 --scan-limit 200`
 2) Let cron handle:
    - `short_term_crypto_finder.py` (daily) → feed results to `add_position_from_finder.py` or `add_top5_from_finder.py` to stage/execute trades.
    - `run_breakout_autotrade.py` (hourly) for 2R breakouts on USDC majors.
