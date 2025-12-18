@@ -162,7 +162,9 @@
 - **Daily Rotation Guardrails**: it is acceptable to close a short-term idea inside a day and replace it with fresher momentum, provided (a) the updated scan shows a lower score/risk reclassification or better risk-reward elsewhere, (b) the instrument remains liquid (tight spread, stable depth), and (c) costs (spread + fees) stay within plan. Avoid churning purely because the list reshuffled.
 - **Refresh Rhythm**: anchor one scan just after the Coinbase daily bar (≈00:00 UTC); optional midday check is fine for fast conditions. Document every forced exit reason in `trade_logs/` and respect existing stop/target discipline when holding between refreshes.
 - **ATR “Gatekeeper” (nuance)**: The RR≥2:1 filter is influenced by daily ATR because ATR affects stop sizing and the RR risk-distance floor. However, the short-term finder uses an ATR **clip** (USD + bps caps) rather than a hard “reject if ATR too high” rule. True favorable conditions show up when many symbols have RR≥2 **and** ATR is **within cap** (not clipped) across the universe.
-- **RR Confirmation**: Use `scripts/symbol_snapshot.py` as a spot check; only re-engage sizing when multiple symbols show RR≥2.0 with current filters, not just one-off stables or odd tickers.
+- **RR Confirmation / Sanity Checks**:
+  - Short-term: use `scripts/symbol_snapshot.py` as a spot check; only re-engage sizing when multiple symbols show RR≥2.0 with current filters, not just one-off stables or odd tickers.
+  - Long-term: use `scripts/long_term_snapshot.py` (daily candles + long-term indicators like ATR(14)/Sharpe/drawdown) to sanity-check spread/liquidity/volatility before taking multi-day holds.
 
 ## 13. Current Short-Term Execution (Nov 2025)
 - Run `short_term_crypto_finder.py` (profile `focused_no_llm_100`) daily after the UTC candle; use the live-spread RR calc and RR≥2:1 gate.

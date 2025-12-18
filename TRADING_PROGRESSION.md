@@ -7,6 +7,11 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
 
+## December 18, 2025 - Long-Term Snapshot Tool (Daily Metrics)
+- Added `scripts/long_term_snapshot.py` as a long-horizon companion to `scripts/symbol_snapshot.py`.
+- It uses `LongTermCryptoFinder` (daily candles + long-term indicators like ATR(14), Sharpe, max drawdown) and prints LONG/SHORT entry/SL/TP plus risk level, so I can sanity-check long-term candidates without relying on short-term intraday readouts.
+- Reminder: spread + liquidity still matter for long-term trades (execution cost + exit ability), but short-term intraday fields (range position / 6h vol) are mostly entry-timing noise for multi-day holds.
+
 ## December 18, 2025 - BTC Whipsaw Candles; Relief Rally Talk
 - Yesterday BTC printed a big green candle followed quickly by a big red candle (~+3% then ~-3%). The sudden whipsaw sparked discussion on Twitter.
 - Some traders are framing it as potential “relief rally” setup, but I’m staying rules-based and waiting for my gates (RR/ATR/liquidity/spread) to align before acting.
