@@ -3,7 +3,9 @@ from types import SimpleNamespace
 
 from scripts.long_term_snapshot import (
     _fmt_usd_compact,
+    _fmt_mult,
     _format_side,
+    _effective_atr_cap_bps,
     _is_stable_symbol,
     _parse_symbols,
     _price_precision,
@@ -27,6 +29,17 @@ class LongTermSnapshotHelpersTest(unittest.TestCase):
         self.assertEqual(_fmt_usd_compact(1_234), "1.23K")
         self.assertEqual(_fmt_usd_compact(5_000_000), "5.00M")
         self.assertEqual(_fmt_usd_compact(7_000_000_000), "7.00B")
+
+    def test_fmt_mult(self) -> None:
+        self.assertEqual(_fmt_mult(1.234), "x1.23")
+        self.assertEqual(_fmt_mult(12.34), "x12.3")
+        self.assertEqual(_fmt_mult(123.4), "x123")
+
+    def test_effective_atr_cap_bps(self) -> None:
+        self.assertIsNone(_effective_atr_cap_bps(0.0, 2.0, 150.0))
+        self.assertIsNone(_effective_atr_cap_bps(100.0, None, None))
+        self.assertAlmostEqual(_effective_atr_cap_bps(100.0, 2.0, None), 200.0)
+        self.assertAlmostEqual(_effective_atr_cap_bps(100.0, 2.0, 150.0), 150.0)
 
     def test_format_side_includes_rr_and_risk(self) -> None:
         metric = SimpleNamespace(
