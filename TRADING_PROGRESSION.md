@@ -7,6 +7,10 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
 
+## December 18, 2025 - BTC Whipsaw Candles; Relief Rally Talk
+- Yesterday BTC printed a big green candle followed quickly by a big red candle (~+3% then ~-3%). The sudden whipsaw sparked discussion on Twitter.
+- Some traders are framing it as potential “relief rally” setup, but I’m staying rules-based and waiting for my gates (RR/ATR/liquidity/spread) to align before acting.
+
 ## December 17, 2025 - Gate-Scan Now Shows Liquidity + Spread “Distance to Acceptable”
 - `scripts/symbol_snapshot.py --gate-scan` now prints three quick “can I actually trade this?” lines alongside RR/ATR:
   - `liq vol=... (x... vs min=..., src=...)`: 24h USD volume, how many times above `min_volume_24h` it is, and the volume source (typically CoinGecko).
