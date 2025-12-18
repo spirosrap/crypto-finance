@@ -14,6 +14,10 @@
 - Gate-scan excludes stablecoins by default (USDT/USDC/USD1/etc) to avoid meaningless “best RR” rows; use `--include-stables` only if needed.
 - Reminder: spread + liquidity still matter for long-term trades (execution cost + exit ability), but short-term intraday fields (range position / 6h vol) are mostly entry-timing noise for multi-day holds.
 
+## December 18, 2025 - Long-Term `focused_llm_100` Profile (Finder + Gate-Scan Match)
+- Added a long-term profile `focused_llm_100` so my finder run and long-term gate-scan use the same core knobs: `limit=100`, `max_results=10`, `min_volume_24h=5M`, `min_vmc_ratio=0.03`, and `use_openai_scoring=1`.
+- This removes the “why don’t these match?” confusion: I can run `long_term_crypto_finder.py --profile focused_llm_100` and then sanity-check the same universe with `scripts/long_term_snapshot.py --gate-scan --profile focused_llm_100`.
+
 ## December 18, 2025 - BTC Whipsaw Candles; Relief Rally Talk
 - Yesterday BTC printed a big green candle followed quickly by a big red candle (~+3% then ~-3%). The sudden whipsaw sparked discussion on Twitter.
 - Some traders are framing it as potential “relief rally” setup, but I’m staying rules-based and waiting for my gates (RR/ATR/liquidity/spread) to align before acting.
