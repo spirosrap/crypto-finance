@@ -241,6 +241,12 @@ def build_short_term_config() -> CryptoFinderConfig:
     cfg.openai_sleep_seconds = _env_override("SHORT_OPENAI_SLEEP_SECONDS", cfg.openai_sleep_seconds, float)
     cfg.report_position_notional = _env_override("SHORT_REPORT_NOTIONAL", cfg.report_position_notional, float)
     cfg.report_leverage = _env_override("SHORT_REPORT_LEVERAGE", cfg.report_leverage, float)
+    # Spread gate (aggressive default): spread_bps * leverage / 100 <= max_spread_margin_pct
+    cfg.max_spread_margin_pct = _env_override(
+        "SHORT_MAX_SPREAD_MARGIN_PCT",
+        getattr(cfg, "max_spread_margin_pct", None) or 20.0,
+        float,
+    )
     cfg.incremental_cache = _env_flag("SHORT_INCREMENTAL_CACHE", getattr(cfg, 'incremental_cache', False))
     cfg.incremental_cache_path = os.getenv(
         "SHORT_INCREMENTAL_CACHE_PATH",
@@ -248,6 +254,40 @@ def build_short_term_config() -> CryptoFinderConfig:
     )
 
     return cfg
+
+
+def _spread_margin_pct(spread_bps: Optional[float], leverage: float) -> Optional[float]:
+    """Return the spread cost as a percentage of margin for a leveraged position."""
+    if spread_bps is None:
+        return None
+    try:
+        spread = float(spread_bps)
+        lev = float(leverage)
+    except Exception:
+        return None
+    if spread <= 0 or lev <= 0:
+        return 0.0
+    return float(spread * lev / 100.0)
+
+
+def _passes_spread_margin_gate(
+    spread_bps: Optional[float],
+    leverage: float,
+    max_spread_margin_pct: Optional[float],
+) -> bool:
+    """Return True if spread cost on margin is acceptable (or unknown)."""
+    if max_spread_margin_pct is None:
+        return True
+    try:
+        cap = float(max_spread_margin_pct)
+    except Exception:
+        return True
+    if cap <= 0:
+        return True
+    cost_pct = _spread_margin_pct(spread_bps, leverage)
+    if cost_pct is None:
+        return True
+    return cost_pct <= cap
 
 
 # -----------------------------------------------------------------------------
@@ -336,7 +376,43 @@ class ShortTermCryptoFinder(LongTermCryptoFinder):
         symbols: Optional[List[str]] = None,
     ) -> List[Dict]:
         raw = super().get_cryptocurrencies_to_analyze(limit=limit, symbols=symbols)
-        return self._filter_unwanted_products(raw)
+        filtered = self._filter_unwanted_products(raw)
+
+        max_margin = getattr(self.config, "max_spread_margin_pct", None)
+        leverage = float(getattr(self.config, "report_leverage", 0.0) or 0.0)
+        try:
+            max_margin_val = float(max_margin) if max_margin is not None else None
+        except Exception:
+            max_margin_val = None
+
+        if max_margin_val is None or max_margin_val <= 0 or leverage <= 0:
+            return filtered
+
+        kept: List[Dict] = []
+        dropped = 0
+        unknown = 0
+        for item in filtered:
+            spread_bps = item.get("spread_bps")
+            if spread_bps is None:
+                unknown += 1
+                kept.append(item)
+                continue
+            if _passes_spread_margin_gate(spread_bps, leverage, max_margin_val):
+                kept.append(item)
+            else:
+                dropped += 1
+
+        if dropped:
+            logger.info(
+                "Applied spread-margin gate (max_margin=%.1f%%, leverage=%.0fx): kept %s/%s (dropped=%s, unknown_spread=%s)",
+                max_margin_val,
+                leverage,
+                len(kept),
+                len(filtered),
+                dropped,
+                unknown,
+            )
+        return kept
 
     # ------------------------------------------------------------------
     # Incremental cache helpers

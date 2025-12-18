@@ -132,7 +132,7 @@ class CryptoFinderConfig:
     ccxt_exchange_id: str = "coinbaseadvanced"  # default CCXT exchange when backend=ccxt
     max_atr_usd: Optional[float] = None  # optional cap on ATR used for stops/TP sizing
     max_atr_bps: Optional[float] = None  # optional cap on ATR in basis points of price
-    max_atr_bps: Optional[float] = None  # optional cap on ATR in basis points of price
+    max_spread_margin_pct: Optional[float] = None  # optional cap on spread cost as % of margin (spread_bps * leverage / 100)
 
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
@@ -277,6 +277,7 @@ class CryptoFinderConfig:
             'ccxt_exchange_id': self.ccxt_exchange_id,
             'max_atr_usd': self.max_atr_usd,
             'max_atr_bps': self.max_atr_bps,
+            'max_spread_margin_pct': self.max_spread_margin_pct,
         }
 
 # Configure enhanced logging with file rotation
