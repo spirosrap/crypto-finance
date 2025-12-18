@@ -11,6 +11,7 @@
   - Long-horizon snapshot: `scripts/long_term_snapshot.py` (daily candles + long-term indicators like ATR(14)/Sharpe/drawdown).
     - Gate scan (long-term): `python scripts/long_term_snapshot.py --gate-scan --profile wide --top 15 --scan-limit 200`
   - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N]`.
+  - Long-term profile used for LLM + liquidity filters: `python long_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_long.txt --suppress-console-logs`
 - **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock).
 - **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).
 - **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text.

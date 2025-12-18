@@ -84,6 +84,9 @@ python long_term_crypto_finder.py --output json
 # Run the "wide" preset and capture a clean text report without log chatter
 python long_term_crypto_finder.py --profile wide --plain-output finder_long.txt --suppress-console-logs
 
+# Run the "focused_llm_100" preset (100 symbols, top 10 results, liquidity filters, OpenAI scoring)
+python long_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_long.txt --suppress-console-logs
+
 `--plain-output` writes the same formatted report you see in the console, while
 `--suppress-console-logs` removes the streaming log handler so you no longer
 need to pipe through `tee`/`grep` to obtain a clean summary file.
@@ -98,7 +101,7 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--suppress-console-logs` | false | Disable console log handler for clean stdout piping |
 | `--limit` | 50 (`CRYPTO_DEFAULT_LIMIT` or profile) | Number of cryptocurrencies to analyze before ranking (must be >0) |
 | `--min-market-cap` | 100000000 | Minimum market cap in USD ($100M, must be >0) |
-| `--min-volume` | env | Minimum 24h USD volume (must be >0 when provided) |
+| `--min-volume` | env/profile | Minimum 24h USD volume (must be >0 when provided) |
 | `--max-results` | 20 (profile/env) | Maximum number of results to display (must be >0) |
 | `--output` | console | Output format: `console` or `json` |
 | `--side` | both | Evaluate `long`, `short`, or `both` |
@@ -115,9 +118,9 @@ need to pipe through `tee`/`grep` to obtain a clean summary file.
 | `--quotes` | env | Preferred quote currencies, e.g., `USDC,USD,USDT` |
 | `--risk-free-rate` | env | Annual risk-free rate (e.g., `0.03` for 3%) |
 | `--analysis-days` | env/profile | Lookback window for technical/risk metrics (e.g., `365`, must be >0 when provided) |
-| `--min-vmc-ratio` | env | Minimum volume-to-market-cap ratio (e.g., `0.03` for 3%) |
+| `--min-vmc-ratio` | env/profile | Minimum volume-to-market-cap ratio (e.g., `0.03` for 3%) |
 | `--max-risk-level` | env | Highest risk level to include (`LOW`, `MEDIUM_LOW`, `MEDIUM`, `MEDIUM_HIGH`, `HIGH`, `VERY_HIGH`) |
-| `--use-openai-scoring/--no-use-openai-scoring` | env (`CRYPTO_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring without touching env vars |
+| `--use-openai-scoring/--no-use-openai-scoring` | env/profile (`CRYPTO_USE_OPENAI_SCORING`) | Toggle LLM-assisted scoring without touching env vars |
 | `--openai-weight` | env (`CRYPTO_OPENAI_WEIGHT`) | Blend ratio between baseline and LLM score |
 | `--openai-model` | env (`CRYPTO_OPENAI_MODEL`) | Override OpenAI model identifier |
 | `--openai-max-candidates` | env (`CRYPTO_OPENAI_MAX_CANDIDATES`) | Cap number of candidates sent to the model |
