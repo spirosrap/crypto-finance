@@ -194,6 +194,20 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         price = float(coin.get("current_price") or 0.0)
         atr = float(tech.get("atr") or 0.0)
         atr_pct = (atr / price * 100.0) if price > 0 else 0.0
+        atr_bps = (atr / price * 10_000.0) if price > 0 else None
+        cap_bps = _effective_atr_cap_bps(
+            price,
+            getattr(cfg, "max_atr_usd", None),
+            getattr(cfg, "max_atr_bps", None),
+        )
+        headroom_bps = (cap_bps - atr_bps) if (cap_bps is not None and atr_bps is not None) else None
+        cap_txt = f"{cap_bps:.0f} bps" if cap_bps is not None else "n/a"
+        if headroom_bps is None:
+            cap_note = "ATR cap n/a"
+        elif headroom_bps < 0:
+            cap_note = f"ATR above cap by {abs(headroom_bps):.0f} bps"
+        else:
+            cap_note = f"ATR headroom +{headroom_bps:.0f} bps"
 
         print("=" * 80)
         print(f"{coin.get('symbol', 'n/a')} ({coin.get('name', 'n/a')})  product={product_id}")
@@ -209,6 +223,7 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
 
         print(
             f"ATR{cfg.atr_period}={_fmt(atr, 2)} ({_fmt(atr_pct, 2)}%)  "
+            f"cap={cap_txt} ({cap_note})  "
             f"daily_vol_30d={_fmt(tech.get('daily_vol_30d'), 4)}  "
             f"Sharpe={_fmt(tech.get('sharpe_ratio'), 2)}  "
             f"MaxDD={_fmt(float(tech.get('max_drawdown') or 0.0) * 100.0, 2)}%  "
