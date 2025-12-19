@@ -169,6 +169,7 @@
     - Safety-first baseline: **prefer ≥1.0× ATR**.
     - Aggressive floor (max risk): **0.5×–0.75× ATR**.
     - **<0.5× ATR** = skip (noise range).
+  - RR drivers: `scripts/symbol_snapshot.py` also prints a short `RR drivers` line (e.g., `tp_clamp, risk=atr_floor`) so I can see whether low RR is driven by target caps or by the risk floor (ATR/fees/tick).
 
 ## 13. Current Short-Term Execution (Nov 2025)
 - Run `short_term_crypto_finder.py` (profile `focused_no_llm_100`) daily after the UTC candle; use the live-spread RR calc and RR≥2:1 gate.

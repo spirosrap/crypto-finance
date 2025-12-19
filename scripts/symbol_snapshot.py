@@ -10,6 +10,7 @@ normal filters.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -135,6 +136,8 @@ def _print_gates(
     atr_cap_usd: Optional[float],
     atr_cap_bps: Optional[float],
     price: Optional[float],
+    rr_drivers_long: Optional[str] = None,
+    rr_drivers_short: Optional[str] = None,
 ) -> None:
     atr_raw = float(tech.get("atr") or 0.0)
     atr_note = ""
@@ -206,6 +209,89 @@ def _print_gates(
     print(f"Gates: ATR7={_fmt(atr_raw, 2)}{atr_note} | RR long { _rr_gap(long_m) } | RR short { _rr_gap(short_m) }")
     print(f"Distances: long {_dist(long_m)} | short {_dist(short_m)}")
     print(f"ATR multiples: long {_dist_atr(long_m)} | short {_dist_atr(short_m)}")
+    if rr_drivers_long or rr_drivers_short:
+        print(f"RR drivers: long {rr_drivers_long or 'n/a'} | short {rr_drivers_short or 'n/a'}")
+
+
+def _rr_driver_line(
+    finder: ShortTermCryptoFinder,
+    df: pd.DataFrame,
+    tech: Dict,
+    coin: Dict,
+    metric,
+    is_long: bool,
+    rr_target: float,
+    fee_slp_bps: float,
+) -> str:
+    if not metric:
+        return "n/a"
+    try:
+        entry = float(metric.entry_price)
+        sl = float(metric.stop_loss_price)
+        tp = float(metric.take_profit_price)
+    except Exception:
+        return "n/a"
+    if entry <= 0:
+        return "n/a"
+
+    price = float(coin.get("current_price") or entry)
+    atr_raw = float(tech.get("atr") or 0.0)
+    atr_raw = finder._cap_atr_value(atr_raw, price) if price > 0 else atr_raw
+    vol_ratio = finder._volatility_ratio(tech)
+    range_pos = finder._range_position(tech)
+    min_risk = entry * (0.0008 + max(vol_ratio - 1.0, 0.0) * 0.0006)
+    raw_risk = abs(entry - sl)
+    risk_amount = max(raw_risk, min_risk)
+
+    if is_long:
+        tp_rr = entry + risk_amount * rr_target
+        tp_candidates = [tp_rr]
+        if len(df) >= 10:
+            swing_high = float(df["high"].tail(10).max())
+            tp_candidates.append(swing_high * 1.01)
+        if len(df) >= 30:
+            recent_close = float(df["price"].tail(30).max())
+            tp_candidates.append(max(recent_close * 1.02, entry + risk_amount))
+        intraday_high = float(tech.get("intraday_high_lookback", 0.0) or 0.0)
+        if intraday_high > 0:
+            tp_candidates.append(max(intraday_high * 0.998, entry + risk_amount * 0.8))
+        base_tp = min(tp_candidates)
+        if range_pos > 0.85:
+            base_tp = min(base_tp, entry * 1.03)
+        tp_final = max(entry * 1.005, base_tp)
+        tp_final = max(tp_final, entry * 1.001)
+    else:
+        tp_rr = entry - risk_amount * rr_target
+        tp_candidates = [tp_rr]
+        if len(df) >= 10:
+            swing_low = float(df["low"].tail(10).min())
+            tp_candidates.append(swing_low * 0.99)
+        if len(df) >= 30:
+            recent_close = float(df["price"].tail(30).min())
+            tp_candidates.append(min(recent_close * 0.98, entry - risk_amount))
+        intraday_low = float(tech.get("intraday_low_lookback", 0.0) or 0.0)
+        if intraday_low > 0:
+            tp_candidates.append(min(intraday_low * 1.002, entry - risk_amount * 0.8))
+        base_tp = max(tp_candidates)
+        if range_pos < 0.15:
+            base_tp = max(base_tp, entry * 0.97)
+        tp_final = min(entry * 0.995, base_tp)
+        tp_final = min(tp_final, entry * 0.999)
+
+    tp_driver = "tp_rr"
+    if abs(tp_final - tp_rr) / entry > 1e-4:
+        tp_driver = "tp_clamp"
+
+    atr_floor_mult = float(os.getenv("CRYPTO_ATR_SL_MULT", "0.5"))
+    fee_add = (float(fee_slp_bps) / 10000.0) * entry if fee_slp_bps else 0.0
+    dist_components = {
+        "raw": raw_risk,
+        "tick": entry * 1e-3,
+        "atr_floor": (atr_raw * atr_floor_mult) if atr_raw > 0 else 0.0,
+        "fee": fee_add,
+    }
+    risk_driver = max(dist_components.items(), key=lambda x: x[1])[0]
+    return f"{tp_driver}, risk={risk_driver}"
 
 
 def _dynamic_bps(price: float) -> float:
@@ -282,6 +368,29 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         atr7 = float(tech.get("atr") or 0.0)
         tr1 = _true_range_last(df)
         atr7_to_21, tr1_to_atr7 = _vol_regime_ratios(atr7, atr21, tr1)
+        fee_slp_bps = finder._effective_fee_bps(coin)
+        rr_target_long = finder._dynamic_rr_target(tech, is_long=True)
+        rr_target_short = finder._dynamic_rr_target(tech, is_long=False)
+        rr_driver_long = _rr_driver_line(
+            finder,
+            df,
+            tech,
+            coin,
+            long_m,
+            True,
+            rr_target_long,
+            fee_slp_bps,
+        )
+        rr_driver_short = _rr_driver_line(
+            finder,
+            df,
+            tech,
+            coin,
+            short_m,
+            False,
+            rr_target_short,
+            fee_slp_bps,
+        )
         print(f"ATR7={_fmt(tech.get('atr'), 2)}  daily_vol_30d={_fmt(tech.get('daily_vol_30d'), 4)}  "
               f"intraday_range_pos={_fmt(tech.get('intraday_range_position'), 3)}  "
               f"intraday_vol_6h={_fmt(tech.get('intraday_volatility_6h'), 4)}  "
@@ -297,6 +406,8 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
             atr_cap_usd=getattr(cfg, "max_atr_usd", None),
             atr_cap_bps=getattr(cfg, "max_atr_bps", None),
             price=coin.get("current_price"),
+            rr_drivers_long=rr_driver_long,
+            rr_drivers_short=rr_driver_short,
         )
         _print_side("LONG", long_m)
         _print_side("SHORT", short_m)

@@ -7,6 +7,11 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
 
+## December 19, 2025 - Snapshot Now Explains RR Drivers
+- `scripts/symbol_snapshot.py` now prints an `RR drivers:` line for both long/short (e.g., `tp_clamp, risk=atr_floor`).
+- This tells me *why* RR is low: reward capped by structure vs the RR target, and whether risk is dominated by raw stop distance, ATR floor, fee/slippage, or the 0.1% tick floor.
+- This makes it easier to see if a low RR is due to market geometry (tight targets) or due to volatility/fees inflating the risk side.
+
 ## December 19, 2025 - Gate-Scan Shows RR Still Far (Conditions Worsening)
 - Recent `scripts/symbol_snapshot.py --gate-scan` shows most of the top-10 names still stuck at RR≈0.80 (gap ~1.20), so conditions look worse again vs earlier optimism.
 - Only PAXG showed ATR within cap, but RR is still far from 2.0; most other names were ATR-clipped, indicating volatility remains too high for clean RRs.
