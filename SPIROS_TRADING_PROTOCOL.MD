@@ -166,6 +166,9 @@
   - Short-term: use `scripts/symbol_snapshot.py` as a spot check; only re-engage sizing when multiple symbols show RR≥2.0 with current filters, not just one-off stables or odd tickers.
   - Long-term: use `scripts/long_term_snapshot.py` (daily candles + long-term indicators like ATR(14)/Sharpe/drawdown) to sanity-check spread/liquidity/volatility before taking multi-day holds; `--gate-scan` shows which symbols are closest to the RR target across the universe.
   - ATR multiples: in `scripts/symbol_snapshot.py`, review the `SL/TP x ATR` line. If SL is well below 1× ATR, the setup is likely noise-prone; prefer wider-than-ATR stops when conditions are hot.
+    - Safety-first baseline: **prefer ≥1.0× ATR**.
+    - Aggressive floor (max risk): **0.5×–0.75× ATR**.
+    - **<0.5× ATR** = skip (noise range).
 
 ## 13. Current Short-Term Execution (Nov 2025)
 - Run `short_term_crypto_finder.py` (profile `focused_no_llm_100`) daily after the UTC candle; use the live-spread RR calc and RR≥2:1 gate.
