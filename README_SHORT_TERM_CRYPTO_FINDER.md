@@ -50,6 +50,7 @@ stops and closer profit targets.
 - **Short-Line Summaries**: Each candidate ends with a concise one-liner for
   quick triage.
 - **Gate Proximity Scan**: Use `scripts/symbol_snapshot.py --gate-scan --profile focused_no_llm_100 --top 15` to see which symbols are closest to clearing the RR/ATR gates (tiered ATR caps applied). Helpful to gauge when conditions are near tradable without loosening filters. Profiles are filter presets (not fixed symbol lists); gate-scan will analyze the profile-filtered universe unless you cap breadth with `--scan-limit N` (for example `--scan-limit 100`).
+- **ATR Multiples Readout**: `scripts/symbol_snapshot.py` now prints SL/TP distances in ATR units (e.g., `SL 0.8x ATR, TP 1.6x ATR`) so noise-prone setups are obvious at a glance.
 
 ## Installation
 

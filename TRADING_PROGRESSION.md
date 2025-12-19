@@ -21,6 +21,10 @@
 - ZEC surfaced with RR≈2.11 on the short side, but ATR was ~1123 bps versus a 400 bps cap (≈2.8× over cap). That’s heavy clipping, so the RR is not reliable under my current safety stance.
 - Decision: skip the trade. Even for maximum risk appetite I’m capping at ~2× the ATR cap (≈800 bps); above that the volatility is too hot.
 
+## December 19, 2025 - Snapshot Shows SL/TP Distance in ATR Multiples
+- `scripts/symbol_snapshot.py` now prints how far the stop/target are in ATR units (e.g., `SL 0.6x ATR, TP 1.2x ATR`) so I can spot “noise‑prone” setups quickly.
+- This helps explain fast stop‑outs: if SL is much less than 1× ATR, normal volatility can hit it even when the thesis is right.
+
 ## December 18, 2025 - Long-Term Snapshot Tool (Daily Metrics)
 - Added `scripts/long_term_snapshot.py` as a long-horizon companion to `scripts/symbol_snapshot.py`.
 - It uses `LongTermCryptoFinder` (daily candles + long-term indicators like ATR(14), Sharpe, max drawdown) and prints LONG/SHORT entry/SL/TP plus risk level, so I can sanity-check long-term candidates without relying on short-term intraday readouts.

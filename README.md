@@ -8,6 +8,7 @@
 ## Active Tools
 - **Finders**: `short_term_crypto_finder.py`, `long_term_crypto_finder.py`.
   - Short-horizon snapshot: `scripts/symbol_snapshot.py` (includes short-term gates + intraday context).
+    - Includes ATR-multiple readout for SL/TP distance to spot noise-prone setups quickly.
   - Long-horizon snapshot: `scripts/long_term_snapshot.py` (daily candles + long-term indicators like ATR(14)/Sharpe/drawdown).
     - Gate scan (long-term): `python scripts/long_term_snapshot.py --gate-scan --profile wide --top 15 --scan-limit 200`
   - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N]`.
