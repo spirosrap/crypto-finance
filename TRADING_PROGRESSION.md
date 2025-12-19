@@ -7,6 +7,11 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
 
+## December 19, 2025 - Gate-Scan Shows RR Still Far (Conditions Worsening)
+- Recent `scripts/symbol_snapshot.py --gate-scan` shows most of the top-10 names still stuck at RR≈0.80 (gap ~1.20), so conditions look worse again vs earlier optimism.
+- Only PAXG showed ATR within cap, but RR is still far from 2.0; most other names were ATR-clipped, indicating volatility remains too high for clean RRs.
+- Spreads were mixed: some acceptable, but at least one candidate (OP) showed a very wide spread, reinforcing the “wait for better conditions” stance.
+
 ## December 18, 2025 - Long-Term Snapshot Tool (Daily Metrics)
 - Added `scripts/long_term_snapshot.py` as a long-horizon companion to `scripts/symbol_snapshot.py`.
 - It uses `LongTermCryptoFinder` (daily candles + long-term indicators like ATR(14), Sharpe, max drawdown) and prints LONG/SHORT entry/SL/TP plus risk level, so I can sanity-check long-term candidates without relying on short-term intraday readouts.
