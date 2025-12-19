@@ -191,8 +191,21 @@ def _print_gates(
             return f"risk {risk_pct:.2f}%, reward {reward_pct:.2f}%"
         except Exception:
             return "n/a"
+    def _dist_atr(m) -> str:
+        if not m or atr_raw <= 0:
+            return "n/a"
+        try:
+            entry = float(m.entry_price)
+            sl = float(m.stop_loss_price)
+            tp = float(m.take_profit_price)
+            sl_mult = abs(entry - sl) / atr_raw
+            tp_mult = abs(tp - entry) / atr_raw
+            return f"SL {sl_mult:.2f}x ATR, TP {tp_mult:.2f}x ATR"
+        except Exception:
+            return "n/a"
     print(f"Gates: ATR7={_fmt(atr_raw, 2)}{atr_note} | RR long { _rr_gap(long_m) } | RR short { _rr_gap(short_m) }")
     print(f"Distances: long {_dist(long_m)} | short {_dist(short_m)}")
+    print(f"ATR multiples: long {_dist_atr(long_m)} | short {_dist_atr(short_m)}")
 
 
 def _dynamic_bps(price: float) -> float:
