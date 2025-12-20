@@ -1,5 +1,13 @@
 # Crypto Finance — Current Pipeline (Dec 2025)
 
+## About This Repository
+This repo is my active, rules‑based crypto trading workflow. It focuses on short‑term signal generation, disciplined execution, and transparency through logs and diagnostics. For me, it’s a living system that enforces patience (RR/ATR gates) and reduces emotional trading by making the process explicit.
+
+For others, this repo can be useful as:
+- A reference implementation of **systematic crypto trading** with clear gates, snapshots, and audit trails.
+- A practical example of **signal → output → execution** plumbing using CCXT + Coinbase.
+- A toolbox of **diagnostics** (ATR clip analysis, gate scans, volatility regime readouts) that help validate decision rules.
+
 ## Current Focus
 - **Short-Term Crypto Finder (`short_term_crypto_finder.py`)**: Strict RR ≥ 2, ATR(7) gated with tiered caps (3k USD plus bps tiers ≈325/350/400/450 by price bands; tighter cap wins), hard SL/TP. Runs on USDC pairs; logs to `logs/short_term_crypto_finder/`.
 - **Breakout Autotrade (`scripts/run_breakout_autotrade.py`)**: Hourly scan of USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with fixed 2R structure, $500 notional / 50x, 24h lock to avoid stacking. Writes finder-format output; uses Coinbase primary with Kraken fallback. Near-breakouts are logged.
