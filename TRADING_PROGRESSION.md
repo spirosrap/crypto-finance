@@ -11,6 +11,22 @@
 - Ran `scripts/watchdog_atr_clip_analysis.py` on the short-term closed-trade log.
 - Results: heavy clipping (>2x cap) shows higher average upside but much worse MAE; lower ATR buckets are flatter but safer.
 - Decision: keep my low-ATR preference (<= ~1.25–1.5x cap) even if compounding is slower, because it reduces drawdown pain and fast SL churn.
+- Reference table (short-term closed trades):
+```
+ATR cap ratio buckets (ATR_bps / cap_bps):
+bucket        n   win%    avg%    med%  avg_mae  avg_mfe  avg_ratio
+-------------------------------------------------------------------
+1.0-1.25     45   60.0   -0.00    0.12    -7.54     8.02       1.15
+1.25-1.5     56   33.9   -0.47   -0.31    -7.80     7.06       1.37
+1.5-2.0      78   41.0   -0.29   -0.21   -10.62     9.82       1.77
+<=1.0        79   32.9   -0.19    0.00    -5.10     3.55       0.44
+>2.0         73   52.1    0.85    0.28   -13.32    23.06       2.39
+```
+- Quick read:
+  - `>2.0` shows the highest avg% and MFE but also the worst MAE (high upside, high pain).
+  - `1.0–1.25` has solid win% but flat avg% (small wins/losses).
+  - `<=1.0` has low MAE but also low MFE (safer, less payoff).
+  - `1.25–2.0` buckets look weaker on average.
 
 ## December 20, 2025 - Snapshot Output Now Uses Rich Tables (ASCII)
 - Installed `rich` and updated `scripts/symbol_snapshot.py` + `scripts/long_term_snapshot.py` to render ASCII tables when available.
