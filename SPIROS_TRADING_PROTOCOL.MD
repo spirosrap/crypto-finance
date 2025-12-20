@@ -120,6 +120,7 @@
       - Safe: raw ATR `< 500 bps`
       - Medium: raw ATR `< 600 bps`
       - Aggressive/high-risk: raw ATR `< 800 bps`
+  - Outcome check (short-term log): higher clip ratios (>2x) show more upside but materially worse MAE. Lower ratios are flatter but safer, so staying ≤1.25–1.5x cap matches my current safety-first stance even if compounding is slower.
   - Volatility regime ratios (only useful near the cap):
     - I only look at `ATR7/ATR21` and `TR1/ATR7` when ATR is **within cap** or only **mildly clipped** (within my risk tolerance). If ATR is heavily clipped, I skip regardless of ratios.
     - When near-cap, use the ratios as context/timing:

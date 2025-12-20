@@ -7,6 +7,11 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
 
+## December 20, 2025 - ATR Clip Ratio Confirms Conservative Stance
+- Ran `scripts/watchdog_atr_clip_analysis.py` on the short-term closed-trade log.
+- Results: heavy clipping (>2x cap) shows higher average upside but much worse MAE; lower ATR buckets are flatter but safer.
+- Decision: keep my low-ATR preference (<= ~1.25–1.5x cap) even if compounding is slower, because it reduces drawdown pain and fast SL churn.
+
 ## December 20, 2025 - ATR Clip Ratio Outcome Test Added
 - Added `scripts/watchdog_atr_clip_analysis.py` to bucket closed trades by `ATR_bps / cap_bps`.
 - Goal: quantify which volatility regimes (within cap, mildly clipped, heavily clipped) perform best before changing gates.
