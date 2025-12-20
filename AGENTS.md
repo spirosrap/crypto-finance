@@ -99,6 +99,7 @@
 - Reference paths with filenames and line numbers when flagging issues or proposing edits.
 - Surface risks early (data staleness, long-running backtests, TA-Lib availability).
 - Favor incremental pull-request sized changes; document follow-ups if scope must be split.
+- When adding a new feature, command, or workflow, update all relevant docs (README, README_* finders, SPIROS_TRADING_PROTOCOL.MD, TRADING_PROGRESSION.md) so the pipeline stays current.
 - End deliverables with next-step suggestions (tests to run, deployment actions, monitoring reminders).
 
 ## Gate Definitions (quick reference)
