@@ -16,6 +16,7 @@
 - **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock).
 - **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).
 - **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text.
+- **Diagnostics**: `scripts/watchdog_atr_clip_analysis.py` to bucket closed trades by ATR cap ratio and compare outcomes.
 
 ## What’s Retired/Optional
 - Forced daily trading or balanced 5-trade baskets—no longer required.

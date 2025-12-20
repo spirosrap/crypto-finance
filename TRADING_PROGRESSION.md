@@ -7,6 +7,10 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
 
+## December 20, 2025 - ATR Clip Ratio Outcome Test Added
+- Added `scripts/watchdog_atr_clip_analysis.py` to bucket closed trades by `ATR_bps / cap_bps`.
+- Goal: quantify which volatility regimes (within cap, mildly clipped, heavily clipped) perform best before changing gates.
+
 ## December 20, 2025 - ATR Stays Elevated = Disagreement/Two-Sided Flow
 - BTC ATR7 is still in the ~3–4k band, which suggests ongoing **price disagreement** rather than a one-way trend.
 - The persistence of high ATR likely reflects two-sided flow (dip-buying vs selling, hedging/liquidations, uncertainty), keeping daily ranges wide even when direction is unclear.

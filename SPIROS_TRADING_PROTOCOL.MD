@@ -101,6 +101,7 @@
     - VMC quick read: if `vmc` is above the minimum (positive pp gap), the VMC liquidity check is passing.
   - `spr=... bps (...; cap=...)`: current spread in bps and headroom vs a heuristic “acceptable” spread cap (3/5/10 bps by volume tier). This is informational, not a hard gate.
   - Safe-first read: prefer `x>=1`, VMC gap positive, and spread headroom positive; negative spread headroom means the spread is wider than the acceptable range (higher cost/slippage risk).
+- Diagnostics: `scripts/watchdog_atr_clip_analysis.py` buckets closed trades by `ATR_bps / cap_bps` so I can see which ATR regimes perform best before changing gates.
 - Discipline: boredom is part of the edge. Waiting is intentional; do not loosen gates out of impatience. Flat is a valid position.
 - ATR handling (important):
   - Timeframe: the strategy uses **daily ATR(7)** (ATR computed on daily candles with `atr_period=7`), not intraday ATR.

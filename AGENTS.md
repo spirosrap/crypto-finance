@@ -92,6 +92,7 @@
   - `watchdog_dashboard.py`: status/metrics dashboard; keep it in sync with current pipelines for visibility over active trades and cron health.
 - **Observability / Scanning**
   - `scripts/symbol_snapshot.py --gate-scan`: scans the profile-filtered universe and prints the closest symbols to the RR/ATR gates (uses finder-tiered ATR caps and RR target; defaults RR=2, top=15). `--scan-limit N` optionally caps how many symbols are analyzed for speed. Profiles are filter presets (not fixed product lists); scan-limit just limits breadth within that preset.
+  - `scripts/watchdog_atr_clip_analysis.py`: buckets closed trades by `ATR_bps / cap_bps` to evaluate which volatility regimes produce better outcomes.
 
 ## Communication and Delivery Expectations
 - Be explicit about assumptions, especially around time ranges and data availability.
