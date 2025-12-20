@@ -17,7 +17,9 @@ For others, this repo can be useful as:
 - **Finders**: `short_term_crypto_finder.py`, `long_term_crypto_finder.py`.
   - Short-horizon snapshot: `scripts/symbol_snapshot.py` (includes short-term gates + intraday context).
     - Includes ATR-multiple readout for SL/TP distance and an `RR drivers` line showing which caps/floors dominated.
+    - Renders ASCII Rich tables when `rich` is installed; falls back to plain text.
   - Long-horizon snapshot: `scripts/long_term_snapshot.py` (daily candles + long-term indicators like ATR(14)/Sharpe/drawdown).
+    - Renders ASCII Rich tables when `rich` is installed; falls back to plain text.
     - Gate scan (long-term): `python scripts/long_term_snapshot.py --gate-scan --profile wide --top 15 --scan-limit 200`
   - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N]`.
   - Long-term profile used for LLM + liquidity filters: `python long_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_long.txt --suppress-console-logs`
@@ -65,22 +67,9 @@ For others, this repo can be useful as:
 | `trade_logs/watchdog_closed_positions.csv` | watchdog | Closed trade ledger | `trade_logs/` | Source for ATR clip analysis. |
 | `trade_logs/watchdog_tp_sl_checkpoint.json` | watchdog | Open trade checkpoints | `trade_logs/` | Used for recovery. |
 
-## What’s Retired/Optional
-- Forced daily trading or balanced 5-trade baskets—no longer required.
-- Mandatory 24h holds across all strategies—used only when explicitly configured (e.g., breakout autotrade lock).
-- Reservoir/multi-basket experiments—on pause; sticking to finder + breakout playbooks.
-- Legacy bots/tools (not maintained): simplified_trading_bot v1.2.1f, simplified_trading_bot_past/simplified_trading_bot_v1.2.2.py, reservoir/multi-basket scripts. Kept for reference only.
-
-## Quick Start (Current Flow)
-1) Run snapshots: `python scripts/symbol_snapshot.py --symbols BTC,ETH --profile focused_no_llm_100`
-   - Gate proximity view (optional): `python scripts/symbol_snapshot.py --gate-scan --profile focused_no_llm_100 --top 15 --scan-limit 100`
-   - Long-term sanity check (optional): `python scripts/long_term_snapshot.py --symbols BTC,ETH --profile default`
-   - Long-term gate scan (optional): `python scripts/long_term_snapshot.py --gate-scan --profile wide --top 15 --scan-limit 200`
-2) Let cron handle:
-   - `short_term_crypto_finder.py` (daily) → feed results to `add_position_from_finder.py` or `add_top5_from_finder.py` to stage/execute trades.
-   - `run_breakout_autotrade.py` (hourly) for 2R breakouts on USDC majors.
-3) Check `logs/breakout_autotrade.log` for near-breakouts/triggers; finder logs under `logs/short_term_crypto_finder/`.
-4) Optional: enforce a 24h timeout on positions with `watchdog_close_old_positions.py`.
+## Legacy / Not in the Current Pipeline
+- Older tools, setup notes, and retired workflows are archived in `README_LEGACY.md`.
+- The active pipeline is defined above (Current Focus + Runbook + Outputs/Logs).
 
 ## Environment & Requirements
 - Python 3.11, ccxt ≥ 4.2, pandas ≥ 2.3, numpy ≥ 1.24, TA-Lib ≥ 0.6.7, openai ≥ 1.109.1 (installed), full list in `requirements.txt`.

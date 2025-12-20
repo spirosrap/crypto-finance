@@ -16,6 +16,17 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 import pandas as pd
+try:
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+    RICH_AVAILABLE = True
+    RICH_CONSOLE = Console(color_system=None, force_terminal=False, width=120)
+except Exception:
+    RICH_AVAILABLE = False
+    RICH_CONSOLE = None
+    Table = None
+    box = None
 
 # Ensure repository root on sys.path
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -128,7 +139,7 @@ def _print_side(label: str, metric) -> None:
           f"mom={_fmt(metric.momentum_score, 2)}")
 
 
-def _print_gates(
+def _format_gates(
     long_m,
     short_m,
     tech: Dict,
@@ -138,7 +149,7 @@ def _print_gates(
     price: Optional[float],
     rr_drivers_long: Optional[str] = None,
     rr_drivers_short: Optional[str] = None,
-) -> None:
+) -> tuple[str, str, str, Optional[str]]:
     atr_raw = float(tech.get("atr") or 0.0)
     atr_note = ""
     # Tiered dynamic bps (mirror finder logic)
@@ -206,11 +217,42 @@ def _print_gates(
             return f"SL {sl_mult:.2f}x ATR, TP {tp_mult:.2f}x ATR"
         except Exception:
             return "n/a"
-    print(f"Gates: ATR7={_fmt(atr_raw, 2)}{atr_note} | RR long { _rr_gap(long_m) } | RR short { _rr_gap(short_m) }")
-    print(f"Distances: long {_dist(long_m)} | short {_dist(short_m)}")
-    print(f"ATR multiples: long {_dist_atr(long_m)} | short {_dist_atr(short_m)}")
+    gates_line = f"Gates: ATR7={_fmt(atr_raw, 2)}{atr_note} | RR long { _rr_gap(long_m) } | RR short { _rr_gap(short_m) }"
+    dist_line = f"Distances: long {_dist(long_m)} | short {_dist(short_m)}"
+    atr_line = f"ATR multiples: long {_dist_atr(long_m)} | short {_dist_atr(short_m)}"
+    rr_line = None
     if rr_drivers_long or rr_drivers_short:
-        print(f"RR drivers: long {rr_drivers_long or 'n/a'} | short {rr_drivers_short or 'n/a'}")
+        rr_line = f"RR drivers: long {rr_drivers_long or 'n/a'} | short {rr_drivers_short or 'n/a'}"
+    return gates_line, dist_line, atr_line, rr_line
+
+
+def _print_gates(
+    long_m,
+    short_m,
+    tech: Dict,
+    rr_target: float,
+    atr_cap_usd: Optional[float],
+    atr_cap_bps: Optional[float],
+    price: Optional[float],
+    rr_drivers_long: Optional[str] = None,
+    rr_drivers_short: Optional[str] = None,
+) -> None:
+    gates_line, dist_line, atr_line, rr_line = _format_gates(
+        long_m,
+        short_m,
+        tech,
+        rr_target,
+        atr_cap_usd,
+        atr_cap_bps,
+        price,
+        rr_drivers_long=rr_drivers_long,
+        rr_drivers_short=rr_drivers_short,
+    )
+    print(gates_line)
+    print(dist_line)
+    print(atr_line)
+    if rr_line:
+        print(rr_line)
 
 
 def _rr_driver_line(
@@ -347,22 +389,12 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         long_m = finder._build_long_metrics(coin, df, tech, mom, chg)
         short_m = finder._build_short_metrics(coin, df, tech, mom, chg)
 
-        print("=" * 80)
-        print(f"{coin['symbol']} ({coin.get('name','n/a')})  product={product_id}")
         vol = coin.get('volume_24h')
         mc = coin.get('market_cap')
         cg_warn = False
         if (vol is None or vol == 0) or (mc is None or mc == 0):
             cg_warn = True
-        print(f"Price={_fmt(coin.get('current_price'), 2)}  "
-              f"Vol24h={_fmt(vol, 0)}  "
-              f"MCAP={_fmt(mc, 0)}  "
-              f"Rank={coin.get('market_cap_rank', 'n/a')}")
-        if cg_warn:
-            print("WARNING: Missing/zero volume or market cap (CoinGecko/MC feed unavailable); liquidity checks may be incomplete.")
         ts = coin.get("data_timestamp_utc") or getattr(long_m, "data_timestamp_utc", "")
-        if ts:
-            print(f"Data TS (UTC): {ts}")
 
         atr21 = finder._calculate_atr(df, period=21) if len(df) >= 22 else 0.0
         atr7 = float(tech.get("atr") or 0.0)
@@ -391,14 +423,7 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
             rr_target_short,
             fee_slp_bps,
         )
-        print(f"ATR7={_fmt(tech.get('atr'), 2)}  daily_vol_30d={_fmt(tech.get('daily_vol_30d'), 4)}  "
-              f"intraday_range_pos={_fmt(tech.get('intraday_range_position'), 3)}  "
-              f"intraday_vol_6h={_fmt(tech.get('intraday_volatility_6h'), 4)}  "
-              f"spread_bps={_fmt(coin.get('spread_bps'), 3)}")
-        print(
-            f"Vol regime: ATR21={_fmt(atr21, 2)}  ATR7/ATR21={_fmt(atr7_to_21, 2)}  TR1/ATR7={_fmt(tr1_to_atr7, 2)}"
-        )
-        _print_gates(
+        gates_line, dist_line, atr_line, rr_line = _format_gates(
             long_m,
             short_m,
             tech,
@@ -409,9 +434,113 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
             rr_drivers_long=rr_driver_long,
             rr_drivers_short=rr_driver_short,
         )
-        _print_side("LONG", long_m)
-        _print_side("SHORT", short_m)
-        print()
+        vol_regime_line = (
+            f"ATR21={_fmt(atr21, 2)}  ATR7/ATR21={_fmt(atr7_to_21, 2)}  TR1/ATR7={_fmt(tr1_to_atr7, 2)}"
+        )
+
+        if RICH_AVAILABLE and RICH_CONSOLE is not None:
+            console = RICH_CONSOLE
+            console.print("=" * 80)
+            console.print(f"{coin['symbol']} ({coin.get('name','n/a')})  product={product_id}")
+            overview = Table(title="Overview", box=box.ASCII, show_header=False)
+            overview.add_column("Field", style="bold")
+            overview.add_column("Value")
+            overview.add_row("Price", _fmt(coin.get("current_price"), 2))
+            overview.add_row("Vol24h", _fmt(vol, 0))
+            overview.add_row("MCAP", _fmt(mc, 0))
+            overview.add_row("Rank", str(coin.get("market_cap_rank", "n/a")))
+            if ts:
+                overview.add_row("Data TS (UTC)", ts)
+            overview.add_row(
+                "ATR/Vol",
+                f"ATR7={_fmt(tech.get('atr'), 2)}  daily_vol_30d={_fmt(tech.get('daily_vol_30d'), 4)}  "
+                f"intraday_range_pos={_fmt(tech.get('intraday_range_position'), 3)}  "
+                f"intraday_vol_6h={_fmt(tech.get('intraday_volatility_6h'), 4)}  "
+                f"spread_bps={_fmt(coin.get('spread_bps'), 3)}",
+            )
+            overview.add_row("Vol regime", vol_regime_line)
+            overview.add_row("Gates", gates_line.replace("Gates: ", ""))
+            overview.add_row("Distances", dist_line.replace("Distances: ", ""))
+            overview.add_row("ATR multiples", atr_line.replace("ATR multiples: ", ""))
+            if rr_line:
+                overview.add_row("RR drivers", rr_line.replace("RR drivers: ", ""))
+            console.print(overview)
+
+            sides = Table(title="Sides", box=box.ASCII)
+            sides.add_column("Side")
+            sides.add_column("RR", justify="right")
+            sides.add_column("Entry", justify="right")
+            sides.add_column("SL", justify="right")
+            sides.add_column("TP", justify="right")
+            sides.add_column("RSI14", justify="right")
+            sides.add_column("Trend %/d", justify="right")
+            sides.add_column("Mom", justify="right")
+
+            def _add_side_row(label: str, metric) -> None:
+                if not metric:
+                    sides.add_row(label, "n/a", "-", "-", "-", "-", "-", "-")
+                    return
+                def _price_prec(entry: float) -> int:
+                    try:
+                        val = float(entry)
+                    except Exception:
+                        return 4
+                    if val < 1:
+                        return 6
+                    if val < 10:
+                        return 4
+                    if val < 1000:
+                        return 3
+                    return 2
+                price_prec = _price_prec(metric.entry_price)
+                sides.add_row(
+                    label,
+                    _fmt(metric.risk_reward_ratio, 2),
+                    _fmt(metric.entry_price, price_prec),
+                    _fmt(metric.stop_loss_price, price_prec),
+                    _fmt(metric.take_profit_price, price_prec),
+                    _fmt(metric.rsi_14, 1),
+                    _fmt(metric.trend_strength, 3),
+                    _fmt(metric.momentum_score, 2),
+                )
+
+            _add_side_row("LONG", long_m)
+            _add_side_row("SHORT", short_m)
+            console.print(sides)
+            if cg_warn:
+                console.print("WARNING: Missing/zero volume or market cap (CoinGecko/MC feed unavailable); liquidity checks may be incomplete.")
+            console.print()
+        else:
+            print("=" * 80)
+            print(f"{coin['symbol']} ({coin.get('name','n/a')})  product={product_id}")
+            print(f"Price={_fmt(coin.get('current_price'), 2)}  "
+                  f"Vol24h={_fmt(vol, 0)}  "
+                  f"MCAP={_fmt(mc, 0)}  "
+                  f"Rank={coin.get('market_cap_rank', 'n/a')}")
+            if cg_warn:
+                print("WARNING: Missing/zero volume or market cap (CoinGecko/MC feed unavailable); liquidity checks may be incomplete.")
+            if ts:
+                print(f"Data TS (UTC): {ts}")
+
+            print(f"ATR7={_fmt(tech.get('atr'), 2)}  daily_vol_30d={_fmt(tech.get('daily_vol_30d'), 4)}  "
+                  f"intraday_range_pos={_fmt(tech.get('intraday_range_position'), 3)}  "
+                  f"intraday_vol_6h={_fmt(tech.get('intraday_volatility_6h'), 4)}  "
+                  f"spread_bps={_fmt(coin.get('spread_bps'), 3)}")
+            print(f"Vol regime: {vol_regime_line}")
+            _print_gates(
+                long_m,
+                short_m,
+                tech,
+                rr_target=2.0,
+                atr_cap_usd=getattr(cfg, "max_atr_usd", None),
+                atr_cap_bps=getattr(cfg, "max_atr_bps", None),
+                price=coin.get("current_price"),
+                rr_drivers_long=rr_driver_long,
+                rr_drivers_short=rr_driver_short,
+            )
+            _print_side("LONG", long_m)
+            _print_side("SHORT", short_m)
+            print()
 
 
 def gate_scan(
@@ -533,8 +662,74 @@ def gate_scan(
 
     rows.sort(key=lambda r: (r["rr_gap"] if r["rr_gap"] is not None else 1e9,
                              -(r["headroom_bps"] if r["headroom_bps"] is not None else -1e9)))
+    top_rows = rows[:top]
     print(f"Top {min(top, len(rows))} closest to RR {rr_target}:")
-    for row in rows[:top]:
+    if RICH_AVAILABLE and RICH_CONSOLE is not None and top_rows:
+        table = Table(title="Gate Scan (Short-Term)", box=box.ASCII, show_lines=False)
+        table.add_column("Symbol")
+        table.add_column("Side")
+        table.add_column("RR", justify="right")
+        table.add_column("Gap", justify="right")
+        table.add_column("ATR bps", justify="right")
+        table.add_column("ATR cap", justify="left")
+        table.add_column("Vol24h", justify="right")
+        table.add_column("VMC", justify="right")
+        table.add_column("Spr", justify="right")
+        table.add_column("Regime", justify="right")
+
+        for row in top_rows:
+            hr = row["headroom_bps"]
+            atr_txt = f"{row['atr_bps']:.0f}" if row['atr_bps'] is not None else "n/a"
+            if hr is None:
+                atr_gate_txt = "n/a"
+            elif hr < 0:
+                atr_gate_txt = f"clipped -{abs(hr):.0f}"
+            else:
+                atr_gate_txt = f"+{hr:.0f} head"
+
+            vol_txt = _fmt_usd_compact(row.get("vol24h"))
+            liq_mult = _fmt_mult(row.get("vol_mult")) if min_volume > 0 else "n/a"
+            vol_cell = f"{vol_txt} ({liq_mult})"
+
+            vmc_ratio = row.get("vmc_ratio")
+            if vmc_ratio is None:
+                vmc_cell = "n/a"
+            else:
+                vmc_txt = f"{vmc_ratio * 100.0:.2f}%"
+                vmc_gap = row.get("vmc_gap_pp")
+                if min_ratio > 0 and vmc_gap is not None:
+                    vmc_cell = f"{vmc_txt} ({vmc_gap:+.2f}pp)"
+                else:
+                    vmc_cell = vmc_txt
+
+            spr = row.get("spread_bps")
+            if spr is None or spr <= 0:
+                spr_cell = "n/a"
+            else:
+                spr_cap = float(row.get("spread_cap_bps") or 0.0)
+                spr_hr = row.get("spread_headroom_bps")
+                spr_hr_txt = f"{spr_hr:+.2f}" if spr_hr is not None else "n/a"
+                spr_cell = f"{spr:.2f} ({spr_hr_txt}/{spr_cap:.0f})"
+
+            regime = f"{_fmt(row.get('atr7_to_21'), 2)}/{_fmt(row.get('tr1_to_atr7'), 2)}"
+
+            table.add_row(
+                row["symbol"],
+                row["best_side"],
+                f"{row['rr']:.2f}",
+                f"{row['rr_gap']:.2f}",
+                atr_txt,
+                atr_gate_txt,
+                vol_cell,
+                vmc_cell,
+                spr_cell,
+                regime,
+            )
+
+        RICH_CONSOLE.print(table)
+        return
+
+    for row in top_rows:
         hr = row["headroom_bps"]
         cap_txt = f"{row['cap_bps']:.0f} bps" if row['cap_bps'] is not None else "n/a"
         atr_txt = f"{row['atr_bps']:.0f} bps" if row['atr_bps'] is not None else "n/a"

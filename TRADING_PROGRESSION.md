@@ -12,6 +12,10 @@
 - Results: heavy clipping (>2x cap) shows higher average upside but much worse MAE; lower ATR buckets are flatter but safer.
 - Decision: keep my low-ATR preference (<= ~1.25–1.5x cap) even if compounding is slower, because it reduces drawdown pain and fast SL churn.
 
+## December 20, 2025 - Snapshot Output Now Uses Rich Tables (ASCII)
+- Installed `rich` and updated `scripts/symbol_snapshot.py` + `scripts/long_term_snapshot.py` to render ASCII tables when available.
+- Gate-scan and per-symbol outputs are now more readable while keeping a plain-text fallback if Rich isn’t installed.
+
 ## December 20, 2025 - ATR Clip Ratio Outcome Test Added
 - Added `scripts/watchdog_atr_clip_analysis.py` to bucket closed trades by `ATR_bps / cap_bps`.
 - Goal: quantify which volatility regimes (within cap, mildly clipped, heavily clipped) perform best before changing gates.

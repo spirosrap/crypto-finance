@@ -15,6 +15,18 @@ import sys
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+try:
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
+    RICH_AVAILABLE = True
+    RICH_CONSOLE = Console(color_system=None, force_terminal=False, width=120)
+except Exception:
+    RICH_AVAILABLE = False
+    RICH_CONSOLE = None
+    Table = None
+    box = None
+
 # Ensure repository root on sys.path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -209,19 +221,8 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         else:
             cap_note = f"ATR headroom +{headroom_bps:.0f} bps"
 
-        print("=" * 80)
-        print(f"{coin.get('symbol', 'n/a')} ({coin.get('name', 'n/a')})  product={product_id}")
-        print(
-            f"Price={_fmt(price, 2)}  "
-            f"Vol24h={_fmt_usd_compact(coin.get('volume_24h'))}  "
-            f"MCAP={_fmt_usd_compact(coin.get('market_cap'))}  "
-            f"Rank={coin.get('market_cap_rank', 'n/a')}"
-        )
         ts = coin.get("data_timestamp_utc") or getattr(long_m, "data_timestamp_utc", "")
-        if ts:
-            print(f"Data TS (UTC): {ts}")
-
-        print(
+        summary_line = (
             f"ATR{cfg.atr_period}={_fmt(atr, 2)} ({_fmt(atr_pct, 2)}%)  "
             f"cap={cap_txt} ({cap_note})  "
             f"daily_vol_30d={_fmt(tech.get('daily_vol_30d'), 4)}  "
@@ -229,9 +230,70 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
             f"MaxDD={_fmt(float(tech.get('max_drawdown') or 0.0) * 100.0, 2)}%  "
             f"spread_bps={_fmt(coin.get('spread_bps'), 3)}"
         )
-        print(_format_side("LONG", long_m))
-        print(_format_side("SHORT", short_m))
-        print()
+
+        if RICH_AVAILABLE and RICH_CONSOLE is not None:
+            console = RICH_CONSOLE
+            console.print("=" * 80)
+            console.print(f"{coin.get('symbol', 'n/a')} ({coin.get('name', 'n/a')})  product={product_id}")
+            overview = Table(title="Overview", box=box.ASCII, show_header=False)
+            overview.add_column("Field", style="bold")
+            overview.add_column("Value")
+            overview.add_row("Price", _fmt(price, 2))
+            overview.add_row("Vol24h", _fmt_usd_compact(coin.get("volume_24h")))
+            overview.add_row("MCAP", _fmt_usd_compact(coin.get("market_cap")))
+            overview.add_row("Rank", str(coin.get("market_cap_rank", "n/a")))
+            if ts:
+                overview.add_row("Data TS (UTC)", ts)
+            overview.add_row("ATR/Vol", summary_line)
+            console.print(overview)
+
+            sides = Table(title="Sides", box=box.ASCII)
+            sides.add_column("Side")
+            sides.add_column("RR", justify="right")
+            sides.add_column("Entry", justify="right")
+            sides.add_column("SL", justify="right")
+            sides.add_column("TP", justify="right")
+            sides.add_column("RSI", justify="right")
+            sides.add_column("Trend %/d", justify="right")
+            sides.add_column("Mom", justify="right")
+            sides.add_column("Risk", justify="right")
+
+            def _add_row(label: str, metric) -> None:
+                if not metric:
+                    sides.add_row(label, "n/a", "-", "-", "-", "-", "-", "-", "-")
+                    return
+                price_prec = _price_precision(getattr(metric, "entry_price", 0.0))
+                sides.add_row(
+                    label,
+                    _fmt(getattr(metric, "risk_reward_ratio", None), 2),
+                    _fmt(getattr(metric, "entry_price", None), price_prec),
+                    _fmt(getattr(metric, "stop_loss_price", None), price_prec),
+                    _fmt(getattr(metric, "take_profit_price", None), price_prec),
+                    _fmt(getattr(metric, "rsi_14", None), 1),
+                    _fmt(getattr(metric, "trend_strength", None), 3),
+                    _fmt(getattr(metric, "momentum_score", None), 2),
+                    str(getattr(metric, "risk_level", None) or "n/a"),
+                )
+
+            _add_row("LONG", long_m)
+            _add_row("SHORT", short_m)
+            console.print(sides)
+            console.print()
+        else:
+            print("=" * 80)
+            print(f"{coin.get('symbol', 'n/a')} ({coin.get('name', 'n/a')})  product={product_id}")
+            print(
+                f"Price={_fmt(price, 2)}  "
+                f"Vol24h={_fmt_usd_compact(coin.get('volume_24h'))}  "
+                f"MCAP={_fmt_usd_compact(coin.get('market_cap'))}  "
+                f"Rank={coin.get('market_cap_rank', 'n/a')}"
+            )
+            if ts:
+                print(f"Data TS (UTC): {ts}")
+            print(summary_line)
+            print(_format_side("LONG", long_m))
+            print(_format_side("SHORT", short_m))
+            print()
 
 
 def gate_scan(
@@ -380,10 +442,68 @@ def gate_scan(
             -r["vol24h"],
         )
     )
+    top_rows = rows[:top]
     print(f"Top {min(top, len(rows))} closest to RR {rr_target}:")
     if any(row.get("cap_bps") is not None for row in rows):
         print("Note: ATR cap shown is informational for long-term scans (no clipping).")
-    for row in rows[:top]:
+
+    if RICH_AVAILABLE and RICH_CONSOLE is not None and top_rows:
+        table = Table(title="Gate Scan (Long-Term)", box=box.ASCII, show_lines=False)
+        table.add_column("Symbol")
+        table.add_column("Side")
+        table.add_column("RR", justify="right")
+        table.add_column("Gap", justify="right")
+        table.add_column(f"ATR{cfg.atr_period} bps", justify="right")
+        table.add_column("Risk")
+        table.add_column("Vol24h", justify="right")
+        table.add_column("VMC", justify="right")
+        table.add_column("Spr", justify="right")
+        table.add_column("Sharpe", justify="right")
+        table.add_column("DD", justify="right")
+
+        for row in top_rows:
+            atr_bps = row.get("atr_bps")
+            atr_txt = f"{atr_bps:.0f}" if atr_bps is not None else "n/a"
+            vol_txt = _fmt_usd_compact(row.get("vol24h"))
+            liq_mult = _fmt_mult(row.get("vol_mult")) if min_volume > 0 else "n/a"
+            vol_cell = f"{vol_txt} ({liq_mult})"
+            vmc = row.get("vmc_ratio")
+            if vmc is None:
+                vmc_cell = "n/a"
+            else:
+                vmc_txt = f"{vmc * 100.0:.2f}%"
+                vmc_gap = row.get("vmc_gap_pp")
+                if min_ratio > 0 and vmc_gap is not None:
+                    vmc_cell = f"{vmc_txt} ({vmc_gap:+.2f}pp)"
+                else:
+                    vmc_cell = vmc_txt
+            spr = row.get("spread_bps")
+            if spr is None or spr <= 0:
+                spr_cell = "n/a"
+            else:
+                spr_cap = float(row.get("spread_cap_bps") or 0.0)
+                spr_hr = row.get("spread_headroom_bps")
+                spr_hr_txt = f"{spr_hr:+.2f}" if spr_hr is not None else "n/a"
+                spr_cell = f"{spr:.2f} ({spr_hr_txt}/{spr_cap:.0f})"
+
+            table.add_row(
+                row["symbol"],
+                row["best_side"],
+                f"{row['rr']:.2f}",
+                f"{row['rr_gap']:.2f}",
+                atr_txt,
+                row["risk"],
+                vol_cell,
+                vmc_cell,
+                spr_cell,
+                f"{row['sharpe']:.2f}",
+                f"{row['max_dd']*100.0:.1f}%",
+            )
+
+        RICH_CONSOLE.print(table)
+        return
+
+    for row in top_rows:
         hr = row.get("headroom_bps")
         cap_bps = row.get("cap_bps")
         atr_bps = row.get("atr_bps")

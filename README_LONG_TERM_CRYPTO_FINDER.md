@@ -61,6 +61,13 @@ python long_term_crypto_finder.py
 
 By default, the tool evaluates both LONG and SHORT sides and ranks the top opportunities across both.
 
+### Snapshot Helper (Daily View)
+```bash
+python scripts/long_term_snapshot.py --symbols BTC,ETH --profile default
+```
+
+When `rich` is installed, snapshot output (including `--gate-scan`) renders as ASCII tables for readability; it falls back to plain text otherwise.
+
 ### Advanced Usage
 ```bash
 # Analyze top 30 cryptocurrencies, show top 10 best opportunities across BOTH sides
