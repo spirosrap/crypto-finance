@@ -3,6 +3,8 @@
 ## Quick Links
 - [December 2025](#december-2025)
 - [November 2025](#november-2025)
+- [October 2025](#october-2025)
+- [June 2025](#june-2025)
 
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
@@ -440,6 +442,7 @@ bucket        n   win%    avg%    med%  avg_mae  avg_mfe  avg_ratio
 
 ---
 
+## October 2025
 ## October 11, 2025 - Coinbase EURCUSDC Execution Anomaly
 
 ### Market Context
@@ -462,7 +465,7 @@ bucket        n   win%    avg%    med%  avg_mae  avg_mfe  avg_ratio
 - Review sizing/stop-width on thin EURC-PERP books to reduce future slippage and consider wider offsets or manual intervention protocols during fast sell-offs.
 - Watchdog performance snapshot (51 trades through Oct 12): expectancy +0.43R with average winners 1.72R vs losers 1.0R, confirming edge despite modest 49% hit rate. Sharpe 0.26 / Sortino 0.37 highlight that equity swings are driven primarily by crypto’s intrinsic volatility rather than poor trade selection.
 
-
+## June 2025
 ## June 19, 2025 - Single Bitcoin Position Reflection
 
 ### Personal Trading Philosophy Evolution
