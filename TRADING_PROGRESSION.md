@@ -9,6 +9,10 @@
 ## December 2025
 **State at a glance (latest):** BTC ATR7 still >3k and cap‑binding; RR remains sub‑2 on most majors, so signals are sparse and the breakout bot mostly logs near‑breakouts. Recent ZEC candidate was skipped because ATR is above my safe band. Baseline exit test on 331 trades favored a simple ATR bracket model, but I’m keeping the new RR/ATR rules for ~50 trades before any change. Snapshots now include liquidity/spread headroom plus volatility‑regime readouts (ATR7/ATR21, TR1/ATR7) with Rich table output.
 
+## December 21, 2025 - Baseline Snapshot Paper Helper Added
+- Added `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into a baseline finder file (`finder_short_baseline.txt`) with fixed ATR*RR exits.
+- Optional `--open-paper` hands the baseline file to `paper_finder_simulator.py`, so I can stage paper trades and review them in `watchdog_dashboard.py`.
+
 ## December 21, 2025 - ZEC Trade Resurfaced, Still Too Hot
 - ZEC showed up again this morning, but ATR is still above my safe band (ATR ~938 bps vs safe threshold ≤500 bps at 1.25× cap).
 - Decision: skip the trade and stay aligned with the low‑volatility preference.
