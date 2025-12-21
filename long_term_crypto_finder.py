@@ -65,6 +65,7 @@ except ModuleNotFoundError:
 
 from historicaldata import HistoricalData
 from llm_scoring import LLMScorer, build_llm_payload
+from finder_settings import CryptoFinderSettings, ValidationError
 
 
 def _seed_credentials() -> None:
@@ -136,97 +137,13 @@ class CryptoFinderConfig:
 
     @classmethod
     def from_env(cls) -> 'CryptoFinderConfig':
-        """Create configuration from environment variables."""
-        # Parse optional list of symbols from env (comma-separated)
-        symbols_env = os.getenv('CRYPTO_SYMBOLS')
-        symbols_list: Optional[List[str]] = None
-        if symbols_env:
-            symbols_list = [s.strip().upper() for s in symbols_env.split(',') if s.strip()]
-        quotes_env = os.getenv('CRYPTO_QUOTES')
-        quotes_list: Optional[List[str]] = None
-        if quotes_env:
-            quotes_list = [q.strip().upper() for q in quotes_env.split(',') if q.strip()]
-        max_risk_level_env = os.getenv('CRYPTO_MAX_RISK_LEVEL')
-        max_risk_level = max_risk_level_env.strip() if max_risk_level_env else None
-
-        def _float_env(name: str, default: float) -> float:
-            raw = os.getenv(name)
-            if raw is None:
-                return default
-            try:
-                return float(raw)
-            except ValueError:
-                logging.getLogger(__name__).warning(
-                    "Invalid float value '%s' for %s; using default %.3f",
-                    raw,
-                    name,
-                    default,
-                )
-                return default
-
-        def _optional_float_env(name: str) -> Optional[float]:
-            raw = os.getenv(name)
-            if raw is None or raw == "":
-                return None
-            try:
-                return float(raw)
-            except ValueError:
-                logging.getLogger(__name__).warning(
-                    "Invalid float value '%s' for %s; ignoring override",
-                    raw,
-                    name,
-                )
-                return None
-
-        return cls(
-            min_market_cap=int(os.getenv('CRYPTO_MIN_MARKET_CAP', '100000000')),
-            max_results=int(os.getenv('CRYPTO_MAX_RESULTS', '20')),
-            max_workers=int(os.getenv('CRYPTO_MAX_WORKERS', '4')),
-            request_delay=float(os.getenv('CRYPTO_REQUEST_DELAY', '0.5')),
-            cache_ttl=int(os.getenv('CRYPTO_CACHE_TTL', '300')),
-            force_refresh_candles=os.getenv('CRYPTO_FORCE_REFRESH_CANDLES', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
-            risk_free_rate=_float_env('CRYPTO_RISK_FREE_RATE', 0.03),
-            analysis_days=int(os.getenv('CRYPTO_ANALYSIS_DAYS', '365')),
-            intraday_granularity=os.getenv('CRYPTO_INTRADAY_GRANULARITY', 'ONE_HOUR'),
-            intraday_lookback_days=int(os.getenv('CRYPTO_INTRADAY_LOOKBACK_DAYS', '14') or '14'),
-            intraday_resample=os.getenv('CRYPTO_INTRADAY_RESAMPLE', '4H'),
-            min_volume_24h=_float_env('CRYPTO_MIN_VOLUME_24H', 0.0),
-            min_volume_market_cap_ratio=_float_env('CRYPTO_MIN_VMC_RATIO', 0.0),
-            rsi_period=int(os.getenv('CRYPTO_RSI_PERIOD', '14')),
-            atr_period=int(os.getenv('CRYPTO_ATR_PERIOD', '14')),
-            stochastic_period=int(os.getenv('CRYPTO_STOCHASTIC_PERIOD', '14')),
-            williams_period=int(os.getenv('CRYPTO_WILLIAMS_PERIOD', '14')),
-            cci_period=int(os.getenv('CRYPTO_CCI_PERIOD', '20')),
-            adx_period=int(os.getenv('CRYPTO_ADX_PERIOD', '14')),
-            bb_period=int(os.getenv('CRYPTO_BB_PERIOD', '20')),
-            macd_fast=int(os.getenv('CRYPTO_MACD_FAST', '12')),
-            macd_slow=int(os.getenv('CRYPTO_MACD_SLOW', '26')),
-            macd_signal=int(os.getenv('CRYPTO_MACD_SIGNAL', '9')),
-            side=os.getenv('CRYPTO_SIDE', 'both').lower(),
-            unique_by_symbol=os.getenv('CRYPTO_UNIQUE_BY_SYMBOL', '0') in ('1', 'true', 'True'),
-            min_overall_score=_float_env('CRYPTO_MIN_SCORE', 0.0),
-            offline=os.getenv('CRYPTO_OFFLINE', '0') in ('1', 'true', 'True'),
-            symbols=symbols_list,
-            top_per_side=int(os.getenv('CRYPTO_TOP_PER_SIDE')) if os.getenv('CRYPTO_TOP_PER_SIDE') else None,
-            quotes=quotes_list,
-            max_risk_level=max_risk_level,
-            risk_reward_weight=_float_env('CRYPTO_RR_WEIGHT', 0.15),
-            trend_weight=_float_env('CRYPTO_TREND_WEIGHT', 0.10),
-            use_openai_scoring=os.getenv('CRYPTO_USE_OPENAI_SCORING', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
-            openai_model=os.getenv('CRYPTO_OPENAI_MODEL', 'gpt-5-mini'),
-            openai_weight=_float_env('CRYPTO_OPENAI_WEIGHT', 0.25),
-            openai_max_candidates=int(os.getenv('CRYPTO_OPENAI_MAX_CANDIDATES', '12') or '12'),
-            openai_temperature=_optional_float_env('CRYPTO_OPENAI_TEMPERATURE'),
-            openai_sleep_seconds=_float_env('CRYPTO_OPENAI_SLEEP_SECONDS', 0.0),
-            report_position_notional=_float_env('CRYPTO_REPORT_NOTIONAL', 1000.0),
-            report_leverage=_float_env('CRYPTO_REPORT_LEVERAGE', 50.0),
-            incremental_cache=os.getenv('CRYPTO_INCREMENTAL_CACHE', '0').lower() in ('1', 'true', 't', 'yes', 'y'),
-            incremental_cache_path=os.getenv('CRYPTO_INCREMENTAL_CACHE_PATH', 'cache/incremental_metrics.json'),
-            exchange_backend=os.getenv('CRYPTO_EXCHANGE_BACKEND', 'ccxt').strip().lower(),
-            ccxt_exchange_id=os.getenv('CRYPTO_CCXT_EXCHANGE', 'coinbaseadvanced').strip(),
-            max_atr_usd=_optional_float_env('CRYPTO_MAX_ATR_USD'),
-            max_atr_bps=_optional_float_env('CRYPTO_MAX_ATR_BPS'),
-        )
+        """Create configuration from environment variables (validated)."""
+        try:
+            settings = CryptoFinderSettings()
+        except ValidationError as exc:
+            logging.getLogger(__name__).error("Invalid CRYPTO_* configuration: %s", exc)
+            raise
+        return cls(**settings.model_dump())
 
     def to_dict(self) -> Dict:
         """Convert configuration to dictionary."""

@@ -72,7 +72,7 @@ For others, this repo can be useful as:
 - The active pipeline is defined above (Current Focus + Runbook + Outputs/Logs).
 
 ## Environment & Requirements
-- Python 3.11, ccxt ≥ 4.2, pandas ≥ 2.3, numpy ≥ 1.24, TA-Lib ≥ 0.6.7, openai ≥ 1.109.1 (installed), full list in `requirements.txt`.
+- Python 3.11, ccxt ≥ 4.2, pandas ≥ 2.3, numpy ≥ 1.24, TA-Lib ≥ 0.6.7, pydantic ≥ 2.7, pydantic-settings ≥ 2.3, openai ≥ 1.109.1 (installed), full list in `requirements.txt`.
 - Configure API keys in `.env` (Coinbase primary: `API_KEY`/`API_SECRET`; Kraken fallback: `KRAKEN_API_KEY`/`KRAKEN_API_SECRET`). PEM secrets normalize `\\n`.
 
 ## Setup (Current)

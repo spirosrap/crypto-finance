@@ -75,6 +75,7 @@ from long_term_crypto_finder import (
     UTC,
     _finite,
 )
+from finder_settings import ShortTermSettings, ValidationError
 
 
 GRANULARITY_TO_HOURS = {
@@ -140,117 +141,107 @@ logger = _setup_logger()
 # -----------------------------------------------------------------------------
 
 
-def _env_override(key: str, default, cast):
-    raw = os.getenv(key)
-    if raw is None or raw == "":
-        return default
+def _load_short_term_settings() -> ShortTermSettings:
     try:
-        return cast(raw)
-    except Exception:
-        logger.warning(f"Invalid value for {key!r}: {raw!r}; falling back to {default!r}")
-        return default
-
-
-def _env_flag(key: str, default: bool) -> bool:
-    raw = os.getenv(key)
-    if raw is None or raw == "":
-        return default
-    return raw.strip().lower() in {"1", "true", "t", "yes", "y"}
+        return ShortTermSettings()
+    except ValidationError as exc:
+        logger.error("Invalid SHORT_* configuration: %s", exc)
+        raise
 
 
 def build_short_term_config() -> CryptoFinderConfig:
     """Create a CryptoFinderConfig tuned for shorter-term trading."""
 
     cfg = CryptoFinderConfig.from_env()
+    settings = _load_short_term_settings()
 
     default_analysis_days = cfg.analysis_days if cfg.analysis_days else 120
     default_analysis_days = min(90, default_analysis_days)
     cfg.analysis_days = max(
         45,
-        _env_override("SHORT_ANALYSIS_DAYS", default_analysis_days, int),
+        settings.analysis_days if settings.analysis_days is not None else default_analysis_days,
     )
-    cfg.min_market_cap = _env_override("SHORT_MIN_MARKET_CAP", max(cfg.min_market_cap, 50_000_000), int)
-    cfg.max_results = _env_override("SHORT_MAX_RESULTS", cfg.max_results, int)
-    cfg.request_delay = _env_override("SHORT_REQUEST_DELAY", cfg.request_delay, float)
-    cfg.max_workers = _env_override("SHORT_MAX_WORKERS", cfg.max_workers, int)
-    cfg.side = _env_override("SHORT_SIDE", cfg.side, str).lower()
-    cfg.unique_by_symbol = _env_flag("SHORT_UNIQUE_BY_SYMBOL", bool(cfg.unique_by_symbol))
-    cfg.min_overall_score = _env_override("SHORT_MIN_SCORE", max(cfg.min_overall_score, 20.0), float)
-    cfg.top_per_side = _env_override(
-        "SHORT_TOP_PER_SIDE",
-        cfg.top_per_side if cfg.top_per_side is not None else 10,
-        int,
+    base_min_market_cap = max(cfg.min_market_cap, 50_000_000)
+    cfg.min_market_cap = settings.min_market_cap if settings.min_market_cap is not None else base_min_market_cap
+    cfg.max_results = settings.max_results if settings.max_results is not None else cfg.max_results
+    cfg.request_delay = settings.request_delay if settings.request_delay is not None else cfg.request_delay
+    cfg.max_workers = settings.max_workers if settings.max_workers is not None else cfg.max_workers
+    if settings.side is not None:
+        cfg.side = settings.side.lower()
+    cfg.unique_by_symbol = settings.unique_by_symbol if settings.unique_by_symbol is not None else bool(cfg.unique_by_symbol)
+    cfg.min_overall_score = (
+        settings.min_overall_score if settings.min_overall_score is not None else max(cfg.min_overall_score, 20.0)
     )
-    cfg.risk_free_rate = _env_override("SHORT_RISK_FREE_RATE", 0.01, float)
-    cfg.force_refresh_candles = _env_flag("SHORT_FORCE_REFRESH_CANDLES", True)
+    cfg.top_per_side = settings.top_per_side if settings.top_per_side is not None else (
+        cfg.top_per_side if cfg.top_per_side is not None else 10
+    )
+    cfg.risk_free_rate = settings.risk_free_rate
+    cfg.force_refresh_candles = settings.force_refresh_candles
     current_min_volume = float(cfg.min_volume_24h or 0.0)
     default_min_volume = max(current_min_volume, 15_000_000.0)
-    cfg.min_volume_24h = _env_override("SHORT_MIN_VOLUME_24H", default_min_volume, float)
+    cfg.min_volume_24h = settings.min_volume_24h if settings.min_volume_24h is not None else default_min_volume
     current_vmc_ratio = float(cfg.min_volume_market_cap_ratio or 0.0)
     default_vmc_ratio = max(current_vmc_ratio, 0.025)
-    cfg.min_volume_market_cap_ratio = _env_override(
-        "SHORT_MIN_VMC_RATIO",
-        default_vmc_ratio,
-        float,
+    cfg.min_volume_market_cap_ratio = (
+        settings.min_volume_market_cap_ratio if settings.min_volume_market_cap_ratio is not None else default_vmc_ratio
     )
-    cfg.intraday_granularity = _env_override(
-        "SHORT_INTRADAY_GRANULARITY",
-        cfg.intraday_granularity,
-        str,
-    ).upper()
+    if settings.intraday_granularity is not None:
+        cfg.intraday_granularity = settings.intraday_granularity.upper()
     cfg.intraday_lookback_days = max(
         3,
-        _env_override(
-            "SHORT_INTRADAY_LOOKBACK_DAYS",
-            max(cfg.intraday_lookback_days, 7),
-            int,
-        ),
+        settings.intraday_lookback_days if settings.intraday_lookback_days is not None else max(cfg.intraday_lookback_days, 7),
     )
-    cfg.intraday_resample = _env_override(
-        "SHORT_INTRADAY_RESAMPLE",
-        cfg.intraday_resample,
-        str,
-    ).upper()
+    if settings.intraday_resample is not None:
+        cfg.intraday_resample = settings.intraday_resample.upper()
 
     # Faster indicator defaults
-    cfg.rsi_period = _env_override("SHORT_RSI_PERIOD", 7, int)
-    cfg.atr_period = _env_override("SHORT_ATR_PERIOD", 7, int)
-    cfg.stochastic_period = _env_override("SHORT_STOCH_PERIOD", 10, int)
-    cfg.williams_period = _env_override("SHORT_WILLIAMS_PERIOD", 10, int)
-    cfg.cci_period = _env_override("SHORT_CCI_PERIOD", 14, int)
-    cfg.adx_period = _env_override("SHORT_ADX_PERIOD", 14, int)
-    cfg.bb_period = _env_override("SHORT_BB_PERIOD", 14, int)
-    cfg.macd_fast = _env_override("SHORT_MACD_FAST", 8, int)
-    cfg.macd_slow = _env_override("SHORT_MACD_SLOW", 21, int)
-    cfg.macd_signal = _env_override("SHORT_MACD_SIGNAL", 5, int)
-    cfg.max_atr_usd = _env_override("SHORT_MAX_ATR_USD", cfg.max_atr_usd or 3000.0, float)
+    cfg.rsi_period = settings.rsi_period
+    cfg.atr_period = settings.atr_period
+    cfg.stochastic_period = settings.stochastic_period
+    cfg.williams_period = settings.williams_period
+    cfg.cci_period = settings.cci_period
+    cfg.adx_period = settings.adx_period
+    cfg.bb_period = settings.bb_period
+    cfg.macd_fast = settings.macd_fast
+    cfg.macd_slow = settings.macd_slow
+    cfg.macd_signal = settings.macd_signal
+    cfg.max_atr_usd = settings.max_atr_usd if settings.max_atr_usd is not None else (cfg.max_atr_usd or 3000.0)
     # Default bps cap: 400 bps (4% of price); tiered logic will tighten further for large caps (see _cap_atr_value)
-    cfg.max_atr_bps = _env_override("SHORT_MAX_ATR_BPS", getattr(cfg, "max_atr_bps", 400.0) or 400.0, float)
+    cfg.max_atr_bps = settings.max_atr_bps if settings.max_atr_bps is not None else (getattr(cfg, "max_atr_bps", 400.0) or 400.0)
 
-    max_risk_env = os.getenv("SHORT_MAX_RISK_LEVEL")
-    if max_risk_env:
-        cfg.max_risk_level = max_risk_env.strip().upper()
+    if settings.max_risk_level:
+        cfg.max_risk_level = settings.max_risk_level
 
-    cfg.use_openai_scoring = _env_flag("SHORT_USE_OPENAI_SCORING", bool(cfg.use_openai_scoring))
-    openai_model_override = os.getenv("SHORT_OPENAI_MODEL")
-    if openai_model_override:
-        cfg.openai_model = openai_model_override.strip()
-    cfg.openai_weight = _env_override("SHORT_OPENAI_WEIGHT", cfg.openai_weight, float)
-    cfg.openai_max_candidates = _env_override("SHORT_OPENAI_MAX_CANDIDATES", cfg.openai_max_candidates, int)
-    cfg.openai_temperature = _env_override("SHORT_OPENAI_TEMPERATURE", cfg.openai_temperature, float)
-    cfg.openai_sleep_seconds = _env_override("SHORT_OPENAI_SLEEP_SECONDS", cfg.openai_sleep_seconds, float)
-    cfg.report_position_notional = _env_override("SHORT_REPORT_NOTIONAL", cfg.report_position_notional, float)
-    cfg.report_leverage = _env_override("SHORT_REPORT_LEVERAGE", cfg.report_leverage, float)
-    # Spread gate (aggressive default): spread_bps * leverage / 100 <= max_spread_margin_pct
-    cfg.max_spread_margin_pct = _env_override(
-        "SHORT_MAX_SPREAD_MARGIN_PCT",
-        getattr(cfg, "max_spread_margin_pct", None) or 20.0,
-        float,
+    if settings.use_openai_scoring is not None:
+        cfg.use_openai_scoring = settings.use_openai_scoring
+    if settings.openai_model:
+        cfg.openai_model = settings.openai_model.strip()
+    cfg.openai_weight = settings.openai_weight if settings.openai_weight is not None else cfg.openai_weight
+    cfg.openai_max_candidates = (
+        settings.openai_max_candidates if settings.openai_max_candidates is not None else cfg.openai_max_candidates
     )
-    cfg.incremental_cache = _env_flag("SHORT_INCREMENTAL_CACHE", getattr(cfg, 'incremental_cache', False))
-    cfg.incremental_cache_path = os.getenv(
-        "SHORT_INCREMENTAL_CACHE_PATH",
-        getattr(cfg, 'incremental_cache_path', 'cache/short_term_incremental.json'),
+    cfg.openai_temperature = (
+        settings.openai_temperature if settings.openai_temperature is not None else cfg.openai_temperature
+    )
+    cfg.openai_sleep_seconds = (
+        settings.openai_sleep_seconds if settings.openai_sleep_seconds is not None else cfg.openai_sleep_seconds
+    )
+    cfg.report_position_notional = (
+        settings.report_position_notional if settings.report_position_notional is not None else cfg.report_position_notional
+    )
+    cfg.report_leverage = (
+        settings.report_leverage if settings.report_leverage is not None else cfg.report_leverage
+    )
+    # Spread gate (aggressive default): spread_bps * leverage / 100 <= max_spread_margin_pct
+    cfg.max_spread_margin_pct = (
+        settings.max_spread_margin_pct if settings.max_spread_margin_pct is not None else (cfg.max_spread_margin_pct or 20.0)
+    )
+    if settings.incremental_cache is not None:
+        cfg.incremental_cache = settings.incremental_cache
+    cfg.incremental_cache_path = (
+        settings.incremental_cache_path
+        if settings.incremental_cache_path is not None
+        else getattr(cfg, 'incremental_cache_path', 'cache/short_term_incremental.json')
     )
 
     return cfg
@@ -1768,6 +1759,7 @@ def build_cli_parser(
 
 def main() -> None:
     env_defaults = build_short_term_config()
+    settings = _load_short_term_settings()
 
     valid_risk_levels = {level.name for level in RiskLevel}
     risk_level_type = make_risk_level_validator(valid_risk_levels)
@@ -1779,8 +1771,8 @@ def main() -> None:
         except argparse.ArgumentTypeError as exc:
             logger.warning(f"Ignoring invalid SHORT_MAX_RISK_LEVEL value: {exc}")
 
-    default_limit = _env_override("SHORT_DEFAULT_LIMIT", 30, int)
-    profile_default = os.getenv("SHORT_FINDER_PROFILE", "default")
+    default_limit = settings.default_limit
+    profile_default = settings.finder_profile or "default"
     profile_presets: Dict[str, Dict[str, Any]] = PROFILE_PRESETS
     if profile_default not in profile_presets:
         profile_default = "default"
