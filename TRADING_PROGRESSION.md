@@ -7,7 +7,7 @@
 - [June 2025](#june-2025)
 
 ## December 2025
-**State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
+**State at a glance (latest):** BTC ATR7 still >3k and cap‑binding; RR remains sub‑2 on most majors, so signals are sparse and the breakout bot mostly logs near‑breakouts. Recent ZEC candidate was skipped because ATR is above my safe band. Baseline exit test on 331 trades favored a simple ATR bracket model, but I’m keeping the new RR/ATR rules for ~50 trades before any change. Snapshots now include liquidity/spread headroom plus volatility‑regime readouts (ATR7/ATR21, TR1/ATR7) with Rich table output.
 
 ## December 21, 2025 - ZEC Trade Resurfaced, Still Too Hot
 - ZEC showed up again this morning, but ATR is still above my safe band (ATR ~938 bps vs safe threshold ≤500 bps at 1.25× cap).
