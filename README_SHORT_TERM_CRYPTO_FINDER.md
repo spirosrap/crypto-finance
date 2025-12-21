@@ -130,6 +130,11 @@ python scripts/baseline_finder_from_snapshot.py \
 
 This writes `finder_short_baseline.txt` and, with `--open-paper`, calls `paper_finder_simulator.py` to stage the paper trades (default expiry 24h).
 
+Note: paper trades show 0.00% until you refresh prices. Run:
+```bash
+python paper_finder_simulator.py update
+```
+
 ### Watchdog Reporting Companion
 
 - After executing the finder or automated bots, summarize how finished trades performed with

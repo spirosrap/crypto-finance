@@ -86,6 +86,7 @@
   - Helper: `scripts/baseline_finder_from_snapshot.py` turns snapshot picks into `finder_short_baseline.txt` with baseline ATR*RR exits; optional `--open-paper` hands off to `paper_finder_simulator.py`.
   - Paper logs: `trade_logs/paper_finder_open_positions.csv` and `trade_logs/paper_finder_closed_positions.csv` for dashboard review.
   - Finder-to-paper flow: `paper_finder_simulator.py open --finder-output finder_short.txt` (or `finder_long.txt`) parses finder text and stages paper trades; review them in `watchdog_dashboard.py`.
+  - After staging trades, run `python paper_finder_simulator.py update` so the dashboard reflects current P/L.
 - **Breakout Autotrade**
   - Scan cadence: hourly; symbols: BTC,ETH,SOL,XRP,ADA,DOT,AVAX,LINK,LTC,DOGE,OP,ARB,ATOM,UNI,AAVE,MKR,INJ (USDC quotes).
   - Gates: swing close must clear trigger; RR >= 2; 24h lock after a trade (`.breakout_lock.json`); notional $500, 50x; near-breakout logging within ±0.5%.
