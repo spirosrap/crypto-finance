@@ -24,6 +24,7 @@ bucket        n   win%    avg%    med%  avg_mae  avg_mfe  avg_ratio
 >2.0         73   52.1    0.50    0.14    -5.73     7.55       2.39
 ```
 - Decision: use `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` for the next baseline paper trades.
+- Confidence check: this is a strong hint but not proof; I’m treating it as ~60% likely better and will build confidence via parallel paper runs before changing live rules.
 
 ## December 21, 2025 - Baseline Snapshot Paper Helper Added
 - Added `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into a baseline finder file (`finder_short_baseline.txt`) with fixed ATR*RR exits.
