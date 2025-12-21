@@ -133,6 +133,7 @@ def _format_block(
     lines.append("-" * 50)
     if ts:
         lines.append(f"Data Timestamp (UTC): {ts}")
+    lines.append(f"TRADING LEVELS ({side}):")
     lines.append(f"Entry Price: ${_fmt_price(entry, price_prec)}")
     lines.append(f"Stop Loss: ${_fmt_price(stop, price_prec)}")
     lines.append(f"Take Profit: ${_fmt_price(tp, price_prec)}")
