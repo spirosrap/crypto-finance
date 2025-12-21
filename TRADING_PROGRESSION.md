@@ -9,6 +9,22 @@
 ## December 2025
 **State at a glance (latest):** BTC ATR7 still >3k and cap‑binding; RR remains sub‑2 on most majors, so signals are sparse and the breakout bot mostly logs near‑breakouts. Recent ZEC candidate was skipped because ATR is above my safe band. Baseline exit test on 331 trades favored a simple ATR bracket model, but I’m keeping the new RR/ATR rules for ~50 trades before any change. Snapshots now include liquidity/spread headroom plus volatility‑regime readouts (ATR7/ATR21, TR1/ATR7) with Rich table output.
 
+## December 21, 2025 - Baseline Option 1 (ATR*RR) Re-Test
+- Ran baseline stats with `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` on `trade_logs/watchdog_closed_positions_short_term.csv` (output: `trade_logs/watchdog_closed_positions_baseline_atr_clipped_rr1p5_mult0p8.csv`).
+- Result: improved win% and avg% in the 1.0–1.5× ATR buckets versus the earlier baseline, suggesting a better fit for 24h expiry.
+- Table (ATR cap ratio buckets):
+```
+ATR cap ratio buckets (ATR_bps / cap_bps):
+bucket        n   win%    avg%    med%  avg_mae  avg_mfe  avg_ratio
+-------------------------------------------------------------------
+1.0-1.25     45   57.8    0.35    0.33    -2.08     2.19       1.15
+1.25-1.5     56   62.5    0.60    1.41    -2.59     2.77       1.37
+1.5-2.0      78   47.4    0.13   -0.16    -3.46     3.45       1.77
+<=1.0        79   44.3   -0.27   -0.06    -1.06     0.56       0.44
+>2.0         73   52.1    0.50    0.14    -5.73     7.55       2.39
+```
+- Decision: use `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` for the next baseline paper trades.
+
 ## December 21, 2025 - Baseline Snapshot Paper Helper Added
 - Added `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into a baseline finder file (`finder_short_baseline.txt`) with fixed ATR*RR exits.
 - Optional `--open-paper` hands the baseline file to `paper_finder_simulator.py`, so I can stage paper trades and review them in `watchdog_dashboard.py`.
