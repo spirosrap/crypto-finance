@@ -13,6 +13,10 @@
 - Baseline (ATR clipped) also outperformed: win% 53.8 vs 42.9, avg% 0.175 vs -0.006, baseline better on 55.3% of trades (62 loss→win flips).
 - Decision: keep running the **new RR/ATR rules** until I log ~50 trades, then re‑evaluate before switching exit logic. Currently only ~5 trades into the new regime, so it’s too early to judge.
 
+## December 21, 2025 - ZEC Trade Resurfaced, Still Too Hot
+- ZEC showed up again this morning, but ATR is still above my safe band (ATR ~938 bps vs safe threshold ≤500 bps at 1.25× cap).
+- Decision: skip the trade and stay aligned with the low‑volatility preference.
+
 ## December 20, 2025 - ATR Clip Ratio Confirms Conservative Stance
 - Ran `scripts/watchdog_atr_clip_analysis.py` on the short-term closed-trade log.
 - Results: heavy clipping (>2x cap) shows higher average upside but much worse MAE; lower ATR buckets are flatter but safer.
