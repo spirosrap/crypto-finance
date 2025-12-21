@@ -12,6 +12,7 @@
 ## December 21, 2025 - Baseline Snapshot Paper Helper Added
 - Added `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into a baseline finder file (`finder_short_baseline.txt`) with fixed ATR*RR exits.
 - Optional `--open-paper` hands the baseline file to `paper_finder_simulator.py`, so I can stage paper trades and review them in `watchdog_dashboard.py`.
+- New paper rule: when ATR is within ~1.25x cap and spread/VMC gates pass, I can paper-trade baseline RR exits even if geometry would fail (no live execution yet).
 
 ## December 21, 2025 - ZEC Trade Resurfaced, Still Too Hot
 - ZEC showed up again this morning, but ATR is still above my safe band (ATR ~938 bps vs safe threshold ≤500 bps at 1.25× cap).
