@@ -7,15 +7,15 @@
 ## December 2025
 **State at a glance (latest):** Signals returned (7 opps on Dec 10; 2 trades taken, 1 TP / 1 SL). New SYRUP long opened from cron (Dec 14). BTC ATR7 still >3k and cap-binding; RR remains sub-2 on majors; autotrader logging near-breakouts only. Added volatility-regime readout (ATR7/ATR21 + TR1/ATR7) and a baseline backtest CSV generator to compare exits against a simple ATR bracket model in the dashboard.
 
+## December 21, 2025 - ZEC Trade Resurfaced, Still Too Hot
+- ZEC showed up again this morning, but ATR is still above my safe band (ATR ~938 bps vs safe threshold ≤500 bps at 1.25× cap).
+- Decision: skip the trade and stay aligned with the low‑volatility preference.
+
 ## December 20, 2025 - Baseline vs Current Exit Comparison (Short-Term)
 - Compared actual exits vs baseline exits on `trade_logs/watchdog_closed_positions_short_term.csv` (n=331).
 - Baseline (ATR raw) outperformed: win% 55.0 vs 42.9, avg% 0.187 vs -0.006, baseline better on 57.7% of trades (65 loss→win flips).
 - Baseline (ATR clipped) also outperformed: win% 53.8 vs 42.9, avg% 0.175 vs -0.006, baseline better on 55.3% of trades (62 loss→win flips).
 - Decision: keep running the **new RR/ATR rules** until I log ~50 trades, then re‑evaluate before switching exit logic. Currently only ~5 trades into the new regime, so it’s too early to judge.
-
-## December 21, 2025 - ZEC Trade Resurfaced, Still Too Hot
-- ZEC showed up again this morning, but ATR is still above my safe band (ATR ~938 bps vs safe threshold ≤500 bps at 1.25× cap).
-- Decision: skip the trade and stay aligned with the low‑volatility preference.
 
 ## December 20, 2025 - ATR Clip Ratio Confirms Conservative Stance
 - Ran `scripts/watchdog_atr_clip_analysis.py` on the short-term closed-trade log.
