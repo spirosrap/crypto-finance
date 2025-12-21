@@ -82,6 +82,10 @@
   - Gates: ATR7 USD cap (currently ~3000), RR >= 2, swing close must break the level; liquidity filter (vol and vol/mcap), min mcap $100M.
   - Cron: daily finder writing `finder_short.txt`; trades placed via `add_position_from_finder.py` or `add_top5_from_finder.py`; logs at `logs/short_term_crypto_finder/`.
   - Commands: `python scripts/symbol_snapshot.py --symbols BTC,ETH,SOL,... --profile focused_no_llm_100`.
+- **Paper Trading (Baseline Tests)**
+  - Helper: `scripts/baseline_finder_from_snapshot.py` turns snapshot picks into `finder_short_baseline.txt` with baseline ATR*RR exits; optional `--open-paper` hands off to `paper_finder_simulator.py`.
+  - Paper logs: `trade_logs/paper_finder_open_positions.csv` and `trade_logs/paper_finder_closed_positions.csv` for dashboard review.
+  - Finder-to-paper flow: `paper_finder_simulator.py open --finder-output finder_short.txt` (or `finder_long.txt`) parses finder text and stages paper trades; review them in `watchdog_dashboard.py`.
 - **Breakout Autotrade**
   - Scan cadence: hourly; symbols: BTC,ETH,SOL,XRP,ADA,DOT,AVAX,LINK,LTC,DOGE,OP,ARB,ATOM,UNI,AAVE,MKR,INJ (USDC quotes).
   - Gates: swing close must clear trigger; RR >= 2; 24h lock after a trade (`.breakout_lock.json`); notional $500, 50x; near-breakout logging within ±0.5%.

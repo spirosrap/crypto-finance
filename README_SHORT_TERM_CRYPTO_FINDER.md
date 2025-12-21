@@ -114,6 +114,22 @@ removes the extra logging noise so you no longer need a `tee | grep` filter.
 - Risk rails (`--expectancy-window`, `--max-daily-loss`, `--max-consecutive-losses`) inspect `trade_logs/watchdog_closed_positions.csv` before orders are sent. If a limit is breached, execution automatically drops back to a dry run.
 ``` 
 
+### Baseline Paper Helper
+
+If you want to paper-test baseline ATR/RR exits from snapshot picks (even when RR gates do not pass), generate a finder-style file and optionally open paper trades:
+
+```bash
+python scripts/baseline_finder_from_snapshot.py \
+  --symbols SUPER:LONG,BTC:SHORT \
+  --profile focused_no_llm_100 \
+  --out finder_short_baseline.txt \
+  --open-paper \
+  --portfolio-usd 5000 \
+  --leverage 50
+```
+
+This writes `finder_short_baseline.txt` and, with `--open-paper`, calls `paper_finder_simulator.py` to stage the paper trades (default expiry 24h).
+
 ### Watchdog Reporting Companion
 
 - After executing the finder or automated bots, summarize how finished trades performed with
