@@ -100,3 +100,4 @@ trade_logs/*
 *.log
 finder_long.txt
 finder_short.txt
+finder_short_baseline.txt
