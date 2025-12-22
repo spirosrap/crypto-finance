@@ -46,6 +46,11 @@ from watchdog_close_old_positions import (
     _get_portfolio_uuid,
 )
 from watchdog_metrics import build_snapshot
+try:
+    from trading.equity_report import build_equity_figure
+except Exception as exc:  # pragma: no cover - optional dependency
+    build_equity_figure = None  # type: ignore[assignment]
+    EQUITY_REPORT_IMPORT_ERROR = exc
 
 
 UTC = timezone.utc
@@ -394,6 +399,9 @@ def build_daily_equity(
         else float("nan")
     )
 
+    ending_equity = float(daily["equity"].iloc[-1]) if not daily.empty else starting_equity
+    total_return_pct = ((ending_equity - starting_equity) / starting_equity * 100.0) if starting_equity else 0.0
+
     metrics = {
         "trades": int(len(trades)),
         "wins": wins,
@@ -406,7 +414,9 @@ def build_daily_equity(
         "median_profit_loss_pct": median_profit_loss_pct,
         "best_day": float(daily["daily_pnl"].max()) if not daily.empty else 0.0,
         "worst_day": float(daily["daily_pnl"].min()) if not daily.empty else 0.0,
-        "ending_equity": float(daily["equity"].iloc[-1]) if not daily.empty else starting_equity,
+        "ending_equity": ending_equity,
+        "starting_equity": float(starting_equity),
+        "total_return_pct": float(total_return_pct),
         "max_drawdown": float(drawdown.min()) if not daily.empty else 0.0,
         "max_drawdown_pct": float(daily["drawdown_pct"].min()) if not daily.empty else 0.0,
         "std_dev_trade": std_dev_trade,
@@ -886,6 +896,36 @@ def main() -> None:
     st.line_chart(chart_df["equity"], height=280, use_container_width=True)
     st.area_chart(chart_df["drawdown"], height=280, use_container_width=True)
     st.bar_chart(chart_df["daily_pnl"], height=280, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("Shareable equity report")
+    if build_equity_figure is None:
+        st.info("Install plotly + kaleido to enable shareable equity reports.")
+    else:
+        report_title_default = f"{source_choice} Equity Report"
+        report_title = st.text_input("Report title", value=report_title_default)
+        report_fig = build_equity_figure(daily, metrics, report_title)
+        st.plotly_chart(report_fig, use_container_width=True)
+
+        report_timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+        html_bytes = report_fig.to_html(include_plotlyjs="cdn").encode("utf-8")
+        st.download_button(
+            label="Download report (HTML)",
+            data=html_bytes,
+            file_name=f"equity_report_{report_timestamp}.html",
+            mime="text/html",
+        )
+
+        try:
+            png_bytes = report_fig.to_image(format="png", scale=2)
+            st.download_button(
+                label="Download report (PNG)",
+                data=png_bytes,
+                file_name=f"equity_report_{report_timestamp}.png",
+                mime="image/png",
+            )
+        except Exception:
+            st.info("PNG export requires kaleido (`pip install kaleido`).")
 
     st.markdown("---")
     st.subheader("Daily table")

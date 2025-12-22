@@ -13,6 +13,7 @@
 - Took two paper trades this morning using the baseline exits (ATR*RR) rather than the strict RR geometry.
 - Early impression: opportunities are far more frequent; I’ll allow ATR <= 1.5x cap for paper testing and explicitly skip anything > 1.5x (safer cutoff).
 - Feeling optimistic but keeping it in paper mode until results confirm the edge.
+- Added a shareable paper equity report: `scripts/paper_equity_report.py` (HTML + PNG) and export in `watchdog_dashboard.py`. It uses daily aggregation, so a single trading day shows one point and drawdown reads 0%.
 - Added DuckDB + PyArrow tooling: `scripts/convert_to_parquet.py` to store finder/trade logs/backtests as parquet and `scripts/duckdb_query.py` for ad-hoc SQL diagnostics.
 - Benefit: parquet keeps historical analytics fast and lightweight as the logs grow.
 - Added `scripts/paper_trade_progress.py` to report paper-trade count vs target, win%, avg%, expectancy, and TP/SL/expiry split in one line.
