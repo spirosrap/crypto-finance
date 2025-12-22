@@ -26,6 +26,11 @@ bucket        n   win%    avg%    med%  avg_mae  avg_mfe  avg_ratio
 - Decision: use `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` for the next baseline paper trades.
 - Confidence check: this is a strong hint but not proof; I’m treating it as ~60% likely better and will build confidence via parallel paper runs before changing live rules.
 
+## December 22, 2025 - Baseline Paper Trades Begin
+- Took two paper trades this morning using the baseline exits (ATR*RR) rather than the strict RR geometry.
+- Early impression: opportunities are far more frequent; with ATR <= 1.25x (or <= 1.5x in a looser mode), this should give enough sample size to test the system properly.
+- Feeling optimistic but keeping it in paper mode until results confirm the edge.
+
 ## December 21, 2025 - Baseline Snapshot Paper Helper Added
 - Added `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into a baseline finder file (`finder_short_baseline.txt`) with fixed ATR*RR exits.
 - Optional `--open-paper` hands the baseline file to `paper_finder_simulator.py`, so I can stage paper trades and review them in `watchdog_dashboard.py`.
