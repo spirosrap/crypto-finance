@@ -9,6 +9,11 @@
 ## December 2025
 **State at a glance (latest):** BTC ATR7 still >3k and cap‑binding; RR remains sub‑2 on most majors, so signals are sparse and the breakout bot mostly logs near‑breakouts. Recent ZEC candidate was skipped because ATR is above my safe band. Baseline exit test on 331 trades favored a simple ATR bracket model, but I’m keeping the new RR/ATR rules for ~50 trades before any change. Snapshots now include liquidity/spread headroom plus volatility‑regime readouts (ATR7/ATR21, TR1/ATR7) with Rich table output.
 
+## December 22, 2025 - Baseline Paper Trades Begin
+- Took two paper trades this morning using the baseline exits (ATR*RR) rather than the strict RR geometry.
+- Early impression: opportunities are far more frequent; with ATR <= 1.25x (or <= 1.5x in a looser mode), this should give enough sample size to test the system properly.
+- Feeling optimistic but keeping it in paper mode until results confirm the edge.
+
 ## December 21, 2025 - Baseline Option 1 (ATR*RR) Re-Test
 - Ran baseline stats with `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` on `trade_logs/watchdog_closed_positions_short_term.csv` (output: `trade_logs/watchdog_closed_positions_baseline_atr_clipped_rr1p5_mult0p8.csv`).
 - Result: improved win% and avg% in the 1.0–1.5× ATR buckets versus the earlier baseline, suggesting a better fit for 24h expiry.
@@ -25,11 +30,6 @@ bucket        n   win%    avg%    med%  avg_mae  avg_mfe  avg_ratio
 ```
 - Decision: use `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` for the next baseline paper trades.
 - Confidence check: this is a strong hint but not proof; I’m treating it as ~60% likely better and will build confidence via parallel paper runs before changing live rules.
-
-## December 22, 2025 - Baseline Paper Trades Begin
-- Took two paper trades this morning using the baseline exits (ATR*RR) rather than the strict RR geometry.
-- Early impression: opportunities are far more frequent; with ATR <= 1.25x (or <= 1.5x in a looser mode), this should give enough sample size to test the system properly.
-- Feeling optimistic but keeping it in paper mode until results confirm the edge.
 
 ## December 21, 2025 - Baseline Snapshot Paper Helper Added
 - Added `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into a baseline finder file (`finder_short_baseline.txt`) with fixed ATR*RR exits.
