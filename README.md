@@ -29,6 +29,7 @@ For others, this repo can be useful as:
 - **Baseline Paper Helper**: `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into `finder_short_baseline.txt` and optionally open them in `paper_finder_simulator.py`.
   - After opening paper trades, run `python paper_finder_simulator.py update` so the dashboard shows live P/L.
 - **Diagnostics**: `scripts/watchdog_atr_clip_analysis.py` to bucket closed trades by ATR cap ratio and compare outcomes.
+- **Parquet + SQL**: `scripts/convert_to_parquet.py` to emit parquet copies of finder/trade logs/backtests (use `--skip-bad-lines` if a CSV has malformed rows), plus `scripts/duckdb_query.py` for ad-hoc SQL diagnostics. Parquet keeps analytics fast and lightweight on large logs. Low-level helpers live in `trading/parquet_utils.py`.
 
 ## Pipeline Map (Current)
 - Inputs: Coinbase/CCXT candles + CoinGecko metrics + live spread/fee bps (when available).

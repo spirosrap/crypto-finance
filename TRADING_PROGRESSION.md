@@ -13,6 +13,8 @@
 - Took two paper trades this morning using the baseline exits (ATR*RR) rather than the strict RR geometry.
 - Early impression: opportunities are far more frequent; I’ll allow ATR <= 1.5x cap for paper testing and explicitly skip anything > 1.5x (safer cutoff).
 - Feeling optimistic but keeping it in paper mode until results confirm the edge.
+- Added DuckDB + PyArrow tooling: `scripts/convert_to_parquet.py` to store finder/trade logs/backtests as parquet and `scripts/duckdb_query.py` for ad-hoc SQL diagnostics.
+- Benefit: parquet keeps historical analytics fast and lightweight as the logs grow.
 
 ## December 21, 2025 - Baseline Option 1 (ATR*RR) Re-Test
 - Ran baseline stats with `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` on `trade_logs/watchdog_closed_positions_short_term.csv` (output: `trade_logs/watchdog_closed_positions_baseline_atr_clipped_rr1p5_mult0p8.csv`).
