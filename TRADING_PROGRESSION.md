@@ -11,7 +11,7 @@
 
 ## December 22, 2025 - Baseline Paper Trades Begin
 - Took two paper trades this morning using the baseline exits (ATR*RR) rather than the strict RR geometry.
-- Early impression: opportunities are far more frequent; with ATR <= 1.25x (or <= 1.5x in a looser mode), this should give enough sample size to test the system properly.
+- Early impression: opportunities are far more frequent; I’ll allow ATR <= 1.5x cap for paper testing and explicitly skip anything > 1.5x (safer cutoff).
 - Feeling optimistic but keeping it in paper mode until results confirm the edge.
 
 ## December 21, 2025 - Baseline Option 1 (ATR*RR) Re-Test
