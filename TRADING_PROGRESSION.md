@@ -9,6 +9,10 @@
 ## December 2025
 **State at a glance (latest):** BTC ATR7 still >3k and cap‑binding; RR remains sub‑2 on most majors, so signals are sparse and the breakout bot mostly logs near‑breakouts. Recent ZEC candidate was skipped because ATR is above my safe band. Baseline exit test on 331 trades favored a simple ATR bracket model, but I’m keeping the new RR/ATR rules for ~50 trades before any change. Snapshots now include liquidity/spread headroom plus volatility‑regime readouts (ATR7/ATR21, TR1/ATR7) with Rich table output.
 
+## December 23, 2025 - Paper Trades Tracking
+- Paper trading is ongoing and currently green, with most trades on track to expire positive.
+- The PAXG paper trade hit SL; noting it as a less predictable asset in this regime.
+
 ## December 22, 2025 - Baseline Paper Trades Begin
 - Took two paper trades this morning using the baseline exits (ATR*RR) rather than the strict RR geometry.
 - Early impression: opportunities are far more frequent; I’ll allow ATR <= 1.5x cap for paper testing and explicitly skip anything > 1.5x (safer cutoff).
