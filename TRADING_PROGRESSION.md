@@ -14,6 +14,7 @@
 - The PAXG paper trade hit SL; noting it as a less predictable asset in this regime.
 - Added MAE/MFE tracking for paper trades on close (uses Coinbase candles when perps keys are available).
 - Added `scripts/backfill_paper_closed_positions.py` to backfill MAE/MFE and reclassify expiry outcomes as `expired_profit`, `expired_loss`, or `expired_breakeven` (±0.10% band).
+- Placed three new paper trades: DOGE SHORT, SOL SHORT, ETH SHORT after yesterday’s expiries closed in profit. (Note: consider whether the 24h expiry should be longer.)
 
 ## December 22, 2025 - Baseline Paper Trades Begin
 - Took two paper trades this morning using the baseline exits (ATR*RR) rather than the strict RR geometry.
