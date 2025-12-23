@@ -31,6 +31,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple, Set
 import pandas as pd
 
 from add_position_from_finder import ParsedFinder, parse_finder_text
+from watchdog_close_old_positions import compute_mae_mfe_from_history
 
 logger = logging.getLogger("paper_finder_simulator")
 if not logger.handlers:
@@ -98,6 +99,8 @@ THOUSAND_UNIT_BASES = {"SHIB", "BONK", "PEPE", "FLOKI"}
 _SUPPORTED_PERPS: Optional[Set[str]] = None
 _CCXT_PRODUCTS: Optional[Set[str]] = None
 _EXCLUDED_PERPS: Optional[Set[str]] = None
+_CB_SERVICE: Optional["CoinbaseService"] = None
+_CB_SERVICE_READY: bool = False
 
 
 def _isoformat(dt: datetime) -> str:
@@ -221,6 +224,75 @@ def _excluded_perps() -> Set[str]:
     if _EXCLUDED_PERPS is None:
         _EXCLUDED_PERPS = _load_excluded_perps()
     return _EXCLUDED_PERPS
+
+
+def _get_perps_credentials() -> Tuple[str, str]:
+    try:
+        from credentials import get_perps_credentials
+        return get_perps_credentials()
+    except Exception:
+        try:  # pragma: no cover - fallback for older setups
+            from config import API_KEY_PERPS, API_SECRET_PERPS  # type: ignore
+        except Exception:
+            return ("", "")
+        return (API_KEY_PERPS or "", API_SECRET_PERPS or "")  # type: ignore[arg-type]
+
+
+def _get_coinbase_service() -> Optional["CoinbaseService"]:
+    global _CB_SERVICE, _CB_SERVICE_READY
+    if _CB_SERVICE_READY:
+        return _CB_SERVICE
+    _CB_SERVICE_READY = True
+    api_key, api_secret = _get_perps_credentials()
+    if not api_key or not api_secret:
+        logger.warning("MAE/MFE disabled: Coinbase perps credentials not found.")
+        return None
+    try:
+        from coinbaseservice import CoinbaseService
+    except Exception as exc:
+        logger.warning("MAE/MFE disabled: unable to import CoinbaseService (%s).", exc)
+        return None
+    try:
+        _CB_SERVICE = CoinbaseService(api_key, api_secret)
+    except Exception as exc:
+        logger.warning("MAE/MFE disabled: failed to init CoinbaseService (%s).", exc)
+        _CB_SERVICE = None
+    return _CB_SERVICE
+
+
+def _compute_mae_mfe(
+    row: Dict[str, object],
+    exit_price: float,
+    close_time: datetime,
+) -> Tuple[Optional[float], Optional[float]]:
+    cb = _get_coinbase_service()
+    if cb is None:
+        return None, None
+    product_id = str(row.get("product_id") or "")
+    if not product_id:
+        return None, None
+    entry = _safe_float(row.get("entry_price"), default=exit_price)
+    position_usd = _safe_float(row.get("position_usd"), default=0.0)
+    if entry <= 0 or position_usd <= 0:
+        return None, None
+    net_size = position_usd / entry
+    side = (row.get("position_side") or "LONG").upper()
+    if side == "SHORT":
+        net_size = -abs(net_size)
+    open_time = _parse_iso(str(row.get("opened_at") or ""))
+    try:
+        return compute_mae_mfe_from_history(
+            cb=cb,
+            product_id=product_id,
+            net_size=net_size,
+            entry_price=entry,
+            open_time=open_time,
+            close_time=close_time,
+            exit_price=exit_price,
+        )
+    except Exception as exc:
+        logger.warning("MAE/MFE fetch failed for %s (%s)", product_id, exc)
+        return None, None
 
 
 def _ccxt_symbol(product_id: str) -> str:
@@ -392,7 +464,14 @@ def _maybe_close_reason(
     return None
 
 
-def _build_closed_record(row: Dict[str, object], price: float, reason: str, now: datetime) -> Dict[str, object]:
+def _build_closed_record(
+    row: Dict[str, object],
+    price: float,
+    reason: str,
+    now: datetime,
+    mae: Optional[float] = None,
+    mfe: Optional[float] = None,
+) -> Dict[str, object]:
     entry = _safe_float(row.get("entry_price"), default=price)
     side = (row.get("position_side") or "LONG").upper()
     position_usd = _safe_float(row.get("position_usd"), default=0.0)
@@ -418,8 +497,8 @@ def _build_closed_record(row: Dict[str, object], price: float, reason: str, now:
         "exit_price": price,
         "profit_loss": round(pnl, 2),
         "profit_loss_pct": round(pct, 4),
-        "mae": "",
-        "mfe": "",
+        "mae": "" if mae is None else round(mae, 2),
+        "mfe": "" if mfe is None else round(mfe, 2),
         "duration_seconds": int(duration),
     }
 
@@ -482,7 +561,8 @@ def _close_and_update_rows(
         row["unrealized_pnl"] = round(pnl, 2)
 
         if reason:
-            closed.append(_build_closed_record(row, price, reason, now))
+            mae, mfe = _compute_mae_mfe(row, price, now)
+            closed.append(_build_closed_record(row, price, reason, now, mae=mae, mfe=mfe))
         else:
             updated.append(row)
     return updated, closed
@@ -899,7 +979,8 @@ def handle_close(args: argparse.Namespace) -> None:
         exit_price = exit_price_override
         if exit_price is None:
             exit_price = _safe_float(row.get("last_price"), _safe_float(row.get("entry_price"), 0.0))
-        closed_rows.append(_build_closed_record(row, float(exit_price), reason, now))
+        mae, mfe = _compute_mae_mfe(row, float(exit_price), now)
+        closed_rows.append(_build_closed_record(row, float(exit_price), reason, now, mae=mae, mfe=mfe))
 
     if args.dry_run:
         logger.info("Dry run: would close %s trades.", len(selected))
