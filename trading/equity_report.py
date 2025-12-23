@@ -61,6 +61,22 @@ def build_daily_equity(
     daily["cum_pnl"] = daily["daily_pnl"].cumsum()
     daily["equity"] = starting_equity + daily["cum_pnl"]
 
+    # Anchor a baseline point so drawdown reflects the starting equity.
+    if not daily.empty:
+        first_date = daily.index.min()
+        baseline_date = first_date - pd.Timedelta(days=1)
+        baseline_row = pd.DataFrame(
+            {
+                "daily_pnl": [0.0],
+                "trades": [0],
+                "cum_pnl": [0.0],
+                "equity": [starting_equity],
+            },
+            index=[baseline_date],
+        )
+        daily = pd.concat([baseline_row, daily]).sort_index()
+        daily.index.name = "date"
+
     prev_equity = np.concatenate(([starting_equity], daily["equity"].to_numpy()[:-1]))
     prev_equity = np.where(prev_equity == 0, np.nan, prev_equity)
     daily_return_pct = np.divide(daily["daily_pnl"], prev_equity, where=~np.isnan(prev_equity)) * 100.0
