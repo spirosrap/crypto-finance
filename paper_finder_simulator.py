@@ -54,6 +54,8 @@ DEFAULT_CONFIG = {
     "default_position_pct": 3.0,
 }
 
+EXPIRY_BREAKEVEN_PCT = 0.10
+
 OPEN_COLUMNS = [
     "trade_id",
     "symbol",
@@ -446,6 +448,7 @@ def _maybe_close_reason(
     price: float,
     take_profit: float,
     stop_loss: float,
+    entry: float,
     expires_at: Optional[datetime],
     now: datetime,
 ) -> Optional[str]:
@@ -460,7 +463,12 @@ def _maybe_close_reason(
         if price >= stop_loss > 0:
             return "stop_loss"
     if expires_at and now >= expires_at:
-        return "expired_breakeven"
+        if entry <= 0:
+            return "expired_breakeven"
+        pct = _compute_unrealized_pct(side, entry, price)
+        if abs(pct) <= EXPIRY_BREAKEVEN_PCT:
+            return "expired_breakeven"
+        return "expired_profit" if pct > 0 else "expired_loss"
     return None
 
 
@@ -549,6 +557,7 @@ def _close_and_update_rows(
             price=price,
             take_profit=tp,
             stop_loss=sl,
+            entry=entry,
             expires_at=expires_at,
             now=now,
         )
