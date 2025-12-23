@@ -1,0 +1,47 @@
+
+====================================================================================================
+SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
+====================================================================================================
+Generated on (UTC): 2025-12-23 10:16:48Z
+Total opportunities listed: 1
+====================================================================================================
+
+1. FIL (Filecoin) — LONG
+--------------------------------------------------
+Data Timestamp (UTC): 2025-12-23 00:00:00Z
+Price: $1.283000
+Market Cap: $932,916,024 (Rank #101)
+24h Volume: $98,486,914
+24h Change: -2.66%
+7d Change: 4.74%
+30d Change: -21.88%
+ATH: $236.84 (Date: 2021-04-01)
+ATL: $0.848008 (Date: 2025-10-10)
+Volatility (30d, ann.): 93.8%
+Sharpe Ratio: -1.24
+Sortino Ratio: -2.53
+Max Drawdown: -64.66%
+RSI (14): 42.7
+MACD Signal: BULLISH
+BB Position: NEUTRAL
+Trend Strength: -0.70% per day
+Momentum Score: 0.0/100
+Fundamental Score: 94.5/100
+Technical Score: 55.3/100
+Risk Score: 37.5/100
+Risk Level: MEDIUM_LOW
+Overall Score: 30.16/100
+
+💼 TRADING LEVELS (LONG):
+Entry Price: $1.283000
+Stop Loss: $1.253229
+Take Profit: $1.345817
+Risk:Reward Ratio: 2.1:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $48.96 (4.90%)
+Potential SL P&L: $-23.20 (-2.32%)
+
+Short-Line Summaries
+--------------------------------------------------
+1. Summary: FIL long – score 30.16, 2.1× RR; RSI 43; bullish MACD support; risk medium low; trend -0.70%/d.
