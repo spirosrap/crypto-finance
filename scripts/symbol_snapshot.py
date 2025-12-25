@@ -570,6 +570,7 @@ def gate_scan(
         "BTC", "ETH", "SOL", "XRP", "USDT", "USDC",
         "ADA", "AVAX", "LINK", "DOGE", "LTC", "DOT", "MATIC",
     }
+    baseline_exempt_symbols = {"BTC", "ETH"}
 
     def _spread_cap_bps(volume_usd: float) -> float:
         """Heuristic 'acceptable' spread cap for reporting (not a hard gate)."""
@@ -637,6 +638,15 @@ def gate_scan(
             continue
         gaps.sort(key=lambda x: x[1])
         best_side, best_gap, best_rr = gaps[0]
+        atr_ratio = (atr_bps / cap_bps) if (atr_bps is not None and cap_bps) else None
+        vmc_exempt = (coin.get("symbol") or "").upper() in major_symbols
+        baseline_vmc_exempt = (coin.get("symbol") or "").upper() in baseline_exempt_symbols
+        baseline_atr_ok = atr_ratio is not None and atr_ratio <= 1.5
+        baseline_vmc_ok = (min_ratio <= 0) or (ratio is not None and ratio >= min_ratio) or baseline_vmc_exempt
+        baseline_spread_ok = spread_headroom is not None and spread_headroom >= 0
+        baseline_pass = baseline_atr_ok and baseline_vmc_ok and baseline_spread_ok
+        rr_pass = best_rr is not None and best_rr >= rr_target
+
         rows.append({
             "symbol": coin["symbol"],
             "product": product_id,
@@ -646,6 +656,7 @@ def gate_scan(
             "headroom_bps": headroom_bps,
             "atr_bps": atr_bps,
             "cap_bps": cap_bps,
+            "atr_ratio": atr_ratio,
             "atr7_to_21": atr7_to_21,
             "tr1_to_atr7": tr1_to_atr7,
             "vol24h": vol24h,
@@ -656,8 +667,10 @@ def gate_scan(
             "spread_bps": spread_bps,
             "spread_cap_bps": spread_cap,
             "spread_headroom_bps": spread_headroom,
-            "vmc_exempt": (coin.get("symbol") or "").upper() in major_symbols,
+            "vmc_exempt": vmc_exempt,
             "volume_source": str(coin.get("volume_24h_source") or "").strip(),
+            "baseline_pass": baseline_pass,
+            "rr_pass": rr_pass,
         })
 
     rows.sort(key=lambda r: (r["rr_gap"] if r["rr_gap"] is not None else 1e9,
@@ -671,7 +684,9 @@ def gate_scan(
         table.add_column("RR", justify="right")
         table.add_column("Gap", justify="right")
         table.add_column("ATR bps", justify="right")
-        table.add_column("ATR cap", justify="left")
+        table.add_column("ATR cap", justify="left", no_wrap=True, overflow="ellipsis")
+        table.add_column("Base", justify="center")
+        table.add_column("RR", justify="center")
         table.add_column("Vol24h", justify="right")
         table.add_column("VMC", justify="right")
         table.add_column("Spr", justify="right")
@@ -720,6 +735,8 @@ def gate_scan(
                 f"{row['rr_gap']:.2f}",
                 atr_txt,
                 atr_gate_txt,
+                "Y" if row.get("baseline_pass") else "N",
+                "Y" if row.get("rr_pass") else "N",
                 vol_cell,
                 vmc_cell,
                 spr_cell,
@@ -765,8 +782,11 @@ def gate_scan(
             spr_hr_txt = f"{spr_hr:+.2f} bps" if spr_hr is not None else "n/a"
             spr_txt = f"{spr:.2f} bps ({spr_hr_txt}; cap={spr_cap:.0f})"
 
+        base_txt = "pass" if row.get("baseline_pass") else "fail"
+        rr_txt = "pass" if row.get("rr_pass") else "fail"
         print(f"{row['symbol']} ({row['product']}) {row['best_side']} RR={row['rr']:.2f} (gap {row['rr_gap']:.2f}) | "
               f"ATR {atr_txt}, cap {cap_txt}, {atr_gate_txt} | "
+              f"base={base_txt}, rr={rr_txt} | "
               f"liq vol={vol_txt} ({liq_mult} vs min={_fmt_usd_compact(min_volume)}) "
               f"vmc={vmc_txt} ({vmc_gap_txt} vs {min_ratio * 100:.1f}%) | "
               f"spr={spr_txt} | "
