@@ -327,6 +327,22 @@ def build_daily_equity(
     daily["cum_pnl"] = daily["daily_pnl"].cumsum()
     daily["equity"] = starting_equity + daily["cum_pnl"]
 
+    # Anchor a baseline point so the curve starts at the starting equity.
+    if not daily.empty:
+        first_date = daily.index.min()
+        baseline_date = first_date - pd.Timedelta(days=1)
+        baseline_row = pd.DataFrame(
+            {
+                "daily_pnl": [0.0],
+                "trades": [0],
+                "cum_pnl": [0.0],
+                "equity": [starting_equity],
+            },
+            index=[baseline_date],
+        )
+        daily = pd.concat([baseline_row, daily]).sort_index()
+        daily.index.name = "date"
+
     prev_equity = np.concatenate(([starting_equity], daily["equity"].to_numpy()[:-1]))
     prev_equity = np.where(prev_equity == 0, np.nan, prev_equity)
     daily_return_pct = np.divide(daily["daily_pnl"], prev_equity, where=~np.isnan(prev_equity)) * 100.0
@@ -493,6 +509,8 @@ def build_daily_equity(
     metrics["recent_degradation_flag"] = bool(degradation_reasons)
     metrics["recent_degradation_reasons"] = degradation_reasons
 
+    if daily.index.name is None:
+        daily.index.name = "date"
     daily_reset = daily.reset_index()
     return daily_reset, metrics
 
@@ -590,7 +608,14 @@ def main() -> None:
     start_count = st.sidebar.number_input("Start count (1-based)", min_value=0, value=0, step=1)
     end_count = st.sidebar.number_input("End count (inclusive, 0 for none)", min_value=0, value=0, step=1)
     tail_last = st.sidebar.number_input("Last N trades (0 to ignore)", min_value=0, value=0, step=1)
-    starting_equity = st.sidebar.number_input("Starting equity", min_value=0.0, value=1000.0, step=100.0)
+    starting_equity_default = 100.0 if source_mode == "paper" else 1000.0
+    starting_equity = st.sidebar.number_input(
+        "Starting equity",
+        min_value=0.0,
+        value=starting_equity_default,
+        step=100.0,
+        key=f"starting_equity_{source_mode}",
+    )
 
     if st.sidebar.button("Reset filters"):
         st.experimental_rerun()
