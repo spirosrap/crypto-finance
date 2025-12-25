@@ -9,6 +9,9 @@ Launch with:
 from __future__ import annotations
 
 import math
+import os
+import shutil
+import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -524,6 +527,38 @@ def main() -> None:
         index=0,
     )
     source_mode = "paper" if source_choice == "Paper Finder" else "live"
+    if "paper_update_log" not in st.session_state:
+        st.session_state["paper_update_log"] = ""
+    if source_mode == "paper":
+        if st.sidebar.button("Update paper trades"):
+            with st.spinner("Updating paper trades..."):
+                conda_exe = os.environ.get("CONDA_EXE") or shutil.which("conda")
+                if conda_exe:
+                    cmd = [
+                        conda_exe,
+                        "run",
+                        "-n",
+                        "trade",
+                        "python",
+                        str(REPO_ROOT / "paper_finder_simulator.py"),
+                        "update",
+                    ]
+                else:
+                    cmd = [sys.executable, str(REPO_ROOT / "paper_finder_simulator.py"), "update"]
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            output = (result.stdout or "") + (result.stderr or "")
+            st.session_state["paper_update_log"] = output.strip()
+            if result.returncode != 0:
+                st.sidebar.error("Paper update failed.")
+            else:
+                st.sidebar.success("Paper trades updated.")
+        if st.session_state["paper_update_log"]:
+            st.sidebar.code(st.session_state["paper_update_log"])
     default_csv = PAPER_CLOSED_CSV if source_mode == "paper" else Path("trade_logs/watchdog_closed_positions.csv")
     csv_candidates = sorted(Path("trade_logs").glob("*.csv"))
     csv_options = [str(path) for path in csv_candidates]
