@@ -547,8 +547,7 @@ def main() -> None:
         help="Quickly apply a rolling time window; choose Custom to rely on the manual date inputs below.",
     )
 
-    start_date_default = date(2025, 10, 1)
-    start_date_input = st.sidebar.date_input("Start date", start_date_default)
+    start_date_input = st.sidebar.date_input("Start date", value=None)
     end_date_input = st.sidebar.date_input("End date", value=None)
     if isinstance(end_date_input, list):
         end_date_input = end_date_input[0] if end_date_input else None
