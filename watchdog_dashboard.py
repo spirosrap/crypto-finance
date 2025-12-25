@@ -371,18 +371,32 @@ def build_daily_equity(
     else:
         profit_factor = float("inf") if gross_profit > 0 else 0.0
 
-    profit_loss_pct_series = trades["profit_loss_pct"] if "profit_loss_pct" in trades.columns else None
-    if profit_loss_pct_series is not None:
-        valid_profit_loss_pct = profit_loss_pct_series.dropna()
-        nonzero_profit_loss_pct = valid_profit_loss_pct[valid_profit_loss_pct != 0]
+    if "profit_loss_pct" in trades.columns:
+        profit_loss_pct_series = pd.to_numeric(trades["profit_loss_pct"], errors="coerce").dropna()
+    else:
+        profit_loss_pct_series = pd.Series(dtype=float)
+    if not profit_loss_pct_series.empty:
+        nonzero_profit_loss_pct = profit_loss_pct_series[profit_loss_pct_series != 0]
         if not nonzero_profit_loss_pct.empty:
             median_profit_loss_pct = float(nonzero_profit_loss_pct.median())
-        elif not valid_profit_loss_pct.empty:
-            median_profit_loss_pct = float(valid_profit_loss_pct.median())
         else:
-            median_profit_loss_pct = float("nan")
+            median_profit_loss_pct = float(profit_loss_pct_series.median())
+        avg_pct = float(profit_loss_pct_series.mean())
+        wins_pct = profit_loss_pct_series[profit_loss_pct_series > 0]
+        losses_pct = profit_loss_pct_series[profit_loss_pct_series < 0]
+        avg_win_pct = float(wins_pct.mean()) if not wins_pct.empty else float("nan")
+        avg_loss_pct = float(losses_pct.mean()) if not losses_pct.empty else float("nan")
+        win_rate_pct_series = len(wins_pct) / len(profit_loss_pct_series)
+        avg_loss_abs = abs(avg_loss_pct) if not math.isnan(avg_loss_pct) else 0.0
+        expectancy_pct = win_rate_pct_series * (avg_win_pct if not math.isnan(avg_win_pct) else 0.0) - (
+            1 - win_rate_pct_series
+        ) * avg_loss_abs
     else:
         median_profit_loss_pct = float("nan")
+        avg_pct = float("nan")
+        avg_win_pct = float("nan")
+        avg_loss_pct = float("nan")
+        expectancy_pct = float("nan")
 
     wins = int((valid_profit_loss > 0).sum())
     losses = int((valid_profit_loss < 0).sum())
@@ -428,9 +442,13 @@ def build_daily_equity(
         "breakevens": breakevens,
         "win_rate_pct": win_rate_pct,
         "expectancy": expectancy,
+        "expectancy_pct": expectancy_pct,
         "profit_factor": float(profit_factor),
         "median_profit_loss": median_profit_loss,
         "median_profit_loss_pct": median_profit_loss_pct,
+        "avg_pct": avg_pct,
+        "avg_win_pct": avg_win_pct,
+        "avg_loss_pct": avg_loss_pct,
         "best_day": float(daily["daily_pnl"].max()) if not daily.empty else 0.0,
         "worst_day": float(daily["daily_pnl"].min()) if not daily.empty else 0.0,
         "ending_equity": ending_equity,
