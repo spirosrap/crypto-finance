@@ -14,6 +14,10 @@
 - Equity curve is starting to stabilize even with a recent stop loss and other expired losses.
 - No live trades meet the stricter RR gate yet.
 
+## December 25, 2025 - LTC Live Trade
+- LTC briefly cleared the strict RR gate while ATR stayed within ≤1.5× cap, so I took it live.
+- TP/SL were set using the baseline ATR RR bracket (same setup as the paper trade).
+
 ## December 24, 2025 - Paper Trades Green Again
 - Paper open P/L is back in the green (+17.51 unrealized across 7 open trades), with several positions up ~1–2% as they head toward expiry.
 - Gate scan confirms the opportunity window is narrowing again: top‑15 RR gaps are wider and no symbols are near the 2.0 gate.
