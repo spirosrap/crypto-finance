@@ -9,15 +9,15 @@
 ## December 2025
 **State at a glance (latest):** BTC ATR7 still >3k and cap‑binding; RR remains sub‑2 on most majors, so signals are sparse and the breakout bot mostly logs near‑breakouts. Recent ZEC candidate was skipped because ATR is above my safe band. Baseline exit test on 331 trades favored a simple ATR bracket model, but I’m keeping the new RR/ATR rules for ~50 trades before any change. Snapshots now include liquidity/spread headroom plus volatility‑regime readouts (ATR7/ATR21, TR1/ATR7) with Rich table output.
 
-## December 24, 2025 - Paper Trades Green Again
-- Paper open P/L is back in the green (+17.51 unrealized across 7 open trades), with several positions up ~1–2% as they head toward expiry.
-- Gate scan confirms the opportunity window is narrowing again: top‑15 RR gaps are wider and no symbols are near the 2.0 gate.
-- Replayed the old short-term entries with baseline exits (`atr_mult=0.8`, `rr=1.5`, `atr_clipped`) and saved the dashboard-ready output to `trade_logs/watchdog_closed_positions_baseline_short_term.csv`.
-
 ## December 25, 2025 - BTC Paper Trade Added
 - Took another paper trade on BTC (LONG) after it met the baseline conditions.
 - Equity curve is starting to stabilize even with a recent stop loss and other expired losses.
 - No live trades meet the stricter RR gate yet.
+
+## December 24, 2025 - Paper Trades Green Again
+- Paper open P/L is back in the green (+17.51 unrealized across 7 open trades), with several positions up ~1–2% as they head toward expiry.
+- Gate scan confirms the opportunity window is narrowing again: top‑15 RR gaps are wider and no symbols are near the 2.0 gate.
+- Replayed the old short-term entries with baseline exits (`atr_mult=0.8`, `rr=1.5`, `atr_clipped`) and saved the dashboard-ready output to `trade_logs/watchdog_closed_positions_baseline_short_term.csv`.
 
 ## December 23, 2025 - Paper Trades Tracking
 - Paper trading is ongoing and currently green, with most trades on track to expire positive.
