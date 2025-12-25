@@ -525,8 +525,18 @@ def main() -> None:
     )
     source_mode = "paper" if source_choice == "Paper Finder" else "live"
     default_csv = PAPER_CLOSED_CSV if source_mode == "paper" else Path("trade_logs/watchdog_closed_positions.csv")
-    csv_path = st.sidebar.text_input("CSV path", str(default_csv))
-    csv_path = csv_path.strip()
+    csv_candidates = sorted(Path("trade_logs").glob("*.csv"))
+    csv_options = [str(path) for path in csv_candidates]
+    default_csv_str = str(default_csv)
+    if default_csv_str not in csv_options:
+        csv_options.insert(0, default_csv_str)
+    csv_options.append("Custom...")
+    default_index = csv_options.index(default_csv_str) if default_csv_str in csv_options else 0
+    selected_csv = st.sidebar.selectbox("CSV file", options=csv_options, index=default_index)
+    if selected_csv == "Custom...":
+        csv_path = st.sidebar.text_input("CSV path", default_csv_str).strip()
+    else:
+        csv_path = selected_csv
     data_path = Path(csv_path)
 
     today = date.today()
