@@ -745,6 +745,31 @@ def main() -> None:
             st.caption(msg)
         else:
             if source_mode == "paper":
+                if "expires_at" in open_positions_df.columns:
+                    now = datetime.now(UTC)
+
+                    def _format_time_left(ts: pd.Timestamp) -> str:
+                        if pd.isna(ts):
+                            return "n/a"
+                        delta = ts - now
+                        total_sec = int(delta.total_seconds())
+                        if total_sec < 0:
+                            prefix = "expired "
+                            total_sec = abs(total_sec)
+                        else:
+                            prefix = ""
+                        days, rem = divmod(total_sec, 86400)
+                        hours, rem = divmod(rem, 3600)
+                        minutes, _ = divmod(rem, 60)
+                        if days > 0:
+                            return f"{prefix}{days}d {hours}h"
+                        if hours > 0:
+                            return f"{prefix}{hours}h {minutes}m"
+                        return f"{prefix}{minutes}m"
+
+                    open_positions_df = open_positions_df.copy()
+                    open_positions_df["expires_in"] = open_positions_df["expires_at"].apply(_format_time_left)
+
                 paper_cols = [
                     "symbol",
                     "position_side",
@@ -755,7 +780,7 @@ def main() -> None:
                     "stop_loss",
                     "unrealized_pnl",
                     "unrealized_pct",
-                    "expires_at",
+                    "expires_in",
                 ]
                 existing = [col for col in paper_cols if col in open_positions_df.columns]
                 display_df = open_positions_df[existing].copy()
@@ -770,7 +795,7 @@ def main() -> None:
                         "stop_loss": "Stop Loss",
                         "unrealized_pnl": "Unrealized",
                         "unrealized_pct": "Unrealized %",
-                        "expires_at": "Expires",
+                        "expires_in": "Time Left",
                     }
                 )
                 st.dataframe(
