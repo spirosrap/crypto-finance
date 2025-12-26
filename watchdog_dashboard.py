@@ -8,6 +8,7 @@ Launch with:
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import shutil
@@ -60,6 +61,7 @@ UTC = timezone.utc
 AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 250
 PAPER_CLOSED_CSV = Path("trade_logs/paper_finder_closed_positions.csv")
 PAPER_OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
+STATE_PATH = Path("cache/watchdog_dashboard_state.json")
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -77,6 +79,23 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
         df["profit_loss_pct"] = pd.to_numeric(df["profit_loss_pct"], errors="coerce")
     df = df.dropna(subset=["closed_at"]).sort_values("closed_at")
     return df
+
+
+def _load_dashboard_state() -> dict:
+    if not STATE_PATH.exists():
+        return {}
+    try:
+        return json.loads(STATE_PATH.read_text())
+    except Exception:
+        return {}
+
+
+def _save_dashboard_state(state: dict) -> None:
+    try:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATE_PATH.write_text(json.dumps(state))
+    except Exception:
+        return
 
 
 def _format_hours_minutes(hours_val: Optional[float]) -> str:
@@ -600,6 +619,8 @@ def main() -> None:
         index=0,
     )
     source_mode = "paper" if source_choice == "Paper Finder" else "live"
+    if "dashboard_state" not in st.session_state:
+        st.session_state["dashboard_state"] = _load_dashboard_state()
     if "paper_update_log" not in st.session_state:
         st.session_state["paper_update_log"] = ""
     if source_mode == "paper":
@@ -663,7 +684,16 @@ def main() -> None:
     start_count = st.sidebar.number_input("Start count (1-based)", min_value=0, value=0, step=1)
     end_count = st.sidebar.number_input("End count (inclusive, 0 for none)", min_value=0, value=0, step=1)
     tail_last = st.sidebar.number_input("Last N trades (0 to ignore)", min_value=0, value=0, step=1)
-    starting_equity_default = 100.0 if source_mode == "paper" else 1000.0
+    persisted_starting = (
+        st.session_state["dashboard_state"].get("starting_equity", {}).get(source_mode)
+        if isinstance(st.session_state.get("dashboard_state"), dict)
+        else None
+    )
+    starting_equity_default = (
+        float(persisted_starting)
+        if persisted_starting is not None
+        else (100.0 if source_mode == "paper" else 1000.0)
+    )
     starting_equity = st.sidebar.number_input(
         "Starting equity",
         min_value=0.0,
@@ -671,6 +701,12 @@ def main() -> None:
         step=100.0,
         key=f"starting_equity_{source_mode}",
     )
+    if isinstance(st.session_state.get("dashboard_state"), dict):
+        existing = st.session_state["dashboard_state"].get("starting_equity", {})
+        if existing.get(source_mode) != starting_equity:
+            existing[source_mode] = float(starting_equity)
+            st.session_state["dashboard_state"]["starting_equity"] = existing
+            _save_dashboard_state(st.session_state["dashboard_state"])
 
     if st.sidebar.button("Reset filters"):
         st.experimental_rerun()
