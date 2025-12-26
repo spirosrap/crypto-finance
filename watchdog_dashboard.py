@@ -79,6 +79,24 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
     return df
 
 
+def _format_hours_minutes(hours_val: Optional[float]) -> str:
+    if hours_val is None:
+        return "n/a"
+    try:
+        hours_float = float(hours_val)
+    except (TypeError, ValueError):
+        return "n/a"
+    if math.isnan(hours_float):
+        return "n/a"
+    total_minutes = int(abs(hours_float) * 60)
+    days, rem = divmod(total_minutes, 60 * 24)
+    hours, minutes = divmod(rem, 60)
+    prefix = "-" if hours_val < 0 else ""
+    if days > 0:
+        return f"{prefix}{days}d {hours:02d}h"
+    return f"{prefix}{hours:02d}h {minutes:02d}m"
+
+
 def load_open_positions() -> Tuple[pd.DataFrame, float]:
     if not API_KEY_PERPS or not API_SECRET_PERPS:
         return pd.DataFrame(), 0.0
@@ -255,6 +273,7 @@ def load_open_positions() -> Tuple[pd.DataFrame, float]:
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["hours_open"] = df["hours_open"].round(2)
+    df["hours_open_display"] = df["hours_open"].apply(_format_hours_minutes)
     df = df.sort_values("notional", ascending=False)
     total_unrealized = summary_total if summary_total or summary_total == 0.0 else float(df["unrealized_pnl"].sum())
     return df, total_unrealized
@@ -871,7 +890,7 @@ def main() -> None:
                     "mark_price",
                     "unrealized_pnl",
                     "notional",
-                    "hours_open",
+                    "hours_open_display",
                 ]
                 display_df = open_positions_df[columns_to_use].copy()
                 display_df = display_df.rename(
@@ -883,7 +902,7 @@ def main() -> None:
                         "mark_price": "Mark",
                         "unrealized_pnl": "Unrealized",
                         "notional": "Notional",
-                        "hours_open": "Hours",
+                        "hours_open_display": "Hours",
                     }
                 )
                 st.dataframe(
@@ -894,7 +913,6 @@ def main() -> None:
                             "Mark": "{:.4f}",
                             "Unrealized": "{:+.2f}",
                             "Notional": "{:.2f}",
-                            "Hours": "{:.2f}",
                         }
                     ),
                     use_container_width=True,
