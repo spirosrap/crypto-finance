@@ -279,6 +279,9 @@ def load_open_positions() -> Tuple[pd.DataFrame, float]:
             else None
         )
 
+        expiry_hours = 24.0
+        time_left_hours = (expiry_hours - hours_open) if hours_open is not None else None
+
         rows.append(
             {
                 "product_id": symbol,
@@ -289,6 +292,7 @@ def load_open_positions() -> Tuple[pd.DataFrame, float]:
                 "unrealized_pnl": pnl,
                 "notional": notional if notional else abs(entry * size),
                 "hours_open": hours_open,
+                "time_left_hours": time_left_hours,
                 "opened_at": opened_dt,
                 "leverage": leverage,
             }
@@ -306,11 +310,13 @@ def load_open_positions() -> Tuple[pd.DataFrame, float]:
         "unrealized_pnl",
         "notional",
         "hours_open",
+        "time_left_hours",
     ]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["hours_open"] = df["hours_open"].round(2)
     df["hours_open_display"] = df["hours_open"].apply(_format_hours_minutes)
+    df["time_left_display"] = df["time_left_hours"].apply(_format_hours_minutes)
     df = df.sort_values("notional", ascending=False)
     total_unrealized = summary_total if summary_total or summary_total == 0.0 else float(df["unrealized_pnl"].sum())
     return df, total_unrealized
@@ -945,7 +951,7 @@ def main() -> None:
                     "mark_price",
                     "unrealized_pnl",
                     "notional",
-                    "hours_open_display",
+                    "time_left_display",
                 ]
                 display_df = open_positions_df[columns_to_use].copy()
                 display_df = display_df.rename(
@@ -957,7 +963,7 @@ def main() -> None:
                         "mark_price": "Mark",
                         "unrealized_pnl": "Unrealized",
                         "notional": "Notional",
-                        "hours_open_display": "Hours",
+                        "time_left_display": "Time Left",
                     }
                 )
                 st.dataframe(
