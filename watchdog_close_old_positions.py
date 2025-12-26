@@ -1611,6 +1611,23 @@ def _orders_for_product(cb: CoinbaseService, portfolio_uuid: str, product_id: st
     return []
 
 
+def _latest_filled_order_time(
+    cb: CoinbaseService,
+    portfolio_uuid: str,
+    product_id: str,
+    limit: int = 50,
+) -> Optional[datetime]:
+    orders = _orders_for_product(cb, portfolio_uuid, product_id, limit=limit)
+    latest: Optional[datetime] = None
+    for order in orders:
+        dt = _to_datetime(order)
+        if not dt:
+            continue
+        if latest is None or dt > latest:
+            latest = dt
+    return latest
+
+
 def _backfill_last_entries(cb: CoinbaseService, count: int) -> None:
     logger = logging.getLogger(__name__)
     csv_path = _ensure_log_file()
@@ -1936,6 +1953,7 @@ def run_once(
     max_age_hours: int,
     product_filter: Optional[str],
     log_closures: bool = True,
+    recent_order_grace_minutes: int = 30,
 ) -> None:
     logger = logging.getLogger(__name__)
     cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
@@ -1985,7 +2003,26 @@ def run_once(
                 logger.warning(f"No open/entry timestamp found for {symbol}; skipping")
                 continue
 
+        latest_fill = _latest_filled_order_time(cb, portfolio_uuid, symbol)
+        if latest_fill and latest_fill > opened_at:
+            logger.info(
+                "Using latest fill time as open time for %s (%s -> %s)",
+                symbol,
+                _format_datetime(opened_at),
+                _format_datetime(latest_fill),
+            )
+            opened_at = latest_fill
+
         if opened_at <= cutoff:
+            if recent_order_grace_minutes and recent_order_grace_minutes > 0:
+                if latest_fill and now_utc - latest_fill <= timedelta(minutes=recent_order_grace_minutes):
+                    logger.info(
+                        "Skipping %s close: recent fill at %s within %sm grace window",
+                        symbol,
+                        _format_datetime(latest_fill),
+                        recent_order_grace_minutes,
+                    )
+                    continue
             logger.info(f"Position {symbol} opened at {_format_datetime(opened_at)} exceeds {max_age_hours}h; closing...")
             entry_price = _extract_entry_price(pos)
             mark_price = _extract_mark_price(pos)
@@ -2084,6 +2121,8 @@ def main() -> None:
                     help="On first run, log existing fill cycles instead of only new ones")
     ap.add_argument("--no-log-closures", action="store_true",
                     help="Skip writing age-based closure rows to watchdog_closed_positions.csv")
+    ap.add_argument("--recent-order-grace-minutes", type=int, default=30,
+                    help="Skip closing if a filled order was placed within this window (default 30)")
     ap.add_argument("--verbose", action="store_true", help="Enable debug logging")
 
     args = ap.parse_args()
@@ -2124,12 +2163,22 @@ def main() -> None:
     if args.interval_seconds and args.interval_seconds > 0:
         while True:
             try:
-                run_once(args.max_age_hours, args.product, log_closures=log_closures)
+                run_once(
+                    args.max_age_hours,
+                    args.product,
+                    log_closures=log_closures,
+                    recent_order_grace_minutes=args.recent_order_grace_minutes,
+                )
             except Exception as e:
                 logging.getLogger(__name__).error(f"Watchdog iteration error: {e}")
             time.sleep(args.interval_seconds)
     else:
-        run_once(args.max_age_hours, args.product, log_closures=log_closures)
+        run_once(
+            args.max_age_hours,
+            args.product,
+            log_closures=log_closures,
+            recent_order_grace_minutes=args.recent_order_grace_minutes,
+        )
 
 
 if __name__ == "__main__":
