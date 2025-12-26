@@ -9,6 +9,11 @@
 ## December 2025
 **State at a glance (latest):** BTC ATR7 still >3k and cap‑binding; RR remains sub‑2 on most majors, so signals are sparse and the breakout bot mostly logs near‑breakouts. Recent ZEC candidate was skipped because ATR is above my safe band. Baseline exit test on 331 trades favored a simple ATR bracket model, but I’m keeping the new RR/ATR rules for ~50 trades before any change. Snapshots now include liquidity/spread headroom plus volatility‑regime readouts (ATR7/ATR21, TR1/ATR7) with Rich table output.
 
+## December 26, 2025 - Live Trades Went Sideways
+- Live trades went positive briefly, then moved sideways; DOGE hit SL and the rest faded similarly.
+- Paper trades continue to balance more often; the looser baseline gate seems to catch both sides of the spikes more evenly.
+- Opened new paper trades (baseline RR): BTC LONG, ETH LONG, SOL SHORT.
+
 ## December 26, 2025 - Long-Heavy Paper Day
 - Yesterday’s paper trades skewed long; the day was positive overall with longs in profit and shorts slightly down.
 - LTC was in both paper trades and briefly cleared the live gate; the live trade stayed near breakeven after a small uptick.
