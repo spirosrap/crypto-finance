@@ -791,27 +791,34 @@ def main() -> None:
                 if "expires_at" in open_positions_df.columns:
                     now = datetime.now(UTC)
 
+                    def _minutes_left(ts: pd.Timestamp) -> int:
+                        if pd.isna(ts):
+                            return 0
+                        delta = ts - now
+                        return int(delta.total_seconds() // 60)
+
                     def _format_time_left(ts: pd.Timestamp) -> str:
                         if pd.isna(ts):
                             return "n/a"
                         delta = ts - now
-                        total_sec = int(delta.total_seconds())
-                        if total_sec < 0:
+                        raw_seconds = int(delta.total_seconds())
+                        if raw_seconds < 0:
                             prefix = "expired "
-                            total_sec = abs(total_sec)
+                            total_sec = abs(raw_seconds)
                         else:
                             prefix = ""
+                            total_sec = raw_seconds
                         days, rem = divmod(total_sec, 86400)
                         hours, rem = divmod(rem, 3600)
                         minutes, _ = divmod(rem, 60)
                         if days > 0:
-                            return f"{prefix}{days}d {hours}h"
-                        if hours > 0:
-                            return f"{prefix}{hours}h {minutes}m"
-                        return f"{prefix}{minutes}m"
+                            return f"{prefix}{days}d {hours:02d}h {minutes:02d}m"
+                        return f"{prefix}{hours:02d}h {minutes:02d}m"
 
                     open_positions_df = open_positions_df.copy()
+                    open_positions_df["expires_in_minutes"] = open_positions_df["expires_at"].apply(_minutes_left)
                     open_positions_df["expires_in"] = open_positions_df["expires_at"].apply(_format_time_left)
+                    open_positions_df = open_positions_df.sort_values("expires_in_minutes")
 
                 paper_cols = [
                     "symbol",
