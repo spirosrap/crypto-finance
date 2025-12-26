@@ -207,27 +207,45 @@ def load_open_positions() -> Tuple[pd.DataFrame, float]:
             if not has_next:
                 break
 
-        net_progress = 0.0
-        entry_time = None
-        tolerance = max(1e-6, abs(size) * 1e-6)
-        for order in sorted(all_orders, key=lambda o: o.get("created_time", "")):
+        def _parse_order_time(raw_time: Optional[str]) -> Optional[datetime]:
+            if not raw_time:
+                return None
+            try:
+                return datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            except Exception:
+                return None
+
+        def _order_time_dt(order: dict) -> Optional[datetime]:
+            return _parse_order_time(order.get("created_time") or order.get("completion_time"))
+
+        def _order_signed_size(order: dict) -> float:
             side_order = (order.get("side") or "").upper()
             try:
                 filled = float(order.get("filled_size") or 0)
             except Exception:
-                filled = 0.0
-            created_raw = order.get("created_time") or order.get("completion_time")
+                return 0.0
             if side_order == "BUY":
-                net_progress += filled
-            elif side_order == "SELL":
-                net_progress -= filled
+                return filled
+            if side_order == "SELL":
+                return -filled
+            return 0.0
 
-            if abs(net_progress) < tolerance:
-                entry_time = None
+        entry_time = None
+        target = abs(size)
+        tolerance = max(1e-6, target * 1e-6)
+        orders_sorted = sorted(all_orders, key=lambda o: _order_time_dt(o) or datetime.min.replace(tzinfo=UTC), reverse=True)
+        running = 0.0
+        for order in orders_sorted:
+            dt = _order_time_dt(order)
+            if not dt:
                 continue
-
-            if entry_time is None and created_raw:
-                entry_time = created_raw
+            signed = _order_signed_size(order)
+            if signed == 0:
+                continue
+            running += signed
+            entry_time = dt
+            if abs(running) >= (target - tolerance):
+                break
 
         opened_dt = None
         if entry_time:
