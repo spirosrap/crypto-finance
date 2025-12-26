@@ -12,6 +12,8 @@
 ## December 26, 2025 - Long-Heavy Paper Day
 - Yesterday’s paper trades skewed long; the day was positive overall with longs in profit and shorts slightly down.
 - LTC was in both paper trades and briefly cleared the live gate; the live trade stayed near breakeven after a small uptick.
+- DOGE and SOL briefly cleared the strict RR gate, so I took them live as LONGs.
+- Added three more paper trades today: LINK, DOGE, SEI.
 
 ## December 25, 2025 - BTC Paper Trade Added
 - Took another paper trade on BTC (LONG) after it met the baseline conditions.
