@@ -644,6 +644,7 @@ def main() -> None:
                     capture_output=True,
                     text=True,
                     check=False,
+                    cwd=REPO_ROOT,
                 )
             output = (result.stdout or "") + (result.stderr or "")
             st.session_state["paper_update_log"] = output.strip()
