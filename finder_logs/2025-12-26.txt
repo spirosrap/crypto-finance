@@ -1,0 +1,47 @@
+
+====================================================================================================
+SHORT-TERM CRYPTO OPPORTUNITIES ANALYSIS
+====================================================================================================
+Generated on (UTC): 2025-12-26 10:17:35Z
+Total opportunities listed: 1
+====================================================================================================
+
+1. PENGU (Pudgy Penguins) — LONG
+--------------------------------------------------
+Data Timestamp (UTC): 2025-12-26 00:00:00Z
+Price: $0.009116
+Market Cap: $574,300,228 (Rank #132)
+24h Volume: $69,855,369
+24h Change: 1.65%
+7d Change: -1.94%
+30d Change: -19.39%
+ATH: $0.07 (Date: 2024-12-17)
+ATL: $0.003715 (Date: 2025-04-09)
+Volatility (30d, ann.): 118.9%
+Sharpe Ratio: -3.32
+Sortino Ratio: -6.59
+Max Drawdown: -73.60%
+RSI (14): 42.6
+MACD Signal: BULLISH
+BB Position: NEUTRAL
+Trend Strength: -1.20% per day
+Momentum Score: 0.3/100
+Fundamental Score: 94.5/100
+Technical Score: 50.2/100
+Risk Score: 37.5/100
+Risk Level: MEDIUM_LOW
+Overall Score: 29.34/100
+
+💼 TRADING LEVELS (LONG):
+Entry Price: $0.009116
+Stop Loss: $0.008861
+Take Profit: $0.009675
+Risk:Reward Ratio: 2.2:1
+Recommended Position Size: 5.0% of portfolio
+Std. Position Notional: $1,000.00 at 50.0x leverage (margin $20.00)
+Potential TP P&L: $61.33 (6.13%)
+Potential SL P&L: $-28.00 (-2.80%)
+
+Short-Line Summaries
+--------------------------------------------------
+1. Summary: PENGU long – score 29.34, 2.2× RR; RSI 43; bullish MACD support; risk medium low; trend -1.20%/d.
