@@ -794,13 +794,6 @@ def main() -> None:
         summary_notes.append(f"Preset window: {date_preset}")
     elif start_str or end_str:
         summary_notes.append("Custom date window")
-    if not filtered.empty:
-        window_start = filtered["closed_at"].min()
-        window_end = filtered["closed_at"].max()
-        if window_start is not None and window_end is not None:
-            summary_notes.append(
-                f"Data range: {window_start.date().isoformat()} → {window_end.date().isoformat()}"
-            )
     if summary_notes:
         st.caption(" | ".join(summary_notes))
 
