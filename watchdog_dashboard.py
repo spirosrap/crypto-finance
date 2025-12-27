@@ -511,6 +511,13 @@ def build_daily_equity(
         "avg_pct": avg_pct,
         "avg_win_pct": avg_win_pct,
         "avg_loss_pct": avg_loss_pct,
+        "metric_glossary": {
+            "profit_loss": "USD P&L per trade (drives equity curve).",
+            "profit_loss_pct": "% P&L per trade (trade quality).",
+            "expectancy": "Average profit_loss (USD).",
+            "expectancy_pct": "Average profit_loss_pct (%).",
+            "profit_factor": "Total wins ÷ total losses (USD).",
+        },
         "best_day": float(daily["daily_pnl"].max()) if not daily.empty else 0.0,
         "worst_day": float(daily["daily_pnl"].min()) if not daily.empty else 0.0,
         "ending_equity": ending_equity,
@@ -796,6 +803,12 @@ def main() -> None:
         summary_notes.append("Custom date window")
     if summary_notes:
         st.caption(" | ".join(summary_notes))
+
+    with st.expander("Metric glossary", expanded=False):
+        glossary = metrics.get("metric_glossary", {})
+        if glossary:
+            for key, desc in glossary.items():
+                st.markdown(f"- `{key}`: {desc}")
 
     if source_mode == "paper":
         open_positions_df, total_unrealized = load_paper_open_positions(PAPER_OPEN_CSV)

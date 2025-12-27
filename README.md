@@ -31,6 +31,12 @@ For others, this repo can be useful as:
 - **Paper Progress Check**: `scripts/paper_trade_progress.py` prints progress to the 100‑trade target, win%, avg%, expectancy, and TP/SL/expiry split.
 - **Paper Equity Report**: `scripts/paper_equity_report.py` writes a shareable equity curve (HTML + PNG) and `watchdog_dashboard.py` can export the same. Note: equity is daily‑aggregated, so one trading day = one point (drawdown reads 0% when there’s only one day).
 - **Current Paper Experiment (until 100 trades)**: baseline ATR exits (`atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped`) with liquidity/spread gates and ATR ≤ 1.5× cap. Live rules stay unchanged until the 100‑trade sample is complete.
+- **Metric glossary**:
+  - `profit_loss` = USD P&L per trade (drives equity curve).
+  - `profit_loss_pct` = % P&L per trade (trade quality).
+  - Expectancy (USD) = average `profit_loss`.
+  - Expectancy (%) = average `profit_loss_pct`.
+  - Profit factor = total wins ÷ total losses (USD).
 - **Diagnostics**: `scripts/watchdog_atr_clip_analysis.py` to bucket closed trades by ATR cap ratio and compare outcomes.
 - **Parquet + SQL**: `scripts/convert_to_parquet.py` to emit parquet copies of finder/trade logs/backtests (use `--skip-bad-lines` if a CSV has malformed rows), plus `scripts/duckdb_query.py` for ad-hoc SQL diagnostics. Parquet keeps analytics fast and lightweight on large logs. Low-level helpers live in `trading/parquet_utils.py`.
 
