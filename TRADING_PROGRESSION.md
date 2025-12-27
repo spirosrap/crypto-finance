@@ -15,6 +15,8 @@
 - Re-entry rule: after a trade expires/closes, it’s OK to take the same symbol/direction again if gates still pass (no mid-trade flips; optional cooldown if needed).
 - Gate-scan now prints baseline command lines only for symbols that pass the baseline gates and are not already open; it also lists open positions being skipped.
 - Decision: live trading now follows the same baseline system used for paper trades to save time, even though it increases risk. The stricter RR-gate system is archived for now because it produced too few trades and felt late.
+- Live testing command:
+  - `python scripts/symbol_snapshot.py --gate-scan --profile focused_no_llm_100 --top 15 --scan-limit 100 --baseline-commands --baseline-portfolio-usd 5000 --baseline-position-pct 5 --baseline-atr-mult 0.8 --baseline-rr 1.5 --baseline-atr-mode clipped --baseline-leverage 50 --baseline-expiry 30d`
 
 ## December 26, 2025 - Live Trades Went Sideways
 - Live trades went positive briefly, then moved sideways; DOGE hit SL and the rest faded similarly.
