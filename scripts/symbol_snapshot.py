@@ -13,7 +13,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 try:
@@ -38,6 +38,23 @@ from short_term_crypto_finder import (
     ShortTermCryptoFinder,
     build_short_term_config,
 )
+from coinbaseservice import CoinbaseService
+from perp_support import canonical_perp_symbol, perp_price_multiplier
+from watchdog_close_old_positions import _get_portfolio_uuid
+
+try:
+    from credentials import get_perps_credentials
+except ModuleNotFoundError:
+    try:  # pragma: no cover - fallback for older deployments
+        from config import API_KEY_PERPS, API_SECRET_PERPS  # type: ignore
+    except ModuleNotFoundError:  # pragma: no cover - no config available
+        API_KEY_PERPS = ""  # type: ignore
+        API_SECRET_PERPS = ""  # type: ignore
+
+    def get_perps_credentials() -> Tuple[str, str]:
+        return (API_KEY_PERPS or "", API_SECRET_PERPS or "")  # type: ignore[arg-type]
+
+API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
 
 
 def apply_profile_overrides(cfg, profile: str) -> None:
@@ -87,6 +104,80 @@ def _fmt_mult(value: Optional[float]) -> str:
     if num >= 10:
         return f"x{num:.1f}"
     return f"x{num:.2f}"
+
+
+def _price_precision(entry: float) -> int:
+    if entry < 1:
+        return 6
+    if entry < 10:
+        return 4
+    if entry < 1000:
+        return 3
+    return 2
+
+
+def _fmt_price(value: float, precision: int) -> str:
+    return f"{value:.{precision}f}"
+
+
+def _baseline_levels(
+    *,
+    side: str,
+    entry: float,
+    atr_raw: float,
+    atr_mult: float,
+    rr: float,
+    atr_mode: str,
+    finder: ShortTermCryptoFinder,
+) -> tuple[float, float, float]:
+    atr_eff = float(atr_raw)
+    if atr_mode == "clipped":
+        atr_eff = finder._cap_atr_value(atr_eff, entry)
+    risk = atr_eff * float(atr_mult)
+    if risk <= 0:
+        return atr_eff, 0.0, 0.0
+    if side == "LONG":
+        stop = entry - risk
+        tp = entry + risk * rr
+    else:
+        stop = entry + risk
+        tp = entry - risk * rr
+    return atr_eff, float(stop), float(tp)
+
+
+def _load_open_perp_symbols() -> set[str]:
+    if not API_KEY_PERPS or not API_SECRET_PERPS:
+        return set()
+    try:
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+    except Exception:
+        return set()
+    portfolio_uuid = _get_portfolio_uuid(cb)
+    if not portfolio_uuid:
+        return set()
+    try:
+        positions_response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
+    except Exception:
+        return set()
+    positions_raw = []
+    if isinstance(positions_response, dict):
+        positions_raw = positions_response.get("positions", []) or []
+    else:
+        positions_raw = getattr(positions_response, "positions", []) or []
+    symbols: set[str] = set()
+    for pos in positions_raw:
+        pos_dict = pos if isinstance(pos, dict) else pos.to_dict()
+        symbol = pos_dict.get("symbol") or pos_dict.get("product_id")
+        if not symbol:
+            continue
+        base = canonical_perp_symbol(symbol)
+        if base:
+            base = base.split("-")[0]
+        else:
+            base = str(symbol).split("-")[0]
+        if base:
+            symbols.add(base.upper())
+    return symbols
 
 
 def _true_range_last(df: pd.DataFrame) -> Optional[float]:
@@ -549,6 +640,16 @@ def gate_scan(
     top: int,
     rr_target: float,
     scan_limit: Optional[int],
+    baseline_commands: bool,
+    baseline_portfolio_usd: Optional[float],
+    baseline_position_pct: float,
+    baseline_position_usd: Optional[float],
+    baseline_atr_mult: float,
+    baseline_rr: float,
+    baseline_atr_mode: str,
+    baseline_leverage: Optional[float],
+    baseline_expiry: str,
+    baseline_include_open: bool,
 ) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
@@ -657,6 +758,8 @@ def gate_scan(
             "atr_bps": atr_bps,
             "cap_bps": cap_bps,
             "atr_ratio": atr_ratio,
+            "price": price,
+            "atr_raw": atr,
             "atr7_to_21": atr7_to_21,
             "tr1_to_atr7": tr1_to_atr7,
             "vol24h": vol24h,
@@ -677,6 +780,91 @@ def gate_scan(
                              -(r["headroom_bps"] if r["headroom_bps"] is not None else -1e9)))
     top_rows = rows[:top]
     print(f"Top {min(top, len(rows))} closest to RR {rr_target}:")
+
+    def _leverage_text(value: Optional[float]) -> Optional[str]:
+        if value is None:
+            return None
+        try:
+            num = float(value)
+        except Exception:
+            return None
+        if num.is_integer():
+            return f"{int(num)}"
+        return f"{num:.2f}"
+
+    def _baseline_size_usd() -> Optional[float]:
+        if baseline_position_usd is not None and baseline_position_usd > 0:
+            return float(baseline_position_usd)
+        if baseline_portfolio_usd is not None and baseline_portfolio_usd > 0:
+            return float(baseline_portfolio_usd) * (baseline_position_pct / 100.0)
+        fallback = getattr(cfg, "report_position_notional", None)
+        if fallback:
+            return float(fallback)
+        return None
+
+    def _print_baseline_commands() -> None:
+        if not baseline_commands or not top_rows:
+            return
+        open_symbols = set()
+        if not baseline_include_open:
+            open_symbols = _load_open_perp_symbols()
+        leverage_text = _leverage_text(
+            baseline_leverage if baseline_leverage is not None else getattr(cfg, "report_leverage", None)
+        )
+        size_usd = _baseline_size_usd()
+        if size_usd is None or size_usd <= 0:
+            print("Commands: no size available (set --baseline-position-usd or --baseline-portfolio-usd).")
+            return
+
+        commands: List[str] = []
+        skipped: List[str] = []
+        for row in top_rows:
+            if not row.get("baseline_pass"):
+                continue
+            symbol = str(row.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            if not baseline_include_open and symbol in open_symbols:
+                skipped.append(symbol)
+                continue
+            side = str(row.get("best_side") or "").upper()
+            entry = float(row.get("price") or 0.0)
+            atr_raw = float(row.get("atr_raw") or 0.0)
+            if entry <= 0 or atr_raw <= 0:
+                continue
+            price_mult = perp_price_multiplier(symbol)
+            entry *= price_mult
+            atr_raw *= price_mult
+            _, stop, tp = _baseline_levels(
+                side=side,
+                entry=entry,
+                atr_raw=atr_raw,
+                atr_mult=baseline_atr_mult,
+                rr=baseline_rr,
+                atr_mode=baseline_atr_mode,
+                finder=finder,
+            )
+            if stop <= 0 or tp <= 0:
+                continue
+            precision = _price_precision(entry)
+            tp_txt = _fmt_price(tp, precision)
+            sl_txt = _fmt_price(stop, precision)
+            base_symbol = canonical_perp_symbol(symbol) or symbol
+            product = f"{base_symbol}-PERP-INTX"
+            side_ccxt = "BUY" if side == "LONG" else "SELL"
+            cmd = f"python ccxt_trade_perp.py --product {product} --side {side_ccxt} --size {size_usd:.2f}"
+            if leverage_text:
+                cmd += f" --leverage {leverage_text}"
+            cmd += f" --tp {tp_txt} --sl {sl_txt} --expiry {baseline_expiry}"
+            commands.append(cmd)
+
+        if skipped:
+            print(f"Open positions detected (skipping): {', '.join(sorted(set(skipped)))}")
+        if commands:
+            print("Commands:")
+            print("\n".join(commands))
+        else:
+            print("Commands: none (no baseline-pass symbols without open positions).")
     if RICH_AVAILABLE and RICH_CONSOLE is not None and top_rows:
         table = Table(title="Gate Scan (Short-Term)", box=box.ASCII, show_lines=False)
         table.add_column("Symbol")
@@ -744,6 +932,7 @@ def gate_scan(
             )
 
         RICH_CONSOLE.print(table)
+        _print_baseline_commands()
         return
 
     for row in top_rows:
@@ -792,6 +981,8 @@ def gate_scan(
               f"spr={spr_txt} | "
               f"ATR7/ATR21={_fmt(row.get('atr7_to_21'), 2)} TR1/ATR7={_fmt(row.get('tr1_to_atr7'), 2)}")
 
+    _print_baseline_commands()
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Print snapshot metrics for specific symbols.")
     parser.add_argument(
@@ -833,6 +1024,64 @@ def main() -> None:
         default=None,
         help="Limit how many symbols to scan in gate-scan mode (e.g., 100 or 200). Default scans full profile universe.",
     )
+    parser.add_argument(
+        "--baseline-commands",
+        action="store_true",
+        help="Print ccxt_trade_perp command lines for baseline-pass symbols in gate-scan mode.",
+    )
+    parser.add_argument(
+        "--baseline-portfolio-usd",
+        type=float,
+        default=None,
+        help="Portfolio size used to compute baseline position size.",
+    )
+    parser.add_argument(
+        "--baseline-position-pct",
+        type=float,
+        default=5.0,
+        help="Position size percent of portfolio for baseline commands (default: 5).",
+    )
+    parser.add_argument(
+        "--baseline-position-usd",
+        type=float,
+        default=None,
+        help="Fixed USD size per trade for baseline commands (overrides portfolio/pct).",
+    )
+    parser.add_argument(
+        "--baseline-atr-mult",
+        type=float,
+        default=0.8,
+        help="ATR multiple for baseline SL distance (default: 0.8).",
+    )
+    parser.add_argument(
+        "--baseline-rr",
+        type=float,
+        default=1.5,
+        help="Baseline RR target for command generation (default: 1.5).",
+    )
+    parser.add_argument(
+        "--baseline-atr-mode",
+        choices=["raw", "clipped"],
+        default="clipped",
+        help="Use raw or capped ATR for baseline commands (default: clipped).",
+    )
+    parser.add_argument(
+        "--baseline-leverage",
+        type=float,
+        default=None,
+        help="Leverage for baseline commands (default uses profile leverage).",
+    )
+    parser.add_argument(
+        "--baseline-expiry",
+        type=str,
+        default="30d",
+        help="Expiry string for baseline commands (default: 30d).",
+    )
+    parser.add_argument(
+        "--baseline-include-open",
+        action="store_true",
+        help="Include symbols that already have open live positions when printing commands.",
+    )
     args = parser.parse_args()
 
     if args.gate_scan:
@@ -842,6 +1091,16 @@ def main() -> None:
             top=args.top,
             rr_target=args.rr_target,
             scan_limit=args.scan_limit,
+            baseline_commands=args.baseline_commands,
+            baseline_portfolio_usd=args.baseline_portfolio_usd,
+            baseline_position_pct=args.baseline_position_pct,
+            baseline_position_usd=args.baseline_position_usd,
+            baseline_atr_mult=args.baseline_atr_mult,
+            baseline_rr=args.baseline_rr,
+            baseline_atr_mode=args.baseline_atr_mode,
+            baseline_leverage=args.baseline_leverage,
+            baseline_expiry=args.baseline_expiry,
+            baseline_include_open=args.baseline_include_open,
         )
         return
 
