@@ -13,6 +13,8 @@
 - Started taking live trades using the looser baseline gates (same as paper trades).
 - This is riskier than waiting for the 100-trade paper sample, but it saves time even if it may cost.
 - Re-entry rule: after a trade expires/closes, it’s OK to take the same symbol/direction again if gates still pass (no mid-trade flips; optional cooldown if needed).
+- Gate-scan now prints baseline command lines only for symbols that pass the baseline gates and are not already open; it also lists open positions being skipped.
+- Decision: live trading now follows the same baseline system used for paper trades to save time, even though it increases risk. The stricter RR-gate system is archived for now because it produced too few trades and felt late.
 
 ## December 26, 2025 - Live Trades Went Sideways
 - Live trades went positive briefly, then moved sideways; DOGE hit SL and the rest faded similarly.

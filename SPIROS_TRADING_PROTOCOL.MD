@@ -85,14 +85,14 @@
 
 ## 11. Current Style (Dec 2025)
 - Identity: short-term systematic trader (intraday-to-24h), strict RR/ATR gates, willing to sit flat for days. Not classic day trading; not multi-day swing.
-- Playbooks: short_term_crypto_finder (RR>=2 with ATR clipping cap) and breakout_autotrade (fixed 2R structure). Both use hard SL/TP; optional 24h timeout for closes.
+- Playbooks: baseline short-term system (ATR‑scaled exits with baseline gates) and breakout_autotrade (fixed 2R structure). Both use hard SL/TP; optional 24h timeout for closes.
 - Short-term finder selection criteria (engine-level):
   - Universe: Coinbase “online” products filtered to preferred quotes; stablecoin bases are excluded (e.g., USDT/USDC/USD1).
   - Prefilters: market cap >= `min_market_cap` (real MC preferred; estimated MC optional) + liquidity checks (min 24h USD volume and volume/market-cap ratio, with major-symbol exceptions).
-  - Hard gate: candidates are only kept if `risk_reward_ratio >= 2.0` (RR includes fee/slippage floor and uses ATR clipping caps).
+- Hard gate (archived): candidates are only kept if `risk_reward_ratio >= 2.0` (RR includes fee/slippage floor and uses ATR clipping caps).
   - Quality filters: `overall_score >= min_overall_score` and `risk_level <= max_risk_level` (I’m currently medium-or-safer).
   - Output shaping: `unique_by_symbol` keeps best side per symbol; `top_per_side` caps each side; final list sorted by `overall_score`.
-- Frequency: low by design. No trades if conditions are poor; downtime is acceptable.
+- Frequency: currently higher because live trades follow the baseline gate (ATR/spread/VMC); strict RR gating is paused.
 - Automation: breakout_autotrade runs hourly on USDC majors with $500 notional/50x, RR=2, 24h lock to avoid stacking. Near-breakouts are logged; no trade unless conditions trigger.
 - Re-entry discipline: after a trade expires or closes, it’s OK to re-enter the same symbol/direction if the signal still clears gates. No mid-trade flips; treat each scan as a new entry. Optional cooldown: wait 1–2 candles or require RR to be >= the prior entry before re-entering.
 - Housekeeping: `watchdog_close_old_positions.py` runs (or can run) alongside to enforce 24h expiry on open positions; `watchdog_dashboard.py` provides status/metrics visibility on active trades and cron health.
