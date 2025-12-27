@@ -322,6 +322,66 @@ def load_open_positions() -> Tuple[pd.DataFrame, float]:
     return df, total_unrealized
 
 
+def load_perp_usdc_balance() -> Optional[float]:
+    if not API_KEY_PERPS or not API_SECRET_PERPS:
+        return None
+    try:
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+    except Exception:
+        return None
+    portfolio_uuid = _get_portfolio_uuid(cb)
+    if not portfolio_uuid:
+        return None
+    try:
+        portfolio = cb.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+    except Exception:
+        return None
+
+    breakdown = None
+    if isinstance(portfolio, dict):
+        breakdown = portfolio.get("breakdown")
+    else:
+        breakdown = getattr(portfolio, "breakdown", None)
+    if breakdown is None:
+        breakdown = portfolio
+
+    if not isinstance(breakdown, dict):
+        if hasattr(breakdown, "__dict__"):
+            breakdown = vars(breakdown)
+        else:
+            return None
+
+    balances = breakdown.get("portfolio_balances")
+    if balances is None and isinstance(breakdown.get("breakdown"), dict):
+        balances = breakdown["breakdown"].get("portfolio_balances")
+    if balances is None:
+        return None
+
+    if not isinstance(balances, dict):
+        if hasattr(balances, "__dict__"):
+            balances = vars(balances)
+        else:
+            return None
+
+    def _value_from(container: dict, key: str) -> Optional[float]:
+        entry = container.get(key)
+        if not entry:
+            return None
+        if isinstance(entry, dict):
+            value = entry.get("value")
+        else:
+            value = getattr(entry, "value", None)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    available = _value_from(balances, "available_balance")
+    if available is not None:
+        return available
+    return _value_from(balances, "total_balance")
+
+
 def load_paper_open_positions(path: Path) -> Tuple[pd.DataFrame, float]:
     if not path.exists():
         return pd.DataFrame(), 0.0
@@ -859,7 +919,10 @@ def main() -> None:
     position_label = "open position" if open_positions_count == 1 else "open positions"
     summary_total_value = float(total_unrealized) if total_unrealized is not None else 0.0
     pos_label = "live" if source_mode == "live" else "paper"
+    usdc_balance = load_perp_usdc_balance() if source_mode == "live" else None
     exp_label_text = f"({open_positions_count}) Open positions ({pos_label}) | P/L {summary_total_value:+.2f}"
+    if usdc_balance is not None:
+        exp_label_text = f"{exp_label_text} | USDC {usdc_balance:,.2f}"
     label_color = None
     if open_positions_count > 0:
         label_color = "green" if total_unrealized >= 0 else "red"
