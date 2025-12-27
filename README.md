@@ -37,6 +37,13 @@ For others, this repo can be useful as:
   - Expectancy (USD) = average `profit_loss`.
   - Expectancy (%) = average `profit_loss_pct`.
   - Profit factor = total wins ÷ total losses (USD).
+  - `win_rate_pct` = percent of trades with positive `profit_loss`.
+  - `avg_pct` = average `profit_loss_pct` across trades.
+  - `avg_win_pct` / `avg_loss_pct` = average % for winners/losers.
+  - `median_profit_loss` / `median_profit_loss_pct` = median USD/% per trade (less skewed by outliers).
+  - `max_drawdown` / `max_drawdown_pct` = worst peak‑to‑trough equity drop (USD/%).
+  - `sharpe_ratio` = risk‑adjusted return of daily equity (higher is better, noisy on small samples).
+  - `total_return_pct` = (ending equity − starting equity) ÷ starting equity.
 - **Diagnostics**: `scripts/watchdog_atr_clip_analysis.py` to bucket closed trades by ATR cap ratio and compare outcomes.
 - **Parquet + SQL**: `scripts/convert_to_parquet.py` to emit parquet copies of finder/trade logs/backtests (use `--skip-bad-lines` if a CSV has malformed rows), plus `scripts/duckdb_query.py` for ad-hoc SQL diagnostics. Parquet keeps analytics fast and lightweight on large logs. Low-level helpers live in `trading/parquet_utils.py`.
 
