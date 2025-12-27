@@ -12,6 +12,7 @@
 ## December 27, 2025 - Live Baseline Trades Started
 - Started taking live trades using the looser baseline gates (same as paper trades).
 - This is riskier than waiting for the 100-trade paper sample, but it saves time even if it may cost.
+- Re-entry rule: after a trade expires/closes, it’s OK to take the same symbol/direction again if gates still pass (no mid-trade flips; optional cooldown if needed).
 
 ## December 26, 2025 - Live Trades Went Sideways
 - Live trades went positive briefly, then moved sideways; DOGE hit SL and the rest faded similarly.

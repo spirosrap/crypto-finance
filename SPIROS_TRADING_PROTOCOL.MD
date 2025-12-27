@@ -94,6 +94,7 @@
   - Output shaping: `unique_by_symbol` keeps best side per symbol; `top_per_side` caps each side; final list sorted by `overall_score`.
 - Frequency: low by design. No trades if conditions are poor; downtime is acceptable.
 - Automation: breakout_autotrade runs hourly on USDC majors with $500 notional/50x, RR=2, 24h lock to avoid stacking. Near-breakouts are logged; no trade unless conditions trigger.
+- Re-entry discipline: after a trade expires or closes, it’s OK to re-enter the same symbol/direction if the signal still clears gates. No mid-trade flips; treat each scan as a new entry. Optional cooldown: wait 1–2 candles or require RR to be >= the prior entry before re-entering.
 - Housekeeping: `watchdog_close_old_positions.py` runs (or can run) alongside to enforce 24h expiry on open positions; `watchdog_dashboard.py` provides status/metrics visibility on active trades and cron health.
 - Observability: `scripts/symbol_snapshot.py --gate-scan` surfaces which symbols are closest to clearing RR/ATR gates (uses tiered ATR caps and RR target; defaults RR=2, top=15) and now also includes quick liquidity/spread “distance” readouts:
   - `liq vol=... (x... vs min=..., src=...)`: 24h USD volume, how many times above `min_volume_24h`, and the data source (typically CoinGecko).
