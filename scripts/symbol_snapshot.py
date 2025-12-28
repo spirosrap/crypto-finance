@@ -32,6 +32,7 @@ except Exception:
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+EXCLUDED_PERPS_PATH = REPO_ROOT / "config" / "excluded_perps.txt"
 
 from short_term_crypto_finder import (
     PROFILE_PRESETS,
@@ -118,6 +119,33 @@ def _price_precision(entry: float) -> int:
 
 def _fmt_price(value: float, precision: int) -> str:
     return f"{value:.{precision}f}"
+
+
+def _load_excluded_perps(path: Path = EXCLUDED_PERPS_PATH) -> tuple[set[str], set[str]]:
+    """Return (excluded_products, excluded_symbols) from config/excluded_perps.txt."""
+    if not path.exists():
+        return set(), set()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return set(), set()
+    excluded_products: set[str] = set()
+    excluded_symbols: set[str] = set()
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        upper = line.upper()
+        excluded_products.add(upper)
+        base = upper.split("-")[0]
+        candidates = {base}
+        canonical_base = canonical_perp_symbol(base)
+        if canonical_base:
+            candidates.add(canonical_base)
+        for candidate in candidates:
+            if candidate:
+                excluded_symbols.add(candidate.upper())
+    return excluded_products, excluded_symbols
 
 
 def _baseline_levels(
@@ -491,8 +519,13 @@ def snapshot_symbols(symbols: Iterable[str], profile: str, disable_liquidity: bo
         print("No symbols retrieved (check connectivity or liquidity filters).")
         return
 
+    excluded_products, excluded_symbols = _load_excluded_perps()
     for coin in coins:
         product_id = coin["product_id"]
+        symbol_raw = str(coin.get("symbol") or "").upper()
+        base_symbol = symbol_raw.split("-")[0] if symbol_raw else str(product_id).split("-")[0].upper()
+        if product_id in excluded_products or base_symbol in excluded_symbols:
+            continue
         df = finder.get_historical_data(product_id, days=cfg.analysis_days)
         if df is None or df.empty:
             print(f"{coin['symbol']}: no historical data")
@@ -697,6 +730,7 @@ def gate_scan(
         "ADA", "AVAX", "LINK", "DOGE", "LTC", "DOT", "MATIC",
     }
     baseline_exempt_symbols = {"BTC", "ETH"}
+    excluded_products, excluded_symbols = _load_excluded_perps()
 
     def _spread_cap_bps(volume_usd: float) -> float:
         """Heuristic 'acceptable' spread cap for reporting (not a hard gate)."""
@@ -709,6 +743,10 @@ def gate_scan(
     rows = []
     for coin in coins:
         product_id = coin["product_id"]
+        symbol = str(coin.get("symbol") or "").upper()
+        base_symbol = symbol.split("-")[0] if symbol else str(product_id).split("-")[0].upper()
+        if product_id in excluded_products or base_symbol in excluded_symbols:
+            continue
         df = finder.get_historical_data(product_id, days=cfg.analysis_days)
         if df is None or df.empty:
             continue
