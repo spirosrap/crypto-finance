@@ -9,6 +9,9 @@
 ## December 2025
 **State at a glance (latest):** BTC ATR7 still >3k and cap‑binding; RR remains sub‑2 on most majors, so signals are sparse and the breakout bot mostly logs near‑breakouts. Recent ZEC candidate was skipped because ATR is above my safe band. Baseline exit test on 331 trades favored a simple ATR bracket model, but I’m keeping the new RR/ATR rules for ~50 trades before any change. Snapshots now include liquidity/spread headroom plus volatility‑regime readouts (ATR7/ATR21, TR1/ATR7) with Rich table output.
 
+## December 28, 2025 - More Live Trades
+- Placed more live trades today; many more opportunities are surfacing now, so I’m holding ~10–15 simultaneous trades. Not sure yet if I should cap the number of concurrent positions; will monitor.
+
 ## December 27, 2025 - Live Baseline Trades Started
 - Started taking live trades using the looser baseline gates (same as paper trades).
 - This is riskier than waiting for the 100-trade paper sample, but it saves time even if it may cost.
