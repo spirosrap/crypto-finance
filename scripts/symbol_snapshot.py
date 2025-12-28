@@ -932,23 +932,17 @@ def gate_scan(
     def _print_baseline_paper_command() -> None:
         if not baseline_paper_command or not top_rows:
             return
-        open_live = set()
         open_paper = set()
         if not baseline_include_open:
-            open_live = _load_open_perp_symbols()
             open_paper = _load_open_paper_symbols()
 
         symbol_specs: List[str] = []
-        skipped_live: List[str] = []
         skipped_paper: List[str] = []
         for row in top_rows:
             if not row.get("baseline_pass"):
                 continue
             symbol = str(row.get("symbol") or "").upper()
             if not symbol:
-                continue
-            if not baseline_include_open and symbol in open_live:
-                skipped_live.append(symbol)
                 continue
             if not baseline_include_open and symbol in open_paper:
                 skipped_paper.append(symbol)
@@ -958,8 +952,6 @@ def gate_scan(
                 continue
             symbol_specs.append(f"{symbol}:{side}")
 
-        if skipped_live:
-            print(f"Open live positions detected (skipping): {', '.join(sorted(set(skipped_live)))}")
         if skipped_paper:
             print(f"Open paper positions detected (skipping): {', '.join(sorted(set(skipped_paper)))}")
 
