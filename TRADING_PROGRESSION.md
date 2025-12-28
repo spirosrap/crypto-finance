@@ -11,6 +11,7 @@
 
 ## December 28, 2025 - More Live Trades
 - Placed more live trades today; many more opportunities are surfacing now, so I’m holding ~10–15 simultaneous trades. Not sure yet if I should cap the number of concurrent positions; will monitor.
+- Gate-scan now supports `--baseline-paper-command` to emit a one-shot paper-trade command (skips open live/paper positions unless overridden).
 
 ## December 27, 2025 - Live Baseline Trades Started
 - Started taking live trades using the looser baseline gates (same as paper trades).

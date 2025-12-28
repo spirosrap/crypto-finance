@@ -180,6 +180,30 @@ def _load_open_perp_symbols() -> set[str]:
     return symbols
 
 
+def _load_open_paper_symbols(path: Path = Path("trade_logs/paper_finder_open_positions.csv")) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return set()
+    if df.empty:
+        return set()
+    symbols: set[str] = set()
+    status_col = "status" if "status" in df.columns else None
+    for _, row in df.iterrows():
+        if status_col and str(row.get(status_col, "")).upper() != "OPEN":
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            product = str(row.get("product_id") or "").strip().upper()
+            if product:
+                symbol = product.split("-")[0]
+        if symbol:
+            symbols.add(symbol)
+    return symbols
+
+
 def _true_range_last(df: pd.DataFrame) -> Optional[float]:
     """Compute the last candle true range (TR1) using high/low and previous close."""
     if df is None or len(df) < 2:
@@ -641,6 +665,7 @@ def gate_scan(
     rr_target: float,
     scan_limit: Optional[int],
     baseline_commands: bool,
+    baseline_paper_command: bool,
     baseline_portfolio_usd: Optional[float],
     baseline_position_pct: float,
     baseline_position_usd: Optional[float],
@@ -865,6 +890,64 @@ def gate_scan(
             print("\n".join(commands))
         else:
             print("Commands: none (no baseline-pass symbols without open positions).")
+
+    def _print_baseline_paper_command() -> None:
+        if not baseline_paper_command or not top_rows:
+            return
+        open_live = set()
+        open_paper = set()
+        if not baseline_include_open:
+            open_live = _load_open_perp_symbols()
+            open_paper = _load_open_paper_symbols()
+
+        symbol_specs: List[str] = []
+        skipped_live: List[str] = []
+        skipped_paper: List[str] = []
+        for row in top_rows:
+            if not row.get("baseline_pass"):
+                continue
+            symbol = str(row.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            if not baseline_include_open and symbol in open_live:
+                skipped_live.append(symbol)
+                continue
+            if not baseline_include_open and symbol in open_paper:
+                skipped_paper.append(symbol)
+                continue
+            side = str(row.get("best_side") or "").upper()
+            if side not in {"LONG", "SHORT"}:
+                continue
+            symbol_specs.append(f"{symbol}:{side}")
+
+        if skipped_live:
+            print(f"Open live positions detected (skipping): {', '.join(sorted(set(skipped_live)))}")
+        if skipped_paper:
+            print(f"Open paper positions detected (skipping): {', '.join(sorted(set(skipped_paper)))}")
+
+        if not symbol_specs:
+            print("Paper command: none (no baseline-pass symbols without open positions).")
+            return
+
+        cmd_parts = [
+            "python scripts/baseline_finder_from_snapshot.py",
+            f"--symbols {','.join(symbol_specs)}",
+            f"--profile {profile}",
+            f"--atr-mult {baseline_atr_mult}",
+            f"--rr {baseline_rr}",
+            f"--atr-mode {baseline_atr_mode}",
+            "--open-paper",
+        ]
+        if baseline_portfolio_usd is not None and baseline_portfolio_usd > 0:
+            cmd_parts.append(f"--portfolio-usd {baseline_portfolio_usd}")
+        if baseline_position_pct is not None and baseline_position_pct > 0:
+            cmd_parts.append(f"--position-pct {baseline_position_pct}")
+        if baseline_position_usd is not None and baseline_position_usd > 0:
+            cmd_parts.append(f"--fixed-position-usd {baseline_position_usd}")
+        if baseline_leverage is not None:
+            cmd_parts.append(f"--leverage {baseline_leverage}")
+        print("Paper command:")
+        print(" ".join(cmd_parts))
     if RICH_AVAILABLE and RICH_CONSOLE is not None and top_rows:
         table = Table(title="Gate Scan (Short-Term)", box=box.ASCII, show_lines=False)
         table.add_column("Symbol")
@@ -933,6 +1016,7 @@ def gate_scan(
 
         RICH_CONSOLE.print(table)
         _print_baseline_commands()
+        _print_baseline_paper_command()
         return
 
     for row in top_rows:
@@ -982,6 +1066,7 @@ def gate_scan(
               f"ATR7/ATR21={_fmt(row.get('atr7_to_21'), 2)} TR1/ATR7={_fmt(row.get('tr1_to_atr7'), 2)}")
 
     _print_baseline_commands()
+    _print_baseline_paper_command()
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Print snapshot metrics for specific symbols.")
@@ -1028,6 +1113,11 @@ def main() -> None:
         "--baseline-commands",
         action="store_true",
         help="Print ccxt_trade_perp command lines for baseline-pass symbols in gate-scan mode.",
+    )
+    parser.add_argument(
+        "--baseline-paper-command",
+        action="store_true",
+        help="Print baseline_finder_from_snapshot command line to open paper trades for baseline-pass symbols.",
     )
     parser.add_argument(
         "--baseline-portfolio-usd",
@@ -1092,6 +1182,7 @@ def main() -> None:
             rr_target=args.rr_target,
             scan_limit=args.scan_limit,
             baseline_commands=args.baseline_commands,
+            baseline_paper_command=args.baseline_paper_command,
             baseline_portfolio_usd=args.baseline_portfolio_usd,
             baseline_position_pct=args.baseline_position_pct,
             baseline_position_usd=args.baseline_position_usd,
