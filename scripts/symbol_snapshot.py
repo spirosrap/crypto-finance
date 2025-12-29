@@ -702,6 +702,7 @@ def gate_scan(
     baseline_portfolio_usd: Optional[float],
     baseline_position_pct: float,
     baseline_position_usd: Optional[float],
+    baseline_live_position_usd: Optional[float],
     baseline_atr_mult: float,
     baseline_rr: float,
     baseline_atr_mode: str,
@@ -875,6 +876,8 @@ def gate_scan(
         return f"{num:.2f}"
 
     def _baseline_size_usd() -> Optional[float]:
+        if baseline_live_position_usd is not None and baseline_live_position_usd > 0:
+            return float(baseline_live_position_usd)
         if baseline_position_usd is not None and baseline_position_usd > 0:
             return float(baseline_position_usd)
         if baseline_portfolio_usd is not None and baseline_portfolio_usd > 0:
@@ -894,7 +897,7 @@ def gate_scan(
         )
         size_usd = _baseline_size_usd()
         if size_usd is None or size_usd <= 0:
-            print("Commands: no size available (set --baseline-position-usd or --baseline-portfolio-usd).")
+            print("Commands: no size available (set --baseline-live-position-usd, --baseline-position-usd, or --baseline-portfolio-usd).")
             return
 
         total_open = len(open_symbols)
@@ -1241,6 +1244,12 @@ def main() -> None:
         help="Fixed USD size per trade for baseline commands (overrides portfolio/pct).",
     )
     parser.add_argument(
+        "--baseline-live-position-usd",
+        type=float,
+        default=None,
+        help="Fixed USD size for live baseline commands only (paper command still uses portfolio/pct unless fixed-position-usd is set).",
+    )
+    parser.add_argument(
         "--baseline-atr-mult",
         type=float,
         default=0.8,
@@ -1301,6 +1310,7 @@ def main() -> None:
             baseline_portfolio_usd=args.baseline_portfolio_usd,
             baseline_position_pct=args.baseline_position_pct,
             baseline_position_usd=args.baseline_position_usd,
+            baseline_live_position_usd=args.baseline_live_position_usd,
             baseline_atr_mult=args.baseline_atr_mult,
             baseline_rr=args.baseline_rr,
             baseline_atr_mode=args.baseline_atr_mode,
