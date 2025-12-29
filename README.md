@@ -31,6 +31,7 @@ For others, this repo can be useful as:
 - **Baseline Paper Helper**: `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into `finder_short_baseline.txt` and optionally open them in `paper_finder_simulator.py`.
   - After opening paper trades, run `python paper_finder_simulator.py update` so the dashboard shows live P/L.
 - **Paper Progress Check**: `scripts/paper_trade_progress.py` prints progress to the 100‑trade target, win%, avg%, expectancy, and TP/SL/expiry split.
+- **Drawdown Breakdown**: `scripts/drawdown_breakdown.py` compares paper vs live over a rolling window (default 24h), highlighting closure reasons, loss symbols, ATR bucket stops, and spread‑OK stop rates.
 - **Paper Equity Report**: `scripts/paper_equity_report.py` writes a shareable equity curve (HTML + PNG) and `watchdog_dashboard.py` can export the same. Note: equity is daily‑aggregated, so one trading day = one point (drawdown reads 0% when there’s only one day).
 - **Current Paper Experiment (until 100 trades)**: baseline ATR exits (`atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped`) with liquidity/spread gates and ATR ≤ 1.5× cap. Live rules stay unchanged until the 100‑trade sample is complete.
 - **Metric glossary**:
