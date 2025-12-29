@@ -9,6 +9,11 @@
 ## December 2025
 **State at a glance (latest):** Live trading now follows the baseline ATR exits (0.8× ATR, 1.5R) with ATR ≤ 1.5× cap plus spread/VMC gates; the strict RR gate is archived. Opportunities are more frequent, so live books can run ~10–15 concurrent positions. Gate‑scan prints baseline commands and skips symbols already open. Paper experiment continues toward 100 trades with updated equity reporting.
 
+## December 29, 2025 - Drawdown Day
+- Yesterday saw a major drawdown in both paper and live systems.
+- Many stop losses hit; take-profits were scarce.
+- Live trades likely stopped on spikes faster than the paper trades, which lagged the SL hits.
+
 ## December 28, 2025 - More Live Trades
 - Placed more live trades today; many more opportunities are surfacing now, so I’m holding ~10–15 simultaneous trades. Not sure yet if I should cap the number of concurrent positions; will monitor.
 - Gate-scan now supports `--baseline-paper-command` to emit a one-shot paper-trade command (skips open live/paper positions unless overridden).
