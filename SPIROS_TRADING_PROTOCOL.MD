@@ -5,8 +5,8 @@
 ## Core Guardrails (review before login)
 | Guardrail | Limit | Triggered Action |
 | --- | --- | --- |
-| Risk per trade | <= 0.50% of equity | Position size via Section 3 formula; never round up. |
-| Daily loss stop | 1.50% of equity or 3 losing trades | Flatten, halt live trading, shift to review/SIM. |
+| Risk per trade | <= 1.0–2.0% of equity (scale down when 10 trades open) | Position size via Section 3 formula; never round up. |
+| Daily loss stop | 2.0% of equity or -2R (~$20 per $1,000) or 3 losing trades | Flatten; pause new live entries for 24h; shift to review/SIM. |
 | Circuit breaker A | 2 consecutive losses with MAE > 0.7% | Stop for day, screenshot charts, write quick debrief. |
 | Circuit breaker B | 5 consecutive losses (any size) | Stop for day, schedule deep review before next live session. |
 | News blackout | +/- 15 min around top-tier news on instrument | Observe only; queue setup for post-release if still valid. |
@@ -16,6 +16,9 @@
 - Only live trade when rested, calm, and platform connectivity confirmed.
 - Never move a stop further from entry. Never add size outside of a pre-planned add point.
 - If any guardrail is breached, follow the triggered action immediately and document it.
+- Risk cap: 1–2% equity per trade (lower if multiple trades open).
+- No rule changes until 50–100 closed trades confirm or reject the edge.
+- Daily loss stop = 24h pause (current cooldown: 48h; see journal entry).
 
 ## 1. Pre-Session (10 minutes)
 - [ ] Sleep >= 6.5 h, caffeine level stable, stress <= 4/10. Else run SIM only.
@@ -36,8 +39,8 @@
 ## 3. Entry Rules
 - Plan first, click second: write entry, invalidation, Target1 (>= 2R), Target2/Trail.
 - Use only limit/stop orders at planned levels. If level does not trade, log as missed.
-- Position size = (0.5% * Equity) / (Entry - Stop). Round down to nearest allowable lot.
-- Do not stack multiple correlated positions that push total risk > 0.75% equity.
+- Position size = (risk% * Equity) / (Entry - Stop). Default 1%; max 2%; reduce to 0.5–1% when 10 trades are open.
+- Do not stack multiple correlated positions that push total open risk > 10% equity.
 
 ## 4. Trade Management
 - After fill, immediately stage OCO (hard stop + TP). No manual widening.

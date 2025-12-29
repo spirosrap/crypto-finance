@@ -13,7 +13,7 @@
 - Yesterday saw a major drawdown in both paper and live systems.
 - Many stop losses hit; take-profits were scarce.
 - Live trades likely stopped on spikes faster than the paper trades, which lagged the SL hits.
-- Decision: pause new live entries for 48 hours (paper runs continue) to avoid compounding the drawdown.
+- Decision: pause new live entries for 48 hours (paper runs continue); cooldown active now.
 - Set non-negotiables: 1–2% equity risk per trade (scaled down when many trades are open), daily loss stop at 2%, and no rule changes until 50–100 closed trades.
 - Next live restart will assume $1,000 starting equity and $125 notional per trade (about 1% risk if avg stop ~8%).
 - Added `scripts/drawdown_breakdown.py` to compare live vs paper drawdowns (closure reasons, loss symbols, ATR buckets, and spread‑OK stop rates) over a rolling window.
