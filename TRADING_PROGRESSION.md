@@ -17,6 +17,7 @@
 - Set non-negotiables: 1–2% equity risk per trade (scaled down when many trades are open), daily loss stop at 2%, and no rule changes until 50–100 closed trades.
 - Next live restart will assume $1,000 starting equity and $125 notional per trade (about 1% risk if avg stop ~8%).
 - Gate-scan now supports `--baseline-live-position-usd` so live commands can size at $125 while paper sizing stays unchanged.
+- Added `scripts/run_gate_scan_paper.sh` and a 4h cron runner (5 */4) to auto-run gate scan and open paper trades; tested with a 1-minute cron and restored to 4h. Log: `logs/gate_scan_paper.log`.
 - Added `scripts/drawdown_breakdown.py` to compare live vs paper drawdowns (closure reasons, loss symbols, ATR buckets, and spread‑OK stop rates) over a rolling window.
 - Added capacity guards for gate-scan commands: `--baseline-max-open` (default 10) and `--baseline-max-per-cluster` (default 3) to limit concurrent positions by majors/memecoins/alts.
 - Cleaned duplicate open paper positions (kept oldest per symbol/side) and added a guard in `baseline_finder_from_snapshot.py` to skip opening duplicates unless `--include-open` is used.
