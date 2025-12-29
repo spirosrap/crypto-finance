@@ -24,6 +24,7 @@ For others, this repo can be useful as:
   - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N]`.
     - Use `--baseline-commands` to print ccxt trade commands for baseline-pass symbols; open live positions are auto-skipped (and listed).
     - Use `--baseline-paper-command` to emit a one-shot `baseline_finder_from_snapshot.py` command for paper trades (skips open live/paper positions unless `--baseline-include-open` is set).
+    - Capacity guards: `--baseline-max-open` (default 10) and `--baseline-max-per-cluster` (default 3) suppress commands once the live/paper books are full. Clusters are majors/memecoins/alts.
   - Long-term profile used for LLM + liquidity filters: `python long_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_long.txt --suppress-console-logs`
 - **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock).
 - **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).

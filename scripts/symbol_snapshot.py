@@ -208,16 +208,16 @@ def _load_open_perp_symbols() -> set[str]:
     return symbols
 
 
-def _load_open_paper_symbols(path: Path = Path("trade_logs/paper_finder_open_positions.csv")) -> set[str]:
+def _load_open_paper_symbols(path: Path = Path("trade_logs/paper_finder_open_positions.csv")) -> List[str]:
     if not path.exists():
-        return set()
+        return []
     try:
         df = pd.read_csv(path)
     except Exception:
-        return set()
+        return []
     if df.empty:
-        return set()
-    symbols: set[str] = set()
+        return []
+    symbols: List[str] = []
     status_col = "status" if "status" in df.columns else None
     for _, row in df.iterrows():
         if status_col and str(row.get(status_col, "")).upper() != "OPEN":
@@ -228,7 +228,7 @@ def _load_open_paper_symbols(path: Path = Path("trade_logs/paper_finder_open_pos
             if product:
                 symbol = product.split("-")[0]
         if symbol:
-            symbols.add(symbol)
+            symbols.append(symbol)
     return symbols
 
 
@@ -708,6 +708,8 @@ def gate_scan(
     baseline_leverage: Optional[float],
     baseline_expiry: str,
     baseline_include_open: bool,
+    baseline_max_open: int,
+    baseline_max_per_cluster: int,
 ) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
@@ -730,6 +732,7 @@ def gate_scan(
         "ADA", "AVAX", "LINK", "DOGE", "LTC", "DOT", "MATIC",
     }
     baseline_exempt_symbols = {"BTC", "ETH"}
+    memecoin_symbols = {"DOGE", "SHIB", "PEPE", "FLOKI", "BONK", "WIF", "FARTCOIN", "PENGU"}
     excluded_products, excluded_symbols = _load_excluded_perps()
 
     def _spread_cap_bps(volume_usd: float) -> float:
@@ -739,6 +742,22 @@ def gate_scan(
         if volume_usd >= 1e8:
             return 5.0
         return 10.0
+
+    def _cluster_label(symbol: str) -> str:
+        base = (symbol or "").upper()
+        if base.startswith("1000"):
+            base = base[4:]
+        if base in memecoin_symbols:
+            return "memecoins"
+        if base in major_symbols:
+            return "majors"
+        return "alts"
+
+    def _cluster_counts(symbols: Iterable[str]) -> dict[str, int]:
+        counts = {"majors": 0, "memecoins": 0, "alts": 0}
+        for sym in symbols:
+            counts[_cluster_label(sym)] += 1
+        return counts
 
     rows = []
     for coin in coins:
@@ -868,9 +887,8 @@ def gate_scan(
     def _print_baseline_commands() -> None:
         if not baseline_commands or not top_rows:
             return
-        open_symbols = set()
-        if not baseline_include_open:
-            open_symbols = _load_open_perp_symbols()
+        open_symbols = _load_open_perp_symbols() if (baseline_max_open or baseline_max_per_cluster or not baseline_include_open) else set()
+        skip_symbols = set() if baseline_include_open else set(open_symbols)
         leverage_text = _leverage_text(
             baseline_leverage if baseline_leverage is not None else getattr(cfg, "report_leverage", None)
         )
@@ -879,16 +897,27 @@ def gate_scan(
             print("Commands: no size available (set --baseline-position-usd or --baseline-portfolio-usd).")
             return
 
+        total_open = len(open_symbols)
+        cluster_counts = _cluster_counts(open_symbols)
         commands: List[str] = []
-        skipped: List[str] = []
+        skipped_open: List[str] = []
+        skipped_capacity: List[str] = []
+        skipped_cluster: List[str] = []
         for row in top_rows:
             if not row.get("baseline_pass"):
                 continue
             symbol = str(row.get("symbol") or "").upper()
             if not symbol:
                 continue
-            if not baseline_include_open and symbol in open_symbols:
-                skipped.append(symbol)
+            if symbol in skip_symbols:
+                skipped_open.append(symbol)
+                continue
+            if baseline_max_open > 0 and total_open >= baseline_max_open:
+                skipped_capacity.append(symbol)
+                continue
+            cluster = _cluster_label(symbol)
+            if baseline_max_per_cluster > 0 and cluster_counts.get(cluster, 0) >= baseline_max_per_cluster:
+                skipped_cluster.append(symbol)
                 continue
             side = str(row.get("best_side") or "").upper()
             entry = float(row.get("price") or 0.0)
@@ -920,9 +949,26 @@ def gate_scan(
                 cmd += f" --leverage {leverage_text}"
             cmd += f" --tp {tp_txt} --sl {sl_txt} --expiry {baseline_expiry}"
             commands.append(cmd)
+            total_open += 1
+            cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
 
-        if skipped:
-            print(f"Open positions detected (skipping): {', '.join(sorted(set(skipped)))}")
+        if baseline_max_open > 0 or baseline_max_per_cluster > 0:
+            print(
+                "Capacity: total {total}/{max_total} | majors {majors}/{max_cluster} | memecoins {memecoins}/{max_cluster} | alts {alts}/{max_cluster}".format(
+                    total=len(open_symbols),
+                    max_total=baseline_max_open,
+                    majors=cluster_counts.get("majors", 0),
+                    memecoins=cluster_counts.get("memecoins", 0),
+                    alts=cluster_counts.get("alts", 0),
+                    max_cluster=baseline_max_per_cluster,
+                )
+            )
+        if skipped_open:
+            print(f"Open positions detected (skipping): {', '.join(sorted(set(skipped_open)))}")
+        if skipped_capacity:
+            print(f"Max open reached (skipping): {', '.join(sorted(set(skipped_capacity)))}")
+        if skipped_cluster:
+            print(f"Cluster cap reached (skipping): {', '.join(sorted(set(skipped_cluster)))}")
         if commands:
             print("Commands:")
             print("\n".join(commands))
@@ -932,28 +978,55 @@ def gate_scan(
     def _print_baseline_paper_command() -> None:
         if not baseline_paper_command or not top_rows:
             return
-        open_paper = set()
-        if not baseline_include_open:
-            open_paper = _load_open_paper_symbols()
+        open_paper_list = _load_open_paper_symbols() if (baseline_max_open or baseline_max_per_cluster or not baseline_include_open) else []
+        skip_paper = set() if baseline_include_open else set(open_paper_list)
 
         symbol_specs: List[str] = []
         skipped_paper: List[str] = []
+        skipped_capacity: List[str] = []
+        skipped_cluster: List[str] = []
+        total_open = len(open_paper_list)
+        cluster_counts = _cluster_counts(open_paper_list)
         for row in top_rows:
             if not row.get("baseline_pass"):
                 continue
             symbol = str(row.get("symbol") or "").upper()
             if not symbol:
                 continue
-            if not baseline_include_open and symbol in open_paper:
+            if symbol in skip_paper:
                 skipped_paper.append(symbol)
+                continue
+            if baseline_max_open > 0 and total_open >= baseline_max_open:
+                skipped_capacity.append(symbol)
+                continue
+            cluster = _cluster_label(symbol)
+            if baseline_max_per_cluster > 0 and cluster_counts.get(cluster, 0) >= baseline_max_per_cluster:
+                skipped_cluster.append(symbol)
                 continue
             side = str(row.get("best_side") or "").upper()
             if side not in {"LONG", "SHORT"}:
                 continue
             symbol_specs.append(f"{symbol}:{side}")
+            total_open += 1
+            cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
 
+        if baseline_max_open > 0 or baseline_max_per_cluster > 0:
+            print(
+                "Paper capacity: total {total}/{max_total} | majors {majors}/{max_cluster} | memecoins {memecoins}/{max_cluster} | alts {alts}/{max_cluster}".format(
+                    total=len(open_paper_list),
+                    max_total=baseline_max_open,
+                    majors=cluster_counts.get("majors", 0),
+                    memecoins=cluster_counts.get("memecoins", 0),
+                    alts=cluster_counts.get("alts", 0),
+                    max_cluster=baseline_max_per_cluster,
+                )
+            )
         if skipped_paper:
             print(f"Open paper positions detected (skipping): {', '.join(sorted(set(skipped_paper)))}")
+        if skipped_capacity:
+            print(f"Paper max open reached (skipping): {', '.join(sorted(set(skipped_capacity)))}")
+        if skipped_cluster:
+            print(f"Paper cluster cap reached (skipping): {', '.join(sorted(set(skipped_cluster)))}")
 
         if not symbol_specs:
             print("Paper command: none (no baseline-pass symbols without open positions).")
@@ -1198,6 +1271,18 @@ def main() -> None:
         help="Expiry string for baseline commands (default: 30d).",
     )
     parser.add_argument(
+        "--baseline-max-open",
+        type=int,
+        default=10,
+        help="Max open positions allowed before commands are suppressed (default: 10; set 0 to disable).",
+    )
+    parser.add_argument(
+        "--baseline-max-per-cluster",
+        type=int,
+        default=3,
+        help="Max open positions per cluster (majors/memecoins/alts) (default: 3; set 0 to disable).",
+    )
+    parser.add_argument(
         "--baseline-include-open",
         action="store_true",
         help="Include symbols that already have open live positions when printing commands.",
@@ -1222,6 +1307,8 @@ def main() -> None:
             baseline_leverage=args.baseline_leverage,
             baseline_expiry=args.baseline_expiry,
             baseline_include_open=args.baseline_include_open,
+            baseline_max_open=args.baseline_max_open,
+            baseline_max_per_cluster=args.baseline_max_per_cluster,
         )
         return
 
