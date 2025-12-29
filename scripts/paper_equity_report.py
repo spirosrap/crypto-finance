@@ -25,8 +25,8 @@ def main() -> None:
     parser.add_argument(
         "--starting-equity",
         type=float,
-        default=100.0,
-        help="Starting equity for the curve (default: 100.0).",
+        default=1000.0,
+        help="Starting equity for the curve (default: 1000.0).",
     )
     parser.add_argument(
         "--out-dir",

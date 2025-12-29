@@ -776,7 +776,7 @@ def main() -> None:
     starting_equity_default = (
         float(persisted_starting)
         if persisted_starting is not None
-        else (100.0 if source_mode == "paper" else 1000.0)
+        else 1000.0
     )
     starting_equity = st.sidebar.number_input(
         "Starting equity",
