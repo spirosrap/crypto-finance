@@ -13,6 +13,7 @@
 - Yesterday saw a major drawdown in both paper and live systems.
 - Many stop losses hit; take-profits were scarce.
 - Live trades likely stopped on spikes faster than the paper trades, which lagged the SL hits.
+- Decision: pause new live entries for 48 hours (paper runs continue) to avoid compounding the drawdown.
 - Added `scripts/drawdown_breakdown.py` to compare live vs paper drawdowns (closure reasons, loss symbols, ATR buckets, and spread‑OK stop rates) over a rolling window.
 - Added capacity guards for gate-scan commands: `--baseline-max-open` (default 10) and `--baseline-max-per-cluster` (default 3) to limit concurrent positions by majors/memecoins/alts.
 - Cleaned duplicate open paper positions (kept oldest per symbol/side) and added a guard in `baseline_finder_from_snapshot.py` to skip opening duplicates unless `--include-open` is used.
