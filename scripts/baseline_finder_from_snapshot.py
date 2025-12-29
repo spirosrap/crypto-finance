@@ -21,6 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+OPEN_PAPER_CSV = REPO_ROOT / "trade_logs" / "paper_finder_open_positions.csv"
+
 from short_term_crypto_finder import PROFILE_PRESETS, ShortTermCryptoFinder, build_short_term_config
 
 
@@ -202,6 +204,31 @@ def _open_paper_trades(
     subprocess.run(cmd, check=False)
 
 
+def _load_open_paper_pairs(path: Path = OPEN_PAPER_CSV) -> set[tuple[str, str]]:
+    if not path.exists():
+        return set()
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return set()
+    if df.empty:
+        return set()
+    status_col = "status" if "status" in df.columns else None
+    pairs: set[tuple[str, str]] = set()
+    for _, row in df.iterrows():
+        if status_col and str(row.get(status_col, "")).upper() != "OPEN":
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if not symbol:
+            product = str(row.get("product_id") or "").strip().upper()
+            if product:
+                symbol = product.split("-")[0]
+        side = str(row.get("position_side") or "").strip().upper()
+        if symbol and side:
+            pairs.add((symbol, side))
+    return pairs
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Create a baseline finder file from snapshot symbols (optional: open paper trades)."
@@ -269,6 +296,11 @@ def main() -> None:
         help="Open the generated finder blocks in paper_finder_simulator.py.",
     )
     parser.add_argument(
+        "--include-open",
+        action="store_true",
+        help="Include symbols that already have open paper trades (default: skip duplicates).",
+    )
+    parser.add_argument(
         "--portfolio-usd",
         type=float,
         default=None,
@@ -319,7 +351,10 @@ def main() -> None:
 
     coin_map = {str(c.get("symbol", "")).upper(): c for c in coins}
     blocks: List[str] = []
+    added_symbols: set[str] = set()
     rank = 1
+    open_pairs = _load_open_paper_pairs() if (args.open_paper and not args.include_open) else set()
+    skipped_pairs: set[tuple[str, str]] = set()
     for symbol in order:
         coin = coin_map.get(symbol)
         if not coin:
@@ -334,6 +369,9 @@ def main() -> None:
         entry = float(coin.get("current_price") or tech.get("price") or df["price"].iloc[-1])
         atr_raw = float(tech.get("atr") or 0.0)
         for side in symbol_sides.get(symbol, []):
+            if open_pairs and (symbol, side) in open_pairs:
+                skipped_pairs.add((symbol, side))
+                continue
             atr_eff, stop, tp = _baseline_levels(
                 side=side,
                 entry=entry,
@@ -363,15 +401,21 @@ def main() -> None:
                 )
             )
             rank += 1
+            added_symbols.add(symbol)
+
+    if skipped_pairs:
+        skipped_txt = ", ".join(sorted([f"{sym}:{side}" for sym, side in skipped_pairs]))
+        print(f"Skipping open paper positions: {skipped_txt}")
 
     out_path = Path(args.out)
     _write_finder_file(out_path, blocks)
     print(f"Wrote {len(blocks)} baseline entries to {out_path}")
 
     if args.open_paper and blocks:
+        symbols_for_open = [sym for sym in order if sym in added_symbols]
         _open_paper_trades(
             out_path=out_path,
-            symbols=order,
+            symbols=symbols_for_open,
             portfolio_usd=args.portfolio_usd,
             fixed_position_usd=args.fixed_position_usd,
             default_position_pct=args.position_pct,
