@@ -19,6 +19,11 @@
 - Paper equity turned positive again.
 - The process feels more streamlined now that new paper trades are added on a 4-hour cadence instead of random manual pulls.
 
+## December 30, 2025 18:21 - Resisted Breaking Hiatus
+- I felt the urge to break the 48h live-trade pause, but decided not to proceed after Codex’s suggestion.
+- Paper experiment is at 66/100 closed trades.
+- The auto gate-scan + paper runner is now taking new trades on cadence, which feels calmer and reduces the urge to check constantly or overtrade.
+
 ## December 29, 2025 - Drawdown Day
 - Yesterday saw a major drawdown in both paper and live systems.
 - Many stop losses hit; take-profits were scarce.
