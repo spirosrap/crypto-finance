@@ -10,6 +10,7 @@ normal filters.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -36,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
 EXCLUDED_PERPS_PATH = REPO_ROOT / "config" / "excluded_perps.txt"
 LIVE_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "watchdog_closed_positions.csv"
 PAPER_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "paper_finder_closed_positions.csv"
+RANGE_BREAK_STATUS_PATH = REPO_ROOT / "logs" / "range_break_status.json"
 
 from short_term_crypto_finder import (
     PROFILE_PRESETS,
@@ -255,6 +257,49 @@ def _daily_stop_status(
     status = "ACTIVE" if triggered else "OK"
     reason = f"{pnl_today:+.2f} <= -{threshold:.2f}" if triggered else f"{pnl_today:+.2f} > -{threshold:.2f}"
     return triggered, f"Daily stop ({status}): {reason} (pct={pct_txt}, usd={usd_txt})"
+
+
+def _range_break_check(
+    *,
+    df: pd.DataFrame,
+    atr: float,
+    days: int,
+    atr_mult: float,
+) -> Optional[dict]:
+    if df is None or df.empty:
+        return None
+    if atr <= 0:
+        return None
+    lookback = max(int(days), 1)
+    if len(df) < lookback + 1:
+        return None
+    prev = df.iloc[-(lookback + 1):-1]
+    if prev.empty:
+        return None
+    try:
+        range_high = float(prev["high"].max())
+        range_low = float(prev["low"].min())
+        close = float(df["price"].iloc[-1])
+    except Exception:
+        return None
+    buffer = float(atr) * float(atr_mult)
+    breakout = close > range_high + buffer
+    breakdown = close < range_low - buffer
+    triggered = breakout or breakdown
+    direction = "breakout" if breakout else "breakdown" if breakdown else "inside"
+    overage = (close - range_high - buffer) if breakout else (range_low - buffer - close) if breakdown else 0.0
+    return {
+        "range_high": range_high,
+        "range_low": range_low,
+        "close": close,
+        "atr": float(atr),
+        "buffer": buffer,
+        "direction": direction,
+        "triggered": bool(triggered),
+        "overage": float(overage),
+        "days": lookback,
+        "atr_mult": float(atr_mult),
+    }
 
 
 def _load_open_paper_symbols(path: Path = Path("trade_logs/paper_finder_open_positions.csv")) -> List[str]:
@@ -763,6 +808,9 @@ def gate_scan(
     daily_stop_pct: float,
     daily_stop_usd: float,
     daily_stop_equity: float,
+    range_break_symbol: str,
+    range_break_days: int,
+    range_break_atr_mult: float,
 ) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
@@ -792,6 +840,11 @@ def gate_scan(
         stop_pct=daily_stop_pct,
         stop_usd=daily_stop_usd,
     )
+    range_break_info: Optional[dict] = None
+
+    range_break_msg = "Range break: n/a"
+    range_break_active = False
+    range_break_symbol_upper = range_break_symbol.upper()
     if baseline_commands or baseline_paper_command:
         print(f"Daily stop (live): {live_stop_msg}")
         print(f"Daily stop (paper): {paper_stop_msg}")
@@ -854,6 +907,14 @@ def gate_scan(
         atr_bps = (atr / price * 10_000) if price > 0 else None
         cap_bps = (cap / price * 10_000) if (cap and price > 0) else None
         headroom_bps = (cap_bps - atr_bps) if (cap_bps is not None and atr_bps is not None) else None
+
+        if not range_break_info and symbol == range_break_symbol.upper():
+            range_break_info = _range_break_check(
+                df=df,
+                atr=atr,
+                days=range_break_days,
+                atr_mult=range_break_atr_mult,
+            )
 
         try:
             vol24h = float(coin.get("volume_24h") or 0.0)
@@ -932,6 +993,36 @@ def gate_scan(
     rows.sort(key=lambda r: (r["rr_gap"] if r["rr_gap"] is not None else 1e9,
                              -(r["headroom_bps"] if r["headroom_bps"] is not None else -1e9)))
     top_rows = rows[:top]
+
+    def _write_range_break_status() -> None:
+        if range_break_info is None:
+            return
+        RANGE_BREAK_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "symbol": range_break_symbol_upper,
+            **range_break_info,
+        }
+        try:
+            RANGE_BREAK_STATUS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    if range_break_info is not None:
+        range_break_active = bool(range_break_info.get("triggered"))
+        direction = range_break_info.get("direction", "inside")
+        range_high = range_break_info.get("range_high")
+        range_low = range_break_info.get("range_low")
+        close = range_break_info.get("close")
+        buffer = range_break_info.get("buffer")
+        overage = range_break_info.get("overage", 0.0)
+        range_break_msg = (
+            f"Range break ({range_break_symbol_upper}, {range_break_info['days']}d, {range_break_info['atr_mult']:.2f}x ATR): "
+            f"{direction} | close={close:.2f} range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f}"
+        )
+        if range_break_active:
+            range_break_msg += f" over={overage:.2f}"
+    print(range_break_msg)
     print(f"Top {min(top, len(rows))} closest to RR {rr_target}:")
 
     def _leverage_text(value: Optional[float]) -> Optional[str]:
@@ -962,6 +1053,9 @@ def gate_scan(
             return
         if live_stop:
             print("Commands: suppressed (daily stop active for live trades).")
+            return
+        if range_break_active:
+            print("Commands: suppressed (range break active).")
             return
         open_symbols = _load_open_perp_symbols() if (baseline_max_open or baseline_max_per_cluster or not baseline_include_open) else set()
         skip_symbols = set() if baseline_include_open else set(open_symbols)
@@ -1056,6 +1150,9 @@ def gate_scan(
             return
         if paper_stop:
             print("Paper command: suppressed (daily stop active for paper trades).")
+            return
+        if range_break_active:
+            print("Paper command: suppressed (range break active).")
             return
         open_paper_list = _load_open_paper_symbols() if (baseline_max_open or baseline_max_per_cluster or not baseline_include_open) else []
         skip_paper = set() if baseline_include_open else set(open_paper_list)
@@ -1199,6 +1296,7 @@ def gate_scan(
         RICH_CONSOLE.print(table)
         _print_baseline_commands()
         _print_baseline_paper_command()
+        _write_range_break_status()
         return
 
     for row in top_rows:
@@ -1249,6 +1347,7 @@ def gate_scan(
 
     _print_baseline_commands()
     _print_baseline_paper_command()
+    _write_range_break_status()
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Print snapshot metrics for specific symbols.")
@@ -1390,6 +1489,24 @@ def main() -> None:
         default=1000.0,
         help="Equity baseline used for daily stop percent (default: 1000).",
     )
+    parser.add_argument(
+        "--range-break-symbol",
+        type=str,
+        default="BTC",
+        help="Symbol used to detect range breaks for the circuit breaker (default: BTC).",
+    )
+    parser.add_argument(
+        "--range-break-days",
+        type=int,
+        default=7,
+        help="Lookback days for range-break high/low (default: 7).",
+    )
+    parser.add_argument(
+        "--range-break-atr-mult",
+        type=float,
+        default=0.5,
+        help="ATR multiple for range-break buffer (default: 0.5).",
+    )
     args = parser.parse_args()
 
     if args.gate_scan:
@@ -1416,6 +1533,9 @@ def main() -> None:
             daily_stop_pct=args.daily_stop_pct,
             daily_stop_usd=args.daily_stop_usd,
             daily_stop_equity=args.daily_stop_equity,
+            range_break_symbol=args.range_break_symbol,
+            range_break_days=args.range_break_days,
+            range_break_atr_mult=args.range_break_atr_mult,
         )
         return
 
