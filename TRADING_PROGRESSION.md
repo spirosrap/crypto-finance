@@ -15,6 +15,10 @@
 ## December 30, 2025 - Breakout Autotrade Paused
 - Paused the hourly `run_breakout_autotrade.py` cron line while I archive the breakout flow.
 
+## December 30, 2025 - Paper Trades Back Green
+- Paper equity turned positive again.
+- The process feels more streamlined now that new paper trades are added on a 4-hour cadence instead of random manual pulls.
+
 ## December 29, 2025 - Drawdown Day
 - Yesterday saw a major drawdown in both paper and live systems.
 - Many stop losses hit; take-profits were scarce.
