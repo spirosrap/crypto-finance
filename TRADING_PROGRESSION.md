@@ -12,6 +12,9 @@
 ## December 30, 2025 - Live-Only Runner Toggle
 - Added `RUN_PAPER=0|1` to `scripts/run_gate_scan_paper.sh` so I can switch to live-only execution after the paper experiment finishes.
 
+## December 30, 2025 - Breakout Autotrade Paused
+- Paused the hourly `run_breakout_autotrade.py` cron line while I archive the breakout flow.
+
 ## December 29, 2025 - Drawdown Day
 - Yesterday saw a major drawdown in both paper and live systems.
 - Many stop losses hit; take-profits were scarce.
