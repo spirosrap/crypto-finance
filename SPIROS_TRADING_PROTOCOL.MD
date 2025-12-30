@@ -7,6 +7,7 @@
 | --- | --- | --- |
 | Risk per trade | <= 1.0–2.0% of equity (scale down when 10 trades open) | Position size via Section 3 formula; never round up. |
 | Daily loss stop | 2.0% of equity or -2R (~$20 per $1,000) or 3 losing trades | Flatten; pause new live entries for 24h; shift to review/SIM. |
+| Range-break circuit | If price closes outside the 5–7d range by >0.5× ATR | Stop new entries until I re-check conditions; resume only after manual review. |
 | Circuit breaker A | 2 consecutive losses with MAE > 0.7% | Stop for day, screenshot charts, write quick debrief. |
 | Circuit breaker B | 5 consecutive losses (any size) | Stop for day, schedule deep review before next live session. |
 | News blackout | +/- 15 min around top-tier news on instrument | Observe only; queue setup for post-release if still valid. |
@@ -19,6 +20,8 @@
 - Risk cap: 1–2% equity per trade (lower if multiple trades open).
 - No rule changes until 50–100 closed trades confirm or reject the edge.
 - Daily loss stop = 24h pause (current cooldown: 48h; see journal entry).
+- Range-break circuit: if BTC closes outside the 7‑day high/low by >0.5× ATR, halt new entries (gate‑scan suppresses commands) until I manually clear the condition.
+- Range-break status on dashboard: **inside** = OK to trade; **outside** = pause until manual review.
 
 ## 1. Pre-Session (10 minutes)
 - [ ] Sleep >= 6.5 h, caffeine level stable, stress <= 4/10. Else run SIM only.

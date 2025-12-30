@@ -24,6 +24,12 @@
 - Paper experiment is at 66/100 closed trades.
 - The auto gate-scan + paper runner is now taking new trades on cadence, which feels calmer and reduces the urge to check constantly or overtrade.
 
+## December 30, 2025 - Daily Stop + Range Break Gate
+- Added a daily stop gate (−2% or −$20 on $1k) to `symbol_snapshot.py`; gate-scan now suppresses new commands when triggered.
+- Added a range-break circuit: if BTC closes outside the 7‑day range by >0.5× ATR, commands are suppressed until manual review.
+- Dashboard now shows both “Daily stop” and “Range break” status (OK/ACTIVE).
+- Range break status meaning: **inside** = OK to trade; **outside** = pause until manual review.
+
 ## December 29, 2025 - Drawdown Day
 - Yesterday saw a major drawdown in both paper and live systems.
 - Many stop losses hit; take-profits were scarce.
