@@ -59,6 +59,8 @@ except Exception as exc:  # pragma: no cover - optional dependency
 
 UTC = timezone.utc
 AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 250
+DAILY_STOP_PCT = 2.0
+DAILY_STOP_USD = 20.0
 PAPER_CLOSED_CSV = Path("trade_logs/paper_finder_closed_positions.csv")
 PAPER_OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
 STATE_PATH = Path("cache/watchdog_dashboard_state.json")
@@ -873,6 +875,30 @@ def main() -> None:
         summary_notes.append("Custom date window")
     if summary_notes:
         st.caption(" | ".join(summary_notes))
+
+    daily_pnl_today = None
+    if not daily.empty and "date" in daily.columns:
+        daily_dates = pd.to_datetime(daily["date"], utc=True, errors="coerce")
+        today = datetime.now(UTC).date()
+        daily_pnl_today = daily.loc[daily_dates.dt.date == today, "daily_pnl"].sum()
+        try:
+            daily_pnl_today = float(daily_pnl_today)
+        except (TypeError, ValueError):
+            daily_pnl_today = None
+
+    pct_threshold = float(starting_equity) * (DAILY_STOP_PCT / 100.0) if DAILY_STOP_PCT > 0 else None
+    usd_threshold = DAILY_STOP_USD if DAILY_STOP_USD > 0 else None
+    thresholds = [t for t in (pct_threshold, usd_threshold) if t is not None]
+    daily_stop_threshold = min(thresholds) if thresholds else None
+
+    if daily_pnl_today is None or daily_stop_threshold is None:
+        st.info("Daily stop: n/a (no closed trades yet).")
+    else:
+        reason = f"{daily_pnl_today:+.2f} vs -{daily_stop_threshold:.2f} (pct={pct_threshold:.2f}, usd={usd_threshold:.2f})"
+        if daily_pnl_today <= -daily_stop_threshold:
+            st.error(f"Daily stop ACTIVE: {reason}")
+        else:
+            st.success(f"Daily stop OK: {reason}")
 
     with st.expander("Metric glossary", expanded=False):
         glossary = metrics.get("metric_glossary", {})

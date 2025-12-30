@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -33,6 +34,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 EXCLUDED_PERPS_PATH = REPO_ROOT / "config" / "excluded_perps.txt"
+LIVE_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "watchdog_closed_positions.csv"
+PAPER_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "paper_finder_closed_positions.csv"
 
 from short_term_crypto_finder import (
     PROFILE_PRESETS,
@@ -206,6 +209,52 @@ def _load_open_perp_symbols() -> set[str]:
         if base:
             symbols.add(base.upper())
     return symbols
+
+
+def _daily_pnl_today(log_path: Path) -> Optional[float]:
+    if not log_path.exists():
+        return None
+    try:
+        df = pd.read_csv(log_path)
+    except Exception:
+        return None
+    if "closed_at" not in df.columns or "profit_loss" not in df.columns:
+        return None
+    df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True, errors="coerce")
+    df["profit_loss"] = pd.to_numeric(df["profit_loss"], errors="coerce")
+    df = df.dropna(subset=["closed_at", "profit_loss"])
+    today = datetime.now(timezone.utc).date()
+    pnl_today = df.loc[df["closed_at"].dt.date == today, "profit_loss"].sum()
+    try:
+        return float(pnl_today)
+    except Exception:
+        return None
+
+
+def _daily_stop_status(
+    *,
+    pnl_today: Optional[float],
+    equity: float,
+    stop_pct: float,
+    stop_usd: float,
+) -> tuple[bool, str]:
+    if pnl_today is None:
+        return False, "Daily stop: n/a (no closed trades yet)"
+    thresholds = []
+    if stop_pct and stop_pct > 0:
+        thresholds.append(equity * (stop_pct / 100.0))
+    if stop_usd and stop_usd > 0:
+        thresholds.append(stop_usd)
+    if not thresholds:
+        return False, f"Daily stop: off (today P/L {pnl_today:+.2f})"
+    threshold = min(thresholds)
+    triggered = pnl_today <= -threshold
+    pct_threshold = equity * (stop_pct / 100.0) if stop_pct and stop_pct > 0 else None
+    pct_txt = f"{pct_threshold:.2f}" if pct_threshold is not None else "n/a"
+    usd_txt = f"{stop_usd:.2f}" if stop_usd and stop_usd > 0 else "n/a"
+    status = "ACTIVE" if triggered else "OK"
+    reason = f"{pnl_today:+.2f} <= -{threshold:.2f}" if triggered else f"{pnl_today:+.2f} > -{threshold:.2f}"
+    return triggered, f"Daily stop ({status}): {reason} (pct={pct_txt}, usd={usd_txt})"
 
 
 def _load_open_paper_symbols(path: Path = Path("trade_logs/paper_finder_open_positions.csv")) -> List[str]:
@@ -711,6 +760,9 @@ def gate_scan(
     baseline_include_open: bool,
     baseline_max_open: int,
     baseline_max_per_cluster: int,
+    daily_stop_pct: float,
+    daily_stop_usd: float,
+    daily_stop_equity: float,
 ) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
@@ -725,6 +777,24 @@ def gate_scan(
     if not coins:
         print("No symbols retrieved (check connectivity or liquidity filters).")
         return
+
+    live_daily_pnl = _daily_pnl_today(LIVE_CLOSED_LOG_PATH)
+    paper_daily_pnl = _daily_pnl_today(PAPER_CLOSED_LOG_PATH)
+    live_stop, live_stop_msg = _daily_stop_status(
+        pnl_today=live_daily_pnl,
+        equity=daily_stop_equity,
+        stop_pct=daily_stop_pct,
+        stop_usd=daily_stop_usd,
+    )
+    paper_stop, paper_stop_msg = _daily_stop_status(
+        pnl_today=paper_daily_pnl,
+        equity=daily_stop_equity,
+        stop_pct=daily_stop_pct,
+        stop_usd=daily_stop_usd,
+    )
+    if baseline_commands or baseline_paper_command:
+        print(f"Daily stop (live): {live_stop_msg}")
+        print(f"Daily stop (paper): {paper_stop_msg}")
 
     min_volume = float(getattr(cfg, "min_volume_24h", 0.0) or 0.0)
     min_ratio = float(getattr(cfg, "min_volume_market_cap_ratio", 0.0) or 0.0)
@@ -890,6 +960,9 @@ def gate_scan(
     def _print_baseline_commands() -> None:
         if not baseline_commands or not top_rows:
             return
+        if live_stop:
+            print("Commands: suppressed (daily stop active for live trades).")
+            return
         open_symbols = _load_open_perp_symbols() if (baseline_max_open or baseline_max_per_cluster or not baseline_include_open) else set()
         skip_symbols = set() if baseline_include_open else set(open_symbols)
         leverage_text = _leverage_text(
@@ -980,6 +1053,9 @@ def gate_scan(
 
     def _print_baseline_paper_command() -> None:
         if not baseline_paper_command or not top_rows:
+            return
+        if paper_stop:
+            print("Paper command: suppressed (daily stop active for paper trades).")
             return
         open_paper_list = _load_open_paper_symbols() if (baseline_max_open or baseline_max_per_cluster or not baseline_include_open) else []
         skip_paper = set() if baseline_include_open else set(open_paper_list)
@@ -1296,6 +1372,24 @@ def main() -> None:
         action="store_true",
         help="Include symbols that already have open live positions when printing commands.",
     )
+    parser.add_argument(
+        "--daily-stop-pct",
+        type=float,
+        default=2.0,
+        help="Daily stop loss percent of equity for gate-scan commands (default: 2).",
+    )
+    parser.add_argument(
+        "--daily-stop-usd",
+        type=float,
+        default=20.0,
+        help="Daily stop loss USD for gate-scan commands (default: 20).",
+    )
+    parser.add_argument(
+        "--daily-stop-equity",
+        type=float,
+        default=1000.0,
+        help="Equity baseline used for daily stop percent (default: 1000).",
+    )
     args = parser.parse_args()
 
     if args.gate_scan:
@@ -1319,6 +1413,9 @@ def main() -> None:
             baseline_include_open=args.baseline_include_open,
             baseline_max_open=args.baseline_max_open,
             baseline_max_per_cluster=args.baseline_max_per_cluster,
+            daily_stop_pct=args.daily_stop_pct,
+            daily_stop_usd=args.daily_stop_usd,
+            daily_stop_equity=args.daily_stop_equity,
         )
         return
 
