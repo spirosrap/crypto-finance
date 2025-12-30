@@ -5,6 +5,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 PYTHON_BIN=${PYTHON_BIN:-/home/spiros/anaconda3/envs/trade/bin/python}
 RUN_LIVE=${RUN_LIVE:-0}
+RUN_PAPER=${RUN_PAPER:-1}
 
 cd "${REPO_ROOT}"
 
@@ -43,10 +44,12 @@ SCAN_CMD=(
 OUTPUT=$("${SCAN_CMD[@]}" 2>&1)
 printf "%s\n" "${OUTPUT}"
 
-paper_cmd=$(printf "%s\n" "${OUTPUT}" | awk '/^python scripts\/baseline_finder_from_snapshot.py /{print; exit}')
-if [[ -n "${paper_cmd}" ]]; then
-  paper_cmd=${paper_cmd/#python /${PYTHON_BIN} }
-  eval "${paper_cmd}"
+if [[ "${RUN_PAPER}" == "1" ]]; then
+  paper_cmd=$(printf "%s\n" "${OUTPUT}" | awk '/^python scripts\/baseline_finder_from_snapshot.py /{print; exit}')
+  if [[ -n "${paper_cmd}" ]]; then
+    paper_cmd=${paper_cmd/#python /${PYTHON_BIN} }
+    eval "${paper_cmd}"
+  fi
 fi
 
 if [[ "${RUN_LIVE}" == "1" ]]; then

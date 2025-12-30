@@ -31,7 +31,7 @@ For others, this repo can be useful as:
 - **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text.
 - **Baseline Paper Helper**: `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into `finder_short_baseline.txt` and optionally open them in `paper_finder_simulator.py`.
   - After opening paper trades, run `python paper_finder_simulator.py update` so the dashboard shows live P/L.
-- **Gate-scan Paper Runner**: `scripts/run_gate_scan_paper.sh` automates the gate-scan + paper-trade flow (cron-friendly). Set `PYTHON_BIN` and `RUN_LIVE=0|1`; logs to `logs/gate_scan_paper.log`.
+- **Gate-scan Paper Runner**: `scripts/run_gate_scan_paper.sh` automates the gate-scan + paper-trade flow (cron-friendly). Set `PYTHON_BIN`, `RUN_PAPER=0|1`, and `RUN_LIVE=0|1`; logs to `logs/gate_scan_paper.log`.
 - **Paper Progress Check**: `scripts/paper_trade_progress.py` prints progress to the 100‑trade target, win%, avg%, expectancy, and TP/SL/expiry split.
 - **Drawdown Breakdown**: `scripts/drawdown_breakdown.py` compares paper vs live over a rolling window (default 24h), highlighting closure reasons, loss symbols, ATR bucket stops, and spread‑OK stop rates.
 - **Paper Equity Report**: `scripts/paper_equity_report.py` writes a shareable equity curve (HTML + PNG) and `watchdog_dashboard.py` can export the same. Note: equity is daily‑aggregated, so one trading day = one point (drawdown reads 0% when there’s only one day).

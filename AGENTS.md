@@ -87,7 +87,7 @@
   - Paper logs: `trade_logs/paper_finder_open_positions.csv` and `trade_logs/paper_finder_closed_positions.csv` for dashboard review.
   - Finder-to-paper flow: `paper_finder_simulator.py open --finder-output finder_short.txt` (or `finder_long.txt`) parses finder text and stages paper trades; review them in `watchdog_dashboard.py`.
   - After staging trades, run `python paper_finder_simulator.py update` so the dashboard reflects current P/L.
-  - Gate-scan cron runner: `scripts/run_gate_scan_paper.sh` automates gate-scan + paper trades; set `PYTHON_BIN` and `RUN_LIVE=0|1`, logs to `logs/gate_scan_paper.log`.
+  - Gate-scan cron runner: `scripts/run_gate_scan_paper.sh` automates gate-scan + paper trades; set `PYTHON_BIN`, `RUN_PAPER=0|1`, and `RUN_LIVE=0|1`, logs to `logs/gate_scan_paper.log`.
 - **Breakout Autotrade**
   - Scan cadence: hourly; symbols: BTC,ETH,SOL,XRP,ADA,DOT,AVAX,LINK,LTC,DOGE,OP,ARB,ATOM,UNI,AAVE,MKR,INJ (USDC quotes).
   - Gates: swing close must clear trigger; RR >= 2; 24h lock after a trade (`.breakout_lock.json`); notional $500, 50x; near-breakout logging within ±0.5%.
