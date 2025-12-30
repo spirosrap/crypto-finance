@@ -10,7 +10,7 @@ For others, this repo can be useful as:
 
 ## Current Focus
 - **Short-Term Crypto Finder (`short_term_crypto_finder.py`)**: Strict RR ≥ 2, ATR(7) gated with tiered caps (3k USD plus bps tiers ≈325/350/400/450 by price bands; tighter cap wins), hard SL/TP. Runs on USDC pairs; logs to `logs/short_term_crypto_finder/`.
-- **Breakout Autotrade (`scripts/run_breakout_autotrade.py`)**: Hourly scan of USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with fixed 2R structure, $500 notional / 50x, 24h lock to avoid stacking. Writes finder-format output; uses Coinbase primary with Kraken fallback. Near-breakouts are logged.
+- **Breakout Autotrade (`scripts/run_breakout_autotrade.py`)**: Hourly scan of USDC majors (BTC/ETH/SOL/XRP/ADA/DOT/AVAX/LINK/LTC/DOGE/OP/ARB/ATOM/UNI/AAVE/MKR/INJ) with fixed 2R structure, $500 notional / 50x, 24h lock to avoid stacking. Writes finder-format output; uses Coinbase primary with Kraken fallback. Near-breakouts are logged. Currently paused/archived (cron commented).
 - **Safety First**: Downtime is expected; no trades when RR/ATR gates fail. Flat is acceptable.
 
 ## Active Tools
@@ -26,7 +26,7 @@ For others, this repo can be useful as:
     - Use `--baseline-paper-command` to emit a one-shot `baseline_finder_from_snapshot.py` command for paper trades (skips open live/paper positions unless `--baseline-include-open` is set).
     - Capacity guards: `--baseline-max-open` (default 10) and `--baseline-max-per-cluster` (default 3) suppress commands once the live/paper books are full. Clusters are majors/memecoins/alts.
   - Long-term profile used for LLM + liquidity filters: `python long_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_long.txt --suppress-console-logs`
-- **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock).
+- **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock; currently paused).
 - **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).
 - **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text.
 - **Baseline Paper Helper**: `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into `finder_short_baseline.txt` and optionally open them in `paper_finder_simulator.py`.
@@ -55,7 +55,7 @@ For others, this repo can be useful as:
 ## Pipeline Map (Current)
 - Inputs: Coinbase/CCXT candles + CoinGecko metrics + live spread/fee bps (when available).
 - Short-term flow: `short_term_crypto_finder.py` -> `finder_short.txt` -> `add_position_from_finder.py`/`add_top5_from_finder.py` -> `trade_logs/` + watchdogs.
-- Breakout flow: `scripts/run_breakout_autotrade.py` -> `finder_breakout.txt` -> (optional execute) -> `trade_logs/`.
+- Breakout flow: `scripts/run_breakout_autotrade.py` -> `finder_breakout.txt` -> (optional execute) -> `trade_logs/` (currently paused).
 - Long-term flow: `long_term_crypto_finder.py` -> `finder_long.txt` -> discretionary review + sizing.
 - Monitoring: `watchdog_close_old_positions.py` (expiry) + `watchdog_dashboard.py` (equity/health).
 
@@ -68,8 +68,8 @@ For others, this repo can be useful as:
 2) Short-term finder (manual or cron):
    - `python short_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_short.txt --force-refresh`
    - Expect: updated `finder_short.txt` and logs under `logs/short_term_crypto_finder/`.
-3) Breakout autotrade (cron) and log review:
-   - Check `logs/breakout_autotrade.log` for near-breakouts or triggers.
+3) Breakout autotrade (cron) and log review (currently paused):
+   - Check `logs/breakout_autotrade.log` for near-breakouts or triggers when re-enabled.
 4) Optional long-term scan:
    - `python long_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_long.txt --suppress-console-logs`
 
