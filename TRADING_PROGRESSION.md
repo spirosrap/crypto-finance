@@ -9,6 +9,11 @@
 ## December 2025
 **State at a glance (latest):** Live trading now follows the baseline ATR exits (0.8× ATR, 1.5R) with ATR ≤ 1.5× cap plus spread/VMC gates; the strict RR gate is archived. Opportunities are more frequent, so live books can run ~10–15 concurrent positions. Gate‑scan prints baseline commands and skips symbols already open. Paper experiment continues toward 100 trades with updated equity reporting.
 
+## December 31, 2025 08:20 - Paper Auto Flow + Live Restart Plan
+- Fully automatic paper trading is running smoothly, with risk filters active.
+- Planning to resume live trading later today (around 14:00).
+- Hoping the new risk filters help avoid the larger drawdowns from earlier runs.
+
 ## December 30, 2025 - Live-Only Runner Toggle
 - Added `RUN_PAPER=0|1` to `scripts/run_gate_scan_paper.sh` so I can switch to live-only execution after the paper experiment finishes.
 
