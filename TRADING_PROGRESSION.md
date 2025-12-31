@@ -64,6 +64,7 @@
 - Added `scripts/drawdown_breakdown.py` to compare live vs paper drawdowns (closure reasons, loss symbols, ATR buckets, and spread‑OK stop rates) over a rolling window.
 - Added capacity guards for gate-scan commands: `--baseline-max-open` (default 10) and `--baseline-max-per-cluster` (default 3) to limit concurrent positions by majors/memecoins/alts.
 - Cleaned duplicate open paper positions (kept oldest per symbol/side) and added a guard in `baseline_finder_from_snapshot.py` to skip opening duplicates unless `--include-open` is used.
+- Note: the “16 closes in one day” spike was a manual over‑trading day (repeated gate scans + manual entries). The 4‑hour auto cadence + cluster caps should prevent this pattern going forward.
 
 ## December 28, 2025 - More Live Trades
 - Placed more live trades today; many more opportunities are surfacing now, so I’m holding ~10–15 simultaneous trades. Not sure yet if I should cap the number of concurrent positions; will monitor.
