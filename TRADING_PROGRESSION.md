@@ -29,6 +29,7 @@
 ## December 31, 2025 - Watchdog Fill Poll Cron
 - Added a dedicated cron job to run `watchdog_close_old_positions.py --log-fills --skip-close --fills-limit 200 --verbose` every 5 minutes.
 - Tested at 1-minute cadence, confirmed it writes to `logs/watchdog_close_update.log`, then restored to 5 minutes.
+- Purpose: pull the latest fills from the Coinbase account so closed‑trade logs stay current.
 
 ## December 30, 2025 - Live-Only Runner Toggle
 - Added `RUN_PAPER=0|1` to `scripts/run_gate_scan_paper.sh` so I can switch to live-only execution after the paper experiment finishes.
