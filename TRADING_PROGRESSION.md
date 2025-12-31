@@ -17,6 +17,7 @@
 ## December 31, 2025 - Paper Auto-Update Cron
 - Added a dedicated cron job to run `paper_finder_simulator.py update` every 10 minutes.
 - Tested it at 1-minute frequency first, confirmed it writes to `logs/paper_finder_update.log`, then restored to 10 minutes.
+- Updated the cadence to every 5 minutes for faster P/L refresh.
 
 ## December 30, 2025 - Live-Only Runner Toggle
 - Added `RUN_PAPER=0|1` to `scripts/run_gate_scan_paper.sh` so I can switch to live-only execution after the paper experiment finishes.
