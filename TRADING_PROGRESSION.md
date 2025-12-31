@@ -9,6 +9,9 @@
 ## December 2025
 **State at a glance (latest):** Live trading now follows the baseline ATR exits (0.8× ATR, 1.5R) with ATR ≤ 1.5× cap plus spread/VMC gates; the strict RR gate is archived. Opportunities are more frequent, so live books can run ~10–15 concurrent positions. Gate‑scan prints baseline commands and skips symbols already open. Paper experiment continues toward 100 trades with updated equity reporting.
 
+## December 31, 2025 - Live Resume Time Set
+- Resume live trading after the 48h cooldown: 2025-12-31 12:41:48 UTC (14:41:48 Greece), based on last live close at 2025-12-29 12:41:48 UTC.
+
 ## December 31, 2025 08:20 - Paper Auto Flow + Live Restart Plan
 - Fully automatic paper trading is running smoothly, with risk filters active.
 - Planning to resume live trading later today (around 14:00).
