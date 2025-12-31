@@ -31,6 +31,10 @@
 - Tested at 1-minute cadence, confirmed it writes to `logs/watchdog_close_update.log`, then restored to 5 minutes.
 - Purpose: pull the latest fills from the Coinbase account so closed‑trade logs stay current.
 
+## December 31, 2025 - Extend Paper Experiment
+- Keep the fully automated paper experiment running to 150 trades (no manual tinkering) to get a cleaner sample after the abnormal manual day.
+- The abnormal day was caused by repeatedly scanning and manually opening trades, leading to a much higher count (16 closes) than normal cadence days.
+
 ## December 30, 2025 - Live-Only Runner Toggle
 - Added `RUN_PAPER=0|1` to `scripts/run_gate_scan_paper.sh` so I can switch to live-only execution after the paper experiment finishes.
 
