@@ -7,6 +7,8 @@ PYTHON_BIN=${PYTHON_BIN:-/home/spiros/anaconda3/envs/trade/bin/python}
 RUN_LIVE=${RUN_LIVE:-0}
 RUN_PAPER=${RUN_PAPER:-1}
 RUN_PAPER_UPDATE=${RUN_PAPER_UPDATE:-1}
+LIVE_DELAY_SECONDS=${LIVE_DELAY_SECONDS:-10}
+LIVE_SLEEP_SECONDS=${LIVE_SLEEP_SECONDS:-2}
 
 cd "${REPO_ROOT}"
 
@@ -58,10 +60,15 @@ if [[ "${RUN_PAPER}" == "1" ]]; then
 fi
 
 if [[ "${RUN_LIVE}" == "1" ]]; then
+  sleep "${LIVE_DELAY_SECONDS}"
   while IFS= read -r line; do
     if [[ "${line}" == python\ ccxt_trade_perp.py* ]]; then
-      line=${line/#python /${PYTHON_BIN} }
-      eval "${line}"
+      line=${line/#python /SKIP_LOAD_MARKETS=1 ${PYTHON_BIN} }
+      echo "Executing live command: ${line}"
+      if ! eval "${line}"; then
+        echo "Live command failed (continuing): ${line}"
+      fi
+      sleep "${LIVE_SLEEP_SECONDS}"
     fi
   done <<< "${OUTPUT}"
 fi
