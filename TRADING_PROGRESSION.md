@@ -26,6 +26,10 @@
 - Tested it at 1-minute frequency first, confirmed it writes to `logs/paper_finder_update.log`, then restored to 10 minutes.
 - Updated the cadence to every 5 minutes for faster P/L refresh.
 
+## December 31, 2025 - Watchdog Fill Poll Cron
+- Added a dedicated cron job to run `watchdog_close_old_positions.py --log-fills --skip-close --fills-limit 200 --verbose` every 5 minutes.
+- Tested at 1-minute cadence, confirmed it writes to `logs/watchdog_close_update.log`, then restored to 5 minutes.
+
 ## December 30, 2025 - Live-Only Runner Toggle
 - Added `RUN_PAPER=0|1` to `scripts/run_gate_scan_paper.sh` so I can switch to live-only execution after the paper experiment finishes.
 
