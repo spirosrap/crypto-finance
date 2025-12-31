@@ -12,6 +12,10 @@
 ## December 31, 2025 - Live Resume Time Set
 - Resume live trading after the 48h cooldown: 2025-12-31 12:41:48 UTC (14:41:48 Greece), based on last live close at 2025-12-29 12:41:48 UTC.
 
+## December 31, 2025 14:40 - Live Notional Reset
+- Switched live notional per trade back to $250 (from $125) because clustering caps mean fewer trades per day; staying with $1,000 assumed equity.
+- Codex take: acceptable if max-open + daily stop gates remain active; watch drawdown and reduce size if the loss streaks return.
+
 ## December 31, 2025 08:20 - Paper Auto Flow + Live Restart Plan
 - Fully automatic paper trading is running smoothly, with risk filters active.
 - Planning to resume live trading later today (around 14:00).
