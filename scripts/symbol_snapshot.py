@@ -1067,8 +1067,10 @@ def gate_scan(
             print("Commands: no size available (set --baseline-live-position-usd, --baseline-position-usd, or --baseline-portfolio-usd).")
             return
 
-        total_open = len(open_symbols)
-        cluster_counts = _cluster_counts(open_symbols)
+        initial_total_open = len(open_symbols)
+        initial_cluster_counts = _cluster_counts(open_symbols)
+        total_open = initial_total_open
+        cluster_counts = dict(initial_cluster_counts)
         commands: List[str] = []
         skipped_open: List[str] = []
         skipped_capacity: List[str] = []
@@ -1124,15 +1126,26 @@ def gate_scan(
 
         if baseline_max_open > 0 or baseline_max_per_cluster > 0:
             print(
-                "Capacity: total {total}/{max_total} | majors {majors}/{max_cluster} | memecoins {memecoins}/{max_cluster} | alts {alts}/{max_cluster}".format(
-                    total=len(open_symbols),
+                "Open capacity: total {total}/{max_total} | majors {majors}/{max_cluster} | memecoins {memecoins}/{max_cluster} | alts {alts}/{max_cluster}".format(
+                    total=initial_total_open,
                     max_total=baseline_max_open,
-                    majors=cluster_counts.get("majors", 0),
-                    memecoins=cluster_counts.get("memecoins", 0),
-                    alts=cluster_counts.get("alts", 0),
+                    majors=initial_cluster_counts.get("majors", 0),
+                    memecoins=initial_cluster_counts.get("memecoins", 0),
+                    alts=initial_cluster_counts.get("alts", 0),
                     max_cluster=baseline_max_per_cluster,
                 )
             )
+            if commands:
+                print(
+                    "Projected capacity (after commands): total {total}/{max_total} | majors {majors}/{max_cluster} | memecoins {memecoins}/{max_cluster} | alts {alts}/{max_cluster}".format(
+                        total=total_open,
+                        max_total=baseline_max_open,
+                        majors=cluster_counts.get("majors", 0),
+                        memecoins=cluster_counts.get("memecoins", 0),
+                        alts=cluster_counts.get("alts", 0),
+                        max_cluster=baseline_max_per_cluster,
+                    )
+                )
         if skipped_open:
             print(f"Open positions detected (skipping): {', '.join(sorted(set(skipped_open)))}")
         if skipped_capacity:
@@ -1161,8 +1174,10 @@ def gate_scan(
         skipped_paper: List[str] = []
         skipped_capacity: List[str] = []
         skipped_cluster: List[str] = []
-        total_open = len(open_paper_list)
-        cluster_counts = _cluster_counts(open_paper_list)
+        initial_total_open = len(open_paper_list)
+        initial_cluster_counts = _cluster_counts(open_paper_list)
+        total_open = initial_total_open
+        cluster_counts = dict(initial_cluster_counts)
         for row in top_rows:
             if not row.get("baseline_pass"):
                 continue
@@ -1188,15 +1203,26 @@ def gate_scan(
 
         if baseline_max_open > 0 or baseline_max_per_cluster > 0:
             print(
-                "Paper capacity: total {total}/{max_total} | majors {majors}/{max_cluster} | memecoins {memecoins}/{max_cluster} | alts {alts}/{max_cluster}".format(
-                    total=len(open_paper_list),
+                "Paper open capacity: total {total}/{max_total} | majors {majors}/{max_cluster} | memecoins {memecoins}/{max_cluster} | alts {alts}/{max_cluster}".format(
+                    total=initial_total_open,
                     max_total=baseline_max_open,
-                    majors=cluster_counts.get("majors", 0),
-                    memecoins=cluster_counts.get("memecoins", 0),
-                    alts=cluster_counts.get("alts", 0),
+                    majors=initial_cluster_counts.get("majors", 0),
+                    memecoins=initial_cluster_counts.get("memecoins", 0),
+                    alts=initial_cluster_counts.get("alts", 0),
                     max_cluster=baseline_max_per_cluster,
                 )
             )
+            if symbol_specs:
+                print(
+                    "Paper projected capacity (after command): total {total}/{max_total} | majors {majors}/{max_cluster} | memecoins {memecoins}/{max_cluster} | alts {alts}/{max_cluster}".format(
+                        total=total_open,
+                        max_total=baseline_max_open,
+                        majors=cluster_counts.get("majors", 0),
+                        memecoins=cluster_counts.get("memecoins", 0),
+                        alts=cluster_counts.get("alts", 0),
+                        max_cluster=baseline_max_per_cluster,
+                    )
+                )
         if skipped_paper:
             print(f"Open paper positions detected (skipping): {', '.join(sorted(set(skipped_paper)))}")
         if skipped_capacity:
