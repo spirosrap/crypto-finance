@@ -620,9 +620,15 @@ def main() -> None:
 
     print("\n=== Order Summary ===")
     print(f"Entry order: {entry_order}")
-    print(f"Bracket response: {bracket_response if bracket_response else 'N/A (dry run)'}")
     if args.dry_run:
+        print("Bracket response: dry run (no orders sent).")
         print("\nDry run complete. No orders were sent.")
+    elif entry_order.get("via") == "rest":
+        print("Bracket response: placed via REST (see entry_order['response']).")
+    elif bracket_response:
+        print(f"Bracket response: {bracket_response}")
+    else:
+        print("Bracket response: skipped (entry not filled or not submitted).")
 
 
 if __name__ == "__main__":
