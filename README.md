@@ -33,6 +33,7 @@ For others, this repo can be useful as:
 - **Baseline Paper Helper**: `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into `finder_short_baseline.txt` and optionally open them in `paper_finder_simulator.py`.
   - After opening paper trades, run `python paper_finder_simulator.py update` so the dashboard shows live P/L.
 - **Gate-scan Paper Runner**: `scripts/run_gate_scan_paper.sh` automates the gate-scan + paper-trade flow (cron-friendly). Set `PYTHON_BIN`, `RUN_PAPER=0|1`, and `RUN_LIVE=0|1`; logs to `logs/gate_scan_paper.log`.
+  - Scheduled every 4 hours to batch entries and reduce impulse/overtrading; it only opens new trades when gates pass.
 - **Paper Trade Updater (cron)**: `paper_finder_simulator.py update` runs every 5 minutes to keep paper P/L and expiries fresh; logs to `logs/paper_finder_update.log`.
 - **Paper Progress Check**: `scripts/paper_trade_progress.py` prints progress to the 100‑trade target, win%, avg%, expectancy, and TP/SL/expiry split.
 - **Drawdown Breakdown**: `scripts/drawdown_breakdown.py` compares paper vs live over a rolling window (default 24h), highlighting closure reasons, loss symbols, ATR bucket stops, and spread‑OK stop rates.
