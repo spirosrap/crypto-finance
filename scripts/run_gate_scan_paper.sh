@@ -42,7 +42,7 @@ SCAN_CMD=(
   --baseline-atr-mode clipped
   --baseline-leverage 50
   --baseline-expiry 30d
-  --baseline-live-position-usd 125
+  --baseline-live-position-usd 250
   --baseline-paper-command
 )
 
