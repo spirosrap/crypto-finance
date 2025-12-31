@@ -6,6 +6,7 @@ REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 PYTHON_BIN=${PYTHON_BIN:-/home/spiros/anaconda3/envs/trade/bin/python}
 RUN_LIVE=${RUN_LIVE:-0}
 RUN_PAPER=${RUN_PAPER:-1}
+RUN_PAPER_UPDATE=${RUN_PAPER_UPDATE:-1}
 
 cd "${REPO_ROOT}"
 
@@ -21,6 +22,10 @@ exec 9>"${LOCKFILE}"
 if ! flock -n 9; then
   echo "gate_scan_paper: lock held, skipping."
   exit 0
+fi
+
+if [[ "${RUN_PAPER}" == "1" && "${RUN_PAPER_UPDATE}" == "1" ]]; then
+  "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" update
 fi
 
 SCAN_CMD=(
