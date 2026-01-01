@@ -85,6 +85,11 @@ CHECKPOINT_PATH = Path('trade_logs') / 'watchdog_tp_sl_checkpoint.json'
 UTC = timezone.utc
 
 
+def _is_perp_product_id(product_id: str) -> bool:
+    pid = (product_id or "").upper()
+    return pid.endswith("-PERP-INTX") or pid.endswith("-INTX-PERP")
+
+
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -1063,6 +1068,8 @@ def _is_new_cycle(cycle: Cycle, checkpoint: Dict[str, Any], bootstrap_existing: 
 def _convert_fill(raw: Dict[str, Any]) -> Optional[Fill]:
     try:
         product_id = raw['product_id']
+        if not _is_perp_product_id(product_id):
+            return None
         side = str(raw['side']).upper()
         size = float(raw['size'])
         price = float(raw['price'])
@@ -1102,8 +1109,7 @@ def _finalize_cycle(
     total_fees: float,
     closing_order_id: str,
 ) -> Optional[Cycle]:
-    qty = max(entry_qty, exit_qty)
-    if qty <= 1e-12:
+    if entry_qty <= 1e-12 or exit_qty <= 1e-12:
         return None
     return Cycle(
         product_id=product_id,

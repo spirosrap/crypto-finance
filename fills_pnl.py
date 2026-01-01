@@ -40,17 +40,24 @@ def to_float(value, default=0.0) -> float:
 
 
 def parse_time(ts: Any) -> datetime:
+    if isinstance(ts, datetime):
+        return ts.astimezone(UTC) if ts.tzinfo else ts.replace(tzinfo=UTC)
     if isinstance(ts, (int, float)):
         return datetime.fromtimestamp(float(ts), tz=UTC)
     if isinstance(ts, str):
         # Coinbase timestamps usually ISO8601 with Z
-        try:
-            return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=UTC)
-        except Exception:
+        s = ts.strip()
+        if not s:
+            return datetime.now(tz=UTC)
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
             try:
-                return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+                return datetime.strptime(s, fmt).replace(tzinfo=UTC)
             except Exception:
-                return datetime.now(tz=UTC)
+                pass
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(UTC)
+        except Exception:
+            return datetime.now(tz=UTC)
     return datetime.now(tz=UTC)
 
 
