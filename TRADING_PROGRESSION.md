@@ -14,7 +14,7 @@
 - Meme coins are showing up less as opportunities; possibly their window has passed.
 
 ## December 2025
-**State at a glance (latest):** Live trading now follows the baseline ATR exits (0.8× ATR, 1.5R) with ATR ≤ 1.5× cap plus spread/VMC gates; the strict RR gate is archived. Opportunities are more frequent, so live books can run ~10–15 concurrent positions. Gate‑scan prints baseline commands and skips symbols already open. Paper experiment continues toward 100 trades with updated equity reporting.
+**State at a glance (December recap):** Live trading uses baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap plus spread/VMC gates; strict RR gate is archived. Risk guards in place: daily stop (−2%/−$20) and BTC range‑break pause. Gate‑scan runs every 4h with cluster caps (10 total, 3 per bucket) and skips open symbols; paper auto‑updates every 5m and fills poll every 5m. Paper experiment continues to 150 trades; live sizing is $250 notional on $1k assumed equity.
 
 ## December 31, 2025 - Live Resume Time Set
 - Resume live trading after the 48h cooldown: 2025-12-31 12:41:48 UTC (14:41:48 Greece), based on last live close at 2025-12-29 12:41:48 UTC.
