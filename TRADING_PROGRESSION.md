@@ -8,6 +8,9 @@
 - [June 2025](#june-2025)
 
 ## January 2026
+## January 01, 2026 - Live Daily Stop Triggered
+- Live trading entered the 24h pause after the daily stop hit the −2R drawdown threshold.
+
 ## January 01, 2026 - Live + Paper Steady
 - Both live and paper trading continue without issues.
 - 7 open live trades and 7 open paper trades, keeping exposure reasonable without overtrading.
