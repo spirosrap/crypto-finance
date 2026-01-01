@@ -1,10 +1,17 @@
 # Trading Journal
 
 ## Quick Links
+- [January 2026](#january-2026)
 - [December 2025](#december-2025)
 - [November 2025](#november-2025)
 - [October 2025](#october-2025)
 - [June 2025](#june-2025)
+
+## January 2026
+## January 01, 2026 - Live + Paper Steady
+- Both live and paper trading continue without issues.
+- 7 open live trades and 7 open paper trades, keeping exposure reasonable without overtrading.
+- Meme coins are showing up less as opportunities; possibly their window has passed.
 
 ## December 2025
 **State at a glance (latest):** Live trading now follows the baseline ATR exits (0.8× ATR, 1.5R) with ATR ≤ 1.5× cap plus spread/VMC gates; the strict RR gate is archived. Opportunities are more frequent, so live books can run ~10–15 concurrent positions. Gate‑scan prints baseline commands and skips symbols already open. Paper experiment continues toward 100 trades with updated equity reporting.
