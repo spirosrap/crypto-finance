@@ -8,6 +8,10 @@
 - [June 2025](#june-2025)
 
 ## January 2026
+## January 02, 2026 - Daily Stop Reset + Paper Halt
+- Live halt resumed after the UTC day rolled over (daily stop resets on the next day, not a rolling 24h).
+- Paper trading hit the −2R daily stop and is paused for the current UTC day.
+
 ## January 01, 2026 - Live Daily Stop Triggered
 - Live trading entered the 24h pause after the daily stop hit the −2R drawdown threshold.
 
