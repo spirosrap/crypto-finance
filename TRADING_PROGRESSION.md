@@ -8,6 +8,10 @@
 - [June 2025](#june-2025)
 
 ## January 2026
+## January 02, 2026 - Checkpoint Thresholds Defined
+- Paper (150 closes): keep if expectancy_pct ≥ +0.10%, PF ≥ 1.15, Max DD ≥ -10%; tweak one knob if expectancy_pct between -0.10% and +0.10% or PF 0.95–1.15; stop if expectancy_pct ≤ -0.10% and PF < 0.95 or Max DD < -12%.
+- Live (100 closes): scale +10–20% if expectancy_pct ≥ +0.10%, PF ≥ 1.10, Max DD ≥ -6%; hold if expectancy_pct between -0.05% and +0.10%; reduce/pause if expectancy_pct ≤ -0.10% or Max DD < -8%.
+
 ## January 02, 2026 - Daily Stop Reset + Paper Halt
 - Live halt resumed after the UTC day rolled over (daily stop resets on the next day, not a rolling 24h).
 - Paper trading hit the −2R daily stop and is paused for the current UTC day.
