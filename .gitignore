@@ -97,6 +97,7 @@ trade_logs/*
 !trade_logs/
 !trade_logs/paper_finder_open_positions.csv
 !trade_logs/paper_finder_closed_positions.csv
+!trade_logs/watchdog_closed_positions.csv
 *.log
 finder_long.txt
 finder_short.txt
