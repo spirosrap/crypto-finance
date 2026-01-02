@@ -8,6 +8,8 @@
 - [June 2025](#june-2025)
 
 ## January 2026
+**State at a glance (January recap):** Live + paper are running under the baseline ATR exits (0.8× ATR, 1.5R) with ATR ≤ 1.5× cap plus spread/VMC gates, cluster caps (10 total / 3 per bucket), and the daily stop + BTC range‑break circuit. Risk defaults are centralized in `config/risk_thresholds.yaml`. Paper auto‑updates every 5 minutes and fills polling runs every 5 minutes. Checkpoints: 150 paper trades and 100 live trades for the next scale/tweak decision.
+
 ## January 02, 2026 - Risk Thresholds Centralized
 - Moved shared risk defaults (daily stop, range-break, baseline sizing/gates) into `config/risk_thresholds.yaml`.
 - Gate-scan and dashboard now read this file; CLI flags still override per run.
