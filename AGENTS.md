@@ -47,6 +47,7 @@
 - **Before handoff**
   - Summarize code changes and their rationale.
   - Note any files intentionally untouched but relevant for future follow-up.
+  - When changing risk guards (daily stop, range-break, baseline sizing/caps), update `config/risk_thresholds.yaml` and keep docs in sync.
 
 ## Coding Standards and Style
 - Follow PEP 8 with 4-space indentation; keep functions under roughly 50 lines when possible.

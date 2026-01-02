@@ -25,7 +25,9 @@ For others, this repo can be useful as:
     - Use `--baseline-commands` to print ccxt trade commands for baseline-pass symbols; open live positions are auto-skipped (and listed).
     - Use `--baseline-paper-command` to emit a one-shot `baseline_finder_from_snapshot.py` command for paper trades (skips open live/paper positions unless `--baseline-include-open` is set).
     - Capacity guards: `--baseline-max-open` (default 10) and `--baseline-max-per-cluster` (default 3) suppress commands once the live/paper books are full. Clusters are majors/memecoins/alts.
-    - Daily stop + range break: gate-scan now suppresses commands if the daily loss gate triggers (default −2%/−$20) or if BTC closes outside the 7‑day range by >0.5× ATR (range-break circuit).
+    - Daily stop + range break: gate-scan suppresses commands if the daily loss gate triggers (default −2%/−$20) or if BTC closes outside the 7‑day range by >0.5× ATR (range-break circuit).
+    - Shared defaults live in `config/risk_thresholds.yaml` (used by gate‑scan and the dashboard); CLI flags override per run.
+    - Shared risk defaults live in `config/risk_thresholds.yaml` (used by gate-scan + dashboard). CLI flags override per run.
   - Long-term profile used for LLM + liquidity filters: `python long_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_long.txt --suppress-console-logs`
 - **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock; currently paused).
 - **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).
@@ -35,7 +37,7 @@ For others, this repo can be useful as:
 - **Gate-scan Paper Runner**: `scripts/run_gate_scan_paper.sh` automates the gate-scan + paper-trade flow (cron-friendly). Set `PYTHON_BIN`, `RUN_PAPER=0|1`, and `RUN_LIVE=0|1`; logs to `logs/gate_scan_paper.log`.
   - Scheduled every 4 hours to batch entries and reduce impulse/overtrading; it only opens new trades when gates pass.
 - **Paper Trade Updater (cron)**: `paper_finder_simulator.py update` runs every 5 minutes to keep paper P/L and expiries fresh; logs to `logs/paper_finder_update.log`.
-- **Watchdog Fill Poll (cron)**: `watchdog_close_old_positions.py --log-fills --skip-close --fills-limit 200 --verbose` runs every 5 minutes to pull the latest fills from the Coinbase account and refresh the closed-trade log; logs to `logs/watchdog_close_update.log`.
+- **Watchdog Fill Poll (cron)**: `watchdog_close_old_positions.py --log-fills --skip-close --verbose` runs every 5 minutes to pull the latest fills from the Coinbase account and refresh the closed-trade log; logs to `logs/watchdog_close_update.log`.
 - **Paper Progress Check**: `scripts/paper_trade_progress.py` prints progress to the 100‑trade target, win%, avg%, expectancy, and TP/SL/expiry split.
 - **Drawdown Breakdown**: `scripts/drawdown_breakdown.py` compares paper vs live over a rolling window (default 24h), highlighting closure reasons, loss symbols, ATR bucket stops, and spread‑OK stop rates.
 - **Paper Equity Report**: `scripts/paper_equity_report.py` writes a shareable equity curve (HTML + PNG) and `watchdog_dashboard.py` can export the same. Note: equity is daily‑aggregated, so one trading day = one point (drawdown reads 0% when there’s only one day).

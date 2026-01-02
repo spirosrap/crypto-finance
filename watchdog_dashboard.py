@@ -23,6 +23,7 @@ import pandas as pd
 import streamlit as st
 
 from coinbaseservice import CoinbaseService
+from trading.risk_thresholds import load_risk_thresholds
 
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
@@ -59,8 +60,9 @@ except Exception as exc:  # pragma: no cover - optional dependency
 
 UTC = timezone.utc
 AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 250
-DAILY_STOP_PCT = 2.0
-DAILY_STOP_USD = 20.0
+RISK_THRESHOLDS = load_risk_thresholds()
+DAILY_STOP_PCT = float(RISK_THRESHOLDS.get("daily_stop_pct", 2.0) or 0.0)
+DAILY_STOP_USD = float(RISK_THRESHOLDS.get("daily_stop_usd", 20.0) or 0.0)
 PAPER_CLOSED_CSV = Path("trade_logs/paper_finder_closed_positions.csv")
 PAPER_OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
 STATE_PATH = Path("cache/watchdog_dashboard_state.json")

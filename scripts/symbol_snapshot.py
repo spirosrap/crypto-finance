@@ -46,6 +46,7 @@ from short_term_crypto_finder import (
 )
 from coinbaseservice import CoinbaseService
 from perp_support import canonical_perp_symbol, perp_price_multiplier
+from trading.risk_thresholds import load_risk_thresholds
 from watchdog_close_old_positions import _get_portfolio_uuid
 
 try:
@@ -79,6 +80,40 @@ def _fmt(value, precision: int = 2) -> str:
         return f"{float(value):.{precision}f}"
     except Exception:
         return "n/a"
+
+
+def _apply_risk_threshold_overrides(args: argparse.Namespace, argv: List[str]) -> None:
+    overrides = load_risk_thresholds()
+    if not overrides:
+        return
+    mapping = {
+        "daily_stop_pct": ("daily_stop_pct", "--daily-stop-pct"),
+        "daily_stop_usd": ("daily_stop_usd", "--daily-stop-usd"),
+        "daily_stop_equity": ("daily_stop_equity", "--daily-stop-equity"),
+        "range_break_symbol": ("range_break_symbol", "--range-break-symbol"),
+        "range_break_days": ("range_break_days", "--range-break-days"),
+        "range_break_atr_mult": ("range_break_atr_mult", "--range-break-atr-mult"),
+        "baseline_max_open": ("baseline_max_open", "--baseline-max-open"),
+        "baseline_max_per_cluster": ("baseline_max_per_cluster", "--baseline-max-per-cluster"),
+        "baseline_atr_mult": ("baseline_atr_mult", "--baseline-atr-mult"),
+        "baseline_rr": ("baseline_rr", "--baseline-rr"),
+        "baseline_atr_mode": ("baseline_atr_mode", "--baseline-atr-mode"),
+        "baseline_expiry": ("baseline_expiry", "--baseline-expiry"),
+        "baseline_position_pct": ("baseline_position_pct", "--baseline-position-pct"),
+        "baseline_portfolio_usd": ("baseline_portfolio_usd", "--baseline-portfolio-usd"),
+        "baseline_position_usd": ("baseline_position_usd", "--baseline-position-usd"),
+        "baseline_live_position_usd": ("baseline_live_position_usd", "--baseline-live-position-usd"),
+        "baseline_leverage": ("baseline_leverage", "--baseline-leverage"),
+    }
+    for key, (attr, flag) in mapping.items():
+        if key not in overrides:
+            continue
+        if flag in argv:
+            continue
+        value = overrides.get(key)
+        if value is None:
+            continue
+        setattr(args, attr, value)
 
 
 def _fmt_usd_compact(value: Optional[float]) -> str:
@@ -1534,6 +1569,7 @@ def main() -> None:
         help="ATR multiple for range-break buffer (default: 0.5).",
     )
     args = parser.parse_args()
+    _apply_risk_threshold_overrides(args, sys.argv[1:])
 
     if args.gate_scan:
         gate_scan(

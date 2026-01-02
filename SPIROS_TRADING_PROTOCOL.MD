@@ -11,6 +11,7 @@
 | Circuit breaker A | 2 consecutive losses with MAE > 0.7% | Stop for day, screenshot charts, write quick debrief. |
 | Circuit breaker B | 5 consecutive losses (any size) | Stop for day, schedule deep review before next live session. |
 | News blackout | +/- 15 min around top-tier news on instrument | Observe only; queue setup for post-release if still valid. |
+| Risk defaults location | `config/risk_thresholds.yaml` | Gate-scan + dashboard read this file; CLI overrides per run. |
 
 ## 0. Non-Negotiables
 - Capital preservation outranks opportunity. No exceptions.
