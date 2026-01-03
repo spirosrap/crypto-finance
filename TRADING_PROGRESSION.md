@@ -14,6 +14,11 @@
 - Yesterday showed a big uptick in earnings, but it later reversed and the top equity gave back a significant chunk.
 - Paper trading resumed, but the timing was imperfect; equity is negative again even though nothing closed yet.
 
+## January 03, 2026 - Guard Split Snapshot
+- Split performance at the 2025-12-30 UTC guard change shows live improving while paper deteriorated.
+- Live post-guard: 16 trades, PF 1.48, avg +1.75 (avg% +0.75%), maxDD -30.54; last 20 trades PF 1.58.
+- Paper post-guard: 26 trades, PF 0.47, avg -1.68 (avg% -0.67%), maxDD -64.66; last 20 trades PF 0.25.
+
 ## January 02, 2026 - Risk Thresholds Centralized
 - Moved shared risk defaults (daily stop, range-break, baseline sizing/gates) into `config/risk_thresholds.yaml`.
 - Gate-scan and dashboard now read this file; CLI flags still override per run.
