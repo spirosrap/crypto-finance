@@ -23,6 +23,7 @@
 - Daily loss stop = 24h pause (current cooldown: 48h; see journal entry).
 - Range-break circuit: if BTC closes outside the 7‑day high/low by >0.5× ATR, halt new entries (gate‑scan suppresses commands) until I manually clear the condition.
 - Range-break status on dashboard: **inside** = OK to trade; **outside** = pause until manual review.
+- Performance reads must be split pre/post guard change (2025-12-30 UTC); treat them as separate regimes.
 
 ## 1. Pre-Session (10 minutes)
 - [ ] Sleep >= 6.5 h, caffeine level stable, stress <= 4/10. Else run SIM only.
