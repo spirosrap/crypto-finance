@@ -779,9 +779,12 @@ def main() -> None:
         st.session_state["live_total_unrealized"] = 0.0
     if "live_usdc_balance" not in st.session_state:
         st.session_state["live_usdc_balance"] = None
-    if source_mode == "live" and st.session_state["live_positions_df"].empty:
+    if "live_snapshot_ts" not in st.session_state:
+        st.session_state["live_snapshot_ts"] = ""
+    if source_mode == "live":
         snapshot = _load_live_snapshot()
         if snapshot:
+            snap_ts = str(snapshot.get("timestamp") or "")
             cached_df = pd.DataFrame(snapshot.get("positions", []))
             st.session_state["live_positions_df"] = _prepare_open_positions_df(cached_df)
             try:
@@ -789,6 +792,8 @@ def main() -> None:
             except (TypeError, ValueError):
                 st.session_state["live_total_unrealized"] = 0.0
             st.session_state["live_usdc_balance"] = snapshot.get("usdc_balance")
+            if snap_ts:
+                st.session_state["live_snapshot_ts"] = snap_ts
     if source_mode == "paper":
         if st.sidebar.button("Update paper trades"):
             with st.spinner("Updating paper trades..."):
@@ -863,6 +868,7 @@ def main() -> None:
             st.session_state["live_positions_df"] = _prepare_open_positions_df(live_df)
             st.session_state["live_total_unrealized"] = live_unreal
             st.session_state["live_usdc_balance"] = load_perp_usdc_balance()
+            st.session_state["live_snapshot_ts"] = datetime.now(timezone.utc).isoformat()
             _save_live_snapshot(
                 st.session_state["live_positions_df"],
                 st.session_state["live_total_unrealized"],

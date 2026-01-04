@@ -8,6 +8,8 @@ without hitting Coinbase on every refresh.
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
 from datetime import datetime, timezone
 
 
@@ -22,6 +24,10 @@ def _load_dotenv_if_available() -> None:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     logger = logging.getLogger(__name__)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
 
     _load_dotenv_if_available()
 
