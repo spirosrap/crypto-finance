@@ -8,7 +8,7 @@
 - [June 2025](#june-2025)
 
 ## January 2026
-**State at a glance (January recap):** Live + paper are running under the baseline ATR exits (0.8× ATR, 1.5R) with ATR ≤ 1.5× cap plus spread/VMC gates, cluster caps (10 total / 3 per bucket), and the daily stop + BTC range‑break circuit. Risk defaults are centralized in `config/risk_thresholds.yaml`. Paper auto‑updates every 5 minutes and fills polling runs every 5 minutes. Checkpoints: 150 paper trades and 100 live trades for the next scale/tweak decision.
+**State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−2%/−$20) + BTC range‑break circuit now auto‑close live/paper and suppress new entries until the daily reset or the range re‑enters. Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live resumed after the Jan 1 stop and is stronger post‑guard; paper resumed after its halt and is catching up. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
 ## January 04, 2026 - Positive Closes, Cooling Conditions
 - A lot of trades closed positive yesterday and live trading is considerably up.
