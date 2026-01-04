@@ -1014,12 +1014,25 @@ def main() -> None:
         st.caption(" | ".join(summary_notes))
 
     daily_pnl_today = None
+    open_pnl_today = None
     try:
         today = datetime.now(UTC).date()
         daily_pnl_today = trades_df.loc[trades_df["closed_at"].dt.date == today, "profit_loss"].sum()
         daily_pnl_today = float(daily_pnl_today)
     except Exception:
         daily_pnl_today = None
+    if source_mode == "paper":
+        _, open_pnl_today = load_paper_open_positions(PAPER_OPEN_CSV)
+    else:
+        open_pnl_today = st.session_state.get("live_total_unrealized", 0.0)
+    try:
+        open_pnl_today = float(open_pnl_today) if open_pnl_today is not None else None
+    except (TypeError, ValueError):
+        open_pnl_today = None
+
+    total_pnl_today = None
+    if daily_pnl_today is not None or open_pnl_today is not None:
+        total_pnl_today = (daily_pnl_today or 0.0) + (open_pnl_today or 0.0)
 
     pct_threshold = float(starting_equity) * (DAILY_STOP_PCT / 100.0) if DAILY_STOP_PCT > 0 else None
     usd_threshold = DAILY_STOP_USD if DAILY_STOP_USD > 0 else None
@@ -1027,11 +1040,16 @@ def main() -> None:
     daily_stop_threshold = min(thresholds) if thresholds else None
 
     daily_cols = st.columns(2, gap="small")
-    if daily_pnl_today is None or daily_stop_threshold is None:
+    if total_pnl_today is None or daily_stop_threshold is None:
         daily_cols[0].info("Daily stop: n/a (no closed trades yet).")
     else:
-        reason = f"{daily_pnl_today:+.2f} vs -{daily_stop_threshold:.2f} (pct={pct_threshold:.2f}, usd={usd_threshold:.2f})"
-        if daily_pnl_today <= -daily_stop_threshold:
+        closed_txt = f"{daily_pnl_today:+.2f}" if daily_pnl_today is not None else "n/a"
+        open_txt = f"{open_pnl_today:+.2f}" if open_pnl_today is not None else "n/a"
+        reason = (
+            f"{total_pnl_today:+.2f} vs -{daily_stop_threshold:.2f} "
+            f"(closed {closed_txt}, open {open_txt}; pct={pct_threshold:.2f}, usd={usd_threshold:.2f})"
+        )
+        if total_pnl_today <= -daily_stop_threshold:
             daily_cols[0].error(f"Daily stop ACTIVE: {reason}")
         else:
             daily_cols[0].success(f"Daily stop OK: {reason}")

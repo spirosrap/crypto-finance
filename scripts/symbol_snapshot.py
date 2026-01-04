@@ -47,7 +47,12 @@ from short_term_crypto_finder import (
 from coinbaseservice import CoinbaseService
 from perp_support import canonical_perp_symbol, perp_price_multiplier
 from trading.risk_thresholds import load_risk_thresholds
-from watchdog_close_old_positions import _get_portfolio_uuid
+from watchdog_close_old_positions import (
+    _extract_entry_price,
+    _extract_mark_price,
+    _extract_unrealized_pnl,
+    _get_portfolio_uuid,
+)
 
 try:
     from credentials import get_perps_credentials
@@ -266,6 +271,102 @@ def _daily_pnl_today(log_path: Path) -> Optional[float]:
         return float(pnl_today)
     except Exception:
         return None
+
+
+def _combine_pnl(closed_pnl: Optional[float], open_pnl: Optional[float]) -> Optional[float]:
+    if closed_pnl is None and open_pnl is None:
+        return None
+    total = 0.0
+    if closed_pnl is not None:
+        total += closed_pnl
+    if open_pnl is not None:
+        total += open_pnl
+    return total
+
+
+def _load_open_paper_pnl(path: Path = Path("trade_logs/paper_finder_open_positions.csv")) -> Optional[float]:
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return None
+    if "status" in df.columns:
+        df = df[df["status"].astype(str).str.upper() == "OPEN"]
+    if df.empty:
+        return 0.0
+    if "unrealized_pnl" in df.columns:
+        df["unrealized_pnl"] = pd.to_numeric(df["unrealized_pnl"], errors="coerce")
+        pnl = df["unrealized_pnl"].sum(min_count=1)
+        try:
+            return float(pnl)
+        except Exception:
+            return None
+    return None
+
+
+def _load_open_live_pnl() -> Optional[float]:
+    if not API_KEY_PERPS or not API_SECRET_PERPS:
+        return None
+    try:
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+    except Exception:
+        return None
+    portfolio_uuid = _get_portfolio_uuid(cb)
+    if not portfolio_uuid:
+        return None
+    try:
+        positions_response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
+    except Exception:
+        return None
+
+    def _from_currency(container, default: float = 0.0) -> Optional[float]:
+        if container is None:
+            return None
+        if isinstance(container, dict):
+            value = container.get("value")
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+        try:
+            return float(container)
+        except (TypeError, ValueError):
+            return default
+
+    summary_obj = positions_response.get("summary") if isinstance(positions_response, dict) else getattr(positions_response, "summary", None)
+    if summary_obj is not None:
+        summary_total = _from_currency(summary_obj.get("aggregated_pnl") if isinstance(summary_obj, dict) else getattr(summary_obj, "aggregated_pnl", None))
+        if summary_total is not None:
+            return summary_total
+
+    positions_raw = []
+    if isinstance(positions_response, dict):
+        positions_raw = positions_response.get("positions", []) or []
+    else:
+        positions_raw = getattr(positions_response, "positions", []) or []
+
+    total = 0.0
+    seen_any = False
+    for pos in positions_raw:
+        pos_dict = pos if isinstance(pos, dict) else pos.to_dict()
+        try:
+            net_size = float(pos_dict.get("net_size", 0) or 0.0)
+        except Exception:
+            net_size = 0.0
+        side_raw = str(pos_dict.get("position_side") or "").upper()
+        if "SHORT" in side_raw:
+            net_size = -abs(net_size)
+        else:
+            net_size = abs(net_size)
+        entry = _extract_entry_price(pos_dict)
+        mark = _extract_mark_price(pos_dict)
+        pnl = _extract_unrealized_pnl(pos_dict, net_size, entry, mark)
+        if pnl is None:
+            continue
+        total += float(pnl)
+        seen_any = True
+    return total if seen_any else None
 
 
 def _daily_stop_status(
@@ -861,8 +962,12 @@ def gate_scan(
         print("No symbols retrieved (check connectivity or liquidity filters).")
         return
 
-    live_daily_pnl = _daily_pnl_today(LIVE_CLOSED_LOG_PATH)
-    paper_daily_pnl = _daily_pnl_today(PAPER_CLOSED_LOG_PATH)
+    live_daily_closed = _daily_pnl_today(LIVE_CLOSED_LOG_PATH)
+    paper_daily_closed = _daily_pnl_today(PAPER_CLOSED_LOG_PATH)
+    live_open_pnl = _load_open_live_pnl()
+    paper_open_pnl = _load_open_paper_pnl()
+    live_daily_pnl = _combine_pnl(live_daily_closed, live_open_pnl)
+    paper_daily_pnl = _combine_pnl(paper_daily_closed, paper_open_pnl)
     live_stop, live_stop_msg = _daily_stop_status(
         pnl_today=live_daily_pnl,
         equity=daily_stop_equity,
