@@ -19,6 +19,10 @@
 - Gate-scan runner now auto-closes live positions on daily stop or BTC range break, and closes all paper positions with a matching reason.
 - New entries are suppressed when a guard triggers, so the cron runner exits safely.
 
+## January 04, 2026 - Live Snapshot Auto Refresh
+- Added `scripts/update_live_snapshot.py` and a 5‑minute cron to refresh live positions + USDC balance.
+- Dashboard now loads `logs/live_snapshot.json` on refresh, so Ctrl+R shows the latest snapshot without hitting Coinbase.
+
 ## January 03, 2026 - Equity Spike Then Reversal
 - Yesterday showed a big uptick in earnings, but it later reversed and the top equity gave back a significant chunk.
 - Paper trading resumed, but the timing was imperfect; equity is negative again even though nothing closed yet.

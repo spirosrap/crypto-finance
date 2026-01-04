@@ -39,6 +39,7 @@ For others, this repo can be useful as:
   - If the daily stop or BTC range-break guard triggers, it auto-closes live positions (`close_positions.py`) and paper positions (`paper_finder_simulator.py close --all`) and suppresses new entries.
 - **Paper Trade Updater (cron)**: `paper_finder_simulator.py update` runs every 5 minutes to keep paper P/L and expiries fresh; logs to `logs/paper_finder_update.log`.
 - **Watchdog Fill Poll (cron)**: `watchdog_close_old_positions.py --log-fills --skip-close --verbose` runs every 5 minutes to pull the latest fills from the Coinbase account and refresh the closed-trade log; logs to `logs/watchdog_close_update.log`.
+- **Live Snapshot Updater (cron)**: `scripts/update_live_snapshot.py` runs every 5 minutes to refresh live positions + USDC balance and write `logs/live_snapshot.json` for the dashboard; logs to `logs/live_snapshot_update.log`.
 - **Paper Progress Check**: `scripts/paper_trade_progress.py` prints progress to the 100‑trade target, win%, avg%, expectancy, and TP/SL/expiry split.
 - **Drawdown Breakdown**: `scripts/drawdown_breakdown.py` compares paper vs live over a rolling window (default 24h), highlighting closure reasons, loss symbols, ATR bucket stops, and spread‑OK stop rates.
 - **Paper Equity Report**: `scripts/paper_equity_report.py` writes a shareable equity curve (HTML + PNG) and `watchdog_dashboard.py` can export the same. Note: equity is daily‑aggregated, so one trading day = one point (drawdown reads 0% when there’s only one day).

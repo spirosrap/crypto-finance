@@ -67,6 +67,7 @@ PAPER_CLOSED_CSV = Path("trade_logs/paper_finder_closed_positions.csv")
 PAPER_OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
 STATE_PATH = Path("cache/watchdog_dashboard_state.json")
 RANGE_BREAK_STATUS_PATH = REPO_ROOT / "logs" / "range_break_status.json"
+LIVE_SNAPSHOT_PATH = REPO_ROOT / "logs" / "live_snapshot.json"
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -96,6 +97,69 @@ def load_range_break_status() -> Optional[dict]:
     if not isinstance(data, dict):
         return None
     return data
+
+
+def _load_live_snapshot() -> Optional[dict]:
+    if not LIVE_SNAPSHOT_PATH.exists():
+        return None
+    try:
+        data = json.loads(LIVE_SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _save_live_snapshot(df: pd.DataFrame, total_unrealized: float, usdc_balance: Optional[float]) -> None:
+    try:
+        LIVE_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if df.empty:
+            positions = []
+        else:
+            df_copy = df.copy()
+            if "opened_at" in df_copy.columns:
+                df_copy["opened_at"] = df_copy["opened_at"].apply(
+                    lambda v: v.isoformat() if isinstance(v, datetime) else (str(v) if v is not None else None)
+                )
+            positions = df_copy.to_dict(orient="records")
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "positions": positions,
+            "total_unrealized": total_unrealized,
+            "usdc_balance": usdc_balance,
+        }
+        LIVE_SNAPSHOT_PATH.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _prepare_open_positions_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    df = df.copy()
+    if "opened_at" in df.columns:
+        df["opened_at"] = pd.to_datetime(df["opened_at"], errors="coerce", utc=True)
+    numeric_cols = [
+        "net_size",
+        "entry_price",
+        "mark_price",
+        "unrealized_pnl",
+        "notional",
+        "hours_open",
+        "time_left_hours",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    if "hours_open" in df.columns:
+        df["hours_open"] = df["hours_open"].round(2)
+        df["hours_open_display"] = df["hours_open"].apply(_format_hours_minutes)
+    if "time_left_hours" in df.columns:
+        df["time_left_display"] = df["time_left_hours"].apply(_format_hours_minutes)
+    if "notional" in df.columns:
+        df = df.sort_values("notional", ascending=False)
+    return df
 
 
 def _load_dashboard_state() -> dict:
@@ -318,23 +382,7 @@ def load_open_positions() -> Tuple[pd.DataFrame, float]:
     if not rows:
         return pd.DataFrame(), summary_total
 
-    df = pd.DataFrame(rows)
-    df["opened_at"] = pd.to_datetime(df["opened_at"], errors="coerce")
-    numeric_cols = [
-        "net_size",
-        "entry_price",
-        "mark_price",
-        "unrealized_pnl",
-        "notional",
-        "hours_open",
-        "time_left_hours",
-    ]
-    for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["hours_open"] = df["hours_open"].round(2)
-    df["hours_open_display"] = df["hours_open"].apply(_format_hours_minutes)
-    df["time_left_display"] = df["time_left_hours"].apply(_format_hours_minutes)
-    df = df.sort_values("notional", ascending=False)
+    df = _prepare_open_positions_df(pd.DataFrame(rows))
     total_unrealized = summary_total if summary_total or summary_total == 0.0 else float(df["unrealized_pnl"].sum())
     return df, total_unrealized
 
@@ -723,6 +771,24 @@ def main() -> None:
         st.session_state["dashboard_state"] = _load_dashboard_state()
     if "paper_update_log" not in st.session_state:
         st.session_state["paper_update_log"] = ""
+    if "live_update_log" not in st.session_state:
+        st.session_state["live_update_log"] = ""
+    if "live_positions_df" not in st.session_state:
+        st.session_state["live_positions_df"] = pd.DataFrame()
+    if "live_total_unrealized" not in st.session_state:
+        st.session_state["live_total_unrealized"] = 0.0
+    if "live_usdc_balance" not in st.session_state:
+        st.session_state["live_usdc_balance"] = None
+    if source_mode == "live" and st.session_state["live_positions_df"].empty:
+        snapshot = _load_live_snapshot()
+        if snapshot:
+            cached_df = pd.DataFrame(snapshot.get("positions", []))
+            st.session_state["live_positions_df"] = _prepare_open_positions_df(cached_df)
+            try:
+                st.session_state["live_total_unrealized"] = float(snapshot.get("total_unrealized", 0.0))
+            except (TypeError, ValueError):
+                st.session_state["live_total_unrealized"] = 0.0
+            st.session_state["live_usdc_balance"] = snapshot.get("usdc_balance")
     if source_mode == "paper":
         if st.sidebar.button("Update paper trades"):
             with st.spinner("Updating paper trades..."):
@@ -754,6 +820,56 @@ def main() -> None:
                 st.sidebar.success("Paper trades updated.")
         if st.session_state["paper_update_log"]:
             st.sidebar.code(st.session_state["paper_update_log"])
+    else:
+        if st.sidebar.button("Update live data"):
+            with st.spinner("Updating live fills and positions..."):
+                conda_exe = os.environ.get("CONDA_EXE") or shutil.which("conda")
+                if conda_exe:
+                    cmd = [
+                        conda_exe,
+                        "run",
+                        "-n",
+                        "trade",
+                        "python",
+                        str(REPO_ROOT / "watchdog_close_old_positions.py"),
+                        "--log-fills",
+                        "--skip-close",
+                        "--fills-limit",
+                        "500",
+                    ]
+                else:
+                    cmd = [
+                        sys.executable,
+                        str(REPO_ROOT / "watchdog_close_old_positions.py"),
+                        "--log-fills",
+                        "--skip-close",
+                        "--fills-limit",
+                        "500",
+                    ]
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    cwd=REPO_ROOT,
+                )
+            output = (result.stdout or "") + (result.stderr or "")
+            st.session_state["live_update_log"] = output.strip()
+            if result.returncode != 0:
+                st.sidebar.error("Live fills update failed.")
+            else:
+                st.sidebar.success("Live fills updated.")
+            live_df, live_unreal = load_open_positions()
+            st.session_state["live_positions_df"] = _prepare_open_positions_df(live_df)
+            st.session_state["live_total_unrealized"] = live_unreal
+            st.session_state["live_usdc_balance"] = load_perp_usdc_balance()
+            _save_live_snapshot(
+                st.session_state["live_positions_df"],
+                st.session_state["live_total_unrealized"],
+                st.session_state["live_usdc_balance"],
+            )
+        if st.session_state["live_update_log"]:
+            st.sidebar.code(st.session_state["live_update_log"])
     default_csv = PAPER_CLOSED_CSV if source_mode == "paper" else Path("trade_logs/watchdog_closed_positions.csv")
     csv_candidates = sorted(Path("trade_logs").glob("*.csv"))
     csv_options = [str(path) for path in csv_candidates]
@@ -963,7 +1079,10 @@ def main() -> None:
     if source_mode == "paper":
         open_positions_df, total_unrealized = load_paper_open_positions(PAPER_OPEN_CSV)
     else:
-        open_positions_df, total_unrealized = load_open_positions()
+        open_positions_df = _prepare_open_positions_df(
+            st.session_state.get("live_positions_df", pd.DataFrame())
+        )
+        total_unrealized = st.session_state.get("live_total_unrealized", 0.0)
 
     if pipeline_snapshot is not None:
         if total_unrealized is not None:
@@ -999,7 +1118,10 @@ def main() -> None:
     position_label = "open position" if open_positions_count == 1 else "open positions"
     summary_total_value = float(total_unrealized) if total_unrealized is not None else 0.0
     pos_label = "live" if source_mode == "live" else "paper"
-    usdc_balance = load_perp_usdc_balance() if source_mode == "live" else None
+    if source_mode == "live":
+        usdc_balance = st.session_state.get("live_usdc_balance")
+    else:
+        usdc_balance = None
     exp_label_text = f"({open_positions_count}) Open positions ({pos_label}) | P/L {summary_total_value:+.2f}"
     if usdc_balance is not None:
         exp_label_text = f"{exp_label_text} | USDC {usdc_balance:,.2f}"
