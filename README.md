@@ -36,6 +36,7 @@ For others, this repo can be useful as:
   - After opening paper trades, run `python paper_finder_simulator.py update` so the dashboard shows live P/L.
 - **Gate-scan Paper Runner**: `scripts/run_gate_scan_paper.sh` automates the gate-scan + paper-trade flow (cron-friendly). Set `PYTHON_BIN`, `RUN_PAPER=0|1`, and `RUN_LIVE=0|1`; logs to `logs/gate_scan_paper.log`.
   - Scheduled every 4 hours to batch entries and reduce impulse/overtrading; it only opens new trades when gates pass.
+  - If the daily stop or BTC range-break guard triggers, it auto-closes live positions (`close_positions.py`) and paper positions (`paper_finder_simulator.py close --all`) and suppresses new entries.
 - **Paper Trade Updater (cron)**: `paper_finder_simulator.py update` runs every 5 minutes to keep paper P/L and expiries fresh; logs to `logs/paper_finder_update.log`.
 - **Watchdog Fill Poll (cron)**: `watchdog_close_old_positions.py --log-fills --skip-close --verbose` runs every 5 minutes to pull the latest fills from the Coinbase account and refresh the closed-trade log; logs to `logs/watchdog_close_update.log`.
 - **Paper Progress Check**: `scripts/paper_trade_progress.py` prints progress to the 100‑trade target, win%, avg%, expectancy, and TP/SL/expiry split.

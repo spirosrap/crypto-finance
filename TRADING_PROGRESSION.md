@@ -15,6 +15,10 @@
 - Conditions seem to be cooling down now.
 - Paper trading also closed some positive trades.
 
+## January 04, 2026 - Guard Auto-Closures Added
+- Gate-scan runner now auto-closes live positions on daily stop or BTC range break, and closes all paper positions with a matching reason.
+- New entries are suppressed when a guard triggers, so the cron runner exits safely.
+
 ## January 03, 2026 - Equity Spike Then Reversal
 - Yesterday showed a big uptick in earnings, but it later reversed and the top equity gave back a significant chunk.
 - Paper trading resumed, but the timing was imperfect; equity is negative again even though nothing closed yet.
