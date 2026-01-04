@@ -1,6 +1,7 @@
 from coinbase.rest import RESTClient
 from coinbase.rest import portfolios, products, orders
 from datetime import datetime, timedelta
+import os
 import time
 import uuid
 import logging
@@ -11,7 +12,14 @@ from concurrent.futures import wait
 
 class CoinbaseService:
     def __init__(self, api_key, api_secret):
-        self.client = RESTClient(api_key=api_key, api_secret=api_secret)
+        timeout_raw = os.getenv("COINBASE_REST_TIMEOUT", "").strip()
+        timeout = 30
+        if timeout_raw:
+            try:
+                timeout = int(timeout_raw)
+            except ValueError:
+                timeout = 30
+        self.client = RESTClient(api_key=api_key, api_secret=api_secret, timeout=timeout)
         self.DEFAULT_FEE_RATE = 0.005  # 0.5%
         self.MAX_RETRIES = 1
         self.RETRY_DELAY_SECONDS = 60

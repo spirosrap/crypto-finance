@@ -140,6 +140,7 @@ def _ensure_ccxt_exchange() -> "ccxt.Exchange":
             "apiKey": api_key,
             "secret": api_secret,
             "enableRateLimit": True,
+            "timeout": 30000,
         }
     )
     exchange.load_markets()
