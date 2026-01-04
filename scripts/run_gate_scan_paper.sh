@@ -51,6 +51,52 @@ SCAN_CMD=(
 OUTPUT=$("${SCAN_CMD[@]}" 2>&1)
 printf "%s\n" "${OUTPUT}"
 
+daily_stop_live_active=0
+daily_stop_paper_active=0
+range_break_active=0
+
+if printf "%s\n" "${OUTPUT}" | grep -qE "Daily stop \\(live\\): Daily stop \\(ACTIVE\\)"; then
+  daily_stop_live_active=1
+fi
+if printf "%s\n" "${OUTPUT}" | grep -qE "Daily stop \\(paper\\): Daily stop \\(ACTIVE\\)"; then
+  daily_stop_paper_active=1
+fi
+if printf "%s\n" "${OUTPUT}" | grep -qE "Range break .*\\b(breakout|breakdown)\\b"; then
+  range_break_active=1
+fi
+
+guard_active=0
+if [[ "${range_break_active}" == "1" ]]; then
+  guard_active=1
+elif [[ "${RUN_LIVE}" == "1" && "${daily_stop_live_active}" == "1" ]]; then
+  guard_active=1
+elif [[ "${RUN_PAPER}" == "1" && "${daily_stop_paper_active}" == "1" ]]; then
+  guard_active=1
+fi
+
+if [[ "${guard_active}" == "1" ]]; then
+  echo "Guard active: closing open positions and suppressing new entries."
+  if [[ "${RUN_LIVE}" == "1" && ( "${daily_stop_live_active}" == "1" || "${range_break_active}" == "1" ) ]]; then
+    echo "Closing live positions due to guard trigger."
+    if ! "${PYTHON_BIN}" "${REPO_ROOT}/close_positions.py"; then
+      echo "Live close_positions.py failed (continuing)."
+    fi
+  fi
+  if [[ "${RUN_PAPER}" == "1" && ( "${daily_stop_paper_active}" == "1" || "${range_break_active}" == "1" ) ]]; then
+    reason="guard_stop"
+    if [[ "${range_break_active}" == "1" ]]; then
+      reason="range_break"
+    elif [[ "${daily_stop_paper_active}" == "1" ]]; then
+      reason="daily_stop"
+    fi
+    echo "Closing paper trades due to guard trigger (${reason})."
+    if ! "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" close --all --reason "${reason}"; then
+      echo "Paper close failed (continuing)."
+    fi
+  fi
+  exit 0
+fi
+
 if [[ "${RUN_PAPER}" == "1" ]]; then
   paper_cmd=$(printf "%s\n" "${OUTPUT}" | awk '/^python scripts\/baseline_finder_from_snapshot.py /{print; exit}')
   if [[ -n "${paper_cmd}" ]]; then
