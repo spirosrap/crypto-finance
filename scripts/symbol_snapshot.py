@@ -99,6 +99,7 @@ def _apply_risk_threshold_overrides(args: argparse.Namespace, argv: List[str]) -
         "range_break_symbol": ("range_break_symbol", "--range-break-symbol"),
         "range_break_days": ("range_break_days", "--range-break-days"),
         "range_break_atr_mult": ("range_break_atr_mult", "--range-break-atr-mult"),
+        "range_break_confirmed_only": ("range_break_confirmed_only", "--range-break-confirmed-only"),
         "baseline_max_open": ("baseline_max_open", "--baseline-max-open"),
         "baseline_max_per_cluster": ("baseline_max_per_cluster", "--baseline-max-per-cluster"),
         "baseline_atr_mult": ("baseline_atr_mult", "--baseline-atr-mult"),
@@ -494,6 +495,7 @@ def _range_break_check(
     atr: float,
     days: int,
     atr_mult: float,
+    confirmed_only: bool,
 ) -> Optional[dict]:
     if df is None or df.empty:
         return None
@@ -508,7 +510,7 @@ def _range_break_check(
     try:
         range_high = float(prev["high"].max())
         range_low = float(prev["low"].min())
-        close = float(df["price"].iloc[-1])
+    close = float(df["price"].iloc[-1])
     except Exception:
         return None
     confirmed_close = None
@@ -518,11 +520,24 @@ def _range_break_check(
     except Exception:
         confirmed_close = None
     buffer = float(atr) * float(atr_mult)
-    breakout = close > range_high + buffer
-    breakdown = close < range_low - buffer
+    trigger_source = "confirmed" if confirmed_only else "intraday"
+    if confirmed_only and confirmed_close is None:
+        trigger_price = close
+        breakout = False
+        breakdown = False
+    else:
+        trigger_price = confirmed_close if confirmed_only else close
+        breakout = trigger_price > range_high + buffer
+        breakdown = trigger_price < range_low - buffer
     triggered = breakout or breakdown
     direction = "breakout" if breakout else "breakdown" if breakdown else "inside"
-    overage = (close - range_high - buffer) if breakout else (range_low - buffer - close) if breakdown else 0.0
+    overage = (
+        (trigger_price - range_high - buffer)
+        if breakout
+        else (range_low - buffer - trigger_price)
+        if breakdown
+        else 0.0
+    )
     confirmed_inside = None
     if confirmed_close is not None:
         confirmed_inside = (range_low - buffer) <= confirmed_close <= (range_high + buffer)
@@ -531,6 +546,8 @@ def _range_break_check(
         "range_low": range_low,
         "close": close,
         "confirmed_close": confirmed_close,
+        "trigger_source": trigger_source,
+        "trigger_price": float(trigger_price),
         "atr": float(atr),
         "buffer": buffer,
         "direction": direction,
@@ -1051,6 +1068,7 @@ def gate_scan(
     range_break_symbol: str,
     range_break_days: int,
     range_break_atr_mult: float,
+    range_break_confirmed_only: bool,
 ) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
@@ -1204,6 +1222,7 @@ def gate_scan(
                 atr=atr,
                 days=range_break_days,
                 atr_mult=range_break_atr_mult,
+                confirmed_only=range_break_confirmed_only,
             )
 
         try:
@@ -1334,11 +1353,14 @@ def gate_scan(
         buffer = range_break_info.get("buffer")
         overage = range_break_info.get("overage", 0.0)
         confirmed_close = range_break_info.get("confirmed_close")
+        trigger_source = range_break_info.get("trigger_source", "intraday")
         confirmed_txt = f"{confirmed_close:.2f}" if confirmed_close is not None else "n/a"
+        mode_txt = f"{trigger_source}"
         state = "ACTIVE (latched)" if range_break_latched else "ACTIVE"
         if range_break_active:
             range_break_msg = (
-                f"Range break {state}: {range_break_symbol_upper} {range_break_info['days']}d {direction} | "
+                f"Range break {state}: {range_break_symbol_upper} {range_break_info['days']}d {direction} "
+                f"({mode_txt}) | "
                 f"close={close:.2f} range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f} "
                 f"confirmed_close={confirmed_txt}"
             )
@@ -1346,7 +1368,7 @@ def gate_scan(
                 range_break_msg += f" over={overage:.2f}"
         else:
             range_break_msg = (
-                f"Range break OK: {range_break_symbol_upper} {range_break_info['days']}d inside | "
+                f"Range break OK: {range_break_symbol_upper} {range_break_info['days']}d inside ({mode_txt}) | "
                 f"close={close:.2f} range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f} "
                 f"confirmed_close={confirmed_txt}"
             )
@@ -1861,6 +1883,12 @@ def main() -> None:
         default=0.5,
         help="ATR multiple for range-break buffer (default: 0.5).",
     )
+    parser.add_argument(
+        "--range-break-confirmed-only",
+        action="store_true",
+        default=None,
+        help="Trigger range-breaks only on confirmed daily closes (default: false).",
+    )
     args = parser.parse_args()
     _apply_risk_threshold_overrides(args, sys.argv[1:])
 
@@ -1891,6 +1919,7 @@ def main() -> None:
             range_break_symbol=args.range_break_symbol,
             range_break_days=args.range_break_days,
             range_break_atr_mult=args.range_break_atr_mult,
+            range_break_confirmed_only=bool(args.range_break_confirmed_only),
         )
         return
 

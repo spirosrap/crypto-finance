@@ -16,6 +16,7 @@ daily_stop_escalate_count: 7
 range_break_symbol: BTC
 range_break_days: 7
 range_break_atr_mult: 0.5
+range_break_confirmed_only: true
 
 # Baseline gate defaults
 baseline_max_open: 10
