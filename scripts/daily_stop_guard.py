@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -44,6 +45,7 @@ PAPER_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "paper_finder_closed_position
 PAPER_OPEN_LOG_PATH = REPO_ROOT / "trade_logs" / "paper_finder_open_positions.csv"
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
+HISTORY_PATH = REPO_ROOT / "logs" / "daily_stop_history.json"
 
 
 def _load_dotenv_if_available() -> None:
@@ -183,6 +185,110 @@ def _threshold(equity: float, stop_pct: float, stop_usd: float) -> Optional[floa
     return min(thresholds)
 
 
+def _load_history() -> dict:
+    if not HISTORY_PATH.exists():
+        return {"live": {"stops": [], "pause_until": None}}
+    try:
+        data = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {"live": {"stops": [], "pause_until": None}}
+    if not isinstance(data, dict):
+        return {"live": {"stops": [], "pause_until": None}}
+    return data
+
+
+def _save_history(data: dict) -> None:
+    try:
+        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        HISTORY_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _parse_dates(values: list[str]) -> list[date]:
+    dates: list[date] = []
+    for val in values:
+        try:
+            dates.append(date.fromisoformat(str(val)))
+        except Exception:
+            continue
+    return dates
+
+
+def _count_recent(stops: list[date], today: date, window_days: int) -> int:
+    if window_days <= 0:
+        return 0
+    cutoff = today - timedelta(days=window_days - 1)
+    return sum(1 for d in stops if d >= cutoff)
+
+
+def _update_live_stop_history(
+    *,
+    triggered: bool,
+    today: date,
+    streak_window_days: int,
+    streak_count: int,
+    pause_days: int,
+    warn_window_days: int,
+    warn_count: int,
+    escalate_window_days: int,
+    escalate_count: int,
+) -> dict:
+    history = _load_history()
+    live = history.get("live", {}) if isinstance(history.get("live", {}), dict) else {}
+    stops_raw = live.get("stops", [])
+    if not isinstance(stops_raw, list):
+        stops_raw = []
+    stops = _parse_dates([str(val) for val in stops_raw])
+
+    if triggered and today not in stops:
+        stops.append(today)
+
+    max_window = max(streak_window_days, warn_window_days, escalate_window_days, 1)
+    cutoff = today - timedelta(days=max_window - 1)
+    stops = [d for d in stops if d >= cutoff]
+    stops.sort()
+
+    pause_until = None
+    existing_pause = live.get("pause_until")
+    if existing_pause:
+        try:
+            pause_until = date.fromisoformat(str(existing_pause))
+        except Exception:
+            pause_until = None
+
+    streak_hits = _count_recent(stops, today, streak_window_days)
+    warn_hits = _count_recent(stops, today, warn_window_days)
+    escalate_hits = _count_recent(stops, today, escalate_window_days)
+
+    if streak_count > 0 and streak_hits >= streak_count:
+        candidate = today + timedelta(days=max(pause_days, 1))
+        if pause_until is None or candidate > pause_until:
+            pause_until = candidate
+
+    if pause_until is not None and pause_until < today:
+        pause_until = None
+
+    history["live"] = {
+        "stops": [d.isoformat() for d in stops],
+        "pause_until": pause_until.isoformat() if pause_until else None,
+    }
+    _save_history(history)
+
+    return {
+        "streak_hits": streak_hits,
+        "warn_hits": warn_hits,
+        "escalate_hits": escalate_hits,
+        "pause_until": pause_until,
+        "streak_window_days": streak_window_days,
+        "warn_window_days": warn_window_days,
+        "escalate_window_days": escalate_window_days,
+        "streak_count": streak_count,
+        "warn_count": warn_count,
+        "escalate_count": escalate_count,
+    }
+
+
 def _run(cmd: list[str]) -> int:
     return subprocess.run(cmd, cwd=REPO_ROOT, check=False).returncode
 
@@ -193,6 +299,13 @@ def main() -> int:
     stop_pct = float(thresholds.get("daily_stop_pct", 2.0) or 0.0)
     stop_usd = float(thresholds.get("daily_stop_usd", 20.0) or 0.0)
     stop_equity = float(thresholds.get("daily_stop_equity", 1000.0) or 0.0)
+    streak_window_days = int(thresholds.get("daily_stop_streak_window_days", 7) or 7)
+    streak_count = int(thresholds.get("daily_stop_streak_count", 3) or 3)
+    pause_days = int(thresholds.get("daily_stop_pause_days", 3) or 3)
+    warn_window_days = int(thresholds.get("daily_stop_warn_window_days", 14) or 14)
+    warn_count = int(thresholds.get("daily_stop_warn_count", 5) or 5)
+    escalate_window_days = int(thresholds.get("daily_stop_escalate_window_days", 21) or 21)
+    escalate_count = int(thresholds.get("daily_stop_escalate_count", 7) or 7)
     daily_stop_threshold = _threshold(stop_equity, stop_pct, stop_usd)
 
     live_closed = _daily_pnl_today(LIVE_CLOSED_LOG_PATH)
@@ -215,6 +328,41 @@ def main() -> int:
 
     triggered_live = daily_stop_threshold is not None and live_total is not None and live_total <= -daily_stop_threshold
     triggered_paper = daily_stop_threshold is not None and paper_total is not None and paper_total <= -daily_stop_threshold
+
+    today = datetime.now(UTC).date()
+    live_status = _update_live_stop_history(
+        triggered=bool(triggered_live),
+        today=today,
+        streak_window_days=streak_window_days,
+        streak_count=streak_count,
+        pause_days=pause_days,
+        warn_window_days=warn_window_days,
+        warn_count=warn_count,
+        escalate_window_days=escalate_window_days,
+        escalate_count=escalate_count,
+    )
+
+    pause_until = live_status.get("pause_until")
+    if pause_until:
+        print(
+            f"Live pause active: {live_status['streak_hits']}/{streak_count} stops in "
+            f"{streak_window_days}d (pause until {pause_until})."
+        )
+    else:
+        print(
+            f"Live stop streak: {live_status['streak_hits']}/{streak_count} stops in "
+            f"{streak_window_days}d."
+        )
+    if warn_count > 0 and live_status["warn_hits"] >= warn_count:
+        print(
+            f"Warning: {live_status['warn_hits']}/{warn_count} daily stops in "
+            f"{warn_window_days}d. Consider reducing size by 50%."
+        )
+    if escalate_count > 0 and live_status["escalate_hits"] >= escalate_count:
+        print(
+            f"Escalation: {live_status['escalate_hits']}/{escalate_count} daily stops in "
+            f"{escalate_window_days}d. Tighten filters or switch to paper-only."
+        )
 
     if triggered_live and run_live:
         print("Daily stop ACTIVE (live): closing live positions.")

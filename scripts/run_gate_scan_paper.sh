@@ -54,6 +54,7 @@ printf "%s\n" "${OUTPUT}"
 daily_stop_live_active=0
 daily_stop_paper_active=0
 range_break_active=0
+live_pause_active=0
 
 if printf "%s\n" "${OUTPUT}" | grep -qE "Daily stop \\(live\\): Daily stop \\(ACTIVE\\)"; then
   daily_stop_live_active=1
@@ -64,40 +65,41 @@ fi
 if printf "%s\n" "${OUTPUT}" | grep -qE "Range break .*\\b(breakout|breakdown)\\b"; then
   range_break_active=1
 fi
-
-guard_active=0
-if [[ "${range_break_active}" == "1" ]]; then
-  guard_active=1
-elif [[ "${RUN_LIVE}" == "1" && "${daily_stop_live_active}" == "1" ]]; then
-  guard_active=1
-elif [[ "${RUN_PAPER}" == "1" && "${daily_stop_paper_active}" == "1" ]]; then
-  guard_active=1
+if printf "%s\n" "${OUTPUT}" | grep -qE "Live pause \\(stop streak\\): ACTIVE"; then
+  live_pause_active=1
 fi
 
-if [[ "${guard_active}" == "1" ]]; then
-  echo "Guard active: closing open positions and suppressing new entries."
-  if [[ "${RUN_LIVE}" == "1" && ( "${daily_stop_live_active}" == "1" || "${range_break_active}" == "1" ) ]]; then
-    echo "Closing live positions due to guard trigger."
+if [[ "${range_break_active}" == "1" ]]; then
+  echo "Guard active: range break triggered. Closing positions and suppressing new entries."
+  if [[ "${RUN_LIVE}" == "1" ]]; then
+    echo "Closing live positions due to range break."
     if ! "${PYTHON_BIN}" "${REPO_ROOT}/close_positions.py"; then
       echo "Live close_positions.py failed (continuing)."
     fi
   fi
-  if [[ "${RUN_PAPER}" == "1" && ( "${daily_stop_paper_active}" == "1" || "${range_break_active}" == "1" ) ]]; then
-    reason="guard_stop"
-    if [[ "${range_break_active}" == "1" ]]; then
-      reason="range_break"
-    elif [[ "${daily_stop_paper_active}" == "1" ]]; then
-      reason="daily_stop"
-    fi
-    echo "Closing paper trades due to guard trigger (${reason})."
-    if ! "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" close --all --reason "${reason}"; then
+  if [[ "${RUN_PAPER}" == "1" ]]; then
+    echo "Closing paper trades due to range break."
+    if ! "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" close --all --reason "range_break"; then
       echo "Paper close failed (continuing)."
     fi
   fi
   exit 0
 fi
 
-if [[ "${RUN_PAPER}" == "1" ]]; then
+if [[ "${RUN_LIVE}" == "1" && "${daily_stop_live_active}" == "1" ]]; then
+  echo "Daily stop active (live): closing live positions and suppressing live entries."
+  if ! "${PYTHON_BIN}" "${REPO_ROOT}/close_positions.py"; then
+    echo "Live close_positions.py failed (continuing)."
+  fi
+fi
+if [[ "${RUN_PAPER}" == "1" && "${daily_stop_paper_active}" == "1" ]]; then
+  echo "Daily stop active (paper): closing paper positions and suppressing paper entries."
+  if ! "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" close --all --reason "daily_stop"; then
+    echo "Paper close failed (continuing)."
+  fi
+fi
+
+if [[ "${RUN_PAPER}" == "1" && "${daily_stop_paper_active}" != "1" ]]; then
   paper_cmd=$(printf "%s\n" "${OUTPUT}" | awk '/^python scripts\/baseline_finder_from_snapshot.py /{print; exit}')
   if [[ -n "${paper_cmd}" ]]; then
     paper_cmd=${paper_cmd/#python /${PYTHON_BIN} }
@@ -105,7 +107,7 @@ if [[ "${RUN_PAPER}" == "1" ]]; then
   fi
 fi
 
-if [[ "${RUN_LIVE}" == "1" ]]; then
+if [[ "${RUN_LIVE}" == "1" && "${daily_stop_live_active}" != "1" && "${live_pause_active}" != "1" ]]; then
   sleep "${LIVE_DELAY_SECONDS}"
   while IFS= read -r line; do
     if [[ "${line}" == python\ ccxt_trade_perp.py* ]]; then
@@ -117,4 +119,6 @@ if [[ "${RUN_LIVE}" == "1" ]]; then
       sleep "${LIVE_SLEEP_SECONDS}"
     fi
   done <<< "${OUTPUT}"
+elif [[ "${RUN_LIVE}" == "1" && "${live_pause_active}" == "1" ]]; then
+  echo "Live pause active (stop streak): skipping live commands."
 fi

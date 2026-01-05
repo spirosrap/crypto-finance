@@ -4,6 +4,13 @@
 daily_stop_pct: 2.0
 daily_stop_usd: 20.0
 daily_stop_equity: 1000.0
+daily_stop_streak_window_days: 7
+daily_stop_streak_count: 3
+daily_stop_pause_days: 3
+daily_stop_warn_window_days: 14
+daily_stop_warn_count: 5
+daily_stop_escalate_window_days: 21
+daily_stop_escalate_count: 7
 
 # Range-break circuit
 range_break_symbol: BTC

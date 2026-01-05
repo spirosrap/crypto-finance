@@ -13,7 +13,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -38,6 +38,7 @@ EXCLUDED_PERPS_PATH = REPO_ROOT / "config" / "excluded_perps.txt"
 LIVE_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "watchdog_closed_positions.csv"
 PAPER_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "paper_finder_closed_positions.csv"
 RANGE_BREAK_STATUS_PATH = REPO_ROOT / "logs" / "range_break_status.json"
+DAILY_STOP_HISTORY_PATH = REPO_ROOT / "logs" / "daily_stop_history.json"
 
 from short_term_crypto_finder import (
     PROFILE_PRESETS,
@@ -393,6 +394,86 @@ def _daily_stop_status(
     status = "ACTIVE" if triggered else "OK"
     reason = f"{pnl_today:+.2f} <= -{threshold:.2f}" if triggered else f"{pnl_today:+.2f} > -{threshold:.2f}"
     return triggered, f"Daily stop ({status}): {reason} (pct={pct_txt}, usd={usd_txt})"
+
+
+def _load_daily_stop_history(path: Path = DAILY_STOP_HISTORY_PATH) -> dict:
+    if not path.exists():
+        return {"live": {"stops": [], "pause_until": None}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"live": {"stops": [], "pause_until": None}}
+    if not isinstance(data, dict):
+        return {"live": {"stops": [], "pause_until": None}}
+    return data
+
+
+def _parse_stop_dates(values: List[str]) -> List[date]:
+    dates: List[date] = []
+    for val in values:
+        try:
+            dates.append(date.fromisoformat(str(val)))
+        except Exception:
+            continue
+    return dates
+
+
+def _count_recent(stops: List[date], today: date, window_days: int) -> int:
+    if window_days <= 0:
+        return 0
+    cutoff = today - timedelta(days=window_days - 1)
+    return sum(1 for d in stops if d >= cutoff)
+
+
+def _live_pause_status(
+    *,
+    streak_window_days: int,
+    streak_count: int,
+    warn_window_days: int,
+    warn_count: int,
+    escalate_window_days: int,
+    escalate_count: int,
+) -> dict:
+    history = _load_daily_stop_history()
+    live = history.get("live", {}) if isinstance(history.get("live", {}), dict) else {}
+    stops_raw = live.get("stops", [])
+    if not isinstance(stops_raw, list):
+        stops_raw = []
+    stops = _parse_stop_dates([str(val) for val in stops_raw])
+
+    today = datetime.now(timezone.utc).date()
+    max_window = max(streak_window_days, warn_window_days, escalate_window_days, 1)
+    cutoff = today - timedelta(days=max_window - 1)
+    stops = [d for d in stops if d >= cutoff]
+
+    pause_until = None
+    existing_pause = live.get("pause_until")
+    if existing_pause:
+        try:
+            pause_until = date.fromisoformat(str(existing_pause))
+        except Exception:
+            pause_until = None
+    if pause_until is not None and pause_until < today:
+        pause_until = None
+
+    streak_hits = _count_recent(stops, today, streak_window_days)
+    warn_hits = _count_recent(stops, today, warn_window_days)
+    escalate_hits = _count_recent(stops, today, escalate_window_days)
+    pause_active = pause_until is not None and pause_until >= today
+
+    return {
+        "streak_hits": streak_hits,
+        "warn_hits": warn_hits,
+        "escalate_hits": escalate_hits,
+        "pause_until": pause_until,
+        "pause_active": pause_active,
+        "streak_window_days": streak_window_days,
+        "warn_window_days": warn_window_days,
+        "escalate_window_days": escalate_window_days,
+        "streak_count": streak_count,
+        "warn_count": warn_count,
+        "escalate_count": escalate_count,
+    }
 
 
 def _range_break_check(
@@ -980,6 +1061,21 @@ def gate_scan(
         stop_pct=daily_stop_pct,
         stop_usd=daily_stop_usd,
     )
+    thresholds = load_risk_thresholds()
+    streak_window_days = int(thresholds.get("daily_stop_streak_window_days", 7) or 7)
+    streak_count = int(thresholds.get("daily_stop_streak_count", 3) or 3)
+    warn_window_days = int(thresholds.get("daily_stop_warn_window_days", 14) or 14)
+    warn_count = int(thresholds.get("daily_stop_warn_count", 5) or 5)
+    escalate_window_days = int(thresholds.get("daily_stop_escalate_window_days", 21) or 21)
+    escalate_count = int(thresholds.get("daily_stop_escalate_count", 7) or 7)
+    live_pause_status = _live_pause_status(
+        streak_window_days=streak_window_days,
+        streak_count=streak_count,
+        warn_window_days=warn_window_days,
+        warn_count=warn_count,
+        escalate_window_days=escalate_window_days,
+        escalate_count=escalate_count,
+    )
     range_break_info: Optional[dict] = None
 
     range_break_msg = "Range break: n/a"
@@ -988,6 +1084,35 @@ def gate_scan(
     if baseline_commands or baseline_paper_command:
         print(f"Daily stop (live): {live_stop_msg}")
         print(f"Daily stop (paper): {paper_stop_msg}")
+        if live_pause_status["pause_active"]:
+            pause_until = live_pause_status["pause_until"]
+            pause_until_txt = pause_until.isoformat() if pause_until else "n/a"
+            print(
+                "Live pause (stop streak): ACTIVE until "
+                f"{pause_until_txt} ({live_pause_status['streak_hits']}/{live_pause_status['streak_count']} in "
+                f"{live_pause_status['streak_window_days']}d)"
+            )
+        else:
+            print(
+                "Live pause (stop streak): OK "
+                f"({live_pause_status['streak_hits']}/{live_pause_status['streak_count']} in "
+                f"{live_pause_status['streak_window_days']}d)"
+            )
+        if live_pause_status["warn_count"] > 0 and live_pause_status["warn_hits"] >= live_pause_status["warn_count"]:
+            print(
+                "Live stop warning: "
+                f"{live_pause_status['warn_hits']}/{live_pause_status['warn_count']} in "
+                f"{live_pause_status['warn_window_days']}d (consider reducing size 50%)"
+            )
+        if (
+            live_pause_status["escalate_count"] > 0
+            and live_pause_status["escalate_hits"] >= live_pause_status["escalate_count"]
+        ):
+            print(
+                "Live stop escalation: "
+                f"{live_pause_status['escalate_hits']}/{live_pause_status['escalate_count']} in "
+                f"{live_pause_status['escalate_window_days']}d (tighten filters or paper-only)"
+            )
 
     min_volume = float(getattr(cfg, "min_volume_24h", 0.0) or 0.0)
     min_ratio = float(getattr(cfg, "min_volume_market_cap_ratio", 0.0) or 0.0)
