@@ -105,6 +105,7 @@
   - `scripts/paper_trade_progress.py`: quick status on paper trades (count vs target, win%/avg%, expectancy, TP/SL/expiry split).
   - `scripts/paper_equity_report.py`: shareable equity report (HTML + PNG). Uses daily aggregation, so one day = one point and drawdown is 0% with a single day.
   - Cron snapshot for reproducible setup: `docs/cron.md` (install with `crontab docs/cron.md`, then update paths/envs for the new host).
+  - Daily stop streak guard: `scripts/daily_stop_guard.py` records live daily stop hits in `logs/daily_stop_history.json` and enforces pause/warn thresholds configured in `config/risk_thresholds.yaml`.
 
 ## Communication and Delivery Expectations
 - Be explicit about assumptions, especially around time ranges and data availability.

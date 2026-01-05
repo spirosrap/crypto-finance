@@ -18,6 +18,11 @@
 ## January 05, 2026 - Dashboard Health Threshold Adjusted
 - Raised the “pipeline attention” alert threshold from 6h to 12h so it matches the current cadence.
 
+## January 05, 2026 - Daily Stop Streak Guard Added
+- Added a live pause rule: 3 daily stops in 7 days triggers a 3‑day live pause.
+- New warnings: 5 daily stops in 14 days → reduce size 50%; 7 in 21 days → tighten filters or go paper‑only.
+- State is stored in `logs/daily_stop_history.json` and configured via `config/risk_thresholds.yaml`.
+
 ## January 04, 2026 - Positive Closes, Cooling Conditions
 - A lot of trades closed positive yesterday and live trading is considerably up.
 - Conditions seem to be cooling down now.

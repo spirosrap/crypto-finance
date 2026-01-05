@@ -46,6 +46,7 @@ For others, this repo can be useful as:
 - **Paper Equity Report**: `scripts/paper_equity_report.py` writes a shareable equity curve (HTML + PNG) and `watchdog_dashboard.py` can export the same. Note: equity is daily‑aggregated, so one trading day = one point (drawdown reads 0% when there’s only one day).
 - **Risk Guards (automated)**: daily loss gate (default −2%/−$20 of $1k) and BTC range‑break circuit (7‑day range ±0.5× ATR) suppress new entries until manual review.
   - Range-break status: **inside** = OK to trade; **outside** = pause.
+- **Daily Stop Streak Guard**: if live daily stop hits 3 times in 7 days, live entries pause for 3 days; 5 hits in 14 days prompts a size‑reduction warning; 7 hits in 21 days prompts a tighten‑filters/paper‑only warning. Stored in `logs/daily_stop_history.json` and configured in `config/risk_thresholds.yaml`.
 - **Current Paper Experiment (until 100 trades)**: baseline ATR exits (`atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped`) with liquidity/spread gates and ATR ≤ 1.5× cap. Live rules stay unchanged until the 100‑trade sample is complete.
 - **Metric glossary**:
   - `profit_loss` = USD P&L per trade (drives equity curve).
