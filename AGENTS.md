@@ -104,6 +104,7 @@
   - `scripts/duckdb_query.py`: run ad-hoc SQL over parquet/CSV diagnostics (via DuckDB).
   - `scripts/paper_trade_progress.py`: quick status on paper trades (count vs target, win%/avg%, expectancy, TP/SL/expiry split).
   - `scripts/paper_equity_report.py`: shareable equity report (HTML + PNG). Uses daily aggregation, so one day = one point and drawdown is 0% with a single day.
+  - Cron snapshot for reproducible setup: `docs/cron.md` (install with `crontab docs/cron.md`, then update paths/envs for the new host).
 
 ## Communication and Delivery Expectations
 - Be explicit about assumptions, especially around time ranges and data availability.
