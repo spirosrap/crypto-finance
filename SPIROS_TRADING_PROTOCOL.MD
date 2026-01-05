@@ -88,6 +88,7 @@
 ## 10. Mindset Anchors
 - Small losses are rent; big losses are self-inflicted fines.
 - Edge = (clean setups x disciplined execution) - error tax.
+  - Guardrails preserve edge by preventing good days from being erased by bad streaks.
 - Cash is a position; flat is acceptable when clarity fades.
 - Trade what is happening, not what should happen.
 

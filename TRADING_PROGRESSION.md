@@ -10,6 +10,10 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−2%/−$20) + BTC range‑break circuit now auto‑close live/paper and suppress new entries until the daily reset or a confirmed daily close re-enters range±buffer (latched; intraday moves don’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live resumed after the Jan 1 stop and is stronger post‑guard; paper resumed after its halt and is catching up. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 05, 2026 - Edge vs Risk Control Framing
+- Edge shows up on the good days; risk control keeps those gains from getting erased.
+- Guardrails are meant to preserve the upside, not create it.
+
 ## January 05, 2026 - Range-Break Trigger Uses Confirmed Close
 - Range-break now triggers using **confirmed daily closes** only, to avoid intraday flip‑flops.
 - Latch still clears only after a confirmed daily close returns inside the range±buffer.
