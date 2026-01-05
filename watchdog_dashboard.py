@@ -1072,6 +1072,10 @@ def main() -> None:
         except (TypeError, ValueError):
             close = 0.0
         try:
+            confirmed_close = float(range_status.get("confirmed_close", 0.0))
+        except (TypeError, ValueError):
+            confirmed_close = 0.0
+        try:
             range_low = float(range_status.get("range_low", 0.0))
         except (TypeError, ValueError):
             range_low = 0.0
@@ -1088,8 +1092,8 @@ def main() -> None:
         triggered = bool(range_status.get("triggered")) or latched
         state = "latched" if latched else "live"
         msg = (
-            f"{symbol} {days}d {direction} ({state}) | close={close:.2f} range={range_low:.2f}-{range_high:.2f} "
-            f"buffer={buffer:.2f} (ATRx{atr_mult:.2f})"
+            f"{symbol} {days}d {direction} ({state}) | close={close:.2f} confirmed={confirmed_close:.2f} "
+            f"range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f} (ATRx{atr_mult:.2f})"
         )
         if triggered:
             daily_cols[1].error(f"Range break ACTIVE: {msg}")
