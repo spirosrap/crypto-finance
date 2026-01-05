@@ -15,6 +15,9 @@
 - Paper trades showed a similar pattern.
 - Trading continues today even though I expected the daily stop to trigger.
 
+## January 05, 2026 - Dashboard Health Threshold Adjusted
+- Raised the “pipeline attention” alert threshold from 6h to 12h so it matches the current cadence.
+
 ## January 04, 2026 - Positive Closes, Cooling Conditions
 - A lot of trades closed positive yesterday and live trading is considerably up.
 - Conditions seem to be cooling down now.

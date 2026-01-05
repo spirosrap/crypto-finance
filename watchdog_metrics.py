@@ -188,9 +188,9 @@ def _determine_health(snapshot: MetricsSnapshot) -> Tuple[str, Tuple[str, ...]]:
     if snapshot.total_trades == 0:
         return "warn", ("No closed trades recorded yet.",)
 
-    if snapshot.latest_closed_age_seconds > 6 * 3600:
+    if snapshot.latest_closed_age_seconds > 12 * 3600:
         level = "warn"
-        reasons.append("Logs older than 6h.")
+        reasons.append("Logs older than 12h.")
 
     if snapshot.recent_trades_7d >= 5 and snapshot.recent_expectancy_currency_7d < 0:
         level = "warn"
