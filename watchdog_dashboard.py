@@ -1084,9 +1084,11 @@ def main() -> None:
         except (TypeError, ValueError):
             buffer = 0.0
         direction = str(range_status.get("direction", "inside"))
-        triggered = bool(range_status.get("triggered"))
+        latched = bool(range_status.get("latched"))
+        triggered = bool(range_status.get("triggered")) or latched
+        state = "latched" if latched else "live"
         msg = (
-            f"{symbol} {days}d {direction} | close={close:.2f} range={range_low:.2f}-{range_high:.2f} "
+            f"{symbol} {days}d {direction} ({state}) | close={close:.2f} range={range_low:.2f}-{range_high:.2f} "
             f"buffer={buffer:.2f} (ATRx{atr_mult:.2f})"
         )
         if triggered:

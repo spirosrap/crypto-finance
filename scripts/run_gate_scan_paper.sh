@@ -62,7 +62,7 @@ fi
 if printf "%s\n" "${OUTPUT}" | grep -qE "Daily stop \\(paper\\): Daily stop \\(ACTIVE\\)"; then
   daily_stop_paper_active=1
 fi
-if printf "%s\n" "${OUTPUT}" | grep -qE "Range break .*\\b(breakout|breakdown)\\b"; then
+if printf "%s\n" "${OUTPUT}" | grep -qE "Range break ACTIVE"; then
   range_break_active=1
 fi
 if printf "%s\n" "${OUTPUT}" | grep -qE "Live pause \\(stop streak\\): ACTIVE"; then

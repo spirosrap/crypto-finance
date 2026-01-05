@@ -408,6 +408,18 @@ def _load_daily_stop_history(path: Path = DAILY_STOP_HISTORY_PATH) -> dict:
     return data
 
 
+def _load_range_break_status(path: Path = RANGE_BREAK_STATUS_PATH) -> Optional[dict]:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
 def _parse_stop_dates(values: List[str]) -> List[date]:
     dates: List[date] = []
     for val in values:
@@ -499,21 +511,32 @@ def _range_break_check(
         close = float(df["price"].iloc[-1])
     except Exception:
         return None
+    confirmed_close = None
+    try:
+        if len(df) >= 2:
+            confirmed_close = float(df["price"].iloc[-2])
+    except Exception:
+        confirmed_close = None
     buffer = float(atr) * float(atr_mult)
     breakout = close > range_high + buffer
     breakdown = close < range_low - buffer
     triggered = breakout or breakdown
     direction = "breakout" if breakout else "breakdown" if breakdown else "inside"
     overage = (close - range_high - buffer) if breakout else (range_low - buffer - close) if breakdown else 0.0
+    confirmed_inside = None
+    if confirmed_close is not None:
+        confirmed_inside = (range_low - buffer) <= confirmed_close <= (range_high + buffer)
     return {
         "range_high": range_high,
         "range_low": range_low,
         "close": close,
+        "confirmed_close": confirmed_close,
         "atr": float(atr),
         "buffer": buffer,
         "direction": direction,
         "triggered": bool(triggered),
         "overage": float(overage),
+        "confirmed_inside": confirmed_inside,
         "days": lookback,
         "atr_mult": float(atr_mult),
     }
@@ -1080,6 +1103,8 @@ def gate_scan(
 
     range_break_msg = "Range break: n/a"
     range_break_active = False
+    range_break_latched = False
+    range_break_latched_since = None
     range_break_symbol_upper = range_break_symbol.upper()
     if baseline_commands or baseline_paper_command:
         print(f"Daily stop (live): {live_stop_msg}")
@@ -1274,19 +1299,57 @@ def gate_scan(
             pass
 
     if range_break_info is not None:
-        range_break_active = bool(range_break_info.get("triggered"))
+        triggered_now = bool(range_break_info.get("triggered"))
+        confirmed_inside = range_break_info.get("confirmed_inside")
+        prev_status = _load_range_break_status() or {}
+        prev_latched = bool(prev_status.get("latched"))
+        prev_direction = str(prev_status.get("direction") or "")
+        prev_latched_since = prev_status.get("latched_since")
+
+        if triggered_now:
+            range_break_latched = True
+            if not prev_latched_since:
+                range_break_latched_since = datetime.now(timezone.utc).isoformat()
+            else:
+                range_break_latched_since = prev_latched_since
+        elif prev_latched:
+            if confirmed_inside is True:
+                range_break_latched = False
+                range_break_latched_since = None
+            else:
+                range_break_latched = True
+                range_break_latched_since = prev_latched_since
+
+        if range_break_latched and not triggered_now and prev_direction in {"breakout", "breakdown"}:
+            range_break_info["direction"] = prev_direction
+
+        range_break_info["latched"] = range_break_latched
+        range_break_info["latched_since"] = range_break_latched_since
+
+        range_break_active = triggered_now or range_break_latched
         direction = range_break_info.get("direction", "inside")
         range_high = range_break_info.get("range_high")
         range_low = range_break_info.get("range_low")
         close = range_break_info.get("close")
         buffer = range_break_info.get("buffer")
         overage = range_break_info.get("overage", 0.0)
-        range_break_msg = (
-            f"Range break ({range_break_symbol_upper}, {range_break_info['days']}d, {range_break_info['atr_mult']:.2f}x ATR): "
-            f"{direction} | close={close:.2f} range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f}"
-        )
+        confirmed_close = range_break_info.get("confirmed_close")
+        confirmed_txt = f"{confirmed_close:.2f}" if confirmed_close is not None else "n/a"
+        state = "ACTIVE (latched)" if range_break_latched else "ACTIVE"
         if range_break_active:
-            range_break_msg += f" over={overage:.2f}"
+            range_break_msg = (
+                f"Range break {state}: {range_break_symbol_upper} {range_break_info['days']}d {direction} | "
+                f"close={close:.2f} range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f} "
+                f"confirmed_close={confirmed_txt}"
+            )
+            if triggered_now:
+                range_break_msg += f" over={overage:.2f}"
+        else:
+            range_break_msg = (
+                f"Range break OK: {range_break_symbol_upper} {range_break_info['days']}d inside | "
+                f"close={close:.2f} range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f} "
+                f"confirmed_close={confirmed_txt}"
+            )
     print(range_break_msg)
     print(f"Top {min(top, len(rows))} closest to RR {rr_target}:")
 
