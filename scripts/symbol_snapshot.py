@@ -510,7 +510,7 @@ def _range_break_check(
     try:
         range_high = float(prev["high"].max())
         range_low = float(prev["low"].min())
-    close = float(df["price"].iloc[-1])
+        close = float(df["price"].iloc[-1])
     except Exception:
         return None
     confirmed_close = None
