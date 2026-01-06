@@ -6,7 +6,7 @@
 | Guardrail | Limit | Triggered Action |
 | --- | --- | --- |
 | Risk per trade | <= 1.0–2.0% of equity (scale down when 10 trades open) | Position size via Section 3 formula; never round up. |
-| Daily loss stop | 2.0% of equity or -2R (~$20 per $1,000) or 3 losing trades | Flatten; pause new live entries for 24h; shift to review/SIM. |
+| Daily loss stop | 4.0% of equity or -4R (~$40 per $1,000) or 3 losing trades | Flatten; pause new live entries for 24h; shift to review/SIM. |
 | Range-break circuit | If price closes outside the 5–7d range by >0.5× ATR | Stop new entries until I re-check conditions; resume only after manual review. |
 | Circuit breaker A | 2 consecutive losses with MAE > 0.7% | Stop for day, screenshot charts, write quick debrief. |
 | Circuit breaker B | 5 consecutive losses (any size) | Stop for day, schedule deep review before next live session. |
