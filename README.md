@@ -47,7 +47,11 @@ For others, this repo can be useful as:
 - **Risk Guards (automated)**: daily loss gate (default −4%/−$40 of $1k) and BTC range‑break circuit (7‑day range ±0.5× ATR) suppress new entries until the daily reset or a confirmed daily close re-enters the range. `range_break_confirmed_only` makes the trigger rely on confirmed closes only (less intraday flip‑flop).
   - Range-break status: **inside** = OK to trade; **outside** = pause (latched until confirmed close inside range±buffer).
 - **Daily Stop Streak Guard**: if live daily stop hits 3 times in 7 days, live entries pause for 3 days; 5 hits in 14 days prompts a size‑reduction warning; 7 hits in 21 days prompts a tighten‑filters/paper‑only warning. Stored in `logs/daily_stop_history.json` and configured in `config/risk_thresholds.yaml`.
-- **Current Paper Experiment (until 100 trades)**: baseline ATR exits (`atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped`) with liquidity/spread gates and ATR ≤ 1.5× cap. Live rules stay unchanged until the 100‑trade sample is complete.
+- **Current Paper Experiment (to 150 trades)**: baseline ATR exits (`atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped`) with liquidity/spread gates and ATR ≤ 1.5× cap. Live rules stay unchanged until the 150‑trade sample is complete.
+- **Checkpoint plan (live/paper)**:
+  - Finish the 100‑trade live checkpoint as‑is (no tweaks).
+  - Push to 150 with zero changes; keep the system if PF stays > 1.3 and max drawdown stays < 10%.
+  - If weakness persists at 150, first adjustment is to reduce shorts or require a stronger short filter (change one knob only).
 - **Metric glossary**:
   - `profit_loss` = USD P&L per trade (drives equity curve).
   - `profit_loss_pct` = % P&L per trade (trade quality).

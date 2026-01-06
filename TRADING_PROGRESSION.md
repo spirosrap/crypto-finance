@@ -1,5 +1,6 @@
 # Trading Journal
 
+
 ## Quick Links
 - [January 2026](#january-2026)
 - [December 2025](#december-2025)
@@ -9,6 +10,12 @@
 
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit now auto‑close live/paper and suppress new entries until the daily reset or a confirmed daily close re-enters range±buffer (latched; intraday moves don’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live resumed after the Jan 1 stop and is stronger post‑guard; paper resumed after its halt and is catching up. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
+
+## January 07, 2026 - 150-Trade Hold Plan
+- Plan after the ~100 live checkpoint: keep rules unchanged and push to 150 closed live trades before any tweaks.
+- Only consider scaling after the 150 checkpoint if expectancy/PF hold and drawdown stays contained; otherwise hold size and review.
+- No parameter changes until the 150 trade review is complete.
+- Concrete plan: finish the 100‑trade live checkpoint as‑is, then push to 150 with zero changes. If PF stays > 1.3 and max drawdown stays < 10%, keep the system; if weakness persists, first adjustment is to reduce shorts or strengthen the short filter (one knob only).
 
 ## January 06, 2026 - Daily Stop Raised to $40
 - Increased the daily stop to −$40 (4% of the $1k baseline) so it aligns with 6–8 concurrent $250 notionals.
