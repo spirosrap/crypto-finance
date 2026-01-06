@@ -761,10 +761,52 @@ def main() -> None:
 
     st.title("Watchdog Daily Equity Dashboard")
 
+    def _normalize_source_choice(raw: object) -> str | None:
+        if raw is None:
+            return None
+        value = str(raw).strip().lower()
+        if value in {"live", "live watchdog"}:
+            return "Live Watchdog"
+        if value in {"paper", "paper finder"}:
+            return "Paper Finder"
+        return None
+
+    def _get_source_from_query() -> str | None:
+        try:
+            params = st.query_params
+            if "source" in params:
+                raw = params.get("source")
+                if isinstance(raw, list):
+                    raw = raw[0] if raw else None
+                return _normalize_source_choice(raw)
+        except Exception:
+            params = st.experimental_get_query_params()
+            raw = params.get("source")
+            if isinstance(raw, list):
+                raw = raw[0] if raw else None
+            return _normalize_source_choice(raw)
+        return None
+
+    def _set_source_query(choice: str) -> None:
+        value = "paper" if choice == "Paper Finder" else "live"
+        try:
+            st.query_params["source"] = value
+        except Exception:
+            st.experimental_set_query_params(source=value)
+
+    source_from_query = _get_source_from_query()
+    if "log_source" not in st.session_state:
+        st.session_state["log_source"] = source_from_query or "Live Watchdog"
+
+    def _persist_log_source() -> None:
+        _set_source_query(st.session_state["log_source"])
+
     source_choice = st.sidebar.selectbox(
         "Log source",
         options=("Live Watchdog", "Paper Finder"),
-        index=0,
+        index=("Live Watchdog", "Paper Finder").index(st.session_state["log_source"]),
+        key="log_source",
+        on_change=_persist_log_source,
     )
     source_mode = "paper" if source_choice == "Paper Finder" else "live"
     if "dashboard_state" not in st.session_state:
