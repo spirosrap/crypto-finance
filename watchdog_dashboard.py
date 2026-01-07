@@ -205,19 +205,47 @@ def _format_hours_minutes(hours_val: Optional[float]) -> str:
     return f"{prefix}{hours:02d}h {minutes:02d}m"
 
 
-def _render_pipeline_warning(container: st.delta_generator.DeltaGenerator, title: str, details: Optional[str]) -> None:
+def _render_status_box(
+    container: st.delta_generator.DeltaGenerator,
+    title: str,
+    details: Optional[str],
+    tone: str,
+    margin_left: float = 0.0,
+    margin_right: float = 0.0,
+) -> None:
+    palette = {
+        "ok": {
+            "bg": "#e7f6e7",
+            "border": "#c7eac7",
+            "text": "#1b5e20",
+        },
+        "warn": {
+            "bg": "#fff4ce",
+            "border": "#ffe8a1",
+            "text": "#8a6d3b",
+        },
+    }
+    style = palette.get(tone, palette["warn"])
     safe_title = html.escape(title)
     details_html = ""
     if details:
-        safe_details = html.escape(details)
+        safe_details = html.escape(details).replace("\n", "<br>")
         details_html = (
-            "<div style=\"font-size:0.85em; margin-top:0.35rem; color:#8a6d3b;\">"
+            f"<div style=\"font-size:0.85em; margin-top:0.35rem; color:{style['text']};\">"
             f"{safe_details}</div>"
         )
+    margin_total = margin_left + margin_right
+    width_style = f" width: calc(100% - {margin_total}rem);" if margin_total else ""
+    margin_style = ""
+    if margin_left:
+        margin_style += f" margin-left:{margin_left}rem;"
+    if margin_right:
+        margin_style += f" margin-right:{margin_right}rem;"
     container.markdown(
-        "<div style=\"background:#fff4ce; border:1px solid #ffe8a1; border-radius:0.5rem; "
-        "padding:0.6rem 0.9rem;\">"
-        f"<div style=\"font-weight:600; color:#8a6d3b;\">{safe_title}</div>"
+        "<div style=\""
+        f"background:{style['bg']}; border:1px solid {style['border']}; "
+        f"border-radius:0.5rem; padding:0.6rem 0.9rem;{margin_style}{width_style}\">"
+        f"<div style=\"font-weight:600; color:{style['text']};\">{safe_title}</div>"
         f"{details_html}</div>",
         unsafe_allow_html=True,
     )
@@ -266,6 +294,23 @@ def _collect_log_heartbeats() -> list[dict[str, object]]:
             }
         )
     return results
+
+
+def _format_heartbeat_line(heartbeats: list[dict[str, object]]) -> Optional[str]:
+    if not heartbeats:
+        return None
+    parts = []
+    for hb in heartbeats:
+        label = str(hb.get("label"))
+        age_seconds = hb.get("age_seconds", math.inf)
+        if isinstance(age_seconds, (int, float)) and math.isfinite(age_seconds):
+            age_display = _format_hours_minutes(age_seconds / 3600.0)
+        else:
+            age_display = "n/a"
+        status = str(hb.get("status", ""))
+        suffix = f" ({status})" if status not in {"ok", ""} else ""
+        parts.append(f"{label} {age_display}{suffix}")
+    return f"Log heartbeats: {' | '.join(parts)}"
 
 
 def load_open_positions() -> Tuple[pd.DataFrame, float]:
@@ -1152,7 +1197,8 @@ def main() -> None:
     thresholds = [t for t in (pct_threshold, usd_threshold) if t is not None]
     daily_stop_threshold = min(thresholds) if thresholds else None
 
-    daily_cols = st.columns(2, gap="small")
+    daily_cols = st.columns([0.82, 0.06, 1.18])
+    daily_cols[1].markdown("&nbsp;", unsafe_allow_html=True)
     if total_pnl_today is None or daily_stop_threshold is None:
         daily_cols[0].info("Daily stop: n/a (no closed trades yet).")
     else:
@@ -1165,11 +1211,13 @@ def main() -> None:
         if total_pnl_today <= -daily_stop_threshold:
             daily_cols[0].error(f"Daily stop ACTIVE: {reason}")
         else:
-            daily_cols[0].success(f"Daily stop OK: {reason}")
+            _render_status_box(daily_cols[0], "Daily stop OK", reason, tone="ok", margin_right=0.2)
+    daily_cols[0].markdown("<div style=\"margin-bottom:0.6rem;\"></div>", unsafe_allow_html=True)
 
+    range_slot = daily_cols[2]
     range_status = load_range_break_status()
     if range_status is None:
-        daily_cols[1].info("Range break: n/a (run gate-scan).")
+        range_slot.info("Range break: n/a (run gate-scan).")
     else:
         symbol = str(range_status.get("symbol", "n/a"))
         try:
@@ -1209,9 +1257,10 @@ def main() -> None:
             f"range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f} (ATRx{atr_mult:.2f})"
         )
         if triggered:
-            daily_cols[1].error(f"Range break ACTIVE: {msg}")
+            range_slot.error(f"Range break ACTIVE: {msg}")
         else:
-            daily_cols[1].success(f"Range break OK: {msg}")
+            _render_status_box(range_slot, "Range break OK", msg, tone="ok", margin_left=0.2)
+    range_slot.markdown("<div style=\"margin-bottom:0.6rem;\"></div>", unsafe_allow_html=True)
 
     with st.expander("Metric glossary", expanded=False):
         glossary = metrics.get("metric_glossary", {})
@@ -1237,7 +1286,10 @@ def main() -> None:
 
         health_col1, health_col2, health_col3 = st.columns([2, 1, 1])
         if source_mode == "paper":
-            health_col1.info("Paper simulator metrics (no live routing).")
+            heartbeats = _collect_log_heartbeats()
+            heartbeat_line = _format_heartbeat_line(heartbeats)
+            title = "Paper simulator metrics — No live routing."
+            _render_status_box(health_col1, title, heartbeat_line, tone="ok")
         elif pipeline_snapshot.health_level == "ok":
             health_col1.success("Pipeline health: OK")
         else:
@@ -1245,21 +1297,8 @@ def main() -> None:
             if pipeline_snapshot.health_reasons:
                 msg += " — " + "; ".join(pipeline_snapshot.health_reasons)
             heartbeats = _collect_log_heartbeats()
-            details_line = None
-            if heartbeats:
-                parts = []
-                for hb in heartbeats:
-                    label = str(hb.get("label"))
-                    age_seconds = hb.get("age_seconds", math.inf)
-                    if isinstance(age_seconds, (int, float)) and math.isfinite(age_seconds):
-                        age_display = _format_hours_minutes(age_seconds / 3600.0)
-                    else:
-                        age_display = "n/a"
-                    status = str(hb.get("status", ""))
-                    suffix = f" ({status})" if status not in {"ok", ""} else ""
-                    parts.append(f"{label} {age_display}{suffix}")
-                details_line = f"Log heartbeats: {' | '.join(parts)}"
-            _render_pipeline_warning(health_col1, msg, details_line)
+            details_line = _format_heartbeat_line(heartbeats)
+            _render_status_box(health_col1, msg, details_line, tone="warn")
 
         trades_24h = pipeline_snapshot.trades_last_24h
         health_col2.metric("Trades (24h)", trades_24h)
@@ -1274,19 +1313,9 @@ def main() -> None:
 
         if pipeline_snapshot.health_level == "ok":
             heartbeats = _collect_log_heartbeats()
-            if heartbeats:
-                parts = []
-                for hb in heartbeats:
-                    label = str(hb.get("label"))
-                    age_seconds = hb.get("age_seconds", math.inf)
-                    if isinstance(age_seconds, (int, float)) and math.isfinite(age_seconds):
-                        age_display = _format_hours_minutes(age_seconds / 3600.0)
-                    else:
-                        age_display = "n/a"
-                    status = str(hb.get("status", ""))
-                    suffix = f" ({status})" if status not in {"ok", ""} else ""
-                    parts.append(f"{label} {age_display}{suffix}")
-                st.caption(f"Log heartbeats: {' | '.join(parts)}")
+            heartbeat_line = _format_heartbeat_line(heartbeats)
+            if heartbeat_line:
+                st.caption(heartbeat_line)
 
     open_positions_count = int(len(open_positions_df))
     position_label = "open position" if open_positions_count == 1 else "open positions"
