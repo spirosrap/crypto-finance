@@ -32,6 +32,8 @@
 - Handoff checklist for every role: state assumptions, list commands executed, and record any validations skipped.
 
 ## Core Workflows
+- Dashboard health checks include log heartbeats (gate scan / paper update / fill poll / live snapshot). If a log is stale, flag pipeline health even if no trades closed.
+
 - **Environment setup**
   - `python -m venv .venv && source .venv/bin/activate`
   - `pip install -r requirements.txt`
