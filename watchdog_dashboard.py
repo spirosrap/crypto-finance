@@ -9,6 +9,7 @@ Launch with:
 from __future__ import annotations
 
 import json
+import html
 import math
 import os
 import shutil
@@ -68,6 +69,13 @@ PAPER_OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
 STATE_PATH = Path("cache/watchdog_dashboard_state.json")
 RANGE_BREAK_STATUS_PATH = REPO_ROOT / "logs" / "range_break_status.json"
 LIVE_SNAPSHOT_PATH = REPO_ROOT / "logs" / "live_snapshot.json"
+LOG_HEARTBEATS = (
+    ("Gate scan", REPO_ROOT / "logs" / "gate_scan_paper.log", 4 * 60 * 60),
+    ("Paper update", REPO_ROOT / "logs" / "paper_finder_update.log", 5 * 60),
+    ("Fill poll", REPO_ROOT / "logs" / "watchdog_close_update.log", 5 * 60),
+    ("Live snapshot", REPO_ROOT / "logs" / "live_snapshot_update.log", 5 * 60),
+)
+LOG_HEARTBEAT_STALE_MULTIPLIER = 3.0
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -195,6 +203,69 @@ def _format_hours_minutes(hours_val: Optional[float]) -> str:
     if days > 0:
         return f"{prefix}{days}d {hours:02d}h"
     return f"{prefix}{hours:02d}h {minutes:02d}m"
+
+
+def _render_pipeline_warning(container: st.delta_generator.DeltaGenerator, title: str, details: Optional[str]) -> None:
+    safe_title = html.escape(title)
+    details_html = ""
+    if details:
+        safe_details = html.escape(details)
+        details_html = (
+            "<div style=\"font-size:0.85em; margin-top:0.35rem; color:#8a6d3b;\">"
+            f"{safe_details}</div>"
+        )
+    container.markdown(
+        "<div style=\"background:#fff4ce; border:1px solid #ffe8a1; border-radius:0.5rem; "
+        "padding:0.6rem 0.9rem;\">"
+        f"<div style=\"font-weight:600; color:#8a6d3b;\">{safe_title}</div>"
+        f"{details_html}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _collect_log_heartbeats() -> list[dict[str, object]]:
+    now = datetime.now(UTC)
+    results: list[dict[str, object]] = []
+    for label, path, expected_seconds in LOG_HEARTBEATS:
+        if not path.exists():
+            results.append(
+                {
+                    "label": label,
+                    "path": path,
+                    "status": "missing",
+                    "age_seconds": math.inf,
+                    "expected_seconds": expected_seconds,
+                    "stale": True,
+                }
+            )
+            continue
+        try:
+            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        except (OSError, ValueError):
+            results.append(
+                {
+                    "label": label,
+                    "path": path,
+                    "status": "unknown",
+                    "age_seconds": math.inf,
+                    "expected_seconds": expected_seconds,
+                    "stale": True,
+                }
+            )
+            continue
+        age_seconds = (now - mtime).total_seconds()
+        stale = age_seconds > expected_seconds * LOG_HEARTBEAT_STALE_MULTIPLIER
+        results.append(
+            {
+                "label": label,
+                "path": path,
+                "status": "stale" if stale else "ok",
+                "age_seconds": age_seconds,
+                "expected_seconds": expected_seconds,
+                "stale": stale,
+            }
+        )
+    return results
 
 
 def load_open_positions() -> Tuple[pd.DataFrame, float]:
@@ -1173,7 +1244,22 @@ def main() -> None:
             msg = "Pipeline attention required"
             if pipeline_snapshot.health_reasons:
                 msg += " — " + "; ".join(pipeline_snapshot.health_reasons)
-            health_col1.warning(msg)
+            heartbeats = _collect_log_heartbeats()
+            details_line = None
+            if heartbeats:
+                parts = []
+                for hb in heartbeats:
+                    label = str(hb.get("label"))
+                    age_seconds = hb.get("age_seconds", math.inf)
+                    if isinstance(age_seconds, (int, float)) and math.isfinite(age_seconds):
+                        age_display = _format_hours_minutes(age_seconds / 3600.0)
+                    else:
+                        age_display = "n/a"
+                    status = str(hb.get("status", ""))
+                    suffix = f" ({status})" if status not in {"ok", ""} else ""
+                    parts.append(f"{label} {age_display}{suffix}")
+                details_line = f"Log heartbeats: {' | '.join(parts)}"
+            _render_pipeline_warning(health_col1, msg, details_line)
 
         trades_24h = pipeline_snapshot.trades_last_24h
         health_col2.metric("Trades (24h)", trades_24h)
@@ -1185,6 +1271,22 @@ def main() -> None:
         else:
             age_display = "n/a"
         health_col3.metric("Latest close age", age_display)
+
+        if pipeline_snapshot.health_level == "ok":
+            heartbeats = _collect_log_heartbeats()
+            if heartbeats:
+                parts = []
+                for hb in heartbeats:
+                    label = str(hb.get("label"))
+                    age_seconds = hb.get("age_seconds", math.inf)
+                    if isinstance(age_seconds, (int, float)) and math.isfinite(age_seconds):
+                        age_display = _format_hours_minutes(age_seconds / 3600.0)
+                    else:
+                        age_display = "n/a"
+                    status = str(hb.get("status", ""))
+                    suffix = f" ({status})" if status not in {"ok", ""} else ""
+                    parts.append(f"{label} {age_display}{suffix}")
+                st.caption(f"Log heartbeats: {' | '.join(parts)}")
 
     open_positions_count = int(len(open_positions_df))
     position_label = "open position" if open_positions_count == 1 else "open positions"
