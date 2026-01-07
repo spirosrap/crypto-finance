@@ -220,12 +220,18 @@ def _render_status_box(
     tone: str,
     margin_left: float = 0.0,
     margin_right: float = 0.0,
+    details_min_height_em: float = 0.0,
 ) -> None:
     palette = {
         "ok": {
             "bg": "#e7f6e7",
             "border": "#c7eac7",
             "text": "#1b5e20",
+        },
+        "bad": {
+            "bg": "#fdecea",
+            "border": "#f5c6cb",
+            "text": "#7a1f1f",
         },
         "warn": {
             "bg": "#fff4ce",
@@ -238,8 +244,12 @@ def _render_status_box(
     details_html = ""
     if details:
         safe_details = html.escape(details).replace("\n", "<br>")
+        min_height_style = (
+            f" min-height:{details_min_height_em:.2f}em;" if details_min_height_em else ""
+        )
         details_html = (
-            f"<div style=\"font-size:0.85em; margin-top:0.35rem; color:{style['text']};\">"
+            f"<div style=\"font-size:0.85em; margin-top:0.35rem; color:{style['text']};"
+            f" line-height:1.2;{min_height_style}\">"
             f"{safe_details}</div>"
         )
     margin_total = margin_left + margin_right
@@ -257,6 +267,26 @@ def _render_status_box(
         f"{details_html}</div>",
         unsafe_allow_html=True,
     )
+
+
+def _format_daily_stop_detail(
+    total_pnl_today: float,
+    daily_stop_threshold: float,
+    closed_txt: str,
+    open_txt: str,
+    pct_threshold: Optional[float],
+    usd_threshold: Optional[float],
+    reset_in: Optional[str] = None,
+) -> str:
+    pct_val = f"{DAILY_STOP_PCT:.0f}%" if DAILY_STOP_PCT > 0 else "n/a"
+    usd_val = f"{usd_threshold:.0f}" if usd_threshold is not None else "n/a"
+    detail = (
+        f"{total_pnl_today:+.2f} vs -{daily_stop_threshold:.2f} | "
+        f"closed {closed_txt} open {open_txt} | pct/usd {pct_val}/{usd_val}"
+    )
+    if reset_in:
+        detail += f" | reset {reset_in}"
+    return detail
 
 
 def _collect_log_heartbeats() -> list[dict[str, object]]:
@@ -1205,22 +1235,49 @@ def main() -> None:
     thresholds = [t for t in (pct_threshold, usd_threshold) if t is not None]
     daily_stop_threshold = min(thresholds) if thresholds else None
 
-    daily_cols = st.columns([0.82, 0.06, 1.18])
+    daily_cols = st.columns([0.9, 0.02, 1.08])
     daily_cols[1].markdown("&nbsp;", unsafe_allow_html=True)
     if total_pnl_today is None or daily_stop_threshold is None:
         daily_cols[0].info("Daily stop: n/a (no closed trades yet).")
     else:
         closed_txt = f"{daily_pnl_today:+.2f}" if daily_pnl_today is not None else "n/a"
         open_txt = f"{open_pnl_today:+.2f}" if open_pnl_today is not None else "n/a"
-        reason = (
-            f"{total_pnl_today:+.2f} vs -{daily_stop_threshold:.2f} "
-            f"(closed {closed_txt}, open {open_txt}; pct={pct_threshold:.2f}, usd={usd_threshold:.2f})"
-        )
         if total_pnl_today <= -daily_stop_threshold:
             reset_in = _time_until_next_utc_midnight()
-            daily_cols[0].error(f"Daily stop ACTIVE: {reason} | resets in {reset_in}")
+            reason = _format_daily_stop_detail(
+                total_pnl_today,
+                daily_stop_threshold,
+                closed_txt,
+                open_txt,
+                pct_threshold,
+                usd_threshold,
+                reset_in,
+            )
+            _render_status_box(
+                daily_cols[0],
+                "Daily stop ACTIVE",
+                reason,
+                tone="bad",
+                margin_right=0.05,
+                details_min_height_em=1.6,
+            )
         else:
-            _render_status_box(daily_cols[0], "Daily stop OK", reason, tone="ok", margin_right=0.2)
+            reason = _format_daily_stop_detail(
+                total_pnl_today,
+                daily_stop_threshold,
+                closed_txt,
+                open_txt,
+                pct_threshold,
+                usd_threshold,
+            )
+            _render_status_box(
+                daily_cols[0],
+                "Daily stop OK",
+                reason,
+                tone="ok",
+                margin_right=0.05,
+                details_min_height_em=1.6,
+            )
     daily_cols[0].markdown("<div style=\"margin-bottom:0.6rem;\"></div>", unsafe_allow_html=True)
 
     range_slot = daily_cols[2]
@@ -1266,9 +1323,23 @@ def main() -> None:
             f"range={range_low:.2f}-{range_high:.2f} buffer={buffer:.2f} (ATRx{atr_mult:.2f})"
         )
         if triggered:
-            range_slot.error(f"Range break ACTIVE: {msg}")
+            _render_status_box(
+                range_slot,
+                "Range break ACTIVE",
+                msg,
+                tone="bad",
+                margin_left=0.05,
+                details_min_height_em=1.6,
+            )
         else:
-            _render_status_box(range_slot, "Range break OK", msg, tone="ok", margin_left=0.2)
+            _render_status_box(
+                range_slot,
+                "Range break OK",
+                msg,
+                tone="ok",
+                margin_left=0.05,
+                details_min_height_em=1.6,
+            )
     range_slot.markdown("<div style=\"margin-bottom:0.6rem;\"></div>", unsafe_allow_html=True)
 
     with st.expander("Metric glossary", expanded=False):
