@@ -1291,7 +1291,9 @@ def main() -> None:
             title = "Paper simulator metrics — No live routing."
             _render_status_box(health_col1, title, heartbeat_line, tone="ok")
         elif pipeline_snapshot.health_level == "ok":
-            health_col1.success("Pipeline health: OK")
+            heartbeats = _collect_log_heartbeats()
+            heartbeat_line = _format_heartbeat_line(heartbeats)
+            _render_status_box(health_col1, "Pipeline health: OK", heartbeat_line, tone="ok")
         else:
             msg = "Pipeline attention required"
             if pipeline_snapshot.health_reasons:
@@ -1311,11 +1313,7 @@ def main() -> None:
             age_display = "n/a"
         health_col3.metric("Latest close age", age_display)
 
-        if pipeline_snapshot.health_level == "ok":
-            heartbeats = _collect_log_heartbeats()
-            heartbeat_line = _format_heartbeat_line(heartbeats)
-            if heartbeat_line:
-                st.caption(heartbeat_line)
+        # heartbeat already shown in the status box above
 
     open_positions_count = int(len(open_positions_df))
     position_label = "open position" if open_positions_count == 1 else "open positions"
