@@ -205,6 +205,14 @@ def _format_hours_minutes(hours_val: Optional[float]) -> str:
     return f"{prefix}{hours:02d}h {minutes:02d}m"
 
 
+def _time_until_next_utc_midnight() -> str:
+    now = datetime.now(UTC)
+    next_midnight = datetime.combine(now.date() + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
+    remaining = next_midnight - now
+    seconds = max(0.0, remaining.total_seconds())
+    return _format_hours_minutes(seconds / 3600.0)
+
+
 def _render_status_box(
     container: st.delta_generator.DeltaGenerator,
     title: str,
@@ -1209,7 +1217,8 @@ def main() -> None:
             f"(closed {closed_txt}, open {open_txt}; pct={pct_threshold:.2f}, usd={usd_threshold:.2f})"
         )
         if total_pnl_today <= -daily_stop_threshold:
-            daily_cols[0].error(f"Daily stop ACTIVE: {reason}")
+            reset_in = _time_until_next_utc_midnight()
+            daily_cols[0].error(f"Daily stop ACTIVE: {reason} | resets in {reset_in}")
         else:
             _render_status_box(daily_cols[0], "Daily stop OK", reason, tone="ok", margin_right=0.2)
     daily_cols[0].markdown("<div style=\"margin-bottom:0.6rem;\"></div>", unsafe_allow_html=True)
