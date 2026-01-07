@@ -22,6 +22,7 @@
 - No parameter changes until the 150 trade review is complete.
 - Concrete plan: finish the 100‑trade live checkpoint as‑is, then push to 150 with zero changes. If PF stays > 1.3 and max drawdown stays < 10%, keep the system; if weakness persists, first adjustment is to reduce shorts or strengthen the short filter (one knob only).
 
+- Next tweak after the 150‑trade checkpoint (if needed): add a short filter — only short when BTC 3‑day return < 0 or when the trend filter is bearish.
 
 ## January 06, 2026 - Daily Stop Raised to $40
 - Increased the daily stop to −$40 (4% of the $1k baseline) so it aligns with 6–8 concurrent $250 notionals.
