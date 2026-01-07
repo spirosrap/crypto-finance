@@ -1,4 +1,1 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
-5cb17b75fb,AAVE,AAVE-PERP-INTX,LONG,169.75,164.318,177.898,250.0,50.0,2026-01-06T18:07:39Z,2026-01-07T18:07:39Z,OPEN,171.05,2026-01-06T20:20:02Z,1.91,0.7658,0.0,1,5.0,,
-0b1c267ab5,LINK,LINK-PERP-INTX,LONG,13.629,13.193,14.283,250.0,50.0,2026-01-06T18:07:39Z,2026-01-07T18:07:39Z,OPEN,13.723,2026-01-06T20:20:02Z,1.72,0.6897,0.0,2,5.0,,
-9b5096d3b4,DOT,DOT-PERP-INTX,LONG,2.144,2.0754,2.2469,250.0,50.0,2026-01-06T18:07:39Z,2026-01-07T18:07:39Z,OPEN,2.166,2026-01-06T20:20:02Z,2.57,1.0261,0.0,3,5.0,,
