@@ -15,6 +15,9 @@
 - Daily stop hit again today as crypto kept falling.
 - The drawdown erased most gains from the prior upward move.
 
+## January 08, 2026 - Finder Cron Disabled
+- Commented out the `short_term_crypto_finder.py`-related cron outputs (archive + alert + finder/breakout jobs) since I’m no longer using that flow.
+
 ## January 07, 2026 - Daily Stop Hit, Short Reset Window
 - Both live and paper halted after hitting the −4%/−$40 daily stop.
 - The halt lifts on the next UTC day, which in this case is ~4 hours away.
