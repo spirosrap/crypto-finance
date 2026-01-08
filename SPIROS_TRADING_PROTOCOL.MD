@@ -6,7 +6,7 @@
 | Guardrail | Limit | Triggered Action |
 | --- | --- | --- |
 | Risk per trade | <= 1.0–2.0% of equity (scale down when 10 trades open) | Position size via Section 3 formula; never round up. |
-| Daily loss stop | 4.0% of equity or -4R (~$40 per $1,000) or 3 losing trades | Flatten; pause new live entries for 24h; shift to review/SIM. If two daily stops hit within 48h, switch to a rolling 24h halt until a day passes without another stop. |
+| Daily loss stop | 4.0% of equity or -4R (~$40 per $1,000) or 3 losing trades | Flatten; pause new live entries for 24h; shift to review/SIM. |
 | Range-break circuit | If price closes outside the 5–7d range by >0.5× ATR | Stop new entries until I re-check conditions; resume only after manual review. |
 | Circuit breaker A | 2 consecutive losses with MAE > 0.7% | Stop for day, screenshot charts, write quick debrief. |
 | Circuit breaker B | 5 consecutive losses (any size) | Stop for day, schedule deep review before next live session. |
@@ -21,7 +21,6 @@
 - Risk cap: 1–2% equity per trade (lower if multiple trades open).
 - No rule changes until 50–100 closed trades confirm or reject the edge.
 - Daily loss stop = 24h pause (current cooldown: 48h; see journal entry).
-- If two daily stops hit within 48h, the pause switches to a rolling 24h halt until a day passes without another stop.
 - Range-break circuit: if BTC closes outside the 7‑day high/low by >0.5× ATR, halt new entries (gate‑scan suppresses commands) until I manually clear the condition.
 - Range-break status on dashboard: **inside** = OK to trade; **outside** = pause until manual review.
 - Performance reads must be split pre/post guard change (2025-12-30 UTC); treat them as separate regimes.

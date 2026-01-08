@@ -4,9 +4,6 @@
 daily_stop_pct: 4.0
 daily_stop_usd: 40.0
 daily_stop_equity: 1000.0
-daily_stop_rolling_window_hours: 48
-daily_stop_rolling_pause_hours: 24
-daily_stop_rolling_count: 2
 daily_stop_streak_window_days: 7
 daily_stop_streak_count: 3
 daily_stop_pause_days: 3

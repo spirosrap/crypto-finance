@@ -68,7 +68,6 @@ PAPER_CLOSED_CSV = Path("trade_logs/paper_finder_closed_positions.csv")
 PAPER_OPEN_CSV = Path("trade_logs/paper_finder_open_positions.csv")
 STATE_PATH = Path("cache/watchdog_dashboard_state.json")
 RANGE_BREAK_STATUS_PATH = REPO_ROOT / "logs" / "range_break_status.json"
-DAILY_STOP_HISTORY_PATH = REPO_ROOT / "logs" / "daily_stop_history.json"
 LIVE_SNAPSHOT_PATH = REPO_ROOT / "logs" / "live_snapshot.json"
 LOG_HEARTBEATS = (
     ("Gate scan", REPO_ROOT / "logs" / "gate_scan_paper.log", 4 * 60 * 60),
@@ -278,7 +277,6 @@ def _format_daily_stop_detail(
     pct_threshold: Optional[float],
     usd_threshold: Optional[float],
     reset_in: Optional[str] = None,
-    mode_label: Optional[str] = None,
 ) -> str:
     pct_val = f"{DAILY_STOP_PCT:.0f}%" if DAILY_STOP_PCT > 0 else "n/a"
     usd_val = f"{usd_threshold:.0f}" if usd_threshold is not None else "n/a"
@@ -288,33 +286,7 @@ def _format_daily_stop_detail(
     )
     if reset_in:
         detail += f" | reset {reset_in}"
-    if mode_label:
-        detail += f" | {mode_label}"
     return detail
-
-
-def _load_daily_stop_history() -> dict:
-    if not DAILY_STOP_HISTORY_PATH.exists():
-        return {}
-    try:
-        data = json.loads(DAILY_STOP_HISTORY_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _rolling_pause_status(role: str) -> tuple[bool, Optional[datetime]]:
-    history = _load_daily_stop_history()
-    bucket = history.get(role, {}) if isinstance(history.get(role, {}), dict) else {}
-    pause_raw = bucket.get("rolling_pause_until")
-    if not pause_raw:
-        return False, None
-    try:
-        pause_until = datetime.fromisoformat(str(pause_raw)).astimezone(UTC)
-    except Exception:
-        return False, None
-    now = datetime.now(UTC)
-    return pause_until > now, pause_until
 
 
 def _collect_log_heartbeats() -> list[dict[str, object]]:
@@ -1265,21 +1237,13 @@ def main() -> None:
 
     daily_cols = st.columns([0.9, 0.02, 1.08])
     daily_cols[1].markdown("&nbsp;", unsafe_allow_html=True)
-    rolling_role = "paper" if source_mode == "paper" else "live"
-    rolling_active, rolling_until = _rolling_pause_status(rolling_role)
     if total_pnl_today is None or daily_stop_threshold is None:
         daily_cols[0].info("Daily stop: n/a (no closed trades yet).")
     else:
         closed_txt = f"{daily_pnl_today:+.2f}" if daily_pnl_today is not None else "n/a"
         open_txt = f"{open_pnl_today:+.2f}" if open_pnl_today is not None else "n/a"
-        if rolling_active or total_pnl_today <= -daily_stop_threshold:
-            if rolling_active and rolling_until is not None:
-                seconds_left = max(0.0, (rolling_until - datetime.now(UTC)).total_seconds())
-                reset_in = _format_hours_minutes(seconds_left / 3600.0)
-                mode_label = "rolling"
-            else:
-                reset_in = _time_until_next_utc_midnight()
-                mode_label = None
+        if total_pnl_today <= -daily_stop_threshold:
+            reset_in = _time_until_next_utc_midnight()
             reason = _format_daily_stop_detail(
                 total_pnl_today,
                 daily_stop_threshold,
@@ -1288,7 +1252,6 @@ def main() -> None:
                 pct_threshold,
                 usd_threshold,
                 reset_in,
-                mode_label,
             )
             _render_status_box(
                 daily_cols[0],
