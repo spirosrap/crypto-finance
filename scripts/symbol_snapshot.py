@@ -377,8 +377,11 @@ def _daily_stop_status(
     equity: float,
     stop_pct: float,
     stop_usd: float,
+    rolling_pause_until: Optional[datetime] = None,
 ) -> tuple[bool, str]:
-    if pnl_today is None:
+    now = datetime.now(timezone.utc)
+    rolling_active = rolling_pause_until is not None and rolling_pause_until > now
+    if pnl_today is None and not rolling_active:
         return False, "Daily stop: n/a (no closed trades yet)"
     thresholds = []
     if stop_pct and stop_pct > 0:
@@ -388,25 +391,45 @@ def _daily_stop_status(
     if not thresholds:
         return False, f"Daily stop: off (today P/L {pnl_today:+.2f})"
     threshold = min(thresholds)
-    triggered = pnl_today <= -threshold
+    triggered = pnl_today is not None and pnl_today <= -threshold
+    if rolling_active:
+        triggered = True
     pct_threshold = equity * (stop_pct / 100.0) if stop_pct and stop_pct > 0 else None
     pct_txt = f"{pct_threshold:.2f}" if pct_threshold is not None else "n/a"
     usd_txt = f"{stop_usd:.2f}" if stop_usd and stop_usd > 0 else "n/a"
     status = "ACTIVE" if triggered else "OK"
-    reason = f"{pnl_today:+.2f} <= -{threshold:.2f}" if triggered else f"{pnl_today:+.2f} > -{threshold:.2f}"
+    if rolling_active:
+        pause_until = rolling_pause_until.astimezone(timezone.utc).isoformat()
+        reason = f"rolling 24h (pause until {pause_until})"
+    else:
+        reason = f"{pnl_today:+.2f} <= -{threshold:.2f}" if triggered else f"{pnl_today:+.2f} > -{threshold:.2f}"
     return triggered, f"Daily stop ({status}): {reason} (pct={pct_txt}, usd={usd_txt})"
 
 
 def _load_daily_stop_history(path: Path = DAILY_STOP_HISTORY_PATH) -> dict:
     if not path.exists():
-        return {"live": {"stops": [], "pause_until": None}}
+        return {"live": {"stops": [], "pause_until": None}, "paper": {"stops": [], "pause_until": None}}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return {"live": {"stops": [], "pause_until": None}}
+        return {"live": {"stops": [], "pause_until": None}, "paper": {"stops": [], "pause_until": None}}
     if not isinstance(data, dict):
-        return {"live": {"stops": [], "pause_until": None}}
+        return {"live": {"stops": [], "pause_until": None}, "paper": {"stops": [], "pause_until": None}}
     return data
+
+
+def _rolling_pause_status(role: str) -> tuple[bool, Optional[datetime]]:
+    history = _load_daily_stop_history()
+    bucket = history.get(role, {}) if isinstance(history.get(role, {}), dict) else {}
+    pause_raw = bucket.get("rolling_pause_until")
+    if not pause_raw:
+        return False, None
+    try:
+        pause_until = datetime.fromisoformat(str(pause_raw)).astimezone(timezone.utc)
+    except Exception:
+        return False, None
+    now = datetime.now(timezone.utc)
+    return pause_until > now, pause_until
 
 
 def _load_range_break_status(path: Path = RANGE_BREAK_STATUS_PATH) -> Optional[dict]:
@@ -1090,17 +1113,21 @@ def gate_scan(
     paper_open_pnl = _load_open_paper_pnl()
     live_daily_pnl = _combine_pnl(live_daily_closed, live_open_pnl)
     paper_daily_pnl = _combine_pnl(paper_daily_closed, paper_open_pnl)
+    live_rolling_active, live_rolling_until = _rolling_pause_status("live")
+    paper_rolling_active, paper_rolling_until = _rolling_pause_status("paper")
     live_stop, live_stop_msg = _daily_stop_status(
         pnl_today=live_daily_pnl,
         equity=daily_stop_equity,
         stop_pct=daily_stop_pct,
         stop_usd=daily_stop_usd,
+        rolling_pause_until=live_rolling_until if live_rolling_active else None,
     )
     paper_stop, paper_stop_msg = _daily_stop_status(
         pnl_today=paper_daily_pnl,
         equity=daily_stop_equity,
         stop_pct=daily_stop_pct,
         stop_usd=daily_stop_usd,
+        rolling_pause_until=paper_rolling_until if paper_rolling_active else None,
     )
     thresholds = load_risk_thresholds()
     streak_window_days = int(thresholds.get("daily_stop_streak_window_days", 7) or 7)

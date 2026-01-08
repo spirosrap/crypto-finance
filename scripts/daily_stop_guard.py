@@ -186,14 +186,34 @@ def _threshold(equity: float, stop_pct: float, stop_usd: float) -> Optional[floa
 
 
 def _load_history() -> dict:
+    defaults = {
+        "live": {
+            "stops": [],
+            "stop_timestamps": [],
+            "pause_until": None,
+            "rolling_pause_until": None,
+        },
+        "paper": {
+            "stops": [],
+            "stop_timestamps": [],
+            "pause_until": None,
+            "rolling_pause_until": None,
+        },
+    }
     if not HISTORY_PATH.exists():
-        return {"live": {"stops": [], "pause_until": None}}
+        return defaults
     try:
         data = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
     except Exception:
-        return {"live": {"stops": [], "pause_until": None}}
+        return defaults
     if not isinstance(data, dict):
-        return {"live": {"stops": [], "pause_until": None}}
+        return defaults
+    for key, value in defaults.items():
+        if key not in data or not isinstance(data.get(key), dict):
+            data[key] = value
+        else:
+            for field, default_val in value.items():
+                data[key].setdefault(field, default_val)
     return data
 
 
@@ -215,6 +235,16 @@ def _parse_dates(values: list[str]) -> list[date]:
     return dates
 
 
+def _parse_datetimes(values: list[str]) -> list[datetime]:
+    stamps: list[datetime] = []
+    for val in values:
+        try:
+            stamps.append(datetime.fromisoformat(str(val)).astimezone(UTC))
+        except Exception:
+            continue
+    return stamps
+
+
 def _count_recent(stops: list[date], today: date, window_days: int) -> int:
     if window_days <= 0:
         return 0
@@ -222,10 +252,11 @@ def _count_recent(stops: list[date], today: date, window_days: int) -> int:
     return sum(1 for d in stops if d >= cutoff)
 
 
-def _update_live_stop_history(
+def _update_stop_history(
     *,
+    role: str,
     triggered: bool,
-    today: date,
+    now: datetime,
     streak_window_days: int,
     streak_count: int,
     pause_days: int,
@@ -233,16 +264,28 @@ def _update_live_stop_history(
     warn_count: int,
     escalate_window_days: int,
     escalate_count: int,
+    rolling_window_hours: int,
+    rolling_pause_hours: int,
+    rolling_count: int,
 ) -> dict:
     history = _load_history()
-    live = history.get("live", {}) if isinstance(history.get("live", {}), dict) else {}
-    stops_raw = live.get("stops", [])
+    bucket = history.get(role, {}) if isinstance(history.get(role, {}), dict) else {}
+    stops_raw = bucket.get("stops", [])
     if not isinstance(stops_raw, list):
         stops_raw = []
     stops = _parse_dates([str(val) for val in stops_raw])
+    timestamps_raw = bucket.get("stop_timestamps", [])
+    if not isinstance(timestamps_raw, list):
+        timestamps_raw = []
+    timestamps = _parse_datetimes([str(val) for val in timestamps_raw])
+    timestamps.sort()
+
+    today = now.date()
+    prev_stop_ts = timestamps[-1] if timestamps else None
 
     if triggered and today not in stops:
         stops.append(today)
+        timestamps.append(now)
 
     max_window = max(streak_window_days, warn_window_days, escalate_window_days, 1)
     cutoff = today - timedelta(days=max_window - 1)
@@ -250,7 +293,7 @@ def _update_live_stop_history(
     stops.sort()
 
     pause_until = None
-    existing_pause = live.get("pause_until")
+    existing_pause = bucket.get("pause_until")
     if existing_pause:
         try:
             pause_until = date.fromisoformat(str(existing_pause))
@@ -269,9 +312,27 @@ def _update_live_stop_history(
     if pause_until is not None and pause_until < today:
         pause_until = None
 
-    history["live"] = {
+    rolling_pause_until = None
+    existing_rolling = bucket.get("rolling_pause_until")
+    if existing_rolling:
+        try:
+            rolling_pause_until = datetime.fromisoformat(str(existing_rolling)).astimezone(UTC)
+        except Exception:
+            rolling_pause_until = None
+
+    if triggered and rolling_count > 1 and prev_stop_ts is not None:
+        delta = now - prev_stop_ts
+        if delta <= timedelta(hours=max(rolling_window_hours, 1)):
+            rolling_pause_until = now + timedelta(hours=max(rolling_pause_hours, 1))
+
+    if rolling_pause_until is not None and now >= rolling_pause_until:
+        rolling_pause_until = None
+
+    history[role] = {
         "stops": [d.isoformat() for d in stops],
+        "stop_timestamps": [ts.isoformat() for ts in timestamps],
         "pause_until": pause_until.isoformat() if pause_until else None,
+        "rolling_pause_until": rolling_pause_until.isoformat() if rolling_pause_until else None,
     }
     _save_history(history)
 
@@ -280,12 +341,17 @@ def _update_live_stop_history(
         "warn_hits": warn_hits,
         "escalate_hits": escalate_hits,
         "pause_until": pause_until,
+        "rolling_pause_until": rolling_pause_until,
+        "rolling_active": rolling_pause_until is not None and rolling_pause_until > now,
         "streak_window_days": streak_window_days,
         "warn_window_days": warn_window_days,
         "escalate_window_days": escalate_window_days,
         "streak_count": streak_count,
         "warn_count": warn_count,
         "escalate_count": escalate_count,
+        "rolling_window_hours": rolling_window_hours,
+        "rolling_pause_hours": rolling_pause_hours,
+        "rolling_count": rolling_count,
     }
 
 
@@ -306,6 +372,9 @@ def main() -> int:
     warn_count = int(thresholds.get("daily_stop_warn_count", 5) or 5)
     escalate_window_days = int(thresholds.get("daily_stop_escalate_window_days", 21) or 21)
     escalate_count = int(thresholds.get("daily_stop_escalate_count", 7) or 7)
+    rolling_window_hours = int(thresholds.get("daily_stop_rolling_window_hours", 48) or 48)
+    rolling_pause_hours = int(thresholds.get("daily_stop_rolling_pause_hours", 24) or 24)
+    rolling_count = int(thresholds.get("daily_stop_rolling_count", 2) or 2)
     daily_stop_threshold = _threshold(stop_equity, stop_pct, stop_usd)
 
     live_closed = _daily_pnl_today(LIVE_CLOSED_LOG_PATH)
@@ -329,10 +398,12 @@ def main() -> int:
     triggered_live = daily_stop_threshold is not None and live_total is not None and live_total <= -daily_stop_threshold
     triggered_paper = daily_stop_threshold is not None and paper_total is not None and paper_total <= -daily_stop_threshold
 
-    today = datetime.now(UTC).date()
-    live_status = _update_live_stop_history(
+    now = datetime.now(UTC)
+    today = now.date()
+    live_status = _update_stop_history(
+        role="live",
         triggered=bool(triggered_live),
-        today=today,
+        now=now,
         streak_window_days=streak_window_days,
         streak_count=streak_count,
         pause_days=pause_days,
@@ -340,6 +411,24 @@ def main() -> int:
         warn_count=warn_count,
         escalate_window_days=escalate_window_days,
         escalate_count=escalate_count,
+        rolling_window_hours=rolling_window_hours,
+        rolling_pause_hours=rolling_pause_hours,
+        rolling_count=rolling_count,
+    )
+    paper_status = _update_stop_history(
+        role="paper",
+        triggered=bool(triggered_paper),
+        now=now,
+        streak_window_days=streak_window_days,
+        streak_count=streak_count,
+        pause_days=pause_days,
+        warn_window_days=warn_window_days,
+        warn_count=warn_count,
+        escalate_window_days=escalate_window_days,
+        escalate_count=escalate_count,
+        rolling_window_hours=rolling_window_hours,
+        rolling_pause_hours=rolling_pause_hours,
+        rolling_count=rolling_count,
     )
 
     pause_until = live_status.get("pause_until")
@@ -352,6 +441,16 @@ def main() -> int:
         print(
             f"Live stop streak: {live_status['streak_hits']}/{streak_count} stops in "
             f"{streak_window_days}d."
+        )
+    if live_status.get("rolling_active"):
+        print(
+            "Live rolling halt active: "
+            f"{rolling_count} stops in {rolling_window_hours}h (pause until {live_status['rolling_pause_until']})."
+        )
+    if paper_status.get("rolling_active"):
+        print(
+            "Paper rolling halt active: "
+            f"{rolling_count} stops in {rolling_window_hours}h (pause until {paper_status['rolling_pause_until']})."
         )
     if warn_count > 0 and live_status["warn_hits"] >= warn_count:
         print(
