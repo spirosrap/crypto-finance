@@ -26,6 +26,54 @@ if ! flock -n 9; then
   exit 0
 fi
 
+has_open_live_positions() {
+  local result
+  result=$("${PYTHON_BIN}" - <<'PY' 2>/dev/null || true
+import os
+import sys
+from pathlib import Path
+sys.path.insert(0, os.getcwd())
+try:
+    from scripts.daily_stop_guard import _has_open_live_positions
+except Exception:
+    print("unknown")
+    raise SystemExit(0)
+state = _has_open_live_positions()
+if state is None:
+    print("unknown")
+elif state:
+    print("yes")
+else:
+    print("no")
+PY
+)
+  case "${result}" in
+    yes|no|unknown) echo "${result}" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+has_open_paper_positions() {
+  local result
+  result=$("${PYTHON_BIN}" - <<'PY' 2>/dev/null || true
+import os
+import sys
+from pathlib import Path
+sys.path.insert(0, os.getcwd())
+try:
+    from scripts.daily_stop_guard import _has_open_paper_positions
+except Exception:
+    print("unknown")
+    raise SystemExit(0)
+print("yes" if _has_open_paper_positions() else "no")
+PY
+)
+  case "${result}" in
+    yes|no|unknown) echo "${result}" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
 if [[ "${RUN_PAPER}" == "1" && "${RUN_PAPER_UPDATE}" == "1" ]]; then
   "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" update
 fi
@@ -72,30 +120,58 @@ fi
 if [[ "${range_break_active}" == "1" ]]; then
   echo "Guard active: range break triggered. Closing positions and suppressing new entries."
   if [[ "${RUN_LIVE}" == "1" ]]; then
-    echo "Closing live positions due to range break."
-    if ! "${PYTHON_BIN}" "${REPO_ROOT}/close_positions.py"; then
-      echo "Live close_positions.py failed (continuing)."
+    live_state=$(has_open_live_positions)
+    if [[ "${live_state}" == "no" ]]; then
+      echo "Range break: no open live positions; skip close."
+    else
+      if [[ "${live_state}" == "unknown" ]]; then
+        echo "Range break: open live positions unknown; closing to be safe."
+      else
+        echo "Closing live positions due to range break."
+      fi
+      if ! "${PYTHON_BIN}" "${REPO_ROOT}/close_positions.py"; then
+        echo "Live close_positions.py failed (continuing)."
+      fi
     fi
   fi
   if [[ "${RUN_PAPER}" == "1" ]]; then
-    echo "Closing paper trades due to range break."
-    if ! "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" close --all --reason "range_break"; then
-      echo "Paper close failed (continuing)."
+    paper_state=$(has_open_paper_positions)
+    if [[ "${paper_state}" == "no" ]]; then
+      echo "Range break: no open paper trades; skip close."
+    else
+      echo "Closing paper trades due to range break."
+      if ! "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" close --all --reason "range_break"; then
+        echo "Paper close failed (continuing)."
+      fi
     fi
   fi
   exit 0
 fi
 
 if [[ "${RUN_LIVE}" == "1" && "${daily_stop_live_active}" == "1" ]]; then
-  echo "Daily stop active (live): closing live positions and suppressing live entries."
-  if ! "${PYTHON_BIN}" "${REPO_ROOT}/close_positions.py"; then
-    echo "Live close_positions.py failed (continuing)."
+  live_state=$(has_open_live_positions)
+  if [[ "${live_state}" == "no" ]]; then
+    echo "Daily stop active (live): no open positions; suppressing live entries."
+  else
+    if [[ "${live_state}" == "unknown" ]]; then
+      echo "Daily stop active (live): open positions unknown; closing to be safe."
+    else
+      echo "Daily stop active (live): closing live positions and suppressing live entries."
+    fi
+    if ! "${PYTHON_BIN}" "${REPO_ROOT}/close_positions.py"; then
+      echo "Live close_positions.py failed (continuing)."
+    fi
   fi
 fi
 if [[ "${RUN_PAPER}" == "1" && "${daily_stop_paper_active}" == "1" ]]; then
-  echo "Daily stop active (paper): closing paper positions and suppressing paper entries."
-  if ! "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" close --all --reason "daily_stop"; then
-    echo "Paper close failed (continuing)."
+  paper_state=$(has_open_paper_positions)
+  if [[ "${paper_state}" == "no" ]]; then
+    echo "Daily stop active (paper): no open paper trades; suppressing paper entries."
+  else
+    echo "Daily stop active (paper): closing paper positions and suppressing paper entries."
+    if ! "${PYTHON_BIN}" "${REPO_ROOT}/paper_finder_simulator.py" close --all --reason "daily_stop"; then
+      echo "Paper close failed (continuing)."
+    fi
   fi
 fi
 

@@ -110,6 +110,20 @@ def _load_open_paper_pnl(path: Path = PAPER_OPEN_LOG_PATH) -> Optional[float]:
     return None
 
 
+def _has_open_paper_positions(path: Path = PAPER_OPEN_LOG_PATH) -> bool:
+    if not path.exists():
+        return False
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return False
+    if df.empty:
+        return False
+    if "status" in df.columns:
+        df = df[df["status"].astype(str).str.upper() == "OPEN"]
+    return not df.empty
+
+
 def _load_open_live_pnl() -> Optional[float]:
     if not API_KEY_PERPS or not API_SECRET_PERPS:
         return None
@@ -172,6 +186,37 @@ def _load_open_live_pnl() -> Optional[float]:
         total += float(pnl)
         seen_any = True
     return total if seen_any else None
+
+
+def _has_open_live_positions() -> Optional[bool]:
+    if not API_KEY_PERPS or not API_SECRET_PERPS:
+        return None
+    try:
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+    except Exception:
+        return None
+    portfolio_uuid = _get_portfolio_uuid(cb)
+    if not portfolio_uuid:
+        return None
+    try:
+        positions_response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
+    except Exception:
+        return None
+
+    if isinstance(positions_response, dict):
+        positions_raw = positions_response.get("positions", []) or []
+    else:
+        positions_raw = getattr(positions_response, "positions", []) or []
+
+    for pos in positions_raw:
+        pos_dict = pos if isinstance(pos, dict) else pos.to_dict()
+        try:
+            net_size = float(pos_dict.get("net_size", 0) or 0.0)
+        except Exception:
+            net_size = 0.0
+        if abs(net_size) > 0:
+            return True
+    return False
 
 
 def _threshold(equity: float, stop_pct: float, stop_usd: float) -> Optional[float]:
@@ -365,11 +410,21 @@ def main() -> int:
         )
 
     if triggered_live and run_live:
-        print("Daily stop ACTIVE (live): closing live positions.")
-        _run([sys.executable, str(REPO_ROOT / "close_positions.py")])
+        has_live_positions = _has_open_live_positions()
+        if has_live_positions is False:
+            print("Daily stop ACTIVE (live): no open positions detected; skip close.")
+        else:
+            if has_live_positions is None:
+                print("Daily stop ACTIVE (live): open positions unknown; closing to be safe.")
+            else:
+                print("Daily stop ACTIVE (live): closing live positions.")
+            _run([sys.executable, str(REPO_ROOT / "close_positions.py")])
     if triggered_paper and run_paper:
-        print("Daily stop ACTIVE (paper): closing paper positions.")
-        _run([sys.executable, str(REPO_ROOT / "paper_finder_simulator.py"), "close", "--all", "--reason", "daily_stop"])
+        if _has_open_paper_positions():
+            print("Daily stop ACTIVE (paper): closing paper positions.")
+            _run([sys.executable, str(REPO_ROOT / "paper_finder_simulator.py"), "close", "--all", "--reason", "daily_stop"])
+        else:
+            print("Daily stop ACTIVE (paper): no open paper trades to close.")
 
     return 0
 
