@@ -1,1 +1,4 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
+fdb320928d,ONDO,ONDO-PERP-INTX,SHORT,0.39964,0.412428,0.380457,250.0,50.0,2026-01-10T06:08:29Z,2026-01-11T06:08:29Z,OPEN,0.4014,2026-01-10T07:50:02Z,-1.1,-0.4404,0.0,1,5.0,,
+e8386ec988,ETH,ETH-PERP-INTX,SHORT,3083.04,3160.44,2966.94,250.0,50.0,2026-01-10T06:08:29Z,2026-01-11T06:08:29Z,OPEN,3087.15,2026-01-10T07:50:02Z,-0.33,-0.1333,0.0,2,5.0,,
+f275c5a55d,LINK,LINK-PERP-INTX,LONG,13.082,12.677,13.689,250.0,50.0,2026-01-10T06:08:29Z,2026-01-11T06:08:29Z,OPEN,13.13,2026-01-10T07:50:02Z,0.92,0.3669,0.0,4,5.0,,
