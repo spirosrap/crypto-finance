@@ -11,6 +11,11 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit now auto‑close live/paper and suppress new entries until the daily reset or a confirmed daily close re-enters range±buffer (latched; intraday moves don’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live resumed after the Jan 1 stop and is stronger post‑guard; paper resumed after its halt and is catching up. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 10, 2026 - Live Pause Until Paper Improves
+- Pausing live entries and letting paper continue.
+- Resume live only after the paper last‑30 turns positive; start back at half size and reassess after another 30 trades.
+- Re-entry plan: restart live at 25–50% size for 10–20 trades, then scale only if **both** paper last‑30 and live last‑20 are positive; otherwise pause again.
+
 ## January 10, 2026 - Breakeven Drift
 - Trading continues.
 - Yesterday’s trades closed around breakeven with a small loss.
