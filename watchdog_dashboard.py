@@ -187,6 +187,21 @@ def _save_dashboard_state(state: dict) -> None:
         return
 
 
+def _parse_date_value(value: Optional[str]) -> Optional[date]:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _serialize_date_value(value: Optional[date]) -> Optional[str]:
+    if not value:
+        return None
+    return value.isoformat()
+
+
 def _format_hours_minutes(hours_val: Optional[float]) -> str:
     if hours_val is None:
         return "n/a"
@@ -1088,21 +1103,45 @@ def main() -> None:
     data_path = Path(csv_path)
 
     today = date.today()
+    persisted_filters = {}
+    if isinstance(st.session_state.get("dashboard_state"), dict):
+        persisted_filters = (
+            st.session_state["dashboard_state"]
+            .get("date_filters", {})
+            .get(source_mode, {})
+        )
+    persisted_preset = persisted_filters.get("preset")
+    if persisted_preset not in ("Custom", "Last 7 days", "Last 30 days", "Year to date"):
+        persisted_preset = "Custom"
+    persisted_start = _parse_date_value(persisted_filters.get("start"))
+    persisted_end = _parse_date_value(persisted_filters.get("end"))
+
     date_preset = st.sidebar.selectbox(
         "Date preset",
         options=("Custom", "Last 7 days", "Last 30 days", "Year to date"),
-        index=0,
+        index=("Custom", "Last 7 days", "Last 30 days", "Year to date").index(persisted_preset),
         help="Quickly apply a rolling time window; choose Custom to rely on the manual date inputs below.",
     )
 
-    start_date_input = st.sidebar.date_input("Start date", value=None)
-    end_date_input = st.sidebar.date_input("End date", value=None)
+    start_date_input = st.sidebar.date_input("Start date", value=persisted_start)
+    end_date_input = st.sidebar.date_input("End date", value=persisted_end)
     if isinstance(end_date_input, list):
         end_date_input = end_date_input[0] if end_date_input else None
 
-    start_count = st.sidebar.number_input("Start count (1-based)", min_value=0, value=0, step=1)
-    end_count = st.sidebar.number_input("End count (inclusive, 0 for none)", min_value=0, value=0, step=1)
-    tail_last = st.sidebar.number_input("Last N trades (0 to ignore)", min_value=0, value=0, step=1)
+    persisted_counts = {}
+    if isinstance(st.session_state.get("dashboard_state"), dict):
+        persisted_counts = (
+            st.session_state["dashboard_state"]
+            .get("count_filters", {})
+            .get(source_mode, {})
+        )
+    start_count_default = int(persisted_counts.get("start", 0) or 0)
+    end_count_default = int(persisted_counts.get("end", 0) or 0)
+    tail_last_default = int(persisted_counts.get("last", 0) or 0)
+
+    start_count = st.sidebar.number_input("Start count (1-based)", min_value=0, value=start_count_default, step=1)
+    end_count = st.sidebar.number_input("End count (inclusive, 0 for none)", min_value=0, value=end_count_default, step=1)
+    tail_last = st.sidebar.number_input("Last N trades (0 to ignore)", min_value=0, value=tail_last_default, step=1)
     persisted_starting = (
         st.session_state["dashboard_state"].get("starting_equity", {}).get(source_mode)
         if isinstance(st.session_state.get("dashboard_state"), dict)
@@ -1121,6 +1160,22 @@ def main() -> None:
         key=f"starting_equity_{source_mode}",
     )
     if isinstance(st.session_state.get("dashboard_state"), dict):
+        existing_filters = st.session_state["dashboard_state"].get("date_filters", {})
+        updated_filters = {
+            "preset": date_preset,
+            "start": _serialize_date_value(start_date_input),
+            "end": _serialize_date_value(end_date_input),
+        }
+        if existing_filters.get(source_mode) != updated_filters:
+            existing_filters[source_mode] = updated_filters
+            st.session_state["dashboard_state"]["date_filters"] = existing_filters
+            _save_dashboard_state(st.session_state["dashboard_state"])
+        existing_counts = st.session_state["dashboard_state"].get("count_filters", {})
+        updated_counts = {"start": int(start_count), "end": int(end_count), "last": int(tail_last)}
+        if existing_counts.get(source_mode) != updated_counts:
+            existing_counts[source_mode] = updated_counts
+            st.session_state["dashboard_state"]["count_filters"] = existing_counts
+            _save_dashboard_state(st.session_state["dashboard_state"])
         existing = st.session_state["dashboard_state"].get("starting_equity", {})
         if existing.get(source_mode) != starting_equity:
             existing[source_mode] = float(starting_equity)
@@ -1128,6 +1183,16 @@ def main() -> None:
             _save_dashboard_state(st.session_state["dashboard_state"])
 
     if st.sidebar.button("Reset filters"):
+        if isinstance(st.session_state.get("dashboard_state"), dict):
+            existing_filters = st.session_state["dashboard_state"].get("date_filters", {})
+            if source_mode in existing_filters:
+                existing_filters.pop(source_mode, None)
+                st.session_state["dashboard_state"]["date_filters"] = existing_filters
+            existing_counts = st.session_state["dashboard_state"].get("count_filters", {})
+            if source_mode in existing_counts:
+                existing_counts.pop(source_mode, None)
+                st.session_state["dashboard_state"]["count_filters"] = existing_counts
+            _save_dashboard_state(st.session_state["dashboard_state"])
         st.experimental_rerun()
 
     try:
