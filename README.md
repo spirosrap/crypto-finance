@@ -21,7 +21,7 @@ For others, this repo can be useful as:
   - Long-horizon snapshot: `scripts/long_term_snapshot.py` (daily candles + long-term indicators like ATR(14)/Sharpe/drawdown).
     - Renders ASCII Rich tables when `rich` is installed; falls back to plain text.
     - Gate scan (long-term): `python scripts/long_term_snapshot.py --gate-scan --profile wide --top 15 --scan-limit 200`
-  - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N]`.
+  - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N] [--balanced]`.
     - Use `--baseline-commands` to print ccxt trade commands for baseline-pass symbols; open live positions are auto-skipped (and listed).
     - Use `--baseline-paper-command` to emit a one-shot `baseline_finder_from_snapshot.py` command for paper trades (skips open live/paper positions unless `--baseline-include-open` is set).
     - Capacity guards: `--baseline-max-open` (default 10) and `--baseline-max-per-cluster` (default 3) suppress commands once the live/paper books are full. Clusters are majors/memecoins/alts.
@@ -34,7 +34,7 @@ For others, this repo can be useful as:
 - **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text.
 - **Baseline Paper Helper**: `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into `finder_short_baseline.txt` and optionally open them in `paper_finder_simulator.py`.
   - After opening paper trades, run `python paper_finder_simulator.py update` so the dashboard shows live P/L.
-- **Gate-scan Paper Runner**: `scripts/run_gate_scan_paper.sh` automates the gate-scan + paper-trade flow (cron-friendly). Set `PYTHON_BIN`, `RUN_PAPER=0|1`, and `RUN_LIVE=0|1`; logs to `logs/gate_scan_paper.log`.
+- **Gate-scan Paper Runner**: `scripts/run_gate_scan_paper.sh` automates the gate-scan + paper-trade flow (cron-friendly). It now runs `--balanced` with the 400-product focused profile and streams output live (no apparent hang on long scans). Set `PYTHON_BIN`, `RUN_PAPER=0|1`, and `RUN_LIVE=0|1`; logs to `logs/gate_scan_paper.log`.
   - Scheduled every 4 hours to batch entries and reduce impulse/overtrading; it only opens new trades when gates pass.
   - If the daily stop or BTC range-break guard triggers, it auto-closes live positions (`close_positions.py`) and paper positions (`paper_finder_simulator.py close --all`) and suppresses new entries. Range-break stays latched until a confirmed daily close is back inside range±buffer; it can be set to trigger only on confirmed closes via `range_break_confirmed_only`.
 - **Paper Trade Updater (cron)**: `paper_finder_simulator.py update` runs every 5 minutes to keep paper P/L and expiries fresh; logs to `logs/paper_finder_update.log`.

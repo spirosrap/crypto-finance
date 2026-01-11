@@ -60,3 +60,46 @@ class TestSymbolSnapshot(unittest.TestCase):
         atr7_to_21, tr1_to_atr7 = self.symbol_snapshot._vol_regime_ratios(20.0, 0.0, 20.0)
         self.assertIsNone(atr7_to_21)
         self.assertAlmostEqual(tr1_to_atr7, 1.0, places=6)
+
+    def test_select_balanced_rows_even_top(self):
+        rows = [
+            {"symbol": "AAA", "best_side": "LONG", "rr_gap": 0.2, "headroom_bps": 10.0},
+            {"symbol": "BBB", "best_side": "LONG", "rr_gap": 0.1, "headroom_bps": 5.0},
+            {"symbol": "CCC", "best_side": "SHORT", "rr_gap": 0.05, "headroom_bps": 3.0},
+            {"symbol": "DDD", "best_side": "SHORT", "rr_gap": 0.2, "headroom_bps": 4.0},
+            {"symbol": "EEE", "best_side": "LONG", "rr_gap": 0.3, "headroom_bps": 2.0},
+        ]
+        selected, meta = self.symbol_snapshot._select_balanced_rows(rows, 4)
+        self.assertEqual(meta["min_per_side"], 2)
+        self.assertEqual(meta["longs"], 3)
+        self.assertEqual(meta["shorts"], 2)
+        selected_symbols = {row["symbol"] for row in selected}
+        self.assertSetEqual(selected_symbols, {"AAA", "BBB", "CCC", "DDD"})
+        sides = [row["best_side"] for row in selected]
+        self.assertEqual(sides.count("LONG"), 2)
+        self.assertEqual(sides.count("SHORT"), 2)
+
+    def test_select_balanced_rows_odd_top(self):
+        rows = [
+            {"symbol": "AAA", "best_side": "LONG", "rr_gap": 0.2, "headroom_bps": 10.0},
+            {"symbol": "BBB", "best_side": "LONG", "rr_gap": 0.1, "headroom_bps": 5.0},
+            {"symbol": "CCC", "best_side": "SHORT", "rr_gap": 0.05, "headroom_bps": 3.0},
+            {"symbol": "DDD", "best_side": "SHORT", "rr_gap": 0.2, "headroom_bps": 4.0},
+            {"symbol": "EEE", "best_side": "LONG", "rr_gap": 0.3, "headroom_bps": 2.0},
+        ]
+        selected, meta = self.symbol_snapshot._select_balanced_rows(rows, 5)
+        self.assertEqual(meta["min_per_side"], 2)
+        self.assertEqual(len(selected), 5)
+        sides = [row["best_side"] for row in selected]
+        self.assertEqual(sides.count("LONG"), 3)
+        self.assertEqual(sides.count("SHORT"), 2)
+
+    def test_select_balanced_rows_insufficient_side(self):
+        rows = [
+            {"symbol": "AAA", "best_side": "LONG", "rr_gap": 0.1, "headroom_bps": 10.0},
+        ]
+        selected, meta = self.symbol_snapshot._select_balanced_rows(rows, 2)
+        self.assertEqual(selected, [])
+        self.assertEqual(meta["min_per_side"], 1)
+        self.assertEqual(meta["longs"], 1)
+        self.assertEqual(meta["shorts"], 0)

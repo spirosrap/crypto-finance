@@ -81,9 +81,10 @@ fi
 SCAN_CMD=(
   "${PYTHON_BIN}" "${REPO_ROOT}/scripts/symbol_snapshot.py"
   --gate-scan
-  --profile focused_no_llm_100
+  --profile focused_no_llm_400
   --top 15
-  --scan-limit 100
+  --scan-limit 400
+  --balanced
   --baseline-commands
   --baseline-portfolio-usd 5000
   --baseline-position-pct 5
@@ -96,8 +97,18 @@ SCAN_CMD=(
   --baseline-paper-command
 )
 
-OUTPUT=$("${SCAN_CMD[@]}" 2>&1)
-printf "%s\n" "${OUTPUT}"
+OUTPUT_FILE=$(mktemp)
+cleanup_output_file() {
+  rm -f "${OUTPUT_FILE}"
+}
+trap cleanup_output_file EXIT
+
+scan_status=0
+"${SCAN_CMD[@]}" 2>&1 | tee "${OUTPUT_FILE}" || scan_status=$?
+OUTPUT=$(<"${OUTPUT_FILE}")
+if [[ "${scan_status}" != "0" ]]; then
+  exit "${scan_status}"
+fi
 
 daily_stop_live_active=0
 daily_stop_paper_active=0

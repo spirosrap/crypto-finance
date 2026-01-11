@@ -749,6 +749,47 @@ def _print_gates(
         print(rr_line)
 
 
+def _gate_scan_sort_key(row: Dict[str, object]) -> Tuple[float, float]:
+    rr_gap = row.get("rr_gap")
+    headroom = row.get("headroom_bps")
+    try:
+        rr_val = float(rr_gap) if rr_gap is not None else None
+    except Exception:
+        rr_val = None
+    try:
+        headroom_val = float(headroom) if headroom is not None else None
+    except Exception:
+        headroom_val = None
+    return (rr_val if rr_val is not None else 1e9,
+            -(headroom_val if headroom_val is not None else -1e9))
+
+
+def _select_balanced_rows(
+    rows: List[Dict[str, object]],
+    top: int,
+) -> Tuple[List[Dict[str, object]], Dict[str, int]]:
+    if top <= 0 or not rows:
+        return [], {"longs": 0, "shorts": 0, "min_per_side": 0}
+    longs = [row for row in rows if str(row.get("best_side") or "").upper() == "LONG"]
+    shorts = [row for row in rows if str(row.get("best_side") or "").upper() == "SHORT"]
+    longs.sort(key=_gate_scan_sort_key)
+    shorts.sort(key=_gate_scan_sort_key)
+    min_per_side = top // 2
+    if min_per_side and (len(longs) < min_per_side or len(shorts) < min_per_side):
+        return [], {"longs": len(longs), "shorts": len(shorts), "min_per_side": min_per_side}
+    selected: List[Dict[str, object]] = []
+    if min_per_side:
+        selected.extend(longs[:min_per_side])
+        selected.extend(shorts[:min_per_side])
+    remaining = top - len(selected)
+    if remaining > 0:
+        remainder_pool = longs[min_per_side:] + shorts[min_per_side:]
+        remainder_pool.sort(key=_gate_scan_sort_key)
+        selected.extend(remainder_pool[:remaining])
+    selected.sort(key=_gate_scan_sort_key)
+    return selected, {"longs": len(longs), "shorts": len(shorts), "min_per_side": min_per_side}
+
+
 def _rr_driver_line(
     finder: ShortTermCryptoFinder,
     df: pd.DataFrame,
@@ -1069,6 +1110,7 @@ def gate_scan(
     range_break_days: int,
     range_break_atr_mult: float,
     range_break_confirmed_only: bool,
+    balanced: bool,
 ) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
@@ -1299,9 +1341,21 @@ def gate_scan(
             "rr_pass": rr_pass,
         })
 
-    rows.sort(key=lambda r: (r["rr_gap"] if r["rr_gap"] is not None else 1e9,
-                             -(r["headroom_bps"] if r["headroom_bps"] is not None else -1e9)))
+    rows.sort(key=_gate_scan_sort_key)
     top_rows = rows[:top]
+    balance_note = None
+    if balanced:
+        top_rows, balance_meta = _select_balanced_rows(rows, top)
+        min_per_side = balance_meta["min_per_side"]
+        balance_note = (
+            "Balanced gate-scan: LONG={longs}, SHORT={shorts}, min_per_side={min_per_side}.".format(
+                longs=balance_meta["longs"],
+                shorts=balance_meta["shorts"],
+                min_per_side=min_per_side,
+            )
+        )
+        if min_per_side and (balance_meta["longs"] < min_per_side or balance_meta["shorts"] < min_per_side):
+            balance_note += " Insufficient balance; output suppressed."
 
     def _write_range_break_status() -> None:
         if range_break_info is None:
@@ -1373,7 +1427,9 @@ def gate_scan(
                 f"confirmed_close={confirmed_txt}"
             )
     print(range_break_msg)
-    print(f"Top {min(top, len(rows))} closest to RR {rr_target}:")
+    if balance_note:
+        print(balance_note)
+    print(f"Top {len(top_rows)} closest to RR {rr_target}:")
 
     def _leverage_text(value: Optional[float]) -> Optional[str]:
         if value is None:
@@ -1755,6 +1811,11 @@ def main() -> None:
         help="How many symbols to show in gate-scan mode (default: 15).",
     )
     parser.add_argument(
+        "--balanced",
+        action="store_true",
+        help="Require a balanced LONG/SHORT mix in gate-scan output (needs >= floor(top/2) per side).",
+    )
+    parser.add_argument(
         "--rr-target",
         type=float,
         default=2.0,
@@ -1920,6 +1981,7 @@ def main() -> None:
             range_break_days=args.range_break_days,
             range_break_atr_mult=args.range_break_atr_mult,
             range_break_confirmed_only=bool(args.range_break_confirmed_only),
+            balanced=args.balanced,
         )
         return
 
