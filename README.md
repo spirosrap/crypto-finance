@@ -24,6 +24,7 @@ For others, this repo can be useful as:
   - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N] [--balanced]`.
     - Use `--baseline-commands` to print ccxt trade commands for baseline-pass symbols; open live positions are auto-skipped (and listed).
     - Use `--baseline-paper-command` to emit a one-shot `baseline_finder_from_snapshot.py` command for paper trades (skips open live/paper positions unless `--baseline-include-open` is set).
+    - `--balanced` balances the candidate list; baseline-pass filters, open-position skips, and cluster caps can still reduce the final command count.
     - Capacity guards: `--baseline-max-open` (default 10) and `--baseline-max-per-cluster` (default 3) suppress commands once the live/paper books are full. Clusters are majors/memecoins/alts.
     - Daily stop + range break: gate-scan suppresses commands if the daily loss gate triggers (default −4%/−$40) or if BTC closes outside the 7‑day range by >0.5× ATR (range-break circuit). Range-break is **latched** until a confirmed daily close returns inside range±buffer (intraday moves do not clear). Trigger mode is configurable via `range_break_confirmed_only` in `config/risk_thresholds.yaml`.
     - Shared defaults live in `config/risk_thresholds.yaml` (used by gate‑scan and the dashboard); CLI flags override per run.

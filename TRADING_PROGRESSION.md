@@ -15,6 +15,7 @@
 - Yesterday’s paper trading saw more losses; currently at 13 trades.
 - I don’t expect the picture to improve until I reach 30 trades.
 - After 30 paper trades complete, only resume live if the dashboard **Expectancy** is >= 0.25 (USD per trade), or >= 0.30 for a buffer; otherwise pause.
+- Note: `--balanced` only balances the gate-scan candidate list; baseline filters, open-position skips, and cluster caps can still reduce the final command count below 5.
 
 ## January 11, 2026 - Gate-Scan Runner Streams Output
 - The gate-scan paper runner now streams output live (no buffering), so long scans no longer look stuck.
