@@ -15,6 +15,10 @@
 - The gate-scan paper runner now streams output live (no buffering), so long scans no longer look stuck.
 - It also runs with `--balanced` and scans 400 products via the 400-focused profile.
 
+## January 12, 2026 - Paper Drawdown Continues
+- Yesterday’s paper trading saw more losses; currently at 13 trades.
+- I don’t expect the picture to improve until I reach 30 trades.
+
 ## January 11, 2026 - Considering a Live Restart
 - Yesterday’s paper trading finished breakeven and the tape looks like it might reverse, so I’m considering restarting live.
 - I will only resume after the paper last‑30 turns positive, and I’ll re-enter at half size.
