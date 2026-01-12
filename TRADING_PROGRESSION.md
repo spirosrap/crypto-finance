@@ -18,6 +18,7 @@
 ## January 12, 2026 - Paper Drawdown Continues
 - Yesterday’s paper trading saw more losses; currently at 13 trades.
 - I don’t expect the picture to improve until I reach 30 trades.
+- After 30 paper trades complete, only resume live if the dashboard **Expectancy** is >= 0.25 (USD per trade), or >= 0.30 for a buffer; otherwise pause.
 
 ## January 11, 2026 - Considering a Live Restart
 - Yesterday’s paper trading finished breakeven and the tape looks like it might reverse, so I’m considering restarting live.
