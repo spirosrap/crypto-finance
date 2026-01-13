@@ -22,7 +22,10 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
+try:  # pragma: no cover - optional dependency
+    from streamlit_autorefresh import st_autorefresh
+except Exception:  # pragma: no cover - optional dependency
+    st_autorefresh = None  # type: ignore[assignment]
 
 from coinbaseservice import CoinbaseService
 from trading.risk_thresholds import load_risk_thresholds
@@ -219,22 +222,6 @@ def _format_hours_minutes(hours_val: Optional[float]) -> str:
     if days > 0:
         return f"{prefix}{days}d {hours:02d}h"
     return f"{prefix}{hours:02d}h {minutes:02d}m"
-
-
-def _inject_auto_refresh(interval_sec: int) -> None:
-    if interval_sec <= 0:
-        return
-    interval_ms = max(int(interval_sec * 1000), 1000)
-    components.html(
-        f"""
-        <script>
-        setTimeout(function() {{
-            window.location.reload();
-        }}, {interval_ms});
-        </script>
-        """,
-        height=0,
-    )
 
 
 def _time_until_next_utc_midnight() -> str:
@@ -1004,6 +991,7 @@ def main() -> None:
     auto_refresh_default = bool(refresh_defaults.get("enabled", False))
     refresh_interval_default = int(refresh_defaults.get("interval_sec", AUTO_REFRESH_DEFAULT_SEC))
     auto_refresh = st.sidebar.checkbox("Auto-refresh", value=auto_refresh_default)
+    st.sidebar.caption("Runs a Streamlit rerun (same as pressing “R”); does not reload the browser page.")
     refresh_interval = st.sidebar.number_input(
         "Refresh interval (sec)",
         min_value=30,
@@ -1013,7 +1001,10 @@ def main() -> None:
         disabled=not auto_refresh,
     )
     if auto_refresh:
-        _inject_auto_refresh(int(refresh_interval))
+        if st_autorefresh is None:
+            st.sidebar.warning("Install streamlit-autorefresh to enable auto-refresh without reloading the page.")
+        else:
+            st_autorefresh(interval=int(refresh_interval * 1000), key="watchdog_autorefresh")
     if "paper_update_log" not in st.session_state:
         st.session_state["paper_update_log"] = ""
     if "live_update_log" not in st.session_state:
