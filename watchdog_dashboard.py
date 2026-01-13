@@ -22,6 +22,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from coinbaseservice import CoinbaseService
 from trading.risk_thresholds import load_risk_thresholds
@@ -60,7 +61,7 @@ except Exception as exc:  # pragma: no cover - optional dependency
 
 
 UTC = timezone.utc
-AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 250
+AUTO_REFRESH_DEFAULT_SEC = 60
 RISK_THRESHOLDS = load_risk_thresholds()
 DAILY_STOP_PCT = float(RISK_THRESHOLDS.get("daily_stop_pct", 2.0) or 0.0)
 DAILY_STOP_USD = float(RISK_THRESHOLDS.get("daily_stop_usd", 20.0) or 0.0)
@@ -218,6 +219,22 @@ def _format_hours_minutes(hours_val: Optional[float]) -> str:
     if days > 0:
         return f"{prefix}{days}d {hours:02d}h"
     return f"{prefix}{hours:02d}h {minutes:02d}m"
+
+
+def _inject_auto_refresh(interval_sec: int) -> None:
+    if interval_sec <= 0:
+        return
+    interval_ms = max(int(interval_sec * 1000), 1000)
+    components.html(
+        f"""
+        <script>
+        setTimeout(function() {{
+            window.location.reload();
+        }}, {interval_ms});
+        </script>
+        """,
+        height=0,
+    )
 
 
 def _time_until_next_utc_midnight() -> str:
@@ -980,6 +997,23 @@ def main() -> None:
     source_mode = "paper" if source_choice == "Paper Finder" else "live"
     if "dashboard_state" not in st.session_state:
         st.session_state["dashboard_state"] = _load_dashboard_state()
+
+    refresh_defaults = {}
+    if isinstance(st.session_state.get("dashboard_state"), dict):
+        refresh_defaults = st.session_state["dashboard_state"].get("refresh", {}) or {}
+    auto_refresh_default = bool(refresh_defaults.get("enabled", False))
+    refresh_interval_default = int(refresh_defaults.get("interval_sec", AUTO_REFRESH_DEFAULT_SEC))
+    auto_refresh = st.sidebar.checkbox("Auto-refresh", value=auto_refresh_default)
+    refresh_interval = st.sidebar.number_input(
+        "Refresh interval (sec)",
+        min_value=30,
+        max_value=600,
+        value=refresh_interval_default,
+        step=30,
+        disabled=not auto_refresh,
+    )
+    if auto_refresh:
+        _inject_auto_refresh(int(refresh_interval))
     if "paper_update_log" not in st.session_state:
         st.session_state["paper_update_log"] = ""
     if "live_update_log" not in st.session_state:
@@ -1180,6 +1214,14 @@ def main() -> None:
         if existing.get(source_mode) != starting_equity:
             existing[source_mode] = float(starting_equity)
             st.session_state["dashboard_state"]["starting_equity"] = existing
+            _save_dashboard_state(st.session_state["dashboard_state"])
+        refresh_state = st.session_state["dashboard_state"].get("refresh", {})
+        refresh_updated = {
+            "enabled": bool(auto_refresh),
+            "interval_sec": int(refresh_interval),
+        }
+        if refresh_state != refresh_updated:
+            st.session_state["dashboard_state"]["refresh"] = refresh_updated
             _save_dashboard_state(st.session_state["dashboard_state"])
 
     if st.sidebar.button("Reset filters"):
