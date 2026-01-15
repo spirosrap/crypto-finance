@@ -14,6 +14,7 @@
 ## January 15, 2026 - Gate-Scan Filters + TP1 Added
 - Gate-scan now filters underperforming products (paper log lookback, min trades, drop worst) and applies side-specific score gates.
 - Added TP1 partials (default 0.8R / 50%) for both paper and live; paper can move SL to entry after TP1, live uses two brackets and does not auto-move SL.
+- Live trading restarts today after these changes.
 
 ## January 15, 2026 - Paper 30+ Trade Checkpoint
 - Paper trades reached 32; expectancy remains negative at -0.92, so live stays paused per the 30-trade rule.
