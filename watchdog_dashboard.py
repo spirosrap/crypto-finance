@@ -1365,37 +1365,6 @@ def main() -> None:
         symbols=selected_products or None,
     )
 
-    count_filters_active = any(
-        value > 0 for value in (filter_start_count, filter_end_count, int(tail_last))
-    )
-    if count_filters_active and not filtered.empty and not pnl_filtered.empty:
-        filtered_keys = filtered.copy()
-        filtered_keys["_group_time"] = filtered_keys["opened_at"].where(
-            filtered_keys["opened_at"].notna(), filtered_keys["closed_at"]
-        )
-        filtered_key_set = set(
-            zip(
-                filtered_keys["product_id"],
-                filtered_keys["position_side"],
-                filtered_keys["_group_time"],
-            )
-        )
-
-        pnl_keys = pnl_filtered.copy()
-        pnl_keys["_group_time"] = pnl_keys["opened_at"].where(
-            pnl_keys["opened_at"].notna(), pnl_keys["closed_at"]
-        )
-        pnl_key_series = list(
-            zip(
-                pnl_keys["product_id"],
-                pnl_keys["position_side"],
-                pnl_keys["_group_time"],
-            )
-        )
-        pnl_filtered = pnl_filtered.loc[
-            pd.Series(pnl_key_series, index=pnl_filtered.index).isin(filtered_key_set)
-        ].copy()
-
     if filtered.empty and pnl_filtered.empty:
         st.warning("No trades match the selected filters.")
         st.stop()
