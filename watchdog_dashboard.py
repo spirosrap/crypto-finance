@@ -1341,6 +1341,21 @@ def main() -> None:
         max_trade_count = int(trade_view_df.shape[0])
     max_trade_count = max(1, max_trade_count)
 
+    effective_start_count = min(start_count, max_trade_count) if start_count > 0 else 0
+    effective_end_count = min(end_count, max_trade_count) if end_count > 0 else 0
+    effective_tail_last = min(tail_last, max_trade_count) if tail_last > 0 else 0
+
+    if any(
+        (
+            effective_start_count != start_count,
+            effective_end_count != end_count,
+            effective_tail_last != tail_last,
+        )
+    ):
+        st.sidebar.caption(
+            f"Count filters capped to available trades (max {max_trade_count})."
+        )
+
     try:
         pipeline_snapshot = build_snapshot(trade_view_df, include_unrealized=False)
     except Exception as exc:
@@ -1373,8 +1388,8 @@ def main() -> None:
 
         start_str = preset_start.isoformat()
         end_str = preset_end.isoformat()
-    filter_start_count = int(start_count)
-    filter_end_count = int(end_count)
+    filter_start_count = int(effective_start_count)
+    filter_end_count = int(effective_end_count)
 
     filtered = apply_filters(
         trade_view_df,
@@ -1382,7 +1397,7 @@ def main() -> None:
         end_str,
         filter_start_count,
         filter_end_count,
-        int(tail_last),
+        int(effective_tail_last),
         symbols=selected_products or None,
     )
 
@@ -1397,7 +1412,8 @@ def main() -> None:
     )
 
     count_filters_active = any(
-        value > 0 for value in (filter_start_count, filter_end_count, int(tail_last))
+        value > 0
+        for value in (filter_start_count, filter_end_count, int(effective_tail_last))
     )
     if count_filters_active and not filtered.empty and not pnl_filtered.empty:
         filtered_keys = filtered.copy()
