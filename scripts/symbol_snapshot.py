@@ -1201,6 +1201,7 @@ def gate_scan(
     baseline_partial_tp_rr: float,
     baseline_partial_tp_pct: float,
     baseline_partial_tp_move_sl: bool,
+    baseline_limit_bps: float,
     baseline_leverage: Optional[float],
     baseline_expiry: str,
     baseline_include_open: bool,
@@ -1694,13 +1695,24 @@ def gate_scan(
             base_symbol = canonical_perp_symbol(symbol) or symbol
             product = f"{base_symbol}-PERP-INTX"
             side_ccxt = "BUY" if side == "LONG" else "SELL"
-            cmd = f"python ccxt_trade_perp.py --product {product} --side {side_ccxt} --size {size_usd:.2f}"
-            if leverage_text:
-                cmd += f" --leverage {leverage_text}"
-            cmd += f" --tp {tp_txt} --sl {sl_txt} --expiry {baseline_expiry}"
-            if partial_tp_txt and baseline_partial_tp_pct:
-                cmd += f" --tp1 {partial_tp_txt} --tp1-pct {baseline_partial_tp_pct:.2f}"
-            commands.append(cmd)
+        cmd = f"python ccxt_trade_perp.py --product {product} --side {side_ccxt} --size {size_usd:.2f}"
+        if leverage_text:
+            cmd += f" --leverage {leverage_text}"
+        cmd += f" --tp {tp_txt} --sl {sl_txt} --expiry {baseline_expiry}"
+        if baseline_limit_bps and baseline_limit_bps > 0:
+            limit_price = entry
+            offset = entry * (baseline_limit_bps / 10000.0)
+            if side == "LONG":
+                limit_price = entry + offset
+            elif side == "SHORT":
+                limit_price = entry - offset
+            limit_price = max(limit_price, 0.0)
+            if limit_price > 0:
+                limit_txt = _fmt_price(limit_price, precision)
+                cmd += f" --limit {limit_txt}"
+        if partial_tp_txt and baseline_partial_tp_pct:
+            cmd += f" --tp1 {partial_tp_txt} --tp1-pct {baseline_partial_tp_pct:.2f}"
+        commands.append(cmd)
             total_open += 1
             cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
 
@@ -2113,6 +2125,12 @@ def main() -> None:
         help="Use raw or capped ATR for baseline commands (default: clipped).",
     )
     parser.add_argument(
+        "--baseline-limit-bps",
+        type=float,
+        default=0.0,
+        help="Marketable limit offset (bps) for live baseline commands (default: 0 disables).",
+    )
+    parser.add_argument(
         "--baseline-partial-tp-rr",
         type=float,
         default=0.0,
@@ -2222,6 +2240,7 @@ def main() -> None:
             baseline_partial_tp_rr=args.baseline_partial_tp_rr,
             baseline_partial_tp_pct=args.baseline_partial_tp_pct,
             baseline_partial_tp_move_sl=args.baseline_partial_tp_move_sl,
+            baseline_limit_bps=args.baseline_limit_bps,
             baseline_leverage=args.baseline_leverage,
             baseline_expiry=args.baseline_expiry,
             baseline_include_open=args.baseline_include_open,

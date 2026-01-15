@@ -522,6 +522,7 @@ def main() -> None:
     parser.add_argument("--tp1", type=float, help="Partial take-profit price (optional).")
     parser.add_argument("--tp1-pct", type=float, default=0.0, help="Percent of size to close at TP1.")
     parser.add_argument("--tp1-move-sl", action="store_true", help="Move SL to entry after TP1 (not supported yet).")
+    parser.add_argument("--no-rest-fallback", action="store_true", help="Disable REST fallback on CCXT entry failure.")
     parser.add_argument("--limit", type=float, help="Optional entry limit price (omit for market).")
     parser.add_argument("--expiry", choices=["GTC", "12h", "24h", "30d"], default="30d", help="GTD expiry horizon for limit entries.")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without placing orders.")
@@ -545,6 +546,7 @@ def main() -> None:
                 raise RuntimeError("--tp1-pct must be between 0 and 100 (exclusive).")
             tp1_price = quantize_price(float(args.tp1), meta.price_precision)
             logger.info("TP1: %.2f (%s%% of size)", tp1_price, tp1_pct)
+            args.no_rest_fallback = True
         if args.tp1_move_sl:
             logger.warning("TP1 move-SL is not supported yet for live orders; ignoring --tp1-move-sl.")
 
@@ -575,7 +577,7 @@ def main() -> None:
                 args.dry_run,
             )
         except Exception as exc:
-            if (not args.dry_run) and (args.limit is None) and ("index out of range" in str(exc)):
+            if (not args.dry_run) and (args.limit is None) and (not args.no_rest_fallback) and ("index out of range" in str(exc)):
                 logger.warning("CCXT entry failed (%s). Falling back to Coinbase REST order flow.", exc)
                 if tp1_price is not None:
                     logger.warning("TP1 is not supported in REST fallback; placing single bracket only.")
