@@ -1329,16 +1329,17 @@ def main() -> None:
     if source_mode == "paper":
         trade_view_df = filter_paper_trade_batches(trade_view_df)
 
-    column_map = {col.strip().lower(): col for col in trade_view_df.columns}
+    count_source_df = trades_df if source_mode == "paper" else trade_view_df
+    column_map = {col.strip().lower(): col for col in count_source_df.columns}
     max_trade_count = None
     for key in ("count", "trade_count", "trade_number", "trade_index"):
         if key in column_map:
-            series = pd.to_numeric(trade_view_df[column_map[key]], errors='coerce')
+            series = pd.to_numeric(count_source_df[column_map[key]], errors='coerce')
             if series.notna().any():
                 max_trade_count = int(series.max())
                 break
     if max_trade_count is None:
-        max_trade_count = int(trade_view_df.shape[0])
+        max_trade_count = int(count_source_df.shape[0])
     max_trade_count = max(1, max_trade_count)
 
     effective_start_count = start_count if start_count > 0 else 0
@@ -1394,65 +1395,78 @@ def main() -> None:
     filter_start_count = int(effective_start_count)
     filter_end_count = int(effective_end_count)
 
-    filtered = apply_filters(
-        trade_view_df,
-        start_str,
-        end_str,
-        filter_start_count,
-        filter_end_count,
-        int(effective_tail_last),
-        symbols=selected_products or None,
-    )
-
-    pnl_filtered = apply_filters(
-        trades_df,
-        start_str,
-        end_str,
-        0,
-        0,
-        0,
-        symbols=selected_products or None,
-    )
-
-    count_filters_active = any(
-        value > 0
-        for value in (filter_start_count, filter_end_count, int(effective_tail_last))
-    )
-    if count_filters_active and not filtered.empty and not pnl_filtered.empty:
-        filtered_keys = filtered.copy()
-        filtered_keys["_group_time"] = filtered_keys["opened_at"].where(
-            filtered_keys["opened_at"].notna(), filtered_keys["closed_at"]
+    if source_mode == "paper":
+        pnl_filtered = apply_filters(
+            trades_df,
+            start_str,
+            end_str,
+            filter_start_count,
+            filter_end_count,
+            int(effective_tail_last),
+            symbols=selected_products or None,
         )
-        filtered_key_set = set(
-            zip(
-                filtered_keys["product_id"],
-                filtered_keys["position_side"],
-                filtered_keys["_group_time"],
+        filtered = collapse_trade_rows(pnl_filtered)
+        filtered = filter_paper_trade_batches(filtered)
+    else:
+        filtered = apply_filters(
+            trade_view_df,
+            start_str,
+            end_str,
+            filter_start_count,
+            filter_end_count,
+            int(effective_tail_last),
+            symbols=selected_products or None,
+        )
+
+        pnl_filtered = apply_filters(
+            trades_df,
+            start_str,
+            end_str,
+            0,
+            0,
+            0,
+            symbols=selected_products or None,
+        )
+
+        count_filters_active = any(
+            value > 0
+            for value in (filter_start_count, filter_end_count, int(effective_tail_last))
+        )
+        if count_filters_active and not filtered.empty and not pnl_filtered.empty:
+            filtered_keys = filtered.copy()
+            filtered_keys["_group_time"] = filtered_keys["opened_at"].where(
+                filtered_keys["opened_at"].notna(), filtered_keys["closed_at"]
             )
-        )
-
-        pnl_keys = pnl_filtered.copy()
-        pnl_keys["_group_time"] = pnl_keys["opened_at"].where(
-            pnl_keys["opened_at"].notna(), pnl_keys["closed_at"]
-        )
-        pnl_key_series = list(
-            zip(
-                pnl_keys["product_id"],
-                pnl_keys["position_side"],
-                pnl_keys["_group_time"],
+            filtered_key_set = set(
+                zip(
+                    filtered_keys["product_id"],
+                    filtered_keys["position_side"],
+                    filtered_keys["_group_time"],
+                )
             )
-        )
-        key_match = pd.Series(pnl_key_series, index=pnl_filtered.index).isin(filtered_key_set)
 
-        min_close = filtered["closed_at"].min()
-        max_close = filtered["closed_at"].max()
-        if pd.notna(min_close) and pd.notna(max_close):
-            time_match = pnl_filtered["closed_at"].between(min_close, max_close)
-            mask = key_match | time_match
-        else:
-            mask = key_match
+            pnl_keys = pnl_filtered.copy()
+            pnl_keys["_group_time"] = pnl_keys["opened_at"].where(
+                pnl_keys["opened_at"].notna(), pnl_keys["closed_at"]
+            )
+            pnl_key_series = list(
+                zip(
+                    pnl_keys["product_id"],
+                    pnl_keys["position_side"],
+                    pnl_keys["_group_time"],
+                )
+            )
+            key_match = pd.Series(pnl_key_series, index=pnl_filtered.index).isin(filtered_key_set)
 
-        pnl_filtered = pnl_filtered.loc[mask].copy()
+            min_close = filtered["closed_at"].min()
+            max_close = filtered["closed_at"].max()
+            if pd.notna(min_close) and pd.notna(max_close):
+                time_match = pnl_filtered["closed_at"].between(min_close, max_close)
+                mask = key_match | time_match
+            else:
+                mask = key_match
+
+            pnl_filtered = pnl_filtered.loc[mask].copy()
 
     if filtered.empty and pnl_filtered.empty:
         st.warning("No trades match the selected filters.")
