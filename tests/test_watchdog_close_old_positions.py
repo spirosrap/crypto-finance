@@ -248,6 +248,17 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
 
         cb = SimpleNamespace(cancel_all_orders=cancel_all_orders, client=client)
 
+        class DummyExchange:
+            def cancel_all_orders(self, symbol=None):
+                return None
+
+            def create_order(self, *args, **kwargs):
+                return create_order()
+
+        original_exchange = self.module._ensure_ccxt_exchange
+        self.module._ensure_ccxt_exchange = lambda: DummyExchange()
+        self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
+
         closed, fill_price, order_id = self.module._close_position(
             cb,
             product_id='BTC-PERP-INTX',
@@ -290,6 +301,17 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         )
 
         cb = SimpleNamespace(cancel_all_orders=cancel_all_orders, client=client)
+
+        class DummyExchange:
+            def cancel_all_orders(self, symbol=None):
+                return None
+
+            def create_order(self, *args, **kwargs):
+                return create_order()
+
+        original_exchange = self.module._ensure_ccxt_exchange
+        self.module._ensure_ccxt_exchange = lambda: DummyExchange()
+        self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
 
         closed, fill_price, order_id = self.module._close_position(
             cb,
@@ -405,6 +427,38 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertAlmostEqual(cycle.entry_qty, 1.5)
         self.assertAlmostEqual(cycle.realized_pnl, 30.0)
 
+    def test_partial_fill_long_detection(self) -> None:
+        fills = [
+            self.module.Fill('BTC-PERP-INTX', 'BUY', 2.0, 100.0, 0.0, datetime(2025, 10, 5, 0, 0, tzinfo=UTC), '1'),
+            self.module.Fill('BTC-PERP-INTX', 'SELL', 1.0, 105.0, 0.0, datetime(2025, 10, 5, 0, 5, tzinfo=UTC), '2'),
+            self.module.Fill('BTC-PERP-INTX', 'SELL', 1.0, 110.0, 0.0, datetime(2025, 10, 5, 0, 10, tzinfo=UTC), '3'),
+        ]
+        cycles, partials = self.module._process_product_fills_with_partials(fills)
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual(len(partials), 1)
+        event = partials[0]
+        self.assertEqual(event.side, 'LONG')
+        self.assertAlmostEqual(event.qty, 1.0)
+        self.assertAlmostEqual(event.entry_price, 100.0)
+        self.assertAlmostEqual(event.exit_price, 105.0)
+        self.assertAlmostEqual(event.realized_pnl, 5.0)
+
+    def test_partial_fill_short_detection(self) -> None:
+        fills = [
+            self.module.Fill('ETH-PERP-INTX', 'SELL', 2.0, 200.0, 0.0, datetime(2025, 10, 5, 1, 0, tzinfo=UTC), '10'),
+            self.module.Fill('ETH-PERP-INTX', 'BUY', 1.0, 195.0, 0.0, datetime(2025, 10, 5, 1, 5, tzinfo=UTC), '11'),
+            self.module.Fill('ETH-PERP-INTX', 'BUY', 1.0, 190.0, 0.0, datetime(2025, 10, 5, 1, 10, tzinfo=UTC), '12'),
+        ]
+        cycles, partials = self.module._process_product_fills_with_partials(fills)
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual(len(partials), 1)
+        event = partials[0]
+        self.assertEqual(event.side, 'SHORT')
+        self.assertAlmostEqual(event.qty, 1.0)
+        self.assertAlmostEqual(event.entry_price, 200.0)
+        self.assertAlmostEqual(event.exit_price, 195.0)
+        self.assertAlmostEqual(event.realized_pnl, 5.0)
+
     def test_cycle_to_record_breakeven(self) -> None:
         cycle = self.module._process_product_fills([
             self.module.Fill('SOL-PERP-INTX', 'SELL', 1.0, 50.0, 0.0, datetime(2025, 10, 5, 2, 0, tzinfo=UTC), '21'),
@@ -463,9 +517,15 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
 
         checkpoint_same = {
             'last_time': cycle.end_time.isoformat(),
-            'last_order_id': '42',
+            'last_order_id': cycle.closing_order_id,
         }
         self.assertFalse(self.module._is_new_cycle(cycle, checkpoint_same, bootstrap_existing=False))
+
+        checkpoint_diff = {
+            'last_time': cycle.end_time.isoformat(),
+            'last_order_id': '42',
+        }
+        self.assertTrue(self.module._is_new_cycle(cycle, checkpoint_diff, bootstrap_existing=False))
 
     def test_cycle_details_backfill_updates_entry_exit(self) -> None:
         log_path = self.module._log_file_path()

@@ -1013,6 +1013,20 @@ class Cycle:
     closing_order_id: str
 
 
+@dataclass(frozen=True)
+class PartialFillEvent:
+    product_id: str
+    side: str  # 'LONG' or 'SHORT'
+    time: datetime
+    qty: float
+    entry_price: float
+    exit_price: float
+    realized_pnl: float
+    fees: float
+    order_id: str
+    open_time: Optional[datetime]
+
+
 def _checkpoint_path() -> Path:
     path = CHECKPOINT_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1030,11 +1044,27 @@ def _load_checkpoint() -> Dict[str, Any]:
         return {}
 
 
-def _store_checkpoint(last_time: datetime, last_order_id: str) -> None:
-    data = {
-        'last_time': last_time.isoformat(),
-        'last_order_id': last_order_id,
-    }
+def _store_checkpoint(
+    last_time: datetime,
+    last_order_id: str,
+    *,
+    fill_time: Optional[datetime] = None,
+    fill_order_id: Optional[str] = None,
+) -> None:
+    data = _load_checkpoint()
+    data['last_time'] = last_time.isoformat()
+    data['last_order_id'] = last_order_id
+    if fill_time is not None:
+        data['last_fill_time'] = fill_time.isoformat()
+    if fill_order_id is not None:
+        data['last_fill_order_id'] = fill_order_id
+    _checkpoint_path().write_text(json.dumps(data, indent=2))
+
+
+def _store_fill_checkpoint(last_time: datetime, last_order_id: str) -> None:
+    data = _load_checkpoint()
+    data['last_fill_time'] = last_time.isoformat()
+    data['last_fill_order_id'] = last_order_id
     _checkpoint_path().write_text(json.dumps(data, indent=2))
 
 
@@ -1063,6 +1093,29 @@ def _is_new_cycle(cycle: Cycle, checkpoint: Dict[str, Any], bootstrap_existing: 
     delta = last_time - cycle.end_time
     if delta <= timedelta(minutes=5) and not _cycle_logged(cycle):
         return True
+    return False
+
+
+def _is_new_partial(event: PartialFillEvent, checkpoint: Dict[str, Any], bootstrap_existing: bool) -> bool:
+    if not checkpoint:
+        return bootstrap_existing
+
+    last_time_raw = checkpoint.get('last_fill_time') or checkpoint.get('last_time')
+    last_order_id = checkpoint.get('last_fill_order_id') or checkpoint.get('last_order_id')
+    if not last_time_raw:
+        return True
+
+    try:
+        last_time = datetime.fromisoformat(last_time_raw)
+    except ValueError:
+        return True
+
+    if event.time > last_time:
+        return True
+    if event.time == last_time:
+        if not last_order_id:
+            return True
+        return event.order_id != last_order_id
     return False
 
 
@@ -1127,7 +1180,11 @@ def _finalize_cycle(
     )
 
 
-def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
+def _process_product_fills_core(
+    fills: Iterable[Fill],
+    *,
+    collect_partials: bool,
+) -> tuple[List[Cycle], List[PartialFillEvent]]:
     fills_sorted = sorted(fills, key=lambda f: f.time)
     long_inventory: deque[Dict[str, float]] = deque()
     short_inventory: deque[Dict[str, float]] = deque()
@@ -1136,6 +1193,7 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
     eps = 1e-12
 
     cycles: List[Cycle] = []
+    partials: List[PartialFillEvent] = []
     cycle_side: Optional[str] = None
     cycle_start: Optional[datetime] = None
     entry_qty = 0.0
@@ -1174,24 +1232,30 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
         total_fees = 0.0
         last_fill_id = ''
 
+    def start_new_cycle(side: str, when: datetime) -> None:
+        nonlocal cycle_side, cycle_start
+        cycle_side = side
+        cycle_start = when
+
     for fill in fills_sorted:
         last_fill_id = fill.order_id or ''
         total_fees += fill.fee
 
-        def start_new_cycle(side: str) -> None:
-            nonlocal cycle_side, cycle_start
-            cycle_side = side
-            cycle_start = fill.time
-
         if long_qty == 0.0 and short_qty == 0.0:
-            start_new_cycle('LONG' if fill.side == 'BUY' else 'SHORT')
+            start_new_cycle('LONG' if fill.side == 'BUY' else 'SHORT', fill.time)
 
         if fill.side == 'BUY':
             remaining = fill.size
             crossed_flat = False
+            matched_qty = 0.0
+            matched_entry_value = 0.0
+            matched_pnl = 0.0
             while remaining > eps and short_inventory:
                 lot = short_inventory[0]
                 match_qty = min(remaining, lot['qty'])
+                matched_qty += match_qty
+                matched_entry_value += lot['price'] * match_qty
+                matched_pnl += (lot['price'] - fill.price) * match_qty
                 realized += (lot['price'] - fill.price) * match_qty
                 exit_qty += match_qty
                 exit_value += fill.price * match_qty
@@ -1205,11 +1269,28 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
                     crossed_flat = True
             if short_qty <= eps:
                 short_qty = 0.0
+            if collect_partials and matched_qty > eps and not crossed_flat and short_qty > eps:
+                avg_entry = matched_entry_value / matched_qty if matched_qty > eps else fill.price
+                fee_share = (fill.fee * (matched_qty / fill.size)) if fill.size > eps else 0.0
+                partials.append(
+                    PartialFillEvent(
+                        product_id=fill.product_id,
+                        side='SHORT',
+                        time=fill.time,
+                        qty=matched_qty,
+                        entry_price=avg_entry,
+                        exit_price=fill.price,
+                        realized_pnl=matched_pnl - fee_share,
+                        fees=fee_share,
+                        order_id=fill.order_id or '',
+                        open_time=cycle_start,
+                    )
+                )
             if crossed_flat:
                 close_cycle(fill.time)
             if remaining > eps:
                 if long_qty == 0.0 and short_qty == 0.0:
-                    start_new_cycle('LONG')
+                    start_new_cycle('LONG', fill.time)
                 long_inventory.append({'qty': remaining, 'price': fill.price})
                 long_qty += remaining
                 entry_qty += remaining
@@ -1217,9 +1298,15 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
         else:
             remaining = fill.size
             crossed_flat = False
+            matched_qty = 0.0
+            matched_entry_value = 0.0
+            matched_pnl = 0.0
             while remaining > eps and long_inventory:
                 lot = long_inventory[0]
                 match_qty = min(remaining, lot['qty'])
+                matched_qty += match_qty
+                matched_entry_value += lot['price'] * match_qty
+                matched_pnl += (fill.price - lot['price']) * match_qty
                 realized += (fill.price - lot['price']) * match_qty
                 exit_qty += match_qty
                 exit_value += fill.price * match_qty
@@ -1233,11 +1320,28 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
                     crossed_flat = True
             if long_qty <= eps:
                 long_qty = 0.0
+            if collect_partials and matched_qty > eps and not crossed_flat and long_qty > eps:
+                avg_entry = matched_entry_value / matched_qty if matched_qty > eps else fill.price
+                fee_share = (fill.fee * (matched_qty / fill.size)) if fill.size > eps else 0.0
+                partials.append(
+                    PartialFillEvent(
+                        product_id=fill.product_id,
+                        side='LONG',
+                        time=fill.time,
+                        qty=matched_qty,
+                        entry_price=avg_entry,
+                        exit_price=fill.price,
+                        realized_pnl=matched_pnl - fee_share,
+                        fees=fee_share,
+                        order_id=fill.order_id or '',
+                        open_time=cycle_start,
+                    )
+                )
             if crossed_flat:
                 close_cycle(fill.time)
             if remaining > eps:
                 if long_qty == 0.0 and short_qty == 0.0:
-                    start_new_cycle('SHORT')
+                    start_new_cycle('SHORT', fill.time)
                 short_inventory.append({'qty': remaining, 'price': fill.price})
                 short_qty += remaining
                 entry_qty += remaining
@@ -1246,7 +1350,16 @@ def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
         if long_qty == 0.0 and short_qty == 0.0:
             close_cycle(fill.time)
 
+    return cycles, partials
+
+
+def _process_product_fills(fills: Iterable[Fill]) -> List[Cycle]:
+    cycles, _ = _process_product_fills_core(fills, collect_partials=False)
     return cycles
+
+
+def _process_product_fills_with_partials(fills: Iterable[Fill]) -> tuple[List[Cycle], List[PartialFillEvent]]:
+    return _process_product_fills_core(fills, collect_partials=True)
 
 
 def _detect_cycles(fills: Iterable[Fill]) -> List[Cycle]:
@@ -1259,6 +1372,22 @@ def _detect_cycles(fills: Iterable[Fill]) -> List[Cycle]:
         cycles.extend(_process_product_fills(pfills))
     cycles.sort(key=lambda c: c.end_time)
     return cycles
+
+
+def _detect_cycles_with_partials(fills: Iterable[Fill]) -> tuple[List[Cycle], List[PartialFillEvent]]:
+    grouped: Dict[str, List[Fill]] = defaultdict(list)
+    for fill in fills:
+        grouped[fill.product_id].append(fill)
+
+    cycles: List[Cycle] = []
+    partials: List[PartialFillEvent] = []
+    for pfills in grouped.values():
+        cycles_part, partials_part = _process_product_fills_with_partials(pfills)
+        cycles.extend(cycles_part)
+        partials.extend(partials_part)
+    cycles.sort(key=lambda c: c.end_time)
+    partials.sort(key=lambda p: p.time)
+    return cycles, partials
 
 
 def _classify_reason(side: str, pnl: float, threshold: float) -> str:
@@ -1307,6 +1436,46 @@ def _cycle_to_record(
         exit_price=exit_price,
         pnl=cycle.realized_pnl,
         closure_reason=reason,
+        mae=mae,
+        mfe=mfe,
+    )
+    return record
+
+
+def _partial_to_record(
+    event: PartialFillEvent,
+    mae_mfe_fetcher: Optional[Callable[..., tuple[Optional[float], Optional[float]]]] = None,
+) -> Dict[str, str]:
+    net_size = event.qty if event.side == 'LONG' else -event.qty
+    mae = None
+    mfe = None
+
+    if mae_mfe_fetcher:
+        try:
+            mae, mfe = mae_mfe_fetcher(
+                product_id=event.product_id,
+                net_size=net_size,
+                entry_price=event.entry_price,
+                open_time=event.open_time,
+                close_time=event.time,
+                exit_price=event.exit_price,
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Failed to derive MAE/MFE for partial %s: %s", event.product_id, exc
+            )
+
+    record = _create_closure_record(
+        product_id=event.product_id,
+        position_side=event.side,
+        net_size=net_size,
+        leverage='',
+        opened_at=event.open_time,
+        close_time=event.time,
+        entry_price=event.entry_price,
+        exit_price=event.exit_price,
+        pnl=event.realized_pnl,
+        closure_reason='partial_take',
         mae=mae,
         mfe=mfe,
     )
@@ -1365,19 +1534,29 @@ def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -
         logger.info("No fills parsed successfully")
         return
 
-    cycles = _detect_cycles(fills)
-    if not cycles:
+    cycles, partials = _detect_cycles_with_partials(fills)
+    if not cycles and not partials:
         logger.debug("No closed cycles detected in recent fills")
         return
 
     checkpoint = _load_checkpoint()
     threshold = _breakeven_threshold()
     new_cycles = [c for c in cycles if _is_new_cycle(c, checkpoint, bootstrap_existing)]
+    new_partials = [p for p in partials if _is_new_partial(p, checkpoint, bootstrap_existing)]
 
-    if not new_cycles:
+    if not new_cycles and not new_partials:
         if not checkpoint and not bootstrap_existing:
-            latest = cycles[-1]
-            _store_checkpoint(latest.end_time, latest.closing_order_id)
+            latest_cycle = cycles[-1] if cycles else None
+            latest_partial = partials[-1] if partials else None
+            if latest_cycle:
+                _store_checkpoint(
+                    latest_cycle.end_time,
+                    latest_cycle.closing_order_id,
+                    fill_time=latest_partial.time if latest_partial else None,
+                    fill_order_id=latest_partial.order_id if latest_partial else None,
+                )
+            elif latest_partial:
+                _store_fill_checkpoint(latest_partial.time, latest_partial.order_id)
             logger.info("Initial checkpoint stored; rerun to log new TP/SL closures")
         else:
             logger.debug("No new cycles beyond checkpoint")
@@ -1387,9 +1566,30 @@ def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -
         return compute_mae_mfe_from_history(cb=cb, **kwargs)
 
     appended = 0
+    appended_partials = 0
     pending_cycles = 0
     active_positions = _active_positions(cb)
     latest_logged_cycle: Optional[Cycle] = None
+    latest_logged_partial: Optional[PartialFillEvent] = None
+
+    for event in new_partials:
+        record = _partial_to_record(event, mae_mfe_fetcher=_mae_mfe_fetcher)
+        if _record_position_close_if_new(record):
+            appended_partials += 1
+            logger.info(
+                "Recorded partial closure for %s at %s (pnl=%s)",
+                event.product_id,
+                event.time.isoformat(),
+                record['profit_loss'],
+            )
+        else:
+            logger.debug(
+                "Skipped duplicate partial closure for %s at %s",
+                event.product_id,
+                event.time.isoformat(),
+            )
+        latest_logged_partial = event
+
     for cycle in new_cycles:
         active_entry = active_positions.get(cycle.product_id)
         if active_entry is not None:
@@ -1428,8 +1628,12 @@ def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -
 
     if latest_logged_cycle is not None:
         _store_checkpoint(latest_logged_cycle.end_time, latest_logged_cycle.closing_order_id)
+    if latest_logged_partial is not None:
+        _store_fill_checkpoint(latest_logged_partial.time, latest_logged_partial.order_id)
     if appended:
         logger.info("TP/SL logging complete; appended %d new records", appended)
+    if appended_partials:
+        logger.info("Partial fill logging complete; appended %d new records", appended_partials)
     elif pending_cycles:
         logger.info("TP/SL logging deferred %d cycle(s) because matching positions are still open.", pending_cycles)
     else:

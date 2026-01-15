@@ -1,1 +1,6 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,partial_tp_pct,partial_tp_rr,partial_tp_price,partial_tp_done,partial_tp_move_sl,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
+972ca16995,APT,APT-PERP-INTX,SHORT,1.9157,1.9157,1.8237,50.0,0.8,1.86666,True,True,125.0,50.0,2026-01-15T10:18:56Z,2026-01-16T10:18:56Z,OPEN,1.85,2026-01-15T16:42:02Z,4.29,3.4296,0.0,2,5.0,,
+eceb2d0f0b,DOT,DOT-PERP-INTX,LONG,2.2,2.1296,2.3056,50.0,0.8,2.25632,False,True,250.0,50.0,2026-01-15T10:18:56Z,2026-01-16T10:18:56Z,OPEN,2.157,2026-01-15T16:42:02Z,-4.89,-1.9545,0.0,3,5.0,,
+f5a71b0e2c,ENS,ENS-PERP-INTX,SHORT,10.73,10.73,10.215,50.0,0.8,10.4556,True,True,125.0,50.0,2026-01-15T10:18:56Z,2026-01-16T10:18:56Z,OPEN,10.45,2026-01-15T16:42:02Z,3.26,2.6095,0.0,4,5.0,,
+b08517702b,LINK,LINK-PERP-INTX,LONG,14.002,13.555,14.673,50.0,0.8,14.3596,False,True,250.0,50.0,2026-01-15T10:18:56Z,2026-01-16T10:18:56Z,OPEN,13.931,2026-01-15T16:42:02Z,-1.27,-0.5071,0.0,5,5.0,,
+6875657010,BTC,BTC-PERP-INTX,LONG,96799.48,94812.97,99779.24,50.0,0.8,98388.688,False,True,250.0,50.0,2026-01-15T10:18:56Z,2026-01-16T10:18:56Z,OPEN,96754.7,2026-01-15T16:42:02Z,-0.12,-0.0463,0.0,6,5.0,,
