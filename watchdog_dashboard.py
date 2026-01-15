@@ -1607,10 +1607,10 @@ def main() -> None:
                     "product_id",
                     "side",
                     "net_size",
+                    "notional",
                     "entry_price",
                     "mark_price",
                     "unrealized_pnl",
-                    "notional",
                     "time_left_display",
                 ]
                 display_df = open_positions_df[columns_to_use].copy()
@@ -1619,10 +1619,10 @@ def main() -> None:
                         "product_id": "Product",
                         "side": "Side",
                         "net_size": "Quantity",
+                        "notional": "Size (USD)",
                         "entry_price": "Entry",
                         "mark_price": "Mark",
                         "unrealized_pnl": "Unrealized",
-                        "notional": "Notional",
                         "time_left_display": "Time Left",
                     }
                 )
@@ -1633,7 +1633,7 @@ def main() -> None:
                             "Entry": "{:.4f}",
                             "Mark": "{:.4f}",
                             "Unrealized": "{:+.2f}",
-                            "Notional": "{:.2f}",
+                            "Size (USD)": "{:.2f}",
                         }
                     ),
                     use_container_width=True,
