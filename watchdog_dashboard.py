@@ -92,6 +92,8 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
     if "closed_at" not in df.columns:
         raise ValueError("CSV missing required column 'closed_at'")
     df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True, errors="coerce")
+    if "opened_at" in df.columns:
+        df["opened_at"] = pd.to_datetime(df["opened_at"], utc=True, errors="coerce")
     df["profit_loss"] = pd.to_numeric(df["profit_loss"], errors="coerce")
     if "profit_loss_pct" in df.columns:
         df["profit_loss_pct"] = pd.to_numeric(df["profit_loss_pct"], errors="coerce")
@@ -743,6 +745,7 @@ def build_daily_equity(
     daily_pnl = pnl_trades.groupby("date")["profit_loss"].sum(min_count=1).fillna(0.0)
     trade_counts = metrics_source.groupby("date").size()
     daily = pd.DataFrame({"daily_pnl": daily_pnl, "trades": trade_counts})
+    daily["trades"] = daily["trades"].fillna(0).astype(int)
     daily["cum_pnl"] = daily["daily_pnl"].cumsum()
     daily["equity"] = starting_equity + daily["cum_pnl"]
 
@@ -1361,6 +1364,37 @@ def main() -> None:
         0,
         symbols=selected_products or None,
     )
+
+    count_filters_active = any(
+        value > 0 for value in (filter_start_count, filter_end_count, int(tail_last))
+    )
+    if count_filters_active and not filtered.empty and not pnl_filtered.empty:
+        filtered_keys = filtered.copy()
+        filtered_keys["_group_time"] = filtered_keys["opened_at"].where(
+            filtered_keys["opened_at"].notna(), filtered_keys["closed_at"]
+        )
+        filtered_key_set = set(
+            zip(
+                filtered_keys["product_id"],
+                filtered_keys["position_side"],
+                filtered_keys["_group_time"],
+            )
+        )
+
+        pnl_keys = pnl_filtered.copy()
+        pnl_keys["_group_time"] = pnl_keys["opened_at"].where(
+            pnl_keys["opened_at"].notna(), pnl_keys["closed_at"]
+        )
+        pnl_key_series = list(
+            zip(
+                pnl_keys["product_id"],
+                pnl_keys["position_side"],
+                pnl_keys["_group_time"],
+            )
+        )
+        pnl_filtered = pnl_filtered.loc[
+            pd.Series(pnl_key_series, index=pnl_filtered.index).isin(filtered_key_set)
+        ].copy()
 
     if filtered.empty and pnl_filtered.empty:
         st.warning("No trades match the selected filters.")
