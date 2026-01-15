@@ -154,6 +154,35 @@ def collapse_trade_rows(df: pd.DataFrame) -> pd.DataFrame:
     return aggregated
 
 
+def filter_paper_trade_batches(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "opened_at" not in df.columns or "closed_at" not in df.columns:
+        return df
+
+    trades = df.copy()
+    trades["opened_at"] = pd.to_datetime(trades["opened_at"], utc=True, errors="coerce")
+    trades["closed_at"] = pd.to_datetime(trades["closed_at"], utc=True, errors="coerce")
+    trades = trades.dropna(subset=["opened_at", "closed_at"])
+    if trades.empty:
+        return df
+
+    trades["_closed_date"] = trades["closed_at"].dt.date
+    trades["_opened_batch"] = trades["opened_at"].dt.floor("15min")
+
+    counts = (
+        trades.groupby(["_closed_date", "_opened_batch"]).size().reset_index(name="count")
+    )
+    if counts.empty:
+        return trades.drop(columns=["_closed_date", "_opened_batch"])
+
+    counts = counts.sort_values(["_closed_date", "count", "_opened_batch"])
+    dominant = counts.groupby("_closed_date").tail(1)
+    keep_keys = set(zip(dominant["_closed_date"], dominant["_opened_batch"]))
+
+    mask = trades.apply(lambda row: (row["_closed_date"], row["_opened_batch"]) in keep_keys, axis=1)
+    filtered = trades.loc[mask].drop(columns=["_closed_date", "_opened_batch"])
+    return filtered.sort_values("closed_at").reset_index(drop=True)
+
+
 def load_range_break_status() -> Optional[dict]:
     if not RANGE_BREAK_STATUS_PATH.exists():
         return None
@@ -1297,6 +1326,8 @@ def main() -> None:
         st.stop()
 
     trade_view_df = collapse_trade_rows(trades_df)
+    if source_mode == "paper":
+        trade_view_df = filter_paper_trade_batches(trade_view_df)
 
     column_map = {col.strip().lower(): col for col in trade_view_df.columns}
     max_trade_count = None
