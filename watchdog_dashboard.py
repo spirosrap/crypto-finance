@@ -138,6 +138,7 @@ def collapse_trade_rows(df: pd.DataFrame) -> pd.DataFrame:
         profit_loss=("profit_loss", "sum"),
         abs_size=("_abs_size", lambda s: s.sum(min_count=1)),
         pl_pct_weight=("_pl_pct_weighted", lambda s: s.sum(min_count=1)),
+        has_non_partial=("closure_reason", lambda s: (s.astype(str).str.lower() != "partial_take").any()),
     ).reset_index()
 
     aggregated["profit_loss_pct"] = np.where(
@@ -146,6 +147,7 @@ def collapse_trade_rows(df: pd.DataFrame) -> pd.DataFrame:
         np.nan,
     )
     aggregated = aggregated.drop(columns=["abs_size", "pl_pct_weight"])
+    aggregated = aggregated[aggregated["has_non_partial"]].drop(columns=["has_non_partial"])
     aggregated = aggregated.sort_values("closed_at").reset_index(drop=True)
     return aggregated
 
