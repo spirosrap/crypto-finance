@@ -99,6 +99,57 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
     return df
 
 
+def collapse_trade_rows(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    trades = df.copy()
+    trades["closed_at"] = pd.to_datetime(trades["closed_at"], utc=True, errors="coerce")
+    if "profit_loss" in trades.columns:
+        trades["profit_loss"] = pd.to_numeric(trades["profit_loss"], errors="coerce")
+    else:
+        trades["profit_loss"] = np.nan
+
+    if "opened_at" in trades.columns:
+        trades["opened_at"] = pd.to_datetime(trades["opened_at"], utc=True, errors="coerce")
+    else:
+        trades["opened_at"] = pd.NaT
+
+    if "position_side" not in trades.columns:
+        trades["position_side"] = trades.get("side", "")
+
+    group_time = trades["opened_at"].where(trades["opened_at"].notna(), trades["closed_at"])
+    trades["_group_time"] = pd.to_datetime(group_time, utc=True, errors="coerce")
+
+    if "net_size" in trades.columns:
+        trades["_abs_size"] = pd.to_numeric(trades["net_size"], errors="coerce").abs()
+    else:
+        trades["_abs_size"] = np.nan
+    if "profit_loss_pct" in trades.columns:
+        trades["_pl_pct"] = pd.to_numeric(trades["profit_loss_pct"], errors="coerce")
+    else:
+        trades["_pl_pct"] = np.nan
+    trades["_pl_pct_weighted"] = trades["_pl_pct"] * trades["_abs_size"]
+
+    grouped = trades.groupby(["product_id", "position_side", "_group_time"], dropna=False)
+    aggregated = grouped.agg(
+        closed_at=("closed_at", "max"),
+        opened_at=("opened_at", "min"),
+        profit_loss=("profit_loss", "sum"),
+        abs_size=("_abs_size", lambda s: s.sum(min_count=1)),
+        pl_pct_weight=("_pl_pct_weighted", lambda s: s.sum(min_count=1)),
+    ).reset_index()
+
+    aggregated["profit_loss_pct"] = np.where(
+        (aggregated["abs_size"].notna()) & (aggregated["abs_size"] > 0),
+        aggregated["pl_pct_weight"] / aggregated["abs_size"],
+        np.nan,
+    )
+    aggregated = aggregated.drop(columns=["abs_size", "pl_pct_weight"])
+    aggregated = aggregated.sort_values("closed_at").reset_index(drop=True)
+    return aggregated
+
+
 def load_range_break_status() -> Optional[dict]:
     if not RANGE_BREAK_STATUS_PATH.exists():
         return None
@@ -1234,25 +1285,27 @@ def main() -> None:
         st.error(f"Failed to load data: {exc}")
         st.stop()
 
-    column_map = {col.strip().lower(): col for col in trades_df.columns}
+    trade_view_df = collapse_trade_rows(trades_df)
+
+    column_map = {col.strip().lower(): col for col in trade_view_df.columns}
     max_trade_count = None
     for key in ("count", "trade_count", "trade_number", "trade_index"):
         if key in column_map:
-            series = pd.to_numeric(trades_df[column_map[key]], errors='coerce')
+            series = pd.to_numeric(trade_view_df[column_map[key]], errors='coerce')
             if series.notna().any():
                 max_trade_count = int(series.max())
                 break
     if max_trade_count is None:
-        max_trade_count = int(trades_df.shape[0])
+        max_trade_count = int(trade_view_df.shape[0])
     max_trade_count = max(1, max_trade_count)
 
     try:
-        pipeline_snapshot = build_snapshot(trades_df, include_unrealized=False)
+        pipeline_snapshot = build_snapshot(trade_view_df, include_unrealized=False)
     except Exception as exc:
         pipeline_snapshot = None
         st.sidebar.caption(f"Metrics snapshot unavailable: {exc}")
 
-    available_products = sorted(trades_df["product_id"].dropna().unique())
+    available_products = sorted(trade_view_df["product_id"].dropna().unique())
     selected_products = st.sidebar.multiselect(
         "Products (leave empty for all)",
         options=available_products,
@@ -1282,7 +1335,7 @@ def main() -> None:
     filter_end_count = int(end_count)
 
     filtered = apply_filters(
-        trades_df,
+        trade_view_df,
         start_str,
         end_str,
         filter_start_count,
