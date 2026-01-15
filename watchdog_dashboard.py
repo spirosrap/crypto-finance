@@ -1341,20 +1341,23 @@ def main() -> None:
         max_trade_count = int(trade_view_df.shape[0])
     max_trade_count = max(1, max_trade_count)
 
-    effective_start_count = min(start_count, max_trade_count) if start_count > 0 else 0
-    effective_end_count = min(end_count, max_trade_count) if end_count > 0 else 0
-    effective_tail_last = min(tail_last, max_trade_count) if tail_last > 0 else 0
+    effective_start_count = start_count if start_count > 0 else 0
+    effective_end_count = end_count if end_count > 0 else 0
+    effective_tail_last = tail_last if tail_last > 0 else 0
 
-    if any(
-        (
-            effective_start_count != start_count,
-            effective_end_count != end_count,
-            effective_tail_last != tail_last,
-        )
-    ):
-        st.sidebar.caption(
-            f"Count filters capped to available trades (max {max_trade_count})."
-        )
+    warnings = []
+    if effective_start_count > max_trade_count:
+        effective_start_count = 0
+        warnings.append("Start count exceeds available trades and was ignored.")
+    if effective_end_count > max_trade_count:
+        effective_end_count = max_trade_count
+        warnings.append("End count capped to available trades.")
+    if effective_tail_last > max_trade_count:
+        effective_tail_last = max_trade_count
+        warnings.append("Last N trades capped to available trades.")
+
+    if warnings:
+        st.sidebar.caption(" ".join(warnings) + f" (max {max_trade_count})")
 
     try:
         pipeline_snapshot = build_snapshot(trade_view_df, include_unrealized=False)
