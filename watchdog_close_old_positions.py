@@ -78,6 +78,7 @@ LOG_HEADERS = [
     'mae',
     'mfe',
     'duration_seconds',
+    'order_id',
 ]
 
 
@@ -798,6 +799,7 @@ def _create_closure_record(
     closure_reason: str,
     mae: Optional[float],
     mfe: Optional[float],
+    order_id: Optional[str] = None,
 ) -> Dict[str, str]:
     if pnl is None:
         pnl = _calculate_pnl(net_size, entry_price, exit_price)
@@ -829,6 +831,7 @@ def _create_closure_record(
         'mae': _format_float(mae, 2),
         'mfe': _format_float(mfe, 2),
         'duration_seconds': str(duration_seconds) if duration_seconds is not None else '',
+        'order_id': order_id or '',
     }
     return record
 
@@ -897,6 +900,7 @@ def _record_position_close_if_new(record: Dict[str, str], tolerance_seconds: int
     path = _ensure_log_file()
     closed_at = _parse_log_datetime(record.get('closed_at', ''))
     product_id = record.get('product_id', '')
+    record_order_id = (record.get('order_id') or '').strip()
     if closed_at is None or not product_id:
         _record_position_close(record)
         return True
@@ -906,6 +910,55 @@ def _record_position_close_if_new(record: Dict[str, str], tolerance_seconds: int
     with path.open(newline='') as handle:
         reader = csv.DictReader(handle)
         rows.extend(reader)
+
+    if record_order_id:
+        legacy_matches: List[int] = []
+        for idx, row in enumerate(rows):
+            if (row.get('product_id') or '') != product_id:
+                continue
+            existing_order_id = (row.get('order_id') or '').strip()
+            if existing_order_id and existing_order_id == record_order_id:
+                existing_reason = (row.get('closure_reason') or '').strip().lower()
+                current_reason = (record.get('closure_reason') or '').strip().lower()
+                if _reason_priority(current_reason) > _reason_priority(existing_reason):
+                    updated = {field: record.get(field, row.get(field, '')) or '' for field in LOG_HEADERS}
+                    rows[idx] = updated
+                    _rewrite_log_rows(rows)
+                return False
+
+            if existing_order_id:
+                continue
+
+            row_closed = _parse_log_datetime(row.get('closed_at', ''))
+            if row_closed is None or abs((row_closed - closed_at).total_seconds()) > tolerance:
+                continue
+            existing_net = _parse_log_float(row.get('net_size', ''))
+            current_net = _parse_log_float(record.get('net_size', ''))
+            same_net = _float_close(existing_net, current_net)
+            existing_entry = _parse_log_float(row.get('entry_price', ''))
+            current_entry = _parse_log_float(record.get('entry_price', ''))
+            same_entry = _float_close(existing_entry, current_entry)
+            existing_exit = _parse_log_float(row.get('exit_price', ''))
+            current_exit = _parse_log_float(record.get('exit_price', ''))
+            same_exit = _float_close(existing_exit, current_exit)
+            existing_open = _parse_log_datetime(row.get('opened_at', ''))
+            current_open = _parse_log_datetime(record.get('opened_at', ''))
+            same_open = _time_close(existing_open, current_open, tolerance)
+            existing_reason = (row.get('closure_reason') or '').strip().lower()
+            current_reason = (record.get('closure_reason') or '').strip().lower()
+
+            if same_net and same_entry and same_exit and same_open and existing_reason == current_reason:
+                legacy_matches.append(idx)
+
+        if len(legacy_matches) == 1:
+            idx = legacy_matches[0]
+            updated = {field: record.get(field, rows[idx].get(field, '')) or '' for field in LOG_HEADERS}
+            rows[idx] = updated
+            _rewrite_log_rows(rows)
+            return False
+
+        _record_position_close(record)
+        return True
 
     for idx, row in enumerate(rows):
         if (row.get('product_id') or '') != product_id:
@@ -1438,6 +1491,7 @@ def _cycle_to_record(
         closure_reason=reason,
         mae=mae,
         mfe=mfe,
+        order_id=cycle.closing_order_id,
     )
     return record
 
@@ -1478,6 +1532,7 @@ def _partial_to_record(
         closure_reason='partial_take',
         mae=mae,
         mfe=mfe,
+        order_id=event.order_id,
     )
     return record
 
@@ -1959,6 +2014,7 @@ def _backfill_last_entries(cb: CoinbaseService, count: int) -> None:
             closure_reason=adjusted_reason,
             mae=mae,
             mfe=mfe,
+            order_id=row.get('order_id', ''),
         )
 
         # Preserve original closure timestamp format and duration if available
@@ -2292,6 +2348,7 @@ def run_once(
                     closure_reason=closure_reason,
                     mae=mae,
                     mfe=mfe,
+                    order_id=close_order_id,
                 )
                 if log_closures:
                     _record_position_close(record)
