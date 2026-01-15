@@ -15,6 +15,10 @@
 - Gate-scan now filters underperforming products (paper log lookback, min trades, drop worst) and applies side-specific score gates.
 - Added TP1 partials (default 0.8R / 50%) for both paper and live; paper can move SL to entry after TP1, live uses two brackets and does not auto-move SL.
 - Live trading restarts today after these changes.
+- New checkpoint: evaluate **30 new paper trades** from this change date (do not mix with prior sample).
+  - Keep full size only if last‑30 paper expectancy >= 0.25 (>= 0.30 buffer) **and** profit factor >= 1.0.
+  - **Half size** if expectancy is between 0.00 and 0.24 **or** profit factor is between 0.90 and 0.99.
+  - **Pause live** if expectancy < 0.00 **or** profit factor < 0.90.
 
 ## January 15, 2026 - Paper 30+ Trade Checkpoint
 - Paper trades reached 32; expectancy remains negative at -0.92, so live stays paused per the 30-trade rule.
