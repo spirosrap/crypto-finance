@@ -459,6 +459,98 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertAlmostEqual(event.exit_price, 195.0)
         self.assertAlmostEqual(event.realized_pnl, 5.0)
 
+    def test_remaining_cycle_after_partials(self) -> None:
+        fills = [
+            self.module.Fill('BTC-PERP-INTX', 'BUY', 2.0, 100.0, 0.0, datetime(2025, 10, 5, 0, 0, tzinfo=UTC), '1'),
+            self.module.Fill('BTC-PERP-INTX', 'SELL', 1.0, 105.0, 0.0, datetime(2025, 10, 5, 0, 5, tzinfo=UTC), '2'),
+            self.module.Fill('BTC-PERP-INTX', 'SELL', 1.0, 95.0, 0.0, datetime(2025, 10, 5, 0, 10, tzinfo=UTC), '3'),
+        ]
+        cycles, partials = self.module._process_product_fills_with_partials(fills)
+        cycle = cycles[0]
+        self.assertEqual(len(partials), 1)
+        remaining_qty, remaining_pnl = self.module._remaining_cycle_after_partials(cycle, partials)
+        self.assertAlmostEqual(remaining_qty, 1.0)
+        self.assertAlmostEqual(remaining_pnl, -5.0)
+
+    def test_logged_partial_totals_for_cycle(self) -> None:
+        log_path = self.module._log_file_path()
+        opened_at = datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC)
+        closed_at = opened_at + timedelta(minutes=10)
+        later_closed = opened_at + timedelta(minutes=20)
+
+        with log_path.open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=self.module.LOG_HEADERS)
+            writer.writeheader()
+            writer.writerow({
+                'closed_at': closed_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'product_id': 'ARB-PERP-INTX',
+                'position_side': 'LONG',
+                'net_size': '2',
+                'leverage': '',
+                'opened_at': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'closure_reason': 'partial_take',
+                'entry_price': '0.21',
+                'exit_price': '0.22',
+                'profit_loss': '1.0',
+                'profit_loss_pct': '0.5',
+                'mae': '',
+                'mfe': '',
+                'duration_seconds': '600',
+                'order_id': 'p1',
+            })
+            writer.writerow({
+                'closed_at': later_closed.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'product_id': 'ARB-PERP-INTX',
+                'position_side': 'LONG',
+                'net_size': '3',
+                'leverage': '',
+                'opened_at': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'closure_reason': 'partial_take',
+                'entry_price': '0.21',
+                'exit_price': '0.20',
+                'profit_loss': '-0.5',
+                'profit_loss_pct': '-0.25',
+                'mae': '',
+                'mfe': '',
+                'duration_seconds': '1200',
+                'order_id': 'p2',
+            })
+            writer.writerow({
+                'closed_at': later_closed.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'product_id': 'ARB-PERP-INTX',
+                'position_side': 'LONG',
+                'net_size': '3',
+                'leverage': '',
+                'opened_at': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'closure_reason': 'stop_loss',
+                'entry_price': '0.21',
+                'exit_price': '0.20',
+                'profit_loss': '-0.5',
+                'profit_loss_pct': '-0.25',
+                'mae': '',
+                'mfe': '',
+                'duration_seconds': '1200',
+                'order_id': 'skip',
+            })
+
+        cycle = self.module.Cycle(
+            product_id='ARB-PERP-INTX',
+            side='LONG',
+            start_time=opened_at,
+            end_time=opened_at + timedelta(hours=1),
+            entry_qty=5.0,
+            entry_value=1.05,
+            exit_qty=5.0,
+            exit_value=1.0,
+            realized_pnl=0.5,
+            fees=0.0,
+            closing_order_id='close',
+        )
+
+        qty, pnl = self.module._logged_partial_totals_for_cycle(cycle, exclude_order_ids={'p1'})
+        self.assertAlmostEqual(qty, 3.0)
+        self.assertAlmostEqual(pnl, -0.5)
+
     def test_cycle_to_record_breakeven(self) -> None:
         cycle = self.module._process_product_fills([
             self.module.Fill('SOL-PERP-INTX', 'SELL', 1.0, 50.0, 0.0, datetime(2025, 10, 5, 2, 0, tzinfo=UTC), '21'),

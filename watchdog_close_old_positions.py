@@ -1080,6 +1080,85 @@ class PartialFillEvent:
     open_time: Optional[datetime]
 
 
+def _partials_for_cycle(
+    cycle: Cycle,
+    partials: Iterable[PartialFillEvent],
+    tolerance_seconds: int = 1,
+) -> List[PartialFillEvent]:
+    matches: List[PartialFillEvent] = []
+    tol = abs(int(tolerance_seconds))
+    for event in partials:
+        if event.product_id != cycle.product_id:
+            continue
+        if event.side != cycle.side:
+            continue
+        if event.time < cycle.start_time - timedelta(seconds=tol):
+            continue
+        if event.time > cycle.end_time + timedelta(seconds=tol):
+            continue
+        matches.append(event)
+    return matches
+
+
+def _logged_partial_totals_for_cycle(
+    cycle: Cycle,
+    *,
+    exclude_order_ids: Optional[Iterable[str]] = None,
+    tolerance_seconds: int = 60,
+) -> tuple[float, float]:
+    path = _ensure_log_file()
+    if not path.exists():
+        return 0.0, 0.0
+
+    exclude = {oid for oid in (exclude_order_ids or []) if oid}
+    tolerance = abs(int(tolerance_seconds))
+    total_qty = 0.0
+    total_pnl = 0.0
+
+    with path.open(newline='') as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            if (row.get('product_id') or '') != cycle.product_id:
+                continue
+            if (row.get('closure_reason') or '').strip().lower() != 'partial_take':
+                continue
+            order_id = (row.get('order_id') or '').strip()
+            if order_id and order_id in exclude:
+                continue
+            row_open = _parse_log_datetime(row.get('opened_at', ''))
+            if not _time_close(row_open, cycle.start_time, tolerance):
+                continue
+            row_close = _parse_log_datetime(row.get('closed_at', ''))
+            if row_close is not None:
+                if row_close < cycle.start_time - timedelta(seconds=tolerance):
+                    continue
+                if row_close > cycle.end_time + timedelta(seconds=tolerance):
+                    continue
+            net_size = _parse_log_float(row.get('net_size', ''))
+            if net_size is None:
+                continue
+            pnl = _parse_log_float(row.get('profit_loss', '')) or 0.0
+            total_qty += abs(net_size)
+            total_pnl += pnl
+
+    return total_qty, total_pnl
+
+
+def _remaining_cycle_after_partials(
+    cycle: Cycle,
+    partials: Iterable[PartialFillEvent],
+    *,
+    eps: float = 1e-12,
+) -> tuple[float, float]:
+    partial_qty = sum(event.qty for event in partials)
+    partial_pnl = sum(event.realized_pnl for event in partials)
+    remaining_qty = max(0.0, cycle.entry_qty - partial_qty)
+    if remaining_qty <= eps:
+        remaining_qty = 0.0
+    remaining_pnl = cycle.realized_pnl - partial_pnl
+    return remaining_qty, remaining_pnl
+
+
 def _checkpoint_path() -> Path:
     path = CHECKPOINT_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1663,7 +1742,43 @@ def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -
                     pending_cycles += 1
                     continue
 
-        record = _cycle_to_record(cycle, threshold, mae_mfe_fetcher=_mae_mfe_fetcher)
+        cycle_partials = _partials_for_cycle(cycle, partials)
+        partial_qty = sum(event.qty for event in cycle_partials)
+        partial_pnl = sum(event.realized_pnl for event in cycle_partials)
+        logged_partial_qty, logged_partial_pnl = _logged_partial_totals_for_cycle(
+            cycle,
+            exclude_order_ids={event.order_id for event in cycle_partials if event.order_id},
+        )
+        total_partial_qty = partial_qty + logged_partial_qty
+        total_partial_pnl = partial_pnl + logged_partial_pnl
+
+        if total_partial_qty > 0:
+            remaining_qty = max(0.0, cycle.entry_qty - total_partial_qty)
+            remaining_pnl = cycle.realized_pnl - total_partial_pnl
+            if remaining_qty <= max(1e-12, cycle.entry_qty * 0.01):
+                latest_logged_cycle = cycle
+                continue
+            entry_price = cycle.entry_value / cycle.entry_qty if cycle.entry_qty else None
+            net_size = remaining_qty if cycle.side == 'LONG' else -remaining_qty
+            exit_price = cycle.exit_value / cycle.exit_qty if cycle.exit_qty else None
+            reason = _classify_reason(cycle.side, remaining_pnl, threshold)
+            record = _create_closure_record(
+                product_id=cycle.product_id,
+                position_side=cycle.side,
+                net_size=net_size,
+                leverage='',
+                opened_at=cycle.start_time,
+                close_time=cycle.end_time,
+                entry_price=entry_price,
+                exit_price=exit_price,
+                pnl=remaining_pnl,
+                closure_reason=reason,
+                mae=None,
+                mfe=None,
+                order_id=cycle.closing_order_id,
+            )
+        else:
+            record = _cycle_to_record(cycle, threshold, mae_mfe_fetcher=_mae_mfe_fetcher)
         if _record_position_close_if_new(record):
             appended += 1
             logger.info(
