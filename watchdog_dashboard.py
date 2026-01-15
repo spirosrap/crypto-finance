@@ -730,12 +730,18 @@ def apply_filters(
 def build_daily_equity(
     trades: pd.DataFrame,
     starting_equity: float,
+    *,
+    metrics_trades: Optional[pd.DataFrame] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
-    trades = trades.sort_values("closed_at")
-    trades["date"] = trades["closed_at"].dt.date
+    pnl_trades = trades.sort_values("closed_at")
+    pnl_trades["date"] = pnl_trades["closed_at"].dt.date
 
-    daily_pnl = trades.groupby("date")["profit_loss"].sum(min_count=1).fillna(0.0)
-    trade_counts = trades.groupby("date").size()
+    metrics_source = metrics_trades if metrics_trades is not None else pnl_trades
+    metrics_source = metrics_source.sort_values("closed_at")
+    metrics_source["date"] = metrics_source["closed_at"].dt.date
+
+    daily_pnl = pnl_trades.groupby("date")["profit_loss"].sum(min_count=1).fillna(0.0)
+    trade_counts = metrics_source.groupby("date").size()
     daily = pd.DataFrame({"daily_pnl": daily_pnl, "trades": trade_counts})
     daily["cum_pnl"] = daily["daily_pnl"].cumsum()
     daily["equity"] = starting_equity + daily["cum_pnl"]
@@ -770,7 +776,7 @@ def build_daily_equity(
     daily["drawdown"] = drawdown_values
     daily["drawdown_pct"] = drawdown_pct
 
-    profit_loss_series = trades["profit_loss"]
+    profit_loss_series = metrics_source["profit_loss"]
     valid_profit_loss = profit_loss_series.dropna()
     valid_trade_count = len(valid_profit_loss)
 
@@ -784,8 +790,8 @@ def build_daily_equity(
     else:
         profit_factor = float("inf") if gross_profit > 0 else 0.0
 
-    if "profit_loss_pct" in trades.columns:
-        profit_loss_pct_series = pd.to_numeric(trades["profit_loss_pct"], errors="coerce").dropna()
+    if "profit_loss_pct" in metrics_source.columns:
+        profit_loss_pct_series = pd.to_numeric(metrics_source["profit_loss_pct"], errors="coerce").dropna()
     else:
         profit_loss_pct_series = pd.Series(dtype=float)
     if not profit_loss_pct_series.empty:
@@ -849,7 +855,7 @@ def build_daily_equity(
     total_return_pct = ((ending_equity - starting_equity) / starting_equity * 100.0) if starting_equity else 0.0
 
     metrics = {
-        "trades": int(len(trades)),
+        "trades": int(len(metrics_source)),
         "wins": wins,
         "losses": losses,
         "breakevens": breakevens,
@@ -1346,11 +1352,25 @@ def main() -> None:
         symbols=selected_products or None,
     )
 
-    if filtered.empty:
+    pnl_filtered = apply_filters(
+        trades_df,
+        start_str,
+        end_str,
+        0,
+        0,
+        0,
+        symbols=selected_products or None,
+    )
+
+    if filtered.empty and pnl_filtered.empty:
         st.warning("No trades match the selected filters.")
         st.stop()
 
-    daily, metrics = build_daily_equity(filtered, float(starting_equity))
+    daily, metrics = build_daily_equity(
+        pnl_filtered,
+        float(starting_equity),
+        metrics_trades=filtered,
+    )
 
     summary_notes = ["Visualise equity, drawdowns, and daily performance derived from watchdog logs."]
     if selected_products:
