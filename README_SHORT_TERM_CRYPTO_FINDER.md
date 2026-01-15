@@ -135,6 +135,17 @@ Note: paper trades show 0.00% until you refresh prices. Run:
 python paper_finder_simulator.py update
 ```
 
+Optional (paper): add partial take‑profit rules when opening trades:
+```bash
+python scripts/baseline_finder_from_snapshot.py \
+  --symbols SUPER:LONG,BTC:SHORT \
+  --profile focused_no_llm_100 \
+  --open-paper \
+  --partial-tp-rr 0.8 \
+  --partial-tp-pct 50 \
+  --partial-tp-move-sl
+```
+
 ### Watchdog Reporting Companion
 
 - After executing the finder or automated bots, summarize how finished trades performed with

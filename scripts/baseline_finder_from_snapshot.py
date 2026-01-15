@@ -173,6 +173,9 @@ def _open_paper_trades(
     expiry_hours: float,
     tag: Optional[str],
     notes: Optional[str],
+    partial_tp_rr: Optional[float],
+    partial_tp_pct: Optional[float],
+    partial_tp_move_sl: bool,
     dry_run: bool,
 ) -> None:
     cmd = [
@@ -198,6 +201,12 @@ def _open_paper_trades(
         cmd.extend(["--tag", tag])
     if notes:
         cmd.extend(["--notes", notes])
+    if partial_tp_rr and partial_tp_rr > 0:
+        cmd.extend(["--partial-tp-rr", f"{partial_tp_rr:.2f}"])
+    if partial_tp_pct and partial_tp_pct > 0:
+        cmd.extend(["--partial-tp-pct", f"{partial_tp_pct:.2f}"])
+    if partial_tp_move_sl:
+        cmd.append("--partial-tp-move-sl")
     if dry_run:
         cmd.append("--dry-run")
 
@@ -318,6 +327,23 @@ def main() -> None:
         default=24.0,
         help="Expiry horizon for paper trades (default: 24h).",
     )
+    parser.add_argument(
+        "--partial-tp-rr",
+        type=float,
+        default=0.0,
+        help="Partial take-profit RR (paper only, default: 0 disabled).",
+    )
+    parser.add_argument(
+        "--partial-tp-pct",
+        type=float,
+        default=0.0,
+        help="Percent of position to close at partial TP (paper only).",
+    )
+    parser.add_argument(
+        "--partial-tp-move-sl",
+        action="store_true",
+        help="Move SL to entry after partial TP (paper only).",
+    )
     parser.add_argument("--tag", type=str, default=None, help="Optional tag for paper trades.")
     parser.add_argument("--notes", type=str, default=None, help="Optional note for paper trades.")
     parser.add_argument("--dry-run", action="store_true", help="Dry-run when opening paper trades.")
@@ -423,6 +449,9 @@ def main() -> None:
             expiry_hours=args.expiry_hours,
             tag=args.tag,
             notes=args.notes,
+            partial_tp_rr=args.partial_tp_rr,
+            partial_tp_pct=args.partial_tp_pct,
+            partial_tp_move_sl=bool(args.partial_tp_move_sl),
             dry_run=args.dry_run,
         )
 

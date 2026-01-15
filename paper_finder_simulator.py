@@ -64,6 +64,11 @@ OPEN_COLUMNS = [
     "entry_price",
     "stop_loss",
     "take_profit",
+    "partial_tp_pct",
+    "partial_tp_rr",
+    "partial_tp_price",
+    "partial_tp_done",
+    "partial_tp_move_sl",
     "position_usd",
     "leverage",
     "opened_at",
@@ -266,6 +271,7 @@ def _compute_mae_mfe(
     row: Dict[str, object],
     exit_price: float,
     close_time: datetime,
+    position_usd_override: Optional[float] = None,
 ) -> Tuple[Optional[float], Optional[float]]:
     cb = _get_coinbase_service()
     if cb is None:
@@ -274,7 +280,11 @@ def _compute_mae_mfe(
     if not product_id:
         return None, None
     entry = _safe_float(row.get("entry_price"), default=exit_price)
-    position_usd = _safe_float(row.get("position_usd"), default=0.0)
+    position_usd = (
+        float(position_usd_override)
+        if position_usd_override is not None and position_usd_override > 0
+        else _safe_float(row.get("position_usd"), default=0.0)
+    )
     if entry <= 0 or position_usd <= 0:
         return None, None
     net_size = position_usd / entry
@@ -422,6 +432,15 @@ def _safe_float(value, default: float = 0.0) -> float:
         return default
 
 
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
 def _desired_position_usd(
     parsed: ParsedFinder,
     portfolio_usd: float,
@@ -479,10 +498,15 @@ def _build_closed_record(
     now: datetime,
     mae: Optional[float] = None,
     mfe: Optional[float] = None,
+    position_usd_override: Optional[float] = None,
 ) -> Dict[str, object]:
     entry = _safe_float(row.get("entry_price"), default=price)
     side = (row.get("position_side") or "LONG").upper()
-    position_usd = _safe_float(row.get("position_usd"), default=0.0)
+    position_usd = (
+        float(position_usd_override)
+        if position_usd_override is not None and position_usd_override > 0
+        else _safe_float(row.get("position_usd"), default=0.0)
+    )
     pct = _compute_unrealized_pct(side, entry, price)
     pnl = position_usd * pct / 100.0
     opened_at = _parse_iso(str(row.get("opened_at") or ""))
@@ -552,6 +576,49 @@ def _close_and_update_rows(
         tp = _safe_float(row.get("take_profit"), default=entry)
         sl = _safe_float(row.get("stop_loss"), default=entry)
         expires_at = _parse_iso(str(row.get("expires_at") or ""))
+        position_usd = _safe_float(row.get("position_usd"), default=0.0)
+        partial_pct = _safe_float(row.get("partial_tp_pct"), default=0.0)
+        partial_rr = _safe_float(row.get("partial_tp_rr"), default=0.0)
+        partial_price = _safe_float(row.get("partial_tp_price"), default=0.0)
+        partial_done = _truthy(row.get("partial_tp_done"))
+        partial_move_sl = _truthy(row.get("partial_tp_move_sl"))
+
+        if partial_pct > 0 and partial_price > 0 and not partial_done and position_usd > 0:
+            hit_partial = False
+            if str(row.get("position_side") or "LONG").upper() == "LONG":
+                hit_partial = price >= partial_price
+            else:
+                hit_partial = price <= partial_price
+            if hit_partial:
+                close_usd = position_usd * (partial_pct / 100.0)
+                close_usd = min(close_usd, position_usd)
+                if close_usd > 0:
+                    mae, mfe = _compute_mae_mfe(row, price, now, position_usd_override=close_usd)
+                    closed.append(
+                        _build_closed_record(
+                            row,
+                            price,
+                            "partial_take",
+                            now,
+                            mae=mae,
+                            mfe=mfe,
+                            position_usd_override=close_usd,
+                        )
+                    )
+                    remaining = max(0.0, position_usd - close_usd)
+                    row["position_usd"] = round(remaining, 2)
+                    row["partial_tp_done"] = True
+                    row["partial_tp_rr"] = partial_rr
+                    row["partial_tp_pct"] = partial_pct
+                    row["partial_tp_price"] = partial_price
+                    row["partial_tp_move_sl"] = partial_move_sl
+                    if partial_move_sl and entry > 0:
+                        row["stop_loss"] = entry
+                    position_usd = remaining
+                if position_usd <= 0:
+                    continue
+        sl = _safe_float(row.get("stop_loss"), default=entry)
+        tp = _safe_float(row.get("take_profit"), default=entry)
         reason = _maybe_close_reason(
             side=str(row.get("position_side") or "LONG"),
             price=price,
@@ -684,6 +751,9 @@ def _open_selected_trades(
     tag: str,
     note: str,
     fixed_position_usd: Optional[float],
+    partial_tp_rr: float,
+    partial_tp_pct: float,
+    partial_tp_move_sl: bool,
     dry_run: bool,
 ) -> None:
     if not selected:
@@ -706,6 +776,16 @@ def _open_selected_trades(
             fixed_position_usd=fixed_position_usd,
             default_pct=default_pct,
         )
+        partial_rr = float(partial_tp_rr or 0.0)
+        partial_pct = float(partial_tp_pct or 0.0)
+        partial_price = 0.0
+        if partial_rr > 0 and partial_pct > 0:
+            risk = abs(cand.parsed.entry - cand.parsed.stop)
+            if risk > 0:
+                if cand.parsed.side.upper() == "LONG":
+                    partial_price = cand.parsed.entry + risk * partial_rr
+                else:
+                    partial_price = cand.parsed.entry - risk * partial_rr
         opened_at = datetime.now(tz=UTC)
         expires_at = opened_at + timedelta(hours=expiry_hours)
         row = {
@@ -716,6 +796,11 @@ def _open_selected_trades(
             "entry_price": cand.parsed.entry,
             "stop_loss": cand.parsed.stop,
             "take_profit": cand.parsed.take_profit,
+            "partial_tp_pct": round(partial_pct, 2) if partial_pct > 0 else "",
+            "partial_tp_rr": round(partial_rr, 2) if partial_rr > 0 else "",
+            "partial_tp_price": round(partial_price, 6) if partial_price > 0 else "",
+            "partial_tp_done": False,
+            "partial_tp_move_sl": bool(partial_tp_move_sl),
             "position_usd": round(position_usd, 2),
             "leverage": leverage,
             "opened_at": _isoformat(opened_at),
@@ -861,6 +946,9 @@ def handle_open(args: argparse.Namespace) -> None:
         tag=tag,
         note=note,
         fixed_position_usd=args.fixed_position_usd,
+        partial_tp_rr=float(args.partial_tp_rr or 0.0),
+        partial_tp_pct=float(args.partial_tp_pct or 0.0),
+        partial_tp_move_sl=bool(args.partial_tp_move_sl),
         dry_run=args.dry_run,
     )
 
@@ -1072,6 +1160,9 @@ def handle_open_single(args: argparse.Namespace) -> None:
         tag=tag,
         note=note,
         fixed_position_usd=args.fixed_position_usd,
+        partial_tp_rr=float(args.partial_tp_rr or 0.0),
+        partial_tp_pct=float(args.partial_tp_pct or 0.0),
+        partial_tp_move_sl=bool(args.partial_tp_move_sl),
         dry_run=args.dry_run,
     )
 
@@ -1108,6 +1199,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     p_open.add_argument("--default-position-pct", type=float, help="Fallback %% of portfolio when finder lacks a recommendation.")
     p_open.add_argument("--leverage", type=float, help="Stored leverage hint (for display only).")
     p_open.add_argument("--expiry-hours", type=float, help="Expiry horizon in hours (default config).")
+    p_open.add_argument("--partial-tp-rr", type=float, default=0.0, help="Partial take-profit RR (default: 0 disabled).")
+    p_open.add_argument("--partial-tp-pct", type=float, default=0.0, help="Percent to close at partial TP (default: 0).")
+    p_open.add_argument("--partial-tp-move-sl", action="store_true", help="Move SL to entry after partial TP.")
     p_open.add_argument("--tag", help="Optional tag stored with the trade.")
     p_open.add_argument("--notes", help="Optional freeform note.")
     p_open.add_argument("--dry-run", action="store_true", help="Parse and display without writing CSVs.")
@@ -1129,6 +1223,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     p_single.add_argument("--default-position-pct", type=float)
     p_single.add_argument("--leverage", type=float)
     p_single.add_argument("--expiry-hours", type=float)
+    p_single.add_argument("--partial-tp-rr", type=float, default=0.0)
+    p_single.add_argument("--partial-tp-pct", type=float, default=0.0)
+    p_single.add_argument("--partial-tp-move-sl", action="store_true")
     p_single.add_argument("--tag")
     p_single.add_argument("--notes")
     p_single.add_argument("--dry-run", action="store_true")

@@ -61,6 +61,37 @@ class TestSymbolSnapshot(unittest.TestCase):
         self.assertIsNone(atr7_to_21)
         self.assertAlmostEqual(tr1_to_atr7, 1.0, places=6)
 
+    def test_compute_perf_exclusions_drops_worst_fraction(self):
+        df = pd.DataFrame(
+            {
+                "product_id": ["AAA", "AAA", "BBB", "BBB", "CCC", "CCC"],
+                "profit_loss": [1.0, 1.0, -2.0, -1.5, 0.5, 0.7],
+            }
+        )
+        excluded, meta = self.symbol_snapshot._compute_perf_exclusions(
+            df,
+            min_trades=2,
+            drop_worst_frac=0.34,
+            min_expectancy=None,
+        )
+        self.assertEqual({"BBB"}, excluded)
+        self.assertEqual(3, meta["eligible"])
+
+    def test_compute_perf_exclusions_min_expectancy(self):
+        df = pd.DataFrame(
+            {
+                "product_id": ["AAA", "AAA", "BBB", "BBB"],
+                "profit_loss": [1.0, -0.5, -1.0, -0.5],
+            }
+        )
+        excluded, _ = self.symbol_snapshot._compute_perf_exclusions(
+            df,
+            min_trades=2,
+            drop_worst_frac=0.0,
+            min_expectancy=0.0,
+        )
+        self.assertEqual({"BBB"}, excluded)
+
     def test_select_balanced_rows_even_top(self):
         rows = [
             {"symbol": "AAA", "best_side": "LONG", "rr_gap": 0.2, "headroom_bps": 10.0},

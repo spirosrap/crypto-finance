@@ -87,20 +87,20 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         expires = now + timedelta(hours=2)
         self.assertEqual(
             "take_profit",
-            _maybe_close_reason("LONG", 12.5, 12.0, 9.0, expires, now),
+            _maybe_close_reason("LONG", 12.5, 12.0, 9.0, 10.0, expires, now),
         )
         self.assertEqual(
             "stop_loss",
-            _maybe_close_reason("LONG", 8.5, 12.0, 9.0, expires, now),
+            _maybe_close_reason("LONG", 8.5, 12.0, 9.0, 10.0, expires, now),
         )
         self.assertEqual(
             "take_profit",
-            _maybe_close_reason("SHORT", 88.0, 90.0, 110.0, expires, now),
+            _maybe_close_reason("SHORT", 88.0, 90.0, 110.0, 100.0, expires, now),
         )
         expired = now - timedelta(minutes=1)
         self.assertEqual(
             "expired_breakeven",
-            _maybe_close_reason("SHORT", 100.0, 90.0, 110.0, expired, now),
+            _maybe_close_reason("SHORT", 100.0, 90.0, 110.0, 100.0, expired, now),
         )
 
     def test_format_time_left_outputs_human_readable(self) -> None:
@@ -155,6 +155,38 @@ class PaperFinderSimulatorTests(unittest.TestCase):
         self.assertGreater(pnl_lookup["ALPHA-PERP-INTX"], 0)
         self.assertLess(pnl_lookup["BETA-PERP-INTX"], 0)
 
+    def test_partial_take_closes_fraction_and_moves_sl(self) -> None:
+        now = datetime.now(tz=UTC)
+        open_rows = [
+            {
+                "trade_id": "t1",
+                "product_id": "ALPHA-PERP-INTX",
+                "position_side": "LONG",
+                "entry_price": 10.0,
+                "stop_loss": 9.0,
+                "take_profit": 13.0,
+                "partial_tp_pct": 50.0,
+                "partial_tp_rr": 1.0,
+                "partial_tp_price": 11.0,
+                "partial_tp_done": False,
+                "partial_tp_move_sl": True,
+                "position_usd": 1000.0,
+                "opened_at": _isoformat(now - timedelta(hours=1)),
+                "expires_at": _isoformat(now + timedelta(hours=23)),
+            }
+        ]
+
+        def lookup(product_id: str) -> float:
+            return 11.0
+
+        updated, closed = _close_and_update_rows(open_rows, lookup, now)
+        self.assertEqual(1, len(updated))
+        self.assertEqual(1, len(closed))
+        self.assertEqual("partial_take", closed[0]["closure_reason"])
+        self.assertAlmostEqual(500.0, float(updated[0]["position_usd"]))
+        self.assertTrue(bool(updated[0]["partial_tp_done"]))
+        self.assertAlmostEqual(10.0, float(updated[0]["stop_loss"]))
+
     def test_open_selected_trades_appends_rows(self) -> None:
         parsed = ParsedFinder(
             symbol="ALPHA",
@@ -180,6 +212,9 @@ class PaperFinderSimulatorTests(unittest.TestCase):
             tag="unit",
             note="single",
             fixed_position_usd=None,
+            partial_tp_rr=0.0,
+            partial_tp_pct=0.0,
+            partial_tp_move_sl=False,
             dry_run=False,
         )
 
@@ -213,6 +248,9 @@ class PaperFinderSimulatorTests(unittest.TestCase):
             tag="test",
             note="manual",
             fixed_position_usd=None,
+            partial_tp_rr=0.0,
+            partial_tp_pct=0.0,
+            partial_tp_move_sl=False,
             dry_run=False,
         )
         open_df = pd.read_csv(sim.OPEN_CSV)

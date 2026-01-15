@@ -12,6 +12,7 @@
 # 0 * * * * cd /home/spiros/crypto-finance && { set -a; . ./.env; set +a; /home/spiros/anaconda3/envs/trade/bin/python scripts/run_breakout_autotrade.py --timeframe 1h --lookback 50 --portfolio-usd 500 --leverage 50 --out finder_breakout.txt --execute; } >> /home/spiros/crypto-finance/logs/breakout_autotrade.log 2>&1
 5 */4 * * * cd /home/spiros/crypto-finance && PYTHON_BIN=/home/spiros/anaconda3/envs/trade/bin/python RUN_LIVE=1 /bin/bash -lc "scripts/run_gate_scan_paper.sh" >> /home/spiros/crypto-finance/logs/gate_scan_paper.log 2>&1
 # Gate-scan runner streams output live and uses the 400-product balanced scan defaults in the script.
+# It now applies performance filtering + side score gates and adds TP1 partials for paper/live.
 
 # paper_finder_update
 */5 * * * * cd /home/spiros/crypto-finance && /home/spiros/anaconda3/envs/trade/bin/python /home/spiros/crypto-finance/paper_finder_simulator.py update >> /home/spiros/crypto-finance/logs/paper_finder_update.log 2>&1

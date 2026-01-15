@@ -85,6 +85,13 @@ SCAN_CMD=(
   --top 15
   --scan-limit 400
   --balanced
+  --min-score-long 55
+  --min-score-short 60
+  --perf-filter
+  --perf-source paper
+  --perf-lookback-days 120
+  --perf-min-trades 5
+  --perf-drop-worst 0.25
   --baseline-commands
   --baseline-portfolio-usd 5000
   --baseline-position-pct 5
@@ -93,6 +100,9 @@ SCAN_CMD=(
   --baseline-atr-mode clipped
   --baseline-leverage 50
   --baseline-expiry 30d
+  --baseline-partial-tp-rr 0.8
+  --baseline-partial-tp-pct 50
+  --baseline-partial-tp-move-sl
   --baseline-live-position-usd 250
   --baseline-paper-command
 )

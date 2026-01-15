@@ -519,6 +519,9 @@ def main() -> None:
     parser.add_argument("--leverage", type=float, default=5.0, help="Leverage (default 5x).")
     parser.add_argument("--tp", type=float, required=True, help="Take-profit price.")
     parser.add_argument("--sl", type=float, required=True, help="Stop-loss trigger price.")
+    parser.add_argument("--tp1", type=float, help="Partial take-profit price (optional).")
+    parser.add_argument("--tp1-pct", type=float, default=0.0, help="Percent of size to close at TP1.")
+    parser.add_argument("--tp1-move-sl", action="store_true", help="Move SL to entry after TP1 (not supported yet).")
     parser.add_argument("--limit", type=float, help="Optional entry limit price (omit for market).")
     parser.add_argument("--expiry", choices=["GTC", "12h", "24h", "30d"], default="30d", help="GTD expiry horizon for limit entries.")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without placing orders.")
@@ -533,6 +536,17 @@ def main() -> None:
         base_size = calculate_base_size(args.size, entry_price, meta)
         tp_price = quantize_price(args.tp, meta.price_precision)
         sl_price = quantize_price(args.sl, meta.price_precision)
+        tp1_pct = float(args.tp1_pct or 0.0)
+        tp1_price = None
+        if args.tp1 is not None or tp1_pct > 0:
+            if args.tp1 is None or tp1_pct <= 0:
+                raise RuntimeError("TP1 requires both --tp1 and --tp1-pct > 0.")
+            if tp1_pct <= 0 or tp1_pct >= 100:
+                raise RuntimeError("--tp1-pct must be between 0 and 100 (exclusive).")
+            tp1_price = quantize_price(float(args.tp1), meta.price_precision)
+            logger.info("TP1: %.2f (%s%% of size)", tp1_price, tp1_pct)
+        if args.tp1_move_sl:
+            logger.warning("TP1 move-SL is not supported yet for live orders; ignoring --tp1-move-sl.")
 
         logger.info("Reference price: %.2f", current_price)
         logger.info("Computed base size: %.8f %s", base_size, meta.market["base"])
@@ -563,6 +577,8 @@ def main() -> None:
         except Exception as exc:
             if (not args.dry_run) and (args.limit is None) and ("index out of range" in str(exc)):
                 logger.warning("CCXT entry failed (%s). Falling back to Coinbase REST order flow.", exc)
+                if tp1_price is not None:
+                    logger.warning("TP1 is not supported in REST fallback; placing single bracket only.")
                 entry_order = place_market_order_with_targets_rest(
                     product_id=meta.market["id"],
                     side=args.side,
@@ -587,6 +603,76 @@ def main() -> None:
                     logger.warning("Entry order %s not filled (status=%s); bracket submission skipped.", entry_order_id, final_state.get("status"))
                     bracket_response = {"error": "entry_not_filled"}
                 else:
+                    bracket_response = {}
+                    if tp1_price is not None and tp1_pct > 0:
+                        size_tp1 = base_size * (tp1_pct / 100.0)
+                        size_tp2 = base_size - size_tp1
+                        if size_tp1 > 0:
+                            bracket_response["tp1"] = place_trigger_bracket_order(
+                                exchange,
+                                meta,
+                                args.side,
+                                size_tp1,
+                                tp1_price,
+                                sl_price,
+                                args.leverage,
+                                args.expiry,
+                                args.dry_run,
+                            )
+                        if size_tp2 > 0:
+                            bracket_response["tp2"] = place_trigger_bracket_order(
+                                exchange,
+                                meta,
+                                args.side,
+                                size_tp2,
+                                tp_price,
+                                sl_price,
+                                args.leverage,
+                                args.expiry,
+                                args.dry_run,
+                            )
+                    else:
+                        bracket_response = place_trigger_bracket_order(
+                            exchange,
+                            meta,
+                            args.side,
+                            base_size,
+                            tp_price,
+                            sl_price,
+                            args.leverage,
+                            args.expiry,
+                            args.dry_run,
+                        )
+            else:
+                bracket_response = {}
+                if tp1_price is not None and tp1_pct > 0:
+                    size_tp1 = base_size * (tp1_pct / 100.0)
+                    size_tp2 = base_size - size_tp1
+                    if size_tp1 > 0:
+                        bracket_response["tp1"] = place_trigger_bracket_order(
+                            exchange,
+                            meta,
+                            args.side,
+                            size_tp1,
+                            tp1_price,
+                            sl_price,
+                            args.leverage,
+                            args.expiry,
+                            args.dry_run,
+                        )
+                    if size_tp2 > 0:
+                        bracket_response["tp2"] = place_trigger_bracket_order(
+                            exchange,
+                            meta,
+                            args.side,
+                            size_tp2,
+                            tp_price,
+                            sl_price,
+                            args.leverage,
+                            args.expiry,
+                            args.dry_run,
+                        )
+                else:
                     bracket_response = place_trigger_bracket_order(
                         exchange,
                         meta,
@@ -598,18 +684,6 @@ def main() -> None:
                         args.expiry,
                         args.dry_run,
                     )
-            else:
-                bracket_response = place_trigger_bracket_order(
-                    exchange,
-                    meta,
-                    args.side,
-                    base_size,
-                    tp_price,
-                    sl_price,
-                    args.leverage,
-                    args.expiry,
-                    args.dry_run,
-                )
     except Exception as exc:
         context = (
             f"product={args.product} side={args.side} size={args.size} "

@@ -195,6 +195,102 @@ def _load_excluded_perps(path: Path = EXCLUDED_PERPS_PATH) -> tuple[set[str], se
     return excluded_products, excluded_symbols
 
 
+def _metric_score(metric: object) -> Optional[float]:
+    if not metric:
+        return None
+    for attr in ("overall_score", "technical_score", "momentum_score"):
+        try:
+            raw = getattr(metric, attr)
+        except Exception:
+            raw = None
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if pd.isna(val):
+            continue
+        return val
+    return None
+
+
+def _score_passes(score: Optional[float], min_score: float) -> bool:
+    if min_score <= 0:
+        return True
+    if score is None:
+        return False
+    return score >= min_score
+
+
+def _load_closed_trade_logs(
+    paths: Iterable[Path],
+    lookback_days: Optional[int],
+) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            continue
+        if df.empty or "product_id" not in df.columns or "profit_loss" not in df.columns:
+            continue
+        cols = [c for c in ("product_id", "position_side", "profit_loss", "closed_at") if c in df.columns]
+        df = df[cols].copy()
+        df["product_id"] = df["product_id"].astype(str).str.upper()
+        if "position_side" in df.columns:
+            df["position_side"] = df["position_side"].astype(str).str.upper()
+        df["profit_loss"] = pd.to_numeric(df["profit_loss"], errors="coerce")
+        df = df[df["profit_loss"].notna()]
+        if "closed_at" in df.columns:
+            df["closed_at"] = pd.to_datetime(df["closed_at"], errors="coerce", utc=True)
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame(columns=["product_id", "position_side", "profit_loss", "closed_at"])
+    df = pd.concat(frames, ignore_index=True)
+    if lookback_days and "closed_at" in df.columns:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        df = df[df["closed_at"] >= cutoff]
+    return df
+
+
+def _compute_perf_exclusions(
+    df: pd.DataFrame,
+    *,
+    min_trades: int,
+    drop_worst_frac: float,
+    min_expectancy: Optional[float],
+) -> tuple[set[str], dict]:
+    if df.empty:
+        return set(), {"eligible": 0, "excluded": 0}
+    grouped = df.groupby("product_id").agg(
+        trades=("profit_loss", "size"),
+        expectancy=("profit_loss", "mean"),
+    )
+    grouped = grouped[grouped["trades"] >= max(1, int(min_trades or 0))]
+    excluded: set[str] = set()
+    if grouped.empty:
+        return excluded, {"eligible": 0, "excluded": 0}
+    if min_expectancy is not None:
+        excluded |= set(grouped[grouped["expectancy"] < min_expectancy].index)
+    frac = float(drop_worst_frac or 0.0)
+    if frac > 0:
+        if frac > 1:
+            frac = frac / 100.0
+        drop_n = int(len(grouped) * frac)
+        if drop_n > 0:
+            worst = grouped.sort_values("expectancy").head(drop_n)
+            excluded |= set(worst.index)
+    meta = {
+        "eligible": int(len(grouped)),
+        "excluded": int(len(excluded)),
+        "min_trades": int(min_trades),
+        "drop_worst_frac": float(drop_worst_frac),
+        "min_expectancy": min_expectancy,
+    }
+    return excluded, meta
+
+
 def _baseline_levels(
     *,
     side: str,
@@ -1098,6 +1194,9 @@ def gate_scan(
     baseline_atr_mult: float,
     baseline_rr: float,
     baseline_atr_mode: str,
+    baseline_partial_tp_rr: float,
+    baseline_partial_tp_pct: float,
+    baseline_partial_tp_move_sl: bool,
     baseline_leverage: Optional[float],
     baseline_expiry: str,
     baseline_include_open: bool,
@@ -1111,6 +1210,14 @@ def gate_scan(
     range_break_atr_mult: float,
     range_break_confirmed_only: bool,
     balanced: bool,
+    perf_filter: bool,
+    perf_source: str,
+    perf_lookback_days: Optional[int],
+    perf_min_trades: int,
+    perf_drop_worst: float,
+    perf_min_expectancy: Optional[float],
+    min_score_long: float,
+    min_score_short: float,
 ) -> None:
     cfg = build_short_term_config()
     apply_profile_overrides(cfg, profile)
@@ -1125,6 +1232,43 @@ def gate_scan(
     if not coins:
         print("No symbols retrieved (check connectivity or liquidity filters).")
         return
+
+    perf_excluded: set[str] = set()
+    perf_meta: Optional[dict] = None
+    if perf_filter:
+        sources: List[Path] = []
+        source_key = (perf_source or "paper").lower()
+        if source_key in {"paper", "both"}:
+            sources.append(PAPER_CLOSED_LOG_PATH)
+        if source_key in {"live", "both"}:
+            sources.append(LIVE_CLOSED_LOG_PATH)
+        perf_df = _load_closed_trade_logs(sources, perf_lookback_days)
+        perf_excluded, perf_meta = _compute_perf_exclusions(
+            perf_df,
+            min_trades=perf_min_trades,
+            drop_worst_frac=perf_drop_worst,
+            min_expectancy=perf_min_expectancy,
+        )
+        if perf_meta and perf_meta.get("eligible", 0) == 0:
+            print("Performance filter: no eligible trade history; skipping.")
+        else:
+            print(
+                "Performance filter: excluded {excluded}/{eligible} products "
+                "(min_trades={min_trades}, drop_worst={drop_worst_frac}, min_expectancy={min_expectancy}).".format(
+                    excluded=len(perf_excluded),
+                    eligible=perf_meta.get("eligible") if perf_meta else 0,
+                    min_trades=perf_min_trades,
+                    drop_worst_frac=perf_drop_worst,
+                    min_expectancy="n/a" if perf_min_expectancy is None else f"{perf_min_expectancy:.2f}",
+                )
+            )
+    if min_score_long > 0 or min_score_short > 0:
+        print(
+            "Score gates: min LONG score={long_score:.1f}, min SHORT score={short_score:.1f}.".format(
+                long_score=min_score_long,
+                short_score=min_score_short,
+            )
+        )
 
     live_daily_closed = _daily_pnl_today(LIVE_CLOSED_LOG_PATH)
     paper_daily_closed = _daily_pnl_today(PAPER_CLOSED_LOG_PATH)
@@ -1234,11 +1378,16 @@ def gate_scan(
         return counts
 
     rows = []
+    perf_skipped = 0
     for coin in coins:
-        product_id = coin["product_id"]
+        product_id = str(coin["product_id"])
+        product_upper = product_id.upper()
         symbol = str(coin.get("symbol") or "").upper()
         base_symbol = symbol.split("-")[0] if symbol else str(product_id).split("-")[0].upper()
-        if product_id in excluded_products or base_symbol in excluded_symbols:
+        if product_upper in excluded_products or base_symbol in excluded_symbols:
+            continue
+        if perf_excluded and product_upper in perf_excluded:
+            perf_skipped += 1
             continue
         df = finder.get_historical_data(product_id, days=cfg.analysis_days)
         if df is None or df.empty:
@@ -1248,6 +1397,8 @@ def gate_scan(
         chg = finder._calculate_price_changes_from_history(df)
         long_m = finder._build_long_metrics(coin, df, tech, mom, chg)
         short_m = finder._build_short_metrics(coin, df, tech, mom, chg)
+        long_score = _metric_score(long_m)
+        short_score = _metric_score(short_m)
         price = float(coin.get("current_price") or 0.0)
         cap = _effective_atr_cap(price, getattr(cfg, "max_atr_usd", None), getattr(cfg, "max_atr_bps", None))
         atr = float(tech.get("atr") or 0.0)
@@ -1295,15 +1446,16 @@ def gate_scan(
                 return max(0.0, rr_target - rr)
             except Exception:
                 return None
-        gaps = [
-            ("LONG", _rr_gap(long_m), getattr(long_m, "risk_reward_ratio", None)),
-            ("SHORT", _rr_gap(short_m), getattr(short_m, "risk_reward_ratio", None)),
-        ]
+        gaps = []
+        if _score_passes(long_score, min_score_long):
+            gaps.append(("LONG", _rr_gap(long_m), getattr(long_m, "risk_reward_ratio", None), long_score))
+        if _score_passes(short_score, min_score_short):
+            gaps.append(("SHORT", _rr_gap(short_m), getattr(short_m, "risk_reward_ratio", None), short_score))
         gaps = [g for g in gaps if g[1] is not None]
         if not gaps:
             continue
         gaps.sort(key=lambda x: x[1])
-        best_side, best_gap, best_rr = gaps[0]
+        best_side, best_gap, best_rr, best_score = gaps[0]
         atr_ratio = (atr_bps / cap_bps) if (atr_bps is not None and cap_bps) else None
         vmc_exempt = (coin.get("symbol") or "").upper() in major_symbols
         baseline_vmc_exempt = (coin.get("symbol") or "").upper() in baseline_exempt_symbols
@@ -1315,7 +1467,7 @@ def gate_scan(
 
         rows.append({
             "symbol": coin["symbol"],
-            "product": product_id,
+            "product": product_upper,
             "best_side": best_side,
             "rr_gap": best_gap,
             "rr": best_rr,
@@ -1339,7 +1491,13 @@ def gate_scan(
             "volume_source": str(coin.get("volume_24h_source") or "").strip(),
             "baseline_pass": baseline_pass,
             "rr_pass": rr_pass,
+            "score": best_score,
+            "long_score": long_score,
+            "short_score": short_score,
         })
+
+    if perf_excluded:
+        print(f"Performance filter skipped {perf_skipped} symbols from the scan universe.")
 
     rows.sort(key=_gate_scan_sort_key)
     top_rows = rows[:top]
@@ -1519,6 +1677,16 @@ def gate_scan(
             precision = _price_precision(entry)
             tp_txt = _fmt_price(tp, precision)
             sl_txt = _fmt_price(stop, precision)
+            partial_tp_txt = None
+            if baseline_partial_tp_rr and baseline_partial_tp_pct:
+                risk = abs(entry - stop)
+                if risk > 0:
+                    if side == "LONG":
+                        partial_tp = entry + risk * baseline_partial_tp_rr
+                    else:
+                        partial_tp = entry - risk * baseline_partial_tp_rr
+                    if partial_tp > 0:
+                        partial_tp_txt = _fmt_price(partial_tp, precision)
             base_symbol = canonical_perp_symbol(symbol) or symbol
             product = f"{base_symbol}-PERP-INTX"
             side_ccxt = "BUY" if side == "LONG" else "SELL"
@@ -1526,6 +1694,8 @@ def gate_scan(
             if leverage_text:
                 cmd += f" --leverage {leverage_text}"
             cmd += f" --tp {tp_txt} --sl {sl_txt} --expiry {baseline_expiry}"
+            if partial_tp_txt and baseline_partial_tp_pct:
+                cmd += f" --tp1 {partial_tp_txt} --tp1-pct {baseline_partial_tp_pct:.2f}"
             commands.append(cmd)
             total_open += 1
             cluster_counts[cluster] = cluster_counts.get(cluster, 0) + 1
@@ -1657,6 +1827,12 @@ def gate_scan(
             cmd_parts.append(f"--fixed-position-usd {baseline_position_usd}")
         if baseline_leverage is not None:
             cmd_parts.append(f"--leverage {baseline_leverage}")
+        if baseline_partial_tp_rr and baseline_partial_tp_rr > 0:
+            cmd_parts.append(f"--partial-tp-rr {baseline_partial_tp_rr}")
+        if baseline_partial_tp_pct and baseline_partial_tp_pct > 0:
+            cmd_parts.append(f"--partial-tp-pct {baseline_partial_tp_pct}")
+        if baseline_partial_tp_move_sl:
+            cmd_parts.append("--partial-tp-move-sl")
         print("Paper command:")
         print(" ".join(cmd_parts))
     if RICH_AVAILABLE and RICH_CONSOLE is not None and top_rows:
@@ -1665,6 +1841,7 @@ def gate_scan(
         table.add_column("Side")
         table.add_column("RR", justify="right")
         table.add_column("Gap", justify="right")
+        table.add_column("Score", justify="right")
         table.add_column("ATR bps", justify="right")
         table.add_column("ATR cap", justify="left", no_wrap=True, overflow="ellipsis")
         table.add_column("Base", justify="center")
@@ -1710,11 +1887,14 @@ def gate_scan(
 
             regime = f"{_fmt(row.get('atr7_to_21'), 2)}/{_fmt(row.get('tr1_to_atr7'), 2)}"
 
+            score_val = row.get("score")
+            score_txt = f"{score_val:.1f}" if isinstance(score_val, (int, float)) else "n/a"
             table.add_row(
                 row["symbol"],
                 row["best_side"],
                 f"{row['rr']:.2f}",
                 f"{row['rr_gap']:.2f}",
+                score_txt,
                 atr_txt,
                 atr_gate_txt,
                 "Y" if row.get("baseline_pass") else "N",
@@ -1769,7 +1949,9 @@ def gate_scan(
 
         base_txt = "pass" if row.get("baseline_pass") else "fail"
         rr_txt = "pass" if row.get("rr_pass") else "fail"
-        print(f"{row['symbol']} ({row['product']}) {row['best_side']} RR={row['rr']:.2f} (gap {row['rr_gap']:.2f}) | "
+        score_txt = _fmt(row.get("score"), 1) if row.get("score") is not None else "n/a"
+        print(f"{row['symbol']} ({row['product']}) {row['best_side']} "
+              f"RR={row['rr']:.2f} (gap {row['rr_gap']:.2f}) score={score_txt} | "
               f"ATR {atr_txt}, cap {cap_txt}, {atr_gate_txt} | "
               f"base={base_txt}, rr={rr_txt} | "
               f"liq vol={vol_txt} ({liq_mult} vs min={_fmt_usd_compact(min_volume)}) "
@@ -1816,6 +1998,18 @@ def main() -> None:
         help="Require a balanced LONG/SHORT mix in gate-scan output (needs >= floor(top/2) per side).",
     )
     parser.add_argument(
+        "--min-score-long",
+        type=float,
+        default=0.0,
+        help="Minimum technical/overall score required for LONG candidates (default: 0).",
+    )
+    parser.add_argument(
+        "--min-score-short",
+        type=float,
+        default=0.0,
+        help="Minimum technical/overall score required for SHORT candidates (default: 0).",
+    )
+    parser.add_argument(
         "--rr-target",
         type=float,
         default=2.0,
@@ -1826,6 +2020,41 @@ def main() -> None:
         type=int,
         default=None,
         help="Limit how many symbols to scan in gate-scan mode (e.g., 100 or 200). Default scans full profile universe.",
+    )
+    parser.add_argument(
+        "--perf-filter",
+        action="store_true",
+        help="Exclude underperforming products based on closed-trade logs.",
+    )
+    parser.add_argument(
+        "--perf-source",
+        choices=("paper", "live", "both"),
+        default="paper",
+        help="Closed-trade logs to use for performance filtering (default: paper).",
+    )
+    parser.add_argument(
+        "--perf-lookback-days",
+        type=int,
+        default=120,
+        help="Lookback window (days) for performance filter (default: 120).",
+    )
+    parser.add_argument(
+        "--perf-min-trades",
+        type=int,
+        default=5,
+        help="Minimum trades per product to be eligible for performance filtering (default: 5).",
+    )
+    parser.add_argument(
+        "--perf-drop-worst",
+        type=float,
+        default=0.0,
+        help="Drop worst-performing fraction of products (0-1 or percent). Default: 0 (disabled).",
+    )
+    parser.add_argument(
+        "--perf-min-expectancy",
+        type=float,
+        default=None,
+        help="Exclude products with expectancy below this (default: disabled).",
     )
     parser.add_argument(
         "--baseline-commands",
@@ -1878,6 +2107,23 @@ def main() -> None:
         choices=["raw", "clipped"],
         default="clipped",
         help="Use raw or capped ATR for baseline commands (default: clipped).",
+    )
+    parser.add_argument(
+        "--baseline-partial-tp-rr",
+        type=float,
+        default=0.0,
+        help="RR multiple for partial take-profit (paper only, default: 0 disabled).",
+    )
+    parser.add_argument(
+        "--baseline-partial-tp-pct",
+        type=float,
+        default=0.0,
+        help="Percent of position to close at partial take-profit (paper only, default: 0 disabled).",
+    )
+    parser.add_argument(
+        "--baseline-partial-tp-move-sl",
+        action="store_true",
+        help="After partial take-profit, move paper stop-loss to entry (paper only).",
     )
     parser.add_argument(
         "--baseline-leverage",
@@ -1969,6 +2215,9 @@ def main() -> None:
             baseline_atr_mult=args.baseline_atr_mult,
             baseline_rr=args.baseline_rr,
             baseline_atr_mode=args.baseline_atr_mode,
+            baseline_partial_tp_rr=args.baseline_partial_tp_rr,
+            baseline_partial_tp_pct=args.baseline_partial_tp_pct,
+            baseline_partial_tp_move_sl=args.baseline_partial_tp_move_sl,
             baseline_leverage=args.baseline_leverage,
             baseline_expiry=args.baseline_expiry,
             baseline_include_open=args.baseline_include_open,
@@ -1982,6 +2231,14 @@ def main() -> None:
             range_break_atr_mult=args.range_break_atr_mult,
             range_break_confirmed_only=bool(args.range_break_confirmed_only),
             balanced=args.balanced,
+            perf_filter=args.perf_filter,
+            perf_source=args.perf_source,
+            perf_lookback_days=args.perf_lookback_days,
+            perf_min_trades=args.perf_min_trades,
+            perf_drop_worst=args.perf_drop_worst,
+            perf_min_expectancy=args.perf_min_expectancy,
+            min_score_long=args.min_score_long,
+            min_score_short=args.min_score_short,
         )
         return
 
