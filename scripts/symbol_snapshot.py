@@ -198,7 +198,9 @@ def _load_excluded_perps(path: Path = EXCLUDED_PERPS_PATH) -> tuple[set[str], se
 def _metric_score(metric: object) -> Optional[float]:
     if not metric:
         return None
-    for attr in ("overall_score", "technical_score", "momentum_score"):
+    # In gate-scan we don't compute cross-sectional overall_score, so prefer
+    # technical/momentum scores and only fall back to overall_score if > 0.
+    for attr in ("technical_score", "momentum_score", "overall_score"):
         try:
             raw = getattr(metric, attr)
         except Exception:
@@ -208,6 +210,8 @@ def _metric_score(metric: object) -> Optional[float]:
         except (TypeError, ValueError):
             continue
         if pd.isna(val):
+            continue
+        if attr == "overall_score" and val <= 0:
             continue
         return val
     return None
