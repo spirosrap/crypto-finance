@@ -82,9 +82,9 @@ fi
 SCAN_CMD=(
   "${PYTHON_BIN}" "${REPO_ROOT}/scripts/symbol_snapshot.py"
   --gate-scan
-  --profile focused_no_llm_400
+  --profile focused_no_llm_200
   --top 15
-  --scan-limit 400
+  --scan-limit 200
   --balanced
   --min-score-long 55
   --min-score-short 60
