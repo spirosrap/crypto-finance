@@ -387,29 +387,36 @@ def place_entry_order(
         logger.info("Entry order placed: %s", response.get("order_id", response))
         return response
 
-    params = {
-        "marginMode": "cross",
-        "leverage": str(leverage),
-        "timeInForce": "GTD" if expiry != "GTC" else "GTC",
+    payload = {
+        "client_order_id": f"entry-{int(time.time()*1000)}",
+        "product_id": meta.market["id"],
+        "side": side,
+        "order_configuration": {},
+    }
+    order_config = {
+        "base_size": exchange.amount_to_precision(meta.ccxt_symbol, amount),
+        "limit_price": exchange.price_to_precision(meta.ccxt_symbol, price),
+        "post_only": False,
     }
     if expiry != "GTC":
-        params["end_time"] = compute_end_time(expiry)
+        order_config["end_time"] = compute_end_time(expiry)
+        payload["order_configuration"]["limit_limit_gtd"] = order_config
+    else:
+        payload["order_configuration"]["limit_limit_gtc"] = order_config
+
+    if leverage:
+        payload["leverage"] = str(leverage)
+        payload["margin_type"] = "CROSS"
 
     if dry_run:
-        logger.info("[Dry run] create_order(%s, limit, %s, amount=%.8f, price=%s, params=%s)",
-                    meta.ccxt_symbol, side.lower(), amount, price, params)
+        logger.info("[Dry run] submit limit entry payload: %s", payload)
         return {"status": "dry_run"}
 
-    order = exchange.create_order(
-        meta.ccxt_symbol,
-        "limit",
-        side.lower(),
-        amount,
-        price,
-        params,
-    )
-    logger.info("Entry order placed: %s", order.get("id"))
-    return order
+    response = exchange.v3PrivatePostBrokerageOrders(payload)
+    if not bool(response.get("success", True)):
+        raise RuntimeError(f"Entry order rejected: {response.get('error_response', response)}")
+    logger.info("Entry order placed: %s", response.get("order_id", response))
+    return response
 
 
 def place_trigger_bracket_order(
