@@ -101,7 +101,7 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
     return df
 
 
-def collapse_trade_rows(df: pd.DataFrame) -> pd.DataFrame:
+def collapse_trade_rows(df: pd.DataFrame, include_partial_only: bool = False) -> pd.DataFrame:
     if df.empty:
         return df
 
@@ -149,7 +149,11 @@ def collapse_trade_rows(df: pd.DataFrame) -> pd.DataFrame:
         np.nan,
     )
     aggregated = aggregated.drop(columns=["abs_size", "pl_pct_weight"])
-    aggregated = aggregated[aggregated["has_non_partial"]].drop(columns=["has_non_partial"])
+    if include_partial_only:
+        aggregated["partial_only"] = ~aggregated["has_non_partial"]
+        aggregated = aggregated.drop(columns=["has_non_partial"])
+    else:
+        aggregated = aggregated[aggregated["has_non_partial"]].drop(columns=["has_non_partial"])
     aggregated = aggregated.sort_values("closed_at").reset_index(drop=True)
     return aggregated
 
@@ -1275,6 +1279,19 @@ def main() -> None:
         step=100.0,
         key=f"starting_equity_{source_mode}",
     )
+    view_defaults = {}
+    if isinstance(st.session_state.get("dashboard_state"), dict):
+        view_defaults = (
+            st.session_state["dashboard_state"]
+            .get("view_options", {})
+            .get(source_mode, {})
+        )
+    include_partials_default = bool(view_defaults.get("include_partials", False))
+    include_partials = st.sidebar.checkbox(
+        "Include partial exits",
+        value=include_partials_default,
+        help="Include partial_take-only closures in metrics/filters before a full close.",
+    )
     if isinstance(st.session_state.get("dashboard_state"), dict):
         existing_filters = st.session_state["dashboard_state"].get("date_filters", {})
         updated_filters = {
@@ -1296,6 +1313,12 @@ def main() -> None:
         if existing.get(source_mode) != starting_equity:
             existing[source_mode] = float(starting_equity)
             st.session_state["dashboard_state"]["starting_equity"] = existing
+            _save_dashboard_state(st.session_state["dashboard_state"])
+        existing_views = st.session_state["dashboard_state"].get("view_options", {})
+        updated_views = {"include_partials": bool(include_partials)}
+        if existing_views.get(source_mode) != updated_views:
+            existing_views[source_mode] = updated_views
+            st.session_state["dashboard_state"]["view_options"] = existing_views
             _save_dashboard_state(st.session_state["dashboard_state"])
         refresh_state = st.session_state["dashboard_state"].get("refresh", {})
         refresh_updated = {
@@ -1325,7 +1348,7 @@ def main() -> None:
         st.error(f"Failed to load data: {exc}")
         st.stop()
 
-    trade_view_df = collapse_trade_rows(trades_df)
+    trade_view_df = collapse_trade_rows(trades_df, include_partial_only=include_partials)
     if source_mode == "paper":
         trade_view_df = filter_paper_trade_batches(trade_view_df)
 
@@ -1405,7 +1428,7 @@ def main() -> None:
             int(effective_tail_last),
             symbols=selected_products or None,
         )
-        filtered = collapse_trade_rows(pnl_filtered)
+        filtered = collapse_trade_rows(pnl_filtered, include_partial_only=include_partials)
         filtered = filter_paper_trade_batches(filtered)
     else:
         filtered = apply_filters(
