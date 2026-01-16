@@ -467,6 +467,8 @@ def place_market_order_with_targets_rest(
     sl_price: float,
     leverage: float,
     expiry: str,
+    tp1_price: Optional[float] = None,
+    tp1_pct: float = 0.0,
 ) -> Dict:
     try:
         from coinbaseservice import CoinbaseService
@@ -486,11 +488,29 @@ def place_market_order_with_targets_rest(
         stop_loss_price=sl_price,
         leverage=str(leverage) if leverage else None,
         expiry=expiry,
+        tp1_price=tp1_price,
+        tp1_pct=tp1_pct,
     )
     if isinstance(result, dict) and result.get("error"):
         raise RuntimeError(f"REST market+bracket order failed: {result['error']}")
     logger.info("REST market+bracket order placed for %s (%s).", product_id, side)
     return {"success": True, "via": "rest", "response": result}
+
+
+def _log_ccxt_failure(exchange: ccxt.Exchange, exc: Exception) -> None:
+    logger.warning("CCXT exception: %s", exc)
+    try:
+        last_url = getattr(exchange, "last_request_url", None)
+        last_body = getattr(exchange, "last_request_body", None)
+        last_resp = getattr(exchange, "last_http_response", None)
+        if last_url:
+            logger.warning("CCXT last_request_url: %s", last_url)
+        if last_body:
+            logger.warning("CCXT last_request_body: %s", last_body)
+        if last_resp:
+            logger.warning("CCXT last_http_response: %s", last_resp)
+    except Exception:
+        logger.warning("Unable to read CCXT last_* diagnostics.")
 
 
 def wait_for_fill(
@@ -591,20 +611,50 @@ def main() -> None:
                 args.dry_run,
             )
         except Exception as exc:
-            if (not args.dry_run) and (not args.no_rest_fallback) and ("index out of range" in str(exc)):
-                logger.warning("CCXT entry failed (%s). Falling back to Coinbase REST order flow.", exc)
-                if tp1_price is not None:
-                    logger.warning("TP1 is not supported in REST fallback; placing single bracket only.")
-                entry_order = place_market_order_with_targets_rest(
-                    product_id=meta.market["id"],
-                    side=args.side,
-                    base_size=base_size,
-                    tp_price=tp_price,
-                    sl_price=sl_price,
-                    leverage=args.leverage,
-                    expiry=args.expiry,
-                )
-                skip_bracket = True
+            if (not args.dry_run) and ("index out of range" in str(exc)):
+                _log_ccxt_failure(exchange, exc)
+                logger.warning("Retrying CCXT entry after index error with fresh markets.")
+                try:
+                    exchange.load_markets(reload=True)
+                    meta = get_market_meta(exchange, args.product)
+                    base_size = calculate_base_size(args.size, entry_price, meta)
+                    tp_price = quantize_price(args.tp, meta.price_precision)
+                    sl_price = quantize_price(args.sl, meta.price_precision)
+                    if tp1_price is not None:
+                        tp1_price = quantize_price(float(args.tp1), meta.price_precision)
+                except Exception as refresh_exc:
+                    logger.warning("CCXT refresh before retry failed: %s", refresh_exc)
+                try:
+                    entry_order = place_entry_order(
+                        exchange,
+                        meta,
+                        args.side,
+                        base_size,
+                        quantize_price(args.limit, meta.price_precision) if args.limit else None,
+                        args.leverage,
+                        args.expiry,
+                        args.dry_run,
+                    )
+                except Exception as retry_exc:
+                    if (not args.no_rest_fallback) and ("index out of range" in str(retry_exc)):
+                        _log_ccxt_failure(exchange, retry_exc)
+                        logger.warning("CCXT entry still failing; falling back to Coinbase REST.")
+                        if tp1_price is not None:
+                            logger.warning("Using REST fallback with TP1 split brackets.")
+                        entry_order = place_market_order_with_targets_rest(
+                            product_id=meta.market["id"],
+                            side=args.side,
+                            base_size=base_size,
+                            tp_price=tp_price,
+                            sl_price=sl_price,
+                            leverage=args.leverage,
+                            expiry=args.expiry,
+                            tp1_price=tp1_price,
+                            tp1_pct=tp1_pct,
+                        )
+                        skip_bracket = True
+                    else:
+                        raise
             else:
                 raise
 

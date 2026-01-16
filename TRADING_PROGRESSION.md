@@ -11,6 +11,12 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit now auto‑close live/paper and suppress new entries until the daily reset or a confirmed daily close re-enters range±buffer (latched; intraday moves don’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live resumed after the Jan 1 stop and is stronger post‑guard; paper resumed after its halt and is catching up. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 16, 2026 - REST TP1 Fallback Restored
+- When CCXT entry fails, REST fallback now places split brackets for TP1 + TP2 so live trades keep the partial-exit plan.
+
+## January 16, 2026 - CCXT Entry Retry + Diagnostics
+- CCXT order placement now retries once after an “index out of range” with a forced markets reload and logs the last CCXT request/response for debugging before falling back to REST.
+
 ## January 16, 2026 - Gate-Scan Cron Issues + Scan Limit Reduced
 - Reduced the gate-scan universe to 200 symbols to speed the 4h cron runs.
 - Live orders sometimes fail when placed via the cron runner (CCXT “index out of range” errors); manual runs still succeed, so this needs troubleshooting in the cron path.

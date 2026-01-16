@@ -396,11 +396,23 @@ class CoinbaseService:
             self.logger.error(f"Error getting trading pairs: {str(e)}")
             return []
 
-    def place_market_order_with_targets(self, product_id: str, side: str, size: float, 
-                                      take_profit_price: float | str, stop_loss_price: float | str,
-                                      leverage: str = None, expiry: str | None = None) -> dict:
+    def place_market_order_with_targets(
+        self,
+        product_id: str,
+        side: str,
+        size: float,
+        take_profit_price: float | str,
+        stop_loss_price: float | str,
+        leverage: str = None,
+        expiry: str | None = None,
+        tp1_price: float | str | None = None,
+        tp1_pct: float = 0.0,
+    ) -> dict:
         """
-        Place a market order followed by a bracket order for take profit and stop loss.
+        Place a market order followed by bracket order(s) for take profit and stop loss.
+
+        If tp1_price/tp1_pct are provided, split the position into two brackets:
+        TP1 for the partial size and TP2 for the remaining size.
         """
         try:
             # First preview the market order
@@ -488,19 +500,27 @@ class CoinbaseService:
                 self.logger.error(f"Market order not filled: {order_status}")
                 return {"error": "Market order not filled", "market_order": str(market_order)}
 
-            # Generate client_order_id for bracket order
-            bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
-            
             # Set end time based on requested expiry (default 30d)
             end_time = self._compute_end_time(expiry)
             
             # Place bracket order - use opposite side of market order
             bracket_side = "SELL" if side.upper() == "BUY" else "BUY"
-            
-            # Place the bracket order
-            try:
-                # Format prices precisely per leg
-                tp_limit = self._format_price(take_profit_price, price_inc)
+
+            tp1_pct_val = float(tp1_pct or 0.0)
+            if tp1_price is not None or tp1_pct_val > 0:
+                if tp1_price is None or tp1_pct_val <= 0 or tp1_pct_val >= 100:
+                    return {"error": "TP1 requires tp1_price and 0 < tp1_pct < 100"}
+
+            def _place_bracket(base_size_value: float, tp_price_value: float | str) -> dict:
+                base_size_str = self._format_base_size(base_size_value, base_inc)
+                try:
+                    if float(base_size_str) <= 0:
+                        return {"error": "Bracket size rounded to zero"}
+                except Exception:
+                    return {"error": "Bracket size invalid"}
+
+                bracket_client_order_id = f"bracket_{uuid.uuid4().hex[:16]}_{int(time.time())}"
+                tp_limit = self._format_price(tp_price_value, price_inc)
                 sl_stop = self._format_price(stop_loss_price, quote_inc)
 
                 # Optional preview to catch precision failures early
@@ -513,7 +533,7 @@ class CoinbaseService:
                             stop_trigger_price=sl_stop,
                             end_time=end_time,
                             leverage=leverage,
-                            margin_type="CROSS" if leverage else None
+                            margin_type="CROSS" if leverage else None,
                         )
                     else:
                         prev = self.client.preview_trigger_bracket_order_gtd_buy(
@@ -523,18 +543,15 @@ class CoinbaseService:
                             stop_trigger_price=sl_stop,
                             end_time=end_time,
                             leverage=leverage,
-                            margin_type="CROSS" if leverage else None
+                            margin_type="CROSS" if leverage else None,
                         )
-                    # If preview returns error list, surface it
-                    if isinstance(prev, dict) and prev.get('errs'):
-                        errs = prev.get('errs')
-                        # Allow close-only preview errors to pass through; block precision errors
-                        fatal = [e for e in errs if 'PRECISION' in e or 'INVALID' in e]
+                    if isinstance(prev, dict) and prev.get("errs"):
+                        errs = prev.get("errs")
+                        fatal = [e for e in errs if "PRECISION" in e or "INVALID" in e]
                         if fatal:
                             self.logger.error(f"Bracket preview fatal errors: {fatal}")
                             return {"error": "Bracket preview failed", "bracket_error": prev}
                 except Exception as e:
-                    # Non-fatal; proceed to attempt placement, but log
                     self.logger.warning(f"Bracket preview call failed: {e}")
 
                 if bracket_side == "SELL":
@@ -546,7 +563,7 @@ class CoinbaseService:
                         stop_trigger_price=sl_stop,
                         end_time=end_time,
                         leverage=leverage,
-                        margin_type="CROSS" if leverage else None
+                        margin_type="CROSS" if leverage else None,
                     )
                 else:
                     bracket_order = self.client.trigger_bracket_order_gtd_buy(
@@ -557,27 +574,51 @@ class CoinbaseService:
                         stop_trigger_price=sl_stop,
                         end_time=end_time,
                         leverage=leverage,
-                        margin_type="CROSS" if leverage else None
+                        margin_type="CROSS" if leverage else None,
                     )
-                    
-                if hasattr(bracket_order, 'error_response'):
+
+                if hasattr(bracket_order, "error_response"):
                     self.logger.error(f"Failed to place bracket order: {bracket_order.error_response}")
                     return {
                         "error": "Failed to place bracket order",
-                        "market_order": str(market_order),
-                        "bracket_error": bracket_order.error_response
+                        "bracket_error": bracket_order.error_response,
                     }
-                    
+
                 self.logger.info(f"Bracket order placed: {bracket_order}")
-                
-                # Return all order details
+                return {"order": bracket_order, "tp_price": tp_limit, "sl_price": sl_stop}
+
+            # Place the bracket order(s)
+            try:
+                if tp1_price is not None and tp1_pct_val > 0:
+                    size_tp1 = size * (tp1_pct_val / 100.0)
+                    size_tp2 = size - size_tp1
+                    tp1_resp = _place_bracket(size_tp1, tp1_price)
+                    if tp1_resp.get("error"):
+                        return {"error": tp1_resp["error"], "market_order": str(market_order), "bracket_error": tp1_resp}
+                    tp2_resp = _place_bracket(size_tp2, take_profit_price)
+                    if tp2_resp.get("error"):
+                        return {"error": tp2_resp["error"], "market_order": str(market_order), "bracket_error": tp2_resp}
+                    return {
+                        "market_order": str(market_order),
+                        "bracket_order_tp1": str(tp1_resp.get("order")),
+                        "bracket_order_tp2": str(tp2_resp.get("order")),
+                        "status": "success",
+                        "order_id": order_id,
+                        "tp1_price": tp1_resp.get("tp_price"),
+                        "tp_price": tp2_resp.get("tp_price"),
+                        "sl_price": tp2_resp.get("sl_price"),
+                    }
+
+                tp2_resp = _place_bracket(size, take_profit_price)
+                if tp2_resp.get("error"):
+                    return {"error": tp2_resp["error"], "market_order": str(market_order), "bracket_error": tp2_resp}
                 return {
                     "market_order": str(market_order),
-                    "bracket_order": str(bracket_order),
+                    "bracket_order": str(tp2_resp.get("order")),
                     "status": "success",
                     "order_id": order_id,
-                    "tp_price": tp_limit,
-                    "sl_price": sl_stop
+                    "tp_price": tp2_resp.get("tp_price"),
+                    "sl_price": tp2_resp.get("sl_price"),
                 }
                 
             except Exception as e:
