@@ -497,6 +497,54 @@ def place_market_order_with_targets_rest(
     return {"success": True, "via": "rest", "response": result}
 
 
+def _summarize_ccxt_response(response: object, max_len: int = 600) -> str:
+    parsed = None
+    if isinstance(response, (bytes, bytearray)):
+        response = response.decode("utf-8", errors="replace")
+    if isinstance(response, str):
+        text = response.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                parsed = None
+        if parsed is None:
+            summary = text.replace("\n", " ").strip()
+            return summary if len(summary) <= max_len else f"{summary[:max_len]}…(truncated)"
+
+    if parsed is None:
+        parsed = response
+
+    if isinstance(parsed, dict):
+        if "products" in parsed:
+            products = parsed.get("products") or []
+            sample_ids = []
+            for product in products[:5]:
+                if isinstance(product, dict):
+                    pid = product.get("product_id")
+                    if pid:
+                        sample_ids.append(pid)
+            count = parsed.get("num_products") or len(products)
+            summary = f"products={count} sample_ids={sample_ids}"
+        elif "trades" in parsed:
+            trades = parsed.get("trades") or []
+            best_bid = parsed.get("best_bid")
+            best_ask = parsed.get("best_ask")
+            summary = f"trades={len(trades)} best_bid={best_bid} best_ask={best_ask}"
+        else:
+            summary = json.dumps(parsed, separators=(",", ":"), default=str)
+    elif isinstance(parsed, list):
+        sample = parsed[:3]
+        summary = f"list[{len(parsed)}] sample={sample}"
+    else:
+        summary = str(parsed)
+
+    summary = summary.replace("\n", " ").strip()
+    if len(summary) > max_len:
+        summary = f"{summary[:max_len]}…(truncated)"
+    return summary
+
+
 def _log_ccxt_failure(exchange: ccxt.Exchange, exc: Exception) -> None:
     logger.warning("CCXT exception: %s", exc)
     try:
@@ -508,7 +556,10 @@ def _log_ccxt_failure(exchange: ccxt.Exchange, exc: Exception) -> None:
         if last_body:
             logger.warning("CCXT last_request_body: %s", last_body)
         if last_resp:
-            logger.warning("CCXT last_http_response: %s", last_resp)
+            summary = _summarize_ccxt_response(last_resp)
+            logger.warning("CCXT last_http_response (summary): %s", summary)
+            if os.getenv("CCXT_LOG_FULL_RESPONSE") == "1":
+                logger.warning("CCXT last_http_response (full): %s", last_resp)
     except Exception:
         logger.warning("Unable to read CCXT last_* diagnostics.")
 
