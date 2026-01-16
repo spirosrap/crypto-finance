@@ -13,6 +13,7 @@
 
 ## January 16, 2026 - Dashboard Partial Exit Toggle
 - Watchdog dashboard now supports showing partial exits on demand; default view still waits for full closes so trade counts/metrics stay per-trade.
+- Paper view now preserves partial-only rows when the toggle is enabled (no longer dropped by batch filtering).
 
 ## January 16, 2026 - REST TP1 Fallback Restored
 - When CCXT entry fails, REST fallback now places split brackets for TP1 + TP2 so live trades keep the partial-exit plan.

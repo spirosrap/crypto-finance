@@ -158,7 +158,7 @@ def collapse_trade_rows(df: pd.DataFrame, include_partial_only: bool = False) ->
     return aggregated
 
 
-def filter_paper_trade_batches(df: pd.DataFrame) -> pd.DataFrame:
+def filter_paper_trade_batches(df: pd.DataFrame, include_partials: bool = False) -> pd.DataFrame:
     if df.empty or "opened_at" not in df.columns or "closed_at" not in df.columns:
         return df
 
@@ -183,6 +183,16 @@ def filter_paper_trade_batches(df: pd.DataFrame) -> pd.DataFrame:
     keep_keys = set(zip(dominant["_closed_date"], dominant["_opened_batch"]))
 
     mask = trades.apply(lambda row: (row["_closed_date"], row["_opened_batch"]) in keep_keys, axis=1)
+    if include_partials:
+        if "partial_only" in trades.columns:
+            partial_mask = trades["partial_only"].fillna(False)
+        elif "closure_reason" in trades.columns:
+            partial_mask = trades["closure_reason"].astype(str).str.lower().eq("partial_take")
+        else:
+            partial_mask = False
+        if not isinstance(partial_mask, pd.Series):
+            partial_mask = pd.Series([False] * len(trades), index=trades.index)
+        mask = mask | partial_mask
     filtered = trades.loc[mask].drop(columns=["_closed_date", "_opened_batch"])
     return filtered.sort_values("closed_at").reset_index(drop=True)
 
@@ -1350,7 +1360,7 @@ def main() -> None:
 
     trade_view_df = collapse_trade_rows(trades_df, include_partial_only=include_partials)
     if source_mode == "paper":
-        trade_view_df = filter_paper_trade_batches(trade_view_df)
+        trade_view_df = filter_paper_trade_batches(trade_view_df, include_partials=include_partials)
 
     count_source_df = trades_df if source_mode == "paper" else trade_view_df
     column_map = {col.strip().lower(): col for col in count_source_df.columns}
@@ -1429,7 +1439,7 @@ def main() -> None:
             symbols=selected_products or None,
         )
         filtered = collapse_trade_rows(pnl_filtered, include_partial_only=include_partials)
-        filtered = filter_paper_trade_batches(filtered)
+        filtered = filter_paper_trade_batches(filtered, include_partials=include_partials)
     else:
         filtered = apply_filters(
             trade_view_df,
