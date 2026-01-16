@@ -537,6 +537,12 @@ def main() -> None:
 
     try:
         exchange = load_exchange()
+        if os.getenv("SKIP_LOAD_MARKETS") == "1" and (args.limit is not None or args.tp1 is not None):
+            try:
+                exchange.load_markets()
+                logger.warning("Loaded fresh markets to support limit/TP1 entries.")
+            except Exception as exc:
+                logger.warning("load_markets failed under SKIP_LOAD_MARKETS=1: %s", exc)
         meta = get_market_meta(exchange, args.product)
         current_price = fetch_reference_price(exchange, meta.ccxt_symbol)
         entry_price = args.limit or current_price
@@ -553,7 +559,8 @@ def main() -> None:
                 raise RuntimeError("--tp1-pct must be between 0 and 100 (exclusive).")
             tp1_price = quantize_price(float(args.tp1), meta.price_precision)
             logger.info("TP1: %.2f (%s%% of size)", tp1_price, tp1_pct)
-            args.no_rest_fallback = True
+            if args.no_rest_fallback:
+                logger.warning("REST fallback disabled; TP1 requires CCXT order flow.")
         if args.tp1_move_sl:
             logger.warning("TP1 move-SL is not supported yet for live orders; ignoring --tp1-move-sl.")
 
@@ -584,7 +591,7 @@ def main() -> None:
                 args.dry_run,
             )
         except Exception as exc:
-            if (not args.dry_run) and (args.limit is None) and (not args.no_rest_fallback) and ("index out of range" in str(exc)):
+            if (not args.dry_run) and (not args.no_rest_fallback) and ("index out of range" in str(exc)):
                 logger.warning("CCXT entry failed (%s). Falling back to Coinbase REST order flow.", exc)
                 if tp1_price is not None:
                     logger.warning("TP1 is not supported in REST fallback; placing single bracket only.")
