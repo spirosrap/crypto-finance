@@ -41,6 +41,33 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 
+def _apply_ccxt_negative_index_guard() -> None:
+    """Prevent CCXT safe_* helpers from indexing empty lists with -1."""
+    try:
+        from ccxt.base.exchange import Exchange  # type: ignore
+    except Exception:
+        return
+    if getattr(Exchange, "_negative_index_guard", False):
+        return
+
+    def _guarded_get_object_value(dictionary_or_list, key_list):
+        is_data_array = isinstance(dictionary_or_list, list)
+        is_data_dict = isinstance(dictionary_or_list, dict)
+        for key in key_list:
+            if is_data_dict:
+                if key in dictionary_or_list and dictionary_or_list[key] not in (None, ""):
+                    return dictionary_or_list[key]
+            elif is_data_array and not isinstance(key, str):
+                if key < 0:
+                    continue
+                if (key < len(dictionary_or_list)) and (dictionary_or_list[key] is not None) and (dictionary_or_list[key] != ""):
+                    return dictionary_or_list[key]
+        return None
+
+    Exchange.get_object_value_from_key_list = staticmethod(_guarded_get_object_value)
+    Exchange._negative_index_guard = True
+
+
 @dataclass
 class MarketMeta:
     symbol: str
@@ -109,6 +136,7 @@ def _load_margin_cache(max_age_seconds: int = 900) -> Optional[float]:
 
 def load_exchange() -> ccxt.Exchange:
     """Initialise a CCXT Coinbase Advanced client with credentials."""
+    _apply_ccxt_negative_index_guard()
     key_env = os.getenv("COINBASE_PERP_API_KEY")
     secret_env = os.getenv("COINBASE_PERP_API_SECRET")
     key_cfg, secret_cfg = get_perps_credentials()
