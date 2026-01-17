@@ -21,6 +21,7 @@ import os
 import sys
 import json
 import time
+import traceback
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
@@ -323,6 +324,8 @@ def fetch_perp_available_usdc(exchange: ccxt.Exchange) -> float:
         raise RuntimeError(f"Authentication failed when fetching accounts: {exc}") from exc
     except Exception as exc:
         logger.warning("Failed to fetch INTX accounts via v3 API: %s", exc)
+        if os.getenv("CCXT_LOG_TRACEBACK") == "1":
+            logger.warning("INTX accounts traceback:\n%s", traceback.format_exc())
 
     if total > 0:
         _save_margin_cache(total)
@@ -588,6 +591,8 @@ def _log_ccxt_failure(exchange: ccxt.Exchange, exc: Exception) -> None:
             logger.warning("CCXT last_http_response (summary): %s", summary)
             if os.getenv("CCXT_LOG_FULL_RESPONSE") == "1":
                 logger.warning("CCXT last_http_response (full): %s", last_resp)
+        if os.getenv("CCXT_LOG_TRACEBACK") == "1":
+            logger.warning("CCXT traceback:\n%s", traceback.format_exc())
     except Exception:
         logger.warning("Unable to read CCXT last_* diagnostics.")
 
