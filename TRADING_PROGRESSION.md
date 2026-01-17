@@ -11,6 +11,9 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit now auto‑close live/paper and suppress new entries until the daily reset or a confirmed daily close re-enters range±buffer (latched; intraday moves don’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live resumed after the Jan 1 stop and is stronger post‑guard; paper resumed after its halt and is catching up. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 17, 2026 - Dust Cleanup Added to Watchdog
+- Watchdog close runner can now optionally close tiny residual positions by notional (`--dust-notional-usd`) while preserving the usual age-based expiry flow.
+
 ## January 17, 2026 - CCXT Negative-Index Guard Applied
 - Added a local guard to prevent CCXT from indexing empty lists with -1, which was throwing `index out of range` during v3 account/ticker/markets calls.
 - Applied the same guard in the trade conda environment so non-repo CCXT usage inherits the fix until upstream resolves it.

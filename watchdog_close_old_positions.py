@@ -16,6 +16,7 @@ Notes:
   - Cancels open orders for a product before attempting to close its position
   - Uses market IOC orders to close positions similar to close_all_positions()
   - Timestamps are parsed from multiple common keys to be robust across payloads
+  - Optional dust cleanup closes tiny residual positions by notional threshold
 """
 
 from __future__ import annotations
@@ -581,6 +582,28 @@ def _extract_mark_price(pos: Any) -> Optional[float]:
         numeric = _coerce_numeric(value)
         if numeric is not None:
             return numeric
+    return None
+
+
+def _dust_notional_usd(
+    net_size: float,
+    entry_price: Optional[float],
+    mark_price: Optional[float],
+    threshold: float,
+) -> Optional[float]:
+    if threshold is None or threshold <= 0:
+        return None
+    if net_size == 0:
+        return None
+    price = mark_price if mark_price is not None else entry_price
+    if price is None:
+        return None
+    try:
+        notional = abs(float(net_size)) * float(price)
+    except (TypeError, ValueError):
+        return None
+    if notional <= threshold:
+        return notional
     return None
 
 
@@ -2336,6 +2359,7 @@ def run_once(
     product_filter: Optional[str],
     log_closures: bool = True,
     recent_order_grace_minutes: int = 30,
+    dust_notional_usd: float = 0.0,
 ) -> None:
     logger = logging.getLogger(__name__)
     cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
@@ -2376,6 +2400,70 @@ def run_once(
             continue
         if product_filter and symbol != product_filter:
             continue
+        entry_price = _extract_entry_price(pos)
+        mark_price = _extract_mark_price(pos)
+        unrealized_pnl = _extract_unrealized_pnl(pos, net_size, entry_price, mark_price)
+        mae, mfe = _extract_excursions(pos)
+
+        dust_notional = _dust_notional_usd(net_size, entry_price, mark_price, dust_notional_usd)
+        if dust_notional is not None:
+            latest_fill = None
+            if recent_order_grace_minutes and recent_order_grace_minutes > 0:
+                latest_fill = _latest_filled_order_time(cb, portfolio_uuid, symbol)
+                if latest_fill and now_utc - latest_fill <= timedelta(minutes=recent_order_grace_minutes):
+                    logger.info(
+                        "Skipping dust close for %s: recent fill at %s within %sm grace window",
+                        symbol,
+                        _format_datetime(latest_fill),
+                        recent_order_grace_minutes,
+                    )
+                    continue
+            logger.info(
+                "Dust close triggered for %s (notional %.2f <= %.2f)",
+                symbol,
+                dust_notional,
+                dust_notional_usd,
+            )
+            closed, execution_price, close_order_id = _close_position(
+                cb, symbol, net_size, position_side, leverage
+            )
+            if closed:
+                close_time = datetime.now(UTC)
+                exit_price = execution_price if execution_price is not None else mark_price
+                if exit_price is None:
+                    exit_price = _lookup_order_fill_price(cb, close_order_id, symbol)
+                if exit_price is None and mark_price is not None:
+                    exit_price = mark_price
+
+                pnl_for_record = _calculate_pnl(net_size, entry_price, exit_price)
+                if pnl_for_record is None:
+                    pnl_for_record = unrealized_pnl
+
+                record = _create_closure_record(
+                    product_id=symbol,
+                    position_side=position_side,
+                    net_size=net_size,
+                    leverage=leverage,
+                    opened_at=_extract_position_open_time(pos),
+                    close_time=close_time,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    pnl=pnl_for_record,
+                    closure_reason='dust',
+                    mae=mae,
+                    mfe=mfe,
+                    order_id=close_order_id,
+                )
+                if log_closures:
+                    _record_position_close(record)
+                    logger.info(f"Recorded dust closure for {symbol} to {_log_file_path()}")
+                else:
+                    logger.info(
+                        "Closure logging disabled; skipping CSV append for %s (reason=dust, pnl=%s)",
+                        symbol,
+                        pnl_for_record,
+                    )
+            continue
 
         opened_at = _extract_position_open_time(pos)
         if not opened_at:
@@ -2406,10 +2494,6 @@ def run_once(
                     )
                     continue
             logger.info(f"Position {symbol} opened at {_format_datetime(opened_at)} exceeds {max_age_hours}h; closing...")
-            entry_price = _extract_entry_price(pos)
-            mark_price = _extract_mark_price(pos)
-            unrealized_pnl = _extract_unrealized_pnl(pos, net_size, entry_price, mark_price)
-            mae, mfe = _extract_excursions(pos)
             closure_reason = _determine_closure_reason(pos, fallback='expired')
             initial_pnl_estimate = unrealized_pnl
             if initial_pnl_estimate is None:
@@ -2506,6 +2590,8 @@ def main() -> None:
                     help="Skip writing age-based closure rows to watchdog_closed_positions.csv")
     ap.add_argument("--recent-order-grace-minutes", type=int, default=30,
                     help="Skip closing if a filled order was placed within this window (default 30)")
+    ap.add_argument("--dust-notional-usd", type=float, default=0.0,
+                    help="Close positions with notional <= this USD value (0 disables dust cleanup)")
     ap.add_argument("--verbose", action="store_true", help="Enable debug logging")
 
     args = ap.parse_args()
@@ -2551,6 +2637,7 @@ def main() -> None:
                     args.product,
                     log_closures=log_closures,
                     recent_order_grace_minutes=args.recent_order_grace_minutes,
+                    dust_notional_usd=args.dust_notional_usd,
                 )
             except Exception as e:
                 logging.getLogger(__name__).error(f"Watchdog iteration error: {e}")
@@ -2561,6 +2648,7 @@ def main() -> None:
             args.product,
             log_closures=log_closures,
             recent_order_grace_minutes=args.recent_order_grace_minutes,
+            dust_notional_usd=args.dust_notional_usd,
         )
 
 

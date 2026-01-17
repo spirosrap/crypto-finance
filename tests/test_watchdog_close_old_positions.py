@@ -326,6 +326,70 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(order_id, 'fill123')
         self.assertIn('order_id', recorded_kwargs)
 
+    def test_dust_notional_helper(self) -> None:
+        notional = self.module._dust_notional_usd(
+            net_size=2.0,
+            entry_price=1.5,
+            mark_price=None,
+            threshold=5.0,
+        )
+        self.assertAlmostEqual(notional or 0.0, 3.0)
+
+        notional = self.module._dust_notional_usd(
+            net_size=2.0,
+            entry_price=3.0,
+            mark_price=3.0,
+            threshold=5.0,
+        )
+        self.assertIsNone(notional)
+
+    def test_run_once_closes_dust_positions(self) -> None:
+        pos = {
+            'product_id': 'SUI-PERP-INTX',
+            'net_size': '1.0',
+            'position_side': 'LONG',
+            'leverage': '5',
+            'mark_price': '2.5',
+        }
+
+        class DummyClient:
+            def get_portfolios(self):
+                return {'portfolios': [{'type': 'INTX', 'uuid': 'uuid'}]}
+
+            def get_portfolio_breakdown(self, portfolio_uuid=None):
+                return {'breakdown': {'perp_positions': [pos]}}
+
+        class DummyCB:
+            def __init__(self, *args, **kwargs):
+                self.client = DummyClient()
+
+        closed = {}
+
+        def dummy_close(*args, **kwargs):
+            closed['called'] = True
+            return True, 2.6, 'dust-order'
+
+        original_cb = self.module.CoinbaseService
+        original_close = self.module._close_position
+        self.module.CoinbaseService = DummyCB
+        self.module._close_position = dummy_close
+        self.addCleanup(lambda: setattr(self.module, 'CoinbaseService', original_cb))
+        self.addCleanup(lambda: setattr(self.module, '_close_position', original_close))
+
+        self.module.run_once(
+            max_age_hours=24,
+            product_filter=None,
+            log_closures=True,
+            recent_order_grace_minutes=0,
+            dust_notional_usd=5.0,
+        )
+
+        self.assertTrue(closed.get('called'))
+        log_path = self.module._log_file_path()
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(rows[0]['closure_reason'], 'dust')
+
     def test_compute_mae_mfe_handles_empty_candles(self) -> None:
         cb = SimpleNamespace(
             historical_data=SimpleNamespace(

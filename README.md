@@ -35,7 +35,7 @@ For others, this repo can be useful as:
     - Shared risk defaults live in `config/risk_thresholds.yaml` (used by gate-scan + dashboard). CLI flags override per run.
   - Long-term profile used for LLM + liquidity filters: `python long_term_crypto_finder.py --profile focused_llm_100 --plain-output finder_long.txt --suppress-console-logs`
 - **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock; currently paused).
-- **Watchdogs/Closers**: `watchdog_close_old_positions.py` (optional 24h timeout), `watchdog_dashboard.py` for monitoring (Streamlit).
+- **Watchdogs/Closers**: `watchdog_close_old_positions.py` (24h timeout + optional dust cleanup), `watchdog_dashboard.py` for monitoring (Streamlit).
 - **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text.
 - **Baseline Paper Helper**: `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into `finder_short_baseline.txt` and optionally open them in `paper_finder_simulator.py`.
   - After opening paper trades, run `python paper_finder_simulator.py update` so the dashboard shows live P/L.

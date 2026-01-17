@@ -421,6 +421,9 @@ python watchdog_close_old_positions.py --log-fills
 # Continuously close stale positions (skip CSV logging; capture fills separately)
 python watchdog_close_old_positions.py --interval-seconds 300 --no-log-closures
 
+# Close tiny residual positions by notional (e.g., <= $5) while running the loop
+python watchdog_close_old_positions.py --interval-seconds 300 --no-log-closures --dust-notional-usd 5
+
 # Run fill logging on its own cadence (separate process or cron)
 python watchdog_close_old_positions.py --log-fills --fills-interval 300 --skip-close
 ```
@@ -432,6 +435,7 @@ Options:
 - `--backfill-last` (int, default 0): Recompute exit price/PnL for the most recent N log entries and exit (no new closes)
 - `--skip-close`: Skip age-based closing and only run ancillary actions (for example, fill logging)
 - `--log-fills`: Append TP/SL closures from recent fills to the log using the watchdog checkpoint
+- `--dust-notional-usd` (float, default 0): Close tiny residual positions with notional <= this USD threshold (0 disables)
 - `--start-count` / `--end-count`: When you use `watchdog_reporting.py`, slice the post-filter trades by ordinal position (1-based). For example `--start-count 101 --end-count 200` reviews the 101st–200th trades in the window.
 - `--no-log-closures`: Skip writing age-triggered closes to `watchdog_closed_positions.csv` when you prefer to log fills manually (for example, via `--log-fills --skip-close`)
 - `--fills-limit` (int, default 500): Number of recent fills to inspect when `--log-fills` is enabled
