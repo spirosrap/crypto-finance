@@ -17,12 +17,21 @@ except Exception:  # pragma: no cover
     _cfg = None
 
 
+def _normalize_secret(value: str) -> str:
+    if not value:
+        return value
+    if "\\n" in value and "BEGIN" in value and "END" in value:
+        return value.replace("\\n", "\n")
+    return value
+
+
 def _from_env_then_config(name: str) -> str:
     env_value = os.getenv(name)
     if env_value:
-        return env_value
+        return _normalize_secret(env_value) if "SECRET" in name else env_value
     if _cfg is not None:
-        return getattr(_cfg, name, "") or ""
+        value = getattr(_cfg, name, "") or ""
+        return _normalize_secret(value) if "SECRET" in name else value
     return ""
 
 
@@ -47,5 +56,15 @@ def get_openai_api_key() -> str:
 
     return _from_env_then_config("OPENAI_KEY")
 
+def normalize_secret(value: str) -> str:
+    """Normalize PEM secrets by converting escaped newlines to literal newlines."""
 
-__all__ = ["get_perps_credentials", "get_primary_credentials", "get_openai_api_key"]
+    return _normalize_secret(value)
+
+
+__all__ = [
+    "get_perps_credentials",
+    "get_primary_credentials",
+    "get_openai_api_key",
+    "normalize_secret",
+]

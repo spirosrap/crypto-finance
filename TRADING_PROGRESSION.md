@@ -14,6 +14,9 @@
 ## January 17, 2026 - Dust Cleanup Added to Watchdog
 - Watchdog close runner can now optionally close tiny residual positions by notional (`--dust-notional-usd`) while preserving the usual age-based expiry flow.
 
+## January 17, 2026 - PEM Secret Normalization for CCXT
+- Normalized perps API secrets to convert escaped `\\n` into real newlines so CCXT signing works in cron/env runs.
+
 ## January 17, 2026 - CCXT Negative-Index Guard Applied
 - Added a local guard to prevent CCXT from indexing empty lists with -1, which was throwing `index out of range` during v3 account/ticker/markets calls.
 - Applied the same guard in the trade conda environment so non-repo CCXT usage inherits the fix until upstream resolves it.

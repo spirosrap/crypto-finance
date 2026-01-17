@@ -28,10 +28,14 @@ from typing import Dict, Optional, Tuple
 import ccxt  # type: ignore
 
 try:
-    from credentials import get_perps_credentials
+    from credentials import get_perps_credentials, normalize_secret
 except ImportError:  # pragma: no cover
     def get_perps_credentials() -> Tuple[str, str]:
         return os.getenv("API_KEY_PERPS", ""), os.getenv("API_SECRET_PERPS", "")
+    def normalize_secret(value: str) -> str:
+        if "\\n" in value and "BEGIN" in value and "END" in value:
+            return value.replace("\\n", "\n")
+        return value
 
 
 logger = logging.getLogger("ccxt_trade_perp")
@@ -139,7 +143,8 @@ def load_exchange() -> ccxt.Exchange:
     """Initialise a CCXT Coinbase Advanced client with credentials."""
     _apply_ccxt_negative_index_guard()
     key_env = os.getenv("COINBASE_PERP_API_KEY")
-    secret_env = os.getenv("COINBASE_PERP_API_SECRET")
+    secret_env_raw = os.getenv("COINBASE_PERP_API_SECRET")
+    secret_env = normalize_secret(secret_env_raw) if secret_env_raw else None
     key_cfg, secret_cfg = get_perps_credentials()
     api_key = key_env or key_cfg
     api_secret = secret_env or secret_cfg
