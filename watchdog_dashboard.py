@@ -1427,6 +1427,10 @@ def main() -> None:
         end_str = preset_end.isoformat()
     filter_start_count = int(effective_start_count)
     filter_end_count = int(effective_end_count)
+    count_filters_active = any(
+        value > 0
+        for value in (filter_start_count, filter_end_count, int(effective_tail_last))
+    )
 
     if source_mode == "paper":
         pnl_filtered = apply_filters(
@@ -1461,10 +1465,6 @@ def main() -> None:
             symbols=selected_products or None,
         )
 
-        count_filters_active = any(
-            value > 0
-            for value in (filter_start_count, filter_end_count, int(effective_tail_last))
-        )
         if count_filters_active and not filtered.empty and not pnl_filtered.empty:
             filtered_keys = filtered.copy()
             filtered_keys["_group_time"] = filtered_keys["opened_at"].where(
@@ -1493,11 +1493,13 @@ def main() -> None:
 
             min_close = filtered["closed_at"].min()
             max_close = filtered["closed_at"].max()
-            if pd.notna(min_close) and pd.notna(max_close):
-                time_match = pnl_filtered["closed_at"].between(min_close, max_close)
-                mask = key_match | time_match
-            else:
+            if key_match.any():
                 mask = key_match
+            else:
+                if pd.notna(min_close) and pd.notna(max_close):
+                    mask = pnl_filtered["closed_at"].between(min_close, max_close)
+                else:
+                    mask = key_match
 
             pnl_filtered = pnl_filtered.loc[mask].copy()
 
@@ -1505,8 +1507,12 @@ def main() -> None:
         st.warning("No trades match the selected filters.")
         st.stop()
 
+    equity_source = pnl_filtered
+    if count_filters_active and not filtered.empty:
+        equity_source = filtered
+
     daily, metrics = build_daily_equity(
-        pnl_filtered,
+        equity_source,
         float(starting_equity),
         metrics_trades=filtered,
     )
