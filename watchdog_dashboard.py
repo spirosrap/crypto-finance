@@ -2267,7 +2267,7 @@ def main() -> None:
                         return response
 
                     slippage_df = build_exit_slippage_table(
-                        filtered,
+                        pnl_filtered,
                         _fetch_order,
                         max_orders=int(slippage_limit),
                     )
