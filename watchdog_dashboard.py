@@ -2475,23 +2475,23 @@ def main() -> None:
 
                     st.markdown("**Worst slippage exits (top 5)**")
                     worst = slippage_df.sort_values("slippage_usd", ascending=False).head(5)
-                    st.dataframe(
-                        worst[
-                            [
-                                "product_id",
-                                "closed_at",
-                                "closure_reason",
-                                "target_leg",
-                                "position_side",
-                                "exit_price",
-                                "target_price",
-                                "slippage_usd",
-                                "slippage_bps",
-                                "order_id",
-                            ]
-                        ],
-                        use_container_width=True,
-                    )
+                    worst_cols = [
+                        "product_id",
+                        "closed_at",
+                        "closure_reason",
+                        "target_leg",
+                        "position_side",
+                        "exit_price",
+                        "target_price",
+                        "slippage_usd",
+                        "slippage_bps",
+                        "order_id",
+                    ]
+                    missing_cols = [col for col in worst_cols if col not in worst.columns]
+                    if missing_cols:
+                        st.caption("Recompute exit slippage to include: " + ", ".join(missing_cols))
+                        worst_cols = [col for col in worst_cols if col in worst.columns]
+                    st.dataframe(worst[worst_cols], use_container_width=True)
 
                     st.markdown("**Exit slippage detail (latest 50)**")
                     st.dataframe(
