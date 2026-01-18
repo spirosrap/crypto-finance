@@ -115,17 +115,15 @@ def fetch_intx_balance() -> Dict[str, float]:
         breakdown = cb.client.get_portfolio_breakdown(intx_uuid)
         if hasattr(breakdown, "breakdown"):
             bd = breakdown.breakdown
-            if hasattr(bd, "portfolio_balances"):
-                bal = bd.portfolio_balances
-                if hasattr(bal, "total_balance"):
-                    tb = bal.total_balance
-                    result["total_balance"] = float(tb.get("value", 0) if isinstance(tb, dict) else getattr(tb, "value", 0))
-                if hasattr(bal, "perp_unrealized_pnl"):
-                    upnl = bal.perp_unrealized_pnl
-                    result["unrealized_pnl"] = float(upnl.get("value", 0) if isinstance(upnl, dict) else getattr(upnl, "value", 0))
-                if hasattr(bal, "total_cash_equivalent_balance"):
-                    avail = bal.total_cash_equivalent_balance
-                    result["available_balance"] = float(avail.get("value", 0) if isinstance(avail, dict) else getattr(avail, "value", 0))
+            # portfolio_balances is a dict, not an object
+            bal = getattr(bd, "portfolio_balances", None)
+            if bal and isinstance(bal, dict):
+                tb = bal.get("total_balance", {})
+                result["total_balance"] = float(tb.get("value", 0) if isinstance(tb, dict) else 0)
+                upnl = bal.get("perp_unrealized_pnl", {})
+                result["unrealized_pnl"] = float(upnl.get("value", 0) if isinstance(upnl, dict) else 0)
+                avail = bal.get("total_cash_equivalent_balance", {})
+                result["available_balance"] = float(avail.get("value", 0) if isinstance(avail, dict) else 0)
     except Exception as e:
         result["error"] = str(e)
 
