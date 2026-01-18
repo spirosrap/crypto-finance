@@ -15,6 +15,9 @@
 - Watchdog `--move-sl-after-tp1` now reissues a trigger bracket with TP preserved while moving SL to entry (no more stop-limit-only SL).
 - SL is moved to the **post‑partial entry (Coinbase VWAP)** for the remaining size, not the original entry.
 
+## January 18, 2026 - Dashboard Fees & Slippage (Live)
+- Watchdog dashboard can now pull Coinbase fills to display fee totals and exit slippage vs order targets.
+
 ## January 18, 2026 - Paper TP1 Move-SL Logging
 - Added explicit logging when paper trades move SL to entry after TP1 so the journal reflects those adjustments.
 

@@ -17,7 +17,7 @@ import subprocess
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -28,6 +28,7 @@ except Exception:  # pragma: no cover - optional dependency
     st_autorefresh = None  # type: ignore[assignment]
 
 from coinbaseservice import CoinbaseService
+from fills_pnl import compute_round_trip_cycles, fetch_fills
 from trading.risk_thresholds import load_risk_thresholds
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -99,6 +100,200 @@ def load_watchdog_csv(path: Path) -> pd.DataFrame:
         df["profit_loss_pct"] = pd.to_numeric(df["profit_loss_pct"], errors="coerce")
     df = df.dropna(subset=["closed_at"]).sort_values("closed_at")
     return df
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_order_payload(payload: Any) -> Dict[str, Any]:
+    if payload is None:
+        return {}
+    if isinstance(payload, dict):
+        if "order" in payload and isinstance(payload["order"], dict):
+            return payload["order"]
+        return payload
+    order = getattr(payload, "order", None)
+    if isinstance(order, dict):
+        return order
+    try:
+        data = vars(payload)
+    except TypeError:
+        return {}
+    if isinstance(data, dict):
+        if "order" in data and isinstance(data["order"], dict):
+            return data["order"]
+        return data
+    return {}
+
+
+def _extract_order_configuration(order: Dict[str, Any]) -> Dict[str, Any]:
+    if not order:
+        return {}
+    config = order.get("order_configuration")
+    if isinstance(config, dict):
+        return config
+    info = order.get("info")
+    if isinstance(info, dict):
+        nested = info.get("order_configuration")
+        if isinstance(nested, dict):
+            return nested
+    return {}
+
+
+def _select_bracket_target(config: Dict[str, Any], reason: str) -> Optional[float]:
+    for key in ("trigger_bracket_gtd", "trigger_bracket_gtc", "trigger_bracket_ioc"):
+        bracket = config.get(key)
+        if not isinstance(bracket, dict):
+            continue
+        tp_price = _coerce_float(bracket.get("limit_price"))
+        sl_price = _coerce_float(bracket.get("stop_trigger_price"))
+        normalized = (reason or "").lower()
+        if normalized in {"stop_loss", "expired_breakeven"} and sl_price is not None:
+            return sl_price
+        if normalized in {"take_profit", "partial_take"} and tp_price is not None:
+            return tp_price
+        return tp_price if tp_price is not None else sl_price
+    return None
+
+
+def _select_limit_target(config: Dict[str, Any]) -> Optional[float]:
+    for key in ("limit_limit_gtd", "limit_limit_gtc", "limit_limit_ioc"):
+        limit_cfg = config.get(key)
+        if isinstance(limit_cfg, dict):
+            price = _coerce_float(limit_cfg.get("limit_price"))
+            if price is not None:
+                return price
+    return None
+
+
+def _select_stop_limit_target(config: Dict[str, Any], reason: str) -> Optional[float]:
+    for key in ("stop_limit_stop_limit_gtd", "stop_limit_stop_limit_gtc", "stop_limit_stop_limit_ioc"):
+        stop_cfg = config.get(key)
+        if not isinstance(stop_cfg, dict):
+            continue
+        stop_price = _coerce_float(stop_cfg.get("stop_price") or stop_cfg.get("stop_trigger_price"))
+        limit_price = _coerce_float(stop_cfg.get("limit_price"))
+        normalized = (reason or "").lower()
+        if normalized in {"stop_loss", "expired_breakeven"} and stop_price is not None:
+            return stop_price
+        return limit_price if limit_price is not None else stop_price
+    return None
+
+
+def _extract_target_price(order_payload: Any, reason: str) -> Optional[float]:
+    order = _normalize_order_payload(order_payload)
+    config = _extract_order_configuration(order)
+    if not config:
+        return None
+    target = _select_bracket_target(config, reason)
+    if target is not None:
+        return target
+    target = _select_stop_limit_target(config, reason)
+    if target is not None:
+        return target
+    return _select_limit_target(config)
+
+
+def _compute_exit_slippage(
+    exit_price: float,
+    target_price: float,
+    position_side: str,
+) -> Tuple[float, float]:
+    """
+    Return (slippage_price, slippage_bps). Positive means worse than target.
+    """
+    side = (position_side or "").upper()
+    if side == "SHORT":
+        slippage_price = exit_price - target_price
+    else:
+        slippage_price = target_price - exit_price
+    slippage_bps = (slippage_price / target_price * 10000.0) if target_price else 0.0
+    return slippage_price, slippage_bps
+
+
+def _fetch_live_fills(limit: int) -> List[Dict[str, Any]]:
+    api_key, api_secret = get_perps_credentials()
+    if not api_key or not api_secret:
+        raise RuntimeError("Missing perps API credentials for Coinbase fills.")
+    cb = CoinbaseService(api_key=api_key, api_secret=api_secret)
+    return fetch_fills(cb, limit=limit)
+
+
+def _flatten_cycles(cycles_by_product: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    flattened: List[Dict[str, Any]] = []
+    for product_id, cycles in cycles_by_product.items():
+        for cycle in cycles:
+            record = dict(cycle)
+            record["product_id"] = product_id
+            flattened.append(record)
+    return flattened
+
+
+def build_exit_slippage_table(
+    trades: pd.DataFrame,
+    fetch_order: Callable[[str], Any],
+    max_orders: int = 200,
+) -> pd.DataFrame:
+    if trades.empty:
+        return pd.DataFrame()
+
+    required_cols = {"order_id", "exit_price", "net_size", "position_side"}
+    if not required_cols.issubset(set(trades.columns)):
+        return pd.DataFrame()
+
+    working = trades.copy()
+    working["exit_price"] = pd.to_numeric(working["exit_price"], errors="coerce")
+    working["net_size"] = pd.to_numeric(working["net_size"], errors="coerce")
+    working = working.dropna(subset=["order_id", "exit_price", "net_size"])
+    working = working[working["order_id"].astype(str).str.len() > 0]
+    if working.empty:
+        return pd.DataFrame()
+
+    if max_orders and len(working) > max_orders:
+        working = working.sort_values("closed_at").tail(max_orders)
+
+    rows: List[Dict[str, Any]] = []
+    for _, row in working.iterrows():
+        order_id = str(row.get("order_id") or "").strip()
+        if not order_id:
+            continue
+        order_payload = fetch_order(order_id)
+        target_price = _extract_target_price(order_payload, str(row.get("closure_reason") or ""))
+        if target_price is None:
+            continue
+        exit_price = _coerce_float(row.get("exit_price"))
+        if exit_price is None:
+            continue
+        slippage_price, slippage_bps = _compute_exit_slippage(
+            exit_price,
+            float(target_price),
+            str(row.get("position_side") or ""),
+        )
+        size = abs(float(row.get("net_size") or 0.0))
+        slippage_usd = slippage_price * size
+        rows.append(
+            {
+                "product_id": row.get("product_id"),
+                "closed_at": row.get("closed_at"),
+                "closure_reason": row.get("closure_reason"),
+                "position_side": row.get("position_side"),
+                "exit_price": exit_price,
+                "target_price": float(target_price),
+                "slippage_price": slippage_price,
+                "slippage_bps": slippage_bps,
+                "slippage_usd": slippage_usd,
+                "order_id": order_id,
+            }
+        )
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values("closed_at").reset_index(drop=True)
 
 
 def collapse_trade_rows(df: pd.DataFrame, include_partial_only: bool = False) -> pd.DataFrame:
@@ -1122,6 +1317,12 @@ def main() -> None:
         st.session_state["live_usdc_balance"] = None
     if "live_snapshot_ts" not in st.session_state:
         st.session_state["live_snapshot_ts"] = ""
+    if "live_fills_cache" not in st.session_state:
+        st.session_state["live_fills_cache"] = None
+    if "live_fills_loaded_at" not in st.session_state:
+        st.session_state["live_fills_loaded_at"] = ""
+    if "live_slippage_df" not in st.session_state:
+        st.session_state["live_slippage_df"] = None
     if source_mode == "live":
         snapshot = _load_live_snapshot()
         if snapshot:
@@ -1967,6 +2168,126 @@ def main() -> None:
         reasons = metrics.get("recent_degradation_reasons") or []
         joined_reasons = " ".join(reasons) if reasons else "Recent performance is weaker than the broader sample."
         st.warning(f"Recent degradation detected: {joined_reasons}")
+
+    if source_mode == "live":
+        st.markdown("---")
+        with st.expander("Fill costs (fees & slippage)", expanded=False):
+            if not API_KEY_PERPS or not API_SECRET_PERPS:
+                st.info("Perps API keys not configured — cannot fetch Coinbase fills.")
+            else:
+                fills_limit = st.number_input(
+                    "Fills to fetch",
+                    min_value=100,
+                    max_value=2000,
+                    value=500,
+                    step=100,
+                    help="Pull recent fills to compute actual fees and fill-based PnL.",
+                    key="fills_limit",
+                )
+                if st.button("Fetch Coinbase fills", key="fetch_fills"):
+                    try:
+                        st.session_state["live_fills_cache"] = _fetch_live_fills(int(fills_limit))
+                        st.session_state["live_fills_loaded_at"] = datetime.now(UTC).isoformat()
+                    except Exception as exc:
+                        st.session_state["live_fills_cache"] = None
+                        st.session_state["live_fills_loaded_at"] = ""
+                        st.error(f"Failed to fetch fills: {exc}")
+
+                fills_cache = st.session_state.get("live_fills_cache")
+                if fills_cache:
+                    cycles_by_product = compute_round_trip_cycles(fills_cache)
+                    cycles = _flatten_cycles(cycles_by_product)
+
+                    if selected_products:
+                        cycles = [c for c in cycles if c.get("product_id") in selected_products]
+
+                    start_dt = pd.to_datetime(start_str, utc=True) if start_str else None
+                    end_dt = pd.to_datetime(end_str, utc=True) if end_str else None
+
+                    def _cycle_end_time(cycle: Dict[str, Any]) -> Optional[datetime]:
+                        raw = cycle.get("end_time")
+                        if isinstance(raw, datetime):
+                            return raw
+                        if raw:
+                            return pd.to_datetime(raw, utc=True, errors="coerce")
+                        return None
+
+                    filtered_cycles: List[Dict[str, Any]] = []
+                    for cycle in cycles:
+                        end_time = _cycle_end_time(cycle)
+                        if end_time is None:
+                            continue
+                        if start_dt and end_time < start_dt:
+                            continue
+                        if end_dt and end_time >= end_dt:
+                            continue
+                        filtered_cycles.append(cycle)
+
+                    if not filtered_cycles:
+                        st.info("No fill cycles found in the selected window.")
+                    else:
+                        total_fees = sum(float(c.get("fees", 0.0)) for c in filtered_cycles)
+                        gross_pnl = sum(float(c.get("gross_pnl", 0.0)) for c in filtered_cycles)
+                        net_pnl = sum(float(c.get("realized_pnl", 0.0)) for c in filtered_cycles)
+                        fee_pct = (total_fees / gross_pnl * 100.0) if gross_pnl else 0.0
+
+                        fee_cols = st.columns(4)
+                        fee_cols[0].metric("Fees (fills)", f"{total_fees:.2f}")
+                        fee_cols[1].metric("Gross PnL (fills)", f"{gross_pnl:.2f}")
+                        fee_cols[2].metric("Net PnL (fills)", f"{net_pnl:.2f}")
+                        fee_cols[3].metric("Fee % of gross", f"{fee_pct:.2f}%")
+                        loaded_at = st.session_state.get("live_fills_loaded_at")
+                        if loaded_at:
+                            st.caption(f"Cycles: {len(filtered_cycles)} | Loaded at {loaded_at}")
+
+                st.markdown("**Exit slippage vs order target**")
+                slippage_limit = st.number_input(
+                    "Max exit orders to evaluate",
+                    min_value=50,
+                    max_value=400,
+                    value=200,
+                    step=50,
+                    help="Uses closing order IDs from the filtered trades.",
+                    key="slippage_limit",
+                )
+
+                if st.button("Compute exit slippage", key="compute_slippage"):
+                    cb = CoinbaseService(api_key=API_KEY_PERPS, api_secret=API_SECRET_PERPS)
+                    order_cache: Dict[str, Any] = {}
+
+                    def _fetch_order(order_id: str) -> Dict[str, Any]:
+                        cached = order_cache.get(order_id)
+                        if cached is not None:
+                            return cached
+                        try:
+                            response = cb.client.get_order(order_id=order_id)
+                        except Exception:
+                            response = {}
+                        order_cache[order_id] = response
+                        return response
+
+                    slippage_df = build_exit_slippage_table(
+                        filtered,
+                        _fetch_order,
+                        max_orders=int(slippage_limit),
+                    )
+                    st.session_state["live_slippage_df"] = slippage_df
+
+                slippage_df = st.session_state.get("live_slippage_df")
+                if isinstance(slippage_df, pd.DataFrame) and not slippage_df.empty:
+                    total_slip = float(slippage_df["slippage_usd"].sum())
+                    avg_slip = float(slippage_df["slippage_usd"].mean())
+                    avg_bps = float(slippage_df["slippage_bps"].mean())
+                    slip_cols = st.columns(3)
+                    slip_cols[0].metric("Exit slippage (total)", f"{total_slip:+.2f}")
+                    slip_cols[1].metric("Exit slippage (avg)", f"{avg_slip:+.2f}")
+                    slip_cols[2].metric("Exit slippage (avg bps)", f"{avg_bps:+.2f}")
+                    st.dataframe(
+                        slippage_df.sort_values("closed_at", ascending=False).head(50),
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("No slippage data yet. Use “Compute exit slippage” to pull order targets.")
 
     st.markdown("---")
     st.subheader("Charts")
