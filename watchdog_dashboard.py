@@ -1988,9 +1988,12 @@ def main() -> None:
         else:
             actual_bal = intx_balance["total_balance"]
             unrealized = intx_balance["unrealized_pnl"]
-            calculated_equity = metrics["ending_equity"]
-            # Delta = calculated - actual (positive means CSV overstates, likely due to fees)
-            delta_fees = calculated_equity - actual_bal
+            # Gross P&L = sum of profit_loss from CSV (ending_equity - starting_equity)
+            gross_pnl = metrics["ending_equity"] - starting_equity
+            # Actual P&L = change in balance
+            actual_pnl = actual_bal - starting_equity
+            # Fees & slippage = difference between gross and actual P&L
+            fees_slippage = gross_pnl - actual_pnl
 
             balance_row = st.columns(4)
             balance_row[0].metric(
@@ -2005,14 +2008,14 @@ def main() -> None:
             )
             balance_row[2].metric(
                 "Fees & Slippage",
-                f"${delta_fees:+.2f}",
-                delta=f"{delta_fees:+.2f}",
+                f"${fees_slippage:+.2f}",
+                delta=f"{fees_slippage:+.2f}",
                 delta_color="inverse",
-                help="Difference between calculated equity and actual balance (fees, funding, slippage)",
+                help="Gross P&L from trades minus actual P&L (fees, funding, slippage)",
             )
             balance_row[3].metric(
                 "Actual P&L",
-                f"${actual_bal - starting_equity:+.2f}",
+                f"${actual_pnl:+.2f}",
                 help=f"Actual profit/loss from starting equity (${starting_equity:.2f})",
             )
 
