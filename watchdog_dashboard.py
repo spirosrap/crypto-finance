@@ -2423,7 +2423,11 @@ def main() -> None:
                     st.markdown("**Breakdown by closure reason**")
                     reason_df = slippage_df.copy()
                     reason_df["closure_reason"] = reason_df["closure_reason"].fillna("unknown").astype(str)
-                    reason_df["target_leg"] = reason_df["target_leg"].fillna("unknown")
+                    if "target_leg" not in reason_df.columns:
+                        reason_df["target_leg"] = "unknown"
+                        st.caption("Target leg not found in cached slippage table — recompute to classify partials.")
+                    else:
+                        reason_df["target_leg"] = reason_df["target_leg"].fillna("unknown")
                     reason_df["reason_group"] = reason_df["closure_reason"]
                     partial_mask = reason_df["closure_reason"].eq("partial_take")
                     reason_df.loc[partial_mask, "reason_group"] = (
