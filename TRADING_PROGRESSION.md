@@ -22,6 +22,7 @@
 - Slippage target extraction now handles Coinbase order configuration objects (trigger bracket/stop-limit payloads).
 - Slippage panel now sums exit fees alongside slippage to show total exit cost (fees + slip).
 - Added a guard for older cached slippage tables so missing `fee_usd` doesn't crash; prompt to recompute.
+- Added slippage breakdown by closure reason, per-cycle exit cost, and top-5 worst exits.
 
 ## January 18, 2026 - Paper TP1 Move-SL Logging
 - Added explicit logging when paper trades move SL to entry after TP1 so the journal reflects those adjustments.

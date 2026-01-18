@@ -381,6 +381,7 @@ def build_exit_slippage_table(
             {
                 "product_id": row.get("product_id"),
                 "closed_at": row.get("closed_at"),
+                "opened_at": row.get("opened_at"),
                 "closure_reason": row.get("closure_reason"),
                 "position_side": row.get("position_side"),
                 "exit_price": exit_price,
@@ -2400,6 +2401,69 @@ def main() -> None:
                     fee_cols[2].metric("Exit cost (fees+slip)", f"{total_cost:+.2f}")
 
                     st.caption(f"Avg exit cost per order: {avg_cost:+.2f}")
+                    st.markdown("**Breakdown by closure reason**")
+                    reason_df = slippage_df.copy()
+                    reason_df["closure_reason"] = reason_df["closure_reason"].fillna("unknown").astype(str)
+                    reason_summary = (
+                        reason_df.groupby("closure_reason", dropna=False)
+                        .agg(
+                            exits=("order_id", "count"),
+                            slippage_total=("slippage_usd", "sum"),
+                            slippage_avg=("slippage_usd", "mean"),
+                            avg_bps=("slippage_bps", "mean"),
+                            fee_total=("fee_usd", "sum"),
+                            cost_total=("total_cost_usd", "sum"),
+                            cost_avg=("total_cost_usd", "mean"),
+                        )
+                        .reset_index()
+                        .sort_values("cost_total", ascending=False)
+                    )
+                    st.dataframe(reason_summary, use_container_width=True)
+
+                    st.markdown("**Per-cycle exit cost**")
+                    cycle_df = slippage_df.copy()
+                    opened = pd.to_datetime(cycle_df.get("opened_at"), utc=True, errors="coerce")
+                    closed = pd.to_datetime(cycle_df.get("closed_at"), utc=True, errors="coerce")
+                    cycle_df["_group_time"] = opened.where(opened.notna(), closed)
+                    cycle_df["_group_time"] = pd.to_datetime(cycle_df["_group_time"], utc=True, errors="coerce")
+                    cycle_df = cycle_df.dropna(subset=["_group_time"])
+                    if cycle_df.empty:
+                        st.caption("No cycle grouping available for this window.")
+                    else:
+                        cycle_summary = (
+                            cycle_df.groupby(["product_id", "position_side", "_group_time"], dropna=False)
+                            .agg(
+                                closed_at=("closed_at", "max"),
+                                exits=("order_id", "count"),
+                                slippage_total=("slippage_usd", "sum"),
+                                fee_total=("fee_usd", "sum"),
+                                cost_total=("total_cost_usd", "sum"),
+                            )
+                            .reset_index()
+                            .sort_values("cost_total", ascending=False)
+                        )
+                        st.dataframe(cycle_summary.head(20), use_container_width=True)
+
+                    st.markdown("**Worst slippage exits (top 5)**")
+                    worst = slippage_df.sort_values("slippage_usd", ascending=False).head(5)
+                    st.dataframe(
+                        worst[
+                            [
+                                "product_id",
+                                "closed_at",
+                                "closure_reason",
+                                "position_side",
+                                "exit_price",
+                                "target_price",
+                                "slippage_usd",
+                                "slippage_bps",
+                                "order_id",
+                            ]
+                        ],
+                        use_container_width=True,
+                    )
+
+                    st.markdown("**Exit slippage detail (latest 50)**")
                     st.dataframe(
                         slippage_df.sort_values("closed_at", ascending=False).head(50),
                         use_container_width=True,
