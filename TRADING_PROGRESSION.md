@@ -15,7 +15,7 @@
 - Added explicit logging when paper trades move SL to entry after TP1 so the journal reflects those adjustments.
 
 ## January 18, 2026 - Watchdog Move-SL Flag
-- Added `--move-sl-after-tp1` to the watchdog so paper TP1 can move SL to entry when desired.
+- Added `--move-sl-after-tp1` to the watchdog so live TP1 can move SL to entry when desired.
 
 ## January 18, 2026 - Claude Ops Docs Added
 - Added a Claude skill and expanded `CLAUDE.md` with operational notes for the trading workflow.
