@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec /usr/bin/env bash "$0" "$@"
+fi
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -126,16 +129,16 @@ daily_stop_paper_active=0
 range_break_active=0
 live_pause_active=0
 
-if printf "%s\n" "${OUTPUT}" | grep -qE "Daily stop \\(live\\): Daily stop \\(ACTIVE\\)"; then
+if printf "%s\n" "${OUTPUT}" | grep -qF "Daily stop (live): Daily stop (ACTIVE)"; then
   daily_stop_live_active=1
 fi
-if printf "%s\n" "${OUTPUT}" | grep -qE "Daily stop \\(paper\\): Daily stop \\(ACTIVE\\)"; then
+if printf "%s\n" "${OUTPUT}" | grep -qF "Daily stop (paper): Daily stop (ACTIVE)"; then
   daily_stop_paper_active=1
 fi
 if printf "%s\n" "${OUTPUT}" | grep -qE "Range break ACTIVE"; then
   range_break_active=1
 fi
-if printf "%s\n" "${OUTPUT}" | grep -qE "Live pause \\(stop streak\\): ACTIVE"; then
+if printf "%s\n" "${OUTPUT}" | grep -qF "Live pause (stop streak): ACTIVE"; then
   live_pause_active=1
 fi
 
