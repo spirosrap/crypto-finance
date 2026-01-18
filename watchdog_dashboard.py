@@ -167,49 +167,41 @@ def _normalize_order_payload(payload: Any) -> Dict[str, Any]:
     return {}
 
 
+def _as_dict(obj: Any) -> Optional[Dict[str, Any]]:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    if isinstance(obj, Mapping):
+        return dict(obj)
+    try:
+        data = vars(obj)
+    except TypeError:
+        return None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
 def _extract_order_configuration(order: Dict[str, Any]) -> Dict[str, Any]:
     if not order:
         return {}
     config = order.get("order_configuration")
-    if isinstance(config, dict):
-        return config
-    if isinstance(config, Mapping):
-        return dict(config)
-    if config is not None:
-        try:
-            config_dict = vars(config)
-        except TypeError:
-            config_dict = None
-        if isinstance(config_dict, dict):
-            return config_dict
+    config_dict = _as_dict(config)
+    if config_dict is not None:
+        return config_dict
     info = order.get("info")
     if isinstance(info, dict):
         nested = info.get("order_configuration")
-        if isinstance(nested, dict):
-            return nested
-        if isinstance(nested, Mapping):
-            return dict(nested)
-        if nested is not None:
-            try:
-                nested_dict = vars(nested)
-            except TypeError:
-                nested_dict = None
-            if isinstance(nested_dict, dict):
-                return nested_dict
+        nested_dict = _as_dict(nested)
+        if nested_dict is not None:
+            return nested_dict
     return {}
 
 
 def _select_bracket_target(config: Dict[str, Any], reason: str) -> Optional[float]:
     for key in ("trigger_bracket_gtd", "trigger_bracket_gtc", "trigger_bracket_ioc"):
-        bracket = config.get(key)
-        if not isinstance(bracket, dict):
-            if isinstance(bracket, Mapping):
-                bracket = dict(bracket)
-            else:
-                try:
-                    bracket = vars(bracket)
-                except TypeError:
-                    bracket = None
+        bracket = _as_dict(config.get(key))
         if not isinstance(bracket, dict):
             continue
         tp_price = _coerce_float(bracket.get("limit_price"))
@@ -225,15 +217,7 @@ def _select_bracket_target(config: Dict[str, Any], reason: str) -> Optional[floa
 
 def _select_limit_target(config: Dict[str, Any]) -> Optional[float]:
     for key in ("limit_limit_gtd", "limit_limit_gtc", "limit_limit_ioc"):
-        limit_cfg = config.get(key)
-        if not isinstance(limit_cfg, dict):
-            if isinstance(limit_cfg, Mapping):
-                limit_cfg = dict(limit_cfg)
-            else:
-                try:
-                    limit_cfg = vars(limit_cfg)
-                except TypeError:
-                    limit_cfg = None
+        limit_cfg = _as_dict(config.get(key))
         if isinstance(limit_cfg, dict):
             price = _coerce_float(limit_cfg.get("limit_price"))
             if price is not None:
@@ -243,15 +227,7 @@ def _select_limit_target(config: Dict[str, Any]) -> Optional[float]:
 
 def _select_stop_limit_target(config: Dict[str, Any], reason: str) -> Optional[float]:
     for key in ("stop_limit_stop_limit_gtd", "stop_limit_stop_limit_gtc", "stop_limit_stop_limit_ioc"):
-        stop_cfg = config.get(key)
-        if not isinstance(stop_cfg, dict):
-            if isinstance(stop_cfg, Mapping):
-                stop_cfg = dict(stop_cfg)
-            else:
-                try:
-                    stop_cfg = vars(stop_cfg)
-                except TypeError:
-                    stop_cfg = None
+        stop_cfg = _as_dict(config.get(key))
         if not isinstance(stop_cfg, dict):
             continue
         stop_price = _coerce_float(stop_cfg.get("stop_price") or stop_cfg.get("stop_trigger_price"))
@@ -261,6 +237,33 @@ def _select_stop_limit_target(config: Dict[str, Any], reason: str) -> Optional[f
             return stop_price
         return limit_price if limit_price is not None else stop_price
     return None
+
+
+def _extract_bracket_prices(config: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
+    for key in ("trigger_bracket_gtd", "trigger_bracket_gtc", "trigger_bracket_ioc"):
+        bracket = _as_dict(config.get(key))
+        if not isinstance(bracket, dict):
+            continue
+        tp_price = _coerce_float(bracket.get("limit_price"))
+        sl_price = _coerce_float(bracket.get("stop_trigger_price"))
+        return tp_price, sl_price
+    return None, None
+
+
+def _classify_partial_leg(
+    exit_price: float,
+    tp_price: Optional[float],
+    sl_price: Optional[float],
+) -> Optional[str]:
+    if tp_price is None and sl_price is None:
+        return None
+    if tp_price is None:
+        return "sl"
+    if sl_price is None:
+        return "tp"
+    tp_dist = abs(exit_price - tp_price)
+    sl_dist = abs(exit_price - sl_price)
+    return "tp" if tp_dist <= sl_dist else "sl"
 
 
 def _extract_target_price(order_payload: Any, reason: str) -> Optional[float]:
@@ -362,16 +365,31 @@ def build_exit_slippage_table(
         if not order_id:
             continue
         order_payload = fetch_order(order_id)
-        target_price = _extract_target_price(order_payload, str(row.get("closure_reason") or ""))
-        if target_price is None:
-            continue
         exit_price = _coerce_float(row.get("exit_price"))
         if exit_price is None:
+            continue
+        closure_reason = str(row.get("closure_reason") or "")
+        position_side = str(row.get("position_side") or "")
+        config = _extract_order_configuration(_normalize_order_payload(order_payload))
+        tp_price, sl_price = _extract_bracket_prices(config)
+        target_leg = None
+        target_price = None
+
+        if closure_reason.lower() == "partial_take" and (tp_price is not None or sl_price is not None):
+            target_leg = _classify_partial_leg(exit_price, tp_price, sl_price)
+            if target_leg == "tp":
+                target_price = tp_price
+            elif target_leg == "sl":
+                target_price = sl_price
+
+        if target_price is None:
+            target_price = _extract_target_price(order_payload, closure_reason)
+        if target_price is None:
             continue
         slippage_price, slippage_bps = _compute_exit_slippage(
             exit_price,
             float(target_price),
-            str(row.get("position_side") or ""),
+            position_side,
         )
         fee_usd = _extract_order_fee(order_payload) or 0.0
         size = abs(float(row.get("net_size") or 0.0))
@@ -383,7 +401,8 @@ def build_exit_slippage_table(
                 "closed_at": row.get("closed_at"),
                 "opened_at": row.get("opened_at"),
                 "closure_reason": row.get("closure_reason"),
-                "position_side": row.get("position_side"),
+                "position_side": position_side,
+                "target_leg": target_leg,
                 "exit_price": exit_price,
                 "target_price": float(target_price),
                 "slippage_price": slippage_price,
@@ -2404,8 +2423,14 @@ def main() -> None:
                     st.markdown("**Breakdown by closure reason**")
                     reason_df = slippage_df.copy()
                     reason_df["closure_reason"] = reason_df["closure_reason"].fillna("unknown").astype(str)
+                    reason_df["target_leg"] = reason_df["target_leg"].fillna("unknown")
+                    reason_df["reason_group"] = reason_df["closure_reason"]
+                    partial_mask = reason_df["closure_reason"].eq("partial_take")
+                    reason_df.loc[partial_mask, "reason_group"] = (
+                        "partial_" + reason_df.loc[partial_mask, "target_leg"].astype(str)
+                    )
                     reason_summary = (
-                        reason_df.groupby("closure_reason", dropna=False)
+                        reason_df.groupby("reason_group", dropna=False)
                         .agg(
                             exits=("order_id", "count"),
                             slippage_total=("slippage_usd", "sum"),
@@ -2452,6 +2477,7 @@ def main() -> None:
                                 "product_id",
                                 "closed_at",
                                 "closure_reason",
+                                "target_leg",
                                 "position_side",
                                 "exit_price",
                                 "target_price",

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from watchdog_dashboard import (
+    _classify_partial_leg,
     _compute_exit_slippage,
     _extract_target_price,
     _extract_order_fee,
@@ -53,6 +54,16 @@ class TestWatchdogDashboardSlippage(unittest.TestCase):
 
         order = {"fee": "0.50"}
         self.assertEqual(_extract_order_fee(order), 0.5)
+
+    def test_classify_partial_leg(self):
+        # closer to TP
+        self.assertEqual(_classify_partial_leg(105.0, 110.0, 95.0), "tp")
+        # closer to SL
+        self.assertEqual(_classify_partial_leg(96.0, 110.0, 95.0), "sl")
+        # missing TP -> SL
+        self.assertEqual(_classify_partial_leg(100.0, None, 95.0), "sl")
+        # missing SL -> TP
+        self.assertEqual(_classify_partial_leg(100.0, 105.0, None), "tp")
 
     def test_compute_exit_slippage(self):
         slippage_price, slippage_bps = _compute_exit_slippage(95.0, 100.0, "LONG")
