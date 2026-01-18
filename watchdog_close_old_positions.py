@@ -197,6 +197,33 @@ def _get_positions_with_entry(cb: CoinbaseService) -> Dict[str, Dict[str, Any]]:
     """Return current perp positions with entry price, keyed by product symbol."""
     logger = logging.getLogger(__name__)
 
+    def _parse_price(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            for key in ("rawCurrency", "userNativeCurrency"):
+                nested = value.get(key)
+                if isinstance(nested, dict) and nested.get("value") is not None:
+                    try:
+                        return float(nested.get("value"))
+                    except (TypeError, ValueError):
+                        pass
+            if value.get("value") is not None:
+                try:
+                    return float(value.get("value"))
+                except (TypeError, ValueError):
+                    return None
+            return None
+        if hasattr(value, "value"):
+            try:
+                return float(getattr(value, "value"))
+            except (TypeError, ValueError):
+                return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
     # Get portfolio UUID
     ports = cb.client.get_portfolios()
     portfolio_uuid = None
@@ -254,21 +281,29 @@ def _get_positions_with_entry(cb: CoinbaseService) -> Dict[str, Dict[str, Any]]:
         if net_size is None or net_size == 0:
             continue
 
+        raw_side = pos.get('position_side') if isinstance(pos, dict) else getattr(pos, 'position_side', None)
+        side = None
+        if raw_side:
+            upper = str(raw_side).upper()
+            if "SHORT" in upper:
+                side = "SHORT"
+            elif "LONG" in upper:
+                side = "LONG"
+        if side is None:
+            side = "LONG" if net_size > 0 else "SHORT"
+
         # Extract entry price (VWAP)
         entry_price = None
         for key in ('vwap', 'entry_price', 'average_entry', 'avg_entry_price'):
             val = pos.get(key) if isinstance(pos, dict) else getattr(pos, key, None)
-            if val is not None:
-                try:
-                    entry_price = float(val)
-                    break
-                except (TypeError, ValueError):
-                    continue
+            entry_price = _parse_price(val)
+            if entry_price is not None:
+                break
 
         result[symbol] = {
             "net_size": net_size,
             "entry_price": entry_price,
-            "side": "LONG" if net_size > 0 else "SHORT",
+            "side": side,
         }
 
     return result
@@ -297,66 +332,106 @@ def _fetch_open_stop_orders(exchange: "ccxt.Exchange", ccxt_symbol: str) -> List
     return stop_orders
 
 
-def _place_stop_loss_order(
+def _compute_end_time(exp: str) -> str:
+    now = datetime.now(UTC)
+    if exp.endswith("d"):
+        days = int(exp[:-1])
+        end = now + timedelta(days=days)
+    elif exp.endswith("h"):
+        hours = int(exp[:-1])
+        end = now + timedelta(hours=hours)
+    else:
+        end = now + timedelta(days=30)
+    return end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _place_bracket_order(
     exchange: "ccxt.Exchange",
     ccxt_symbol: str,
     product_id: str,
     side: str,
     size: float,
-    stop_price: float,
+    tp_price: float,
+    sl_price: float,
     expiry: str = "30d",
+    end_time_override: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Place a new stop-loss order at the given price."""
+    """Place a trigger bracket order with TP and SL."""
     logger = logging.getLogger(__name__)
 
-    # Determine bracket side (opposite of position side)
     bracket_side = "SELL" if side == "LONG" else "BUY"
-
-    # Compute end time
-    def _compute_end_time(exp: str) -> str:
-        now = datetime.now(UTC)
-        if exp.endswith("d"):
-            days = int(exp[:-1])
-            end = now + timedelta(days=days)
-        elif exp.endswith("h"):
-            hours = int(exp[:-1])
-            end = now + timedelta(hours=hours)
-        else:
-            end = now + timedelta(days=30)
-        return end.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    end_time = _compute_end_time(expiry)
-
-    # Use a stop-limit order very close to stop price (effectively market on trigger)
-    # Set limit price slightly worse than stop to ensure fill
-    limit_price = stop_price * 0.995 if bracket_side == "SELL" else stop_price * 1.005
+    end_time = end_time_override or _compute_end_time(expiry)
 
     payload = {
         "client_order_id": f"sl-moved-{int(time.time()*1000)}",
         "product_id": product_id,
         "side": bracket_side,
         "order_configuration": {
-            "stop_limit_stop_limit_gtd": {
+            "trigger_bracket_gtd": {
                 "base_size": exchange.amount_to_precision(ccxt_symbol, size),
-                "stop_price": exchange.price_to_precision(ccxt_symbol, stop_price),
-                "limit_price": exchange.price_to_precision(ccxt_symbol, limit_price),
-                "stop_direction": "STOP_DIRECTION_STOP_DOWN" if bracket_side == "SELL" else "STOP_DIRECTION_STOP_UP",
+                "limit_price": exchange.price_to_precision(ccxt_symbol, tp_price),
+                "stop_trigger_price": exchange.price_to_precision(ccxt_symbol, sl_price),
                 "end_time": end_time,
             }
         },
     }
 
-    logger.info("Placing new SL order for %s at %s (size=%s, side=%s)", product_id, stop_price, size, bracket_side)
+    logger.info(
+        "Placing new bracket for %s (tp=%s, sl=%s, size=%s, side=%s)",
+        product_id,
+        tp_price,
+        sl_price,
+        size,
+        bracket_side,
+    )
     try:
         response = exchange.v3PrivatePostBrokerageOrders(payload)
         if not bool(response.get("success", True)):
-            logger.error("SL order rejected: %s", response.get("error_response", response))
+            logger.error("Bracket order rejected: %s", response.get("error_response", response))
             return None
-        logger.info("SL order placed: %s", response.get("order_id", response))
+        logger.info("Bracket order placed: %s", response.get("order_id", response))
         return response
     except Exception as exc:
-        logger.error("Failed to place SL order for %s: %s", product_id, exc)
+        logger.error("Failed to place bracket order for %s: %s", product_id, exc)
         return None
+
+
+def _extract_trigger_bracket_config(order: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not isinstance(order, dict):
+        return None
+    info = order.get("info") if isinstance(order.get("info"), dict) else {}
+    for container in (order, info):
+        order_config = container.get("order_configuration") if isinstance(container, dict) else None
+        if not isinstance(order_config, dict):
+            continue
+        for key in ("trigger_bracket_gtd", "trigger_bracket_gtc", "trigger_bracket_ioc"):
+            cfg = order_config.get(key)
+            if isinstance(cfg, dict):
+                return cfg
+    return None
+
+
+def _select_tp_from_brackets(
+    stop_orders: List[Dict[str, Any]],
+    side: str,
+) -> Optional[Tuple[float, Optional[str]]]:
+    candidates: List[Tuple[float, Optional[str]]] = []
+    for order in stop_orders:
+        cfg = _extract_trigger_bracket_config(order)
+        if not cfg:
+            continue
+        tp_price = _coerce_numeric(cfg.get("limit_price"))
+        if tp_price is None:
+            continue
+        end_time = cfg.get("end_time")
+        candidates.append((float(tp_price), end_time if isinstance(end_time, str) else None))
+
+    if not candidates:
+        return None
+
+    if side == "LONG":
+        return max(candidates, key=lambda item: item[0])
+    return min(candidates, key=lambda item: item[0])
 
 
 def _move_sl_to_entry_for_partial(
@@ -394,20 +469,34 @@ def _move_sl_to_entry_for_partial(
     # Fetch existing stop orders
     stop_orders = _fetch_open_stop_orders(exchange, ccxt_symbol)
     if not stop_orders:
-        logger.info("No existing stop orders found for %s; placing new SL at entry", product_id)
-        if dry_run:
-            logger.info("[DRY RUN] Would place SL at entry %.6f for %s (size=%.6f)", entry_price, product_id, remaining_size)
-            return True
-        result = _place_stop_loss_order(exchange, ccxt_symbol, product_id, side, remaining_size, entry_price)
-        return result is not None
+        logger.warning("No existing stop/bracket orders found for %s; cannot move SL to entry", product_id)
+        return False
+
+    tp_selection = _select_tp_from_brackets(stop_orders, side)
+    if not tp_selection:
+        logger.warning("No bracket TP found for %s; cannot move SL to entry", product_id)
+        return False
+
+    tp_price, end_time = tp_selection
 
     # Cancel existing stop orders and place new one at entry
-    logger.info("Found %d stop order(s) for %s; canceling and moving SL to entry %.6f", len(stop_orders), product_id, entry_price)
+    logger.info(
+        "Found %d stop order(s) for %s; canceling and moving SL to entry %.6f (tp=%.6f)",
+        len(stop_orders),
+        product_id,
+        entry_price,
+        tp_price,
+    )
 
     if dry_run:
         for order in stop_orders:
             logger.info("[DRY RUN] Would cancel order %s", order.get("id"))
-        logger.info("[DRY RUN] Would place new SL at entry %.6f (size=%.6f)", entry_price, remaining_size)
+        logger.info(
+            "[DRY RUN] Would place new bracket at entry %.6f (tp=%.6f, size=%.6f)",
+            entry_price,
+            tp_price,
+            remaining_size,
+        )
         return True
 
     # Cancel existing orders
@@ -425,8 +514,17 @@ def _move_sl_to_entry_for_partial(
         logger.warning("Could not cancel any stop orders for %s; skipping SL move", product_id)
         return False
 
-    # Place new SL at entry
-    result = _place_stop_loss_order(exchange, ccxt_symbol, product_id, side, remaining_size, entry_price)
+    # Place new bracket with TP preserved and SL moved to entry
+    result = _place_bracket_order(
+        exchange,
+        ccxt_symbol,
+        product_id,
+        side,
+        remaining_size,
+        tp_price,
+        entry_price,
+        end_time_override=end_time,
+    )
     return result is not None
 
 

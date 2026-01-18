@@ -19,7 +19,7 @@
 */5 * * * * cd /home/spiros/crypto-finance && /home/spiros/anaconda3/envs/trade/bin/python /home/spiros/crypto-finance/paper_finder_simulator.py update >> /home/spiros/crypto-finance/logs/paper_finder_update.log 2>&1
 
 # watchdog_close_update
-*/5 * * * * cd /home/spiros/crypto-finance && /home/spiros/anaconda3/envs/trade/bin/python /home/spiros/crypto-finance/watchdog_close_old_positions.py --log-fills --skip-close --verbose >> /home/spiros/crypto-finance/logs/watchdog_close_update.log 2>&1
+*/3 * * * * cd /home/spiros/crypto-finance && /home/spiros/anaconda3/envs/trade/bin/python /home/spiros/crypto-finance/watchdog_close_old_positions.py --log-fills --verbose --dust-notional-usd 5 --move-sl-after-tp1 >> /home/spiros/crypto-finance/logs/watchdog_close_update.log 2>&1
 
 # live_snapshot_update
 */5 * * * * cd /home/spiros/crypto-finance && /home/spiros/anaconda3/envs/trade/bin/python /home/spiros/crypto-finance/scripts/update_live_snapshot.py >> /home/spiros/crypto-finance/logs/live_snapshot_update.log 2>&1
