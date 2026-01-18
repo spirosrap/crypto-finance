@@ -136,13 +136,33 @@ def _normalize_order_payload(payload: Any) -> Dict[str, Any]:
     order = getattr(payload, "order", None)
     if isinstance(order, dict):
         return order
+    if isinstance(order, Mapping):
+        return dict(order)
+    if order is not None:
+        try:
+            order_dict = vars(order)
+        except TypeError:
+            order_dict = None
+        if isinstance(order_dict, dict) and order_dict:
+            return order_dict
     try:
         data = vars(payload)
     except TypeError:
         return {}
     if isinstance(data, dict):
-        if "order" in data and isinstance(data["order"], dict):
-            return data["order"]
+        if "order" in data:
+            inner = data.get("order")
+            if isinstance(inner, dict):
+                return inner
+            if isinstance(inner, Mapping):
+                return dict(inner)
+            if inner is not None:
+                try:
+                    inner_dict = vars(inner)
+                except TypeError:
+                    inner_dict = None
+                if isinstance(inner_dict, dict) and inner_dict:
+                    return inner_dict
         return data
     return {}
 
@@ -153,17 +173,43 @@ def _extract_order_configuration(order: Dict[str, Any]) -> Dict[str, Any]:
     config = order.get("order_configuration")
     if isinstance(config, dict):
         return config
+    if isinstance(config, Mapping):
+        return dict(config)
+    if config is not None:
+        try:
+            config_dict = vars(config)
+        except TypeError:
+            config_dict = None
+        if isinstance(config_dict, dict):
+            return config_dict
     info = order.get("info")
     if isinstance(info, dict):
         nested = info.get("order_configuration")
         if isinstance(nested, dict):
             return nested
+        if isinstance(nested, Mapping):
+            return dict(nested)
+        if nested is not None:
+            try:
+                nested_dict = vars(nested)
+            except TypeError:
+                nested_dict = None
+            if isinstance(nested_dict, dict):
+                return nested_dict
     return {}
 
 
 def _select_bracket_target(config: Dict[str, Any], reason: str) -> Optional[float]:
     for key in ("trigger_bracket_gtd", "trigger_bracket_gtc", "trigger_bracket_ioc"):
         bracket = config.get(key)
+        if not isinstance(bracket, dict):
+            if isinstance(bracket, Mapping):
+                bracket = dict(bracket)
+            else:
+                try:
+                    bracket = vars(bracket)
+                except TypeError:
+                    bracket = None
         if not isinstance(bracket, dict):
             continue
         tp_price = _coerce_float(bracket.get("limit_price"))
@@ -180,6 +226,14 @@ def _select_bracket_target(config: Dict[str, Any], reason: str) -> Optional[floa
 def _select_limit_target(config: Dict[str, Any]) -> Optional[float]:
     for key in ("limit_limit_gtd", "limit_limit_gtc", "limit_limit_ioc"):
         limit_cfg = config.get(key)
+        if not isinstance(limit_cfg, dict):
+            if isinstance(limit_cfg, Mapping):
+                limit_cfg = dict(limit_cfg)
+            else:
+                try:
+                    limit_cfg = vars(limit_cfg)
+                except TypeError:
+                    limit_cfg = None
         if isinstance(limit_cfg, dict):
             price = _coerce_float(limit_cfg.get("limit_price"))
             if price is not None:
@@ -190,6 +244,14 @@ def _select_limit_target(config: Dict[str, Any]) -> Optional[float]:
 def _select_stop_limit_target(config: Dict[str, Any], reason: str) -> Optional[float]:
     for key in ("stop_limit_stop_limit_gtd", "stop_limit_stop_limit_gtc", "stop_limit_stop_limit_ioc"):
         stop_cfg = config.get(key)
+        if not isinstance(stop_cfg, dict):
+            if isinstance(stop_cfg, Mapping):
+                stop_cfg = dict(stop_cfg)
+            else:
+                try:
+                    stop_cfg = vars(stop_cfg)
+                except TypeError:
+                    stop_cfg = None
         if not isinstance(stop_cfg, dict):
             continue
         stop_price = _coerce_float(stop_cfg.get("stop_price") or stop_cfg.get("stop_trigger_price"))
