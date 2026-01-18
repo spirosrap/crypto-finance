@@ -613,7 +613,14 @@ def _close_and_update_rows(
                     row["partial_tp_price"] = partial_price
                     row["partial_tp_move_sl"] = partial_move_sl
                     if partial_move_sl and entry > 0:
+                        old_sl = sl
                         row["stop_loss"] = entry
+                        logger.info(
+                            "TP1 partial hit for %s; moving SL from %.6f to entry %.6f",
+                            product_id,
+                            old_sl,
+                            entry,
+                        )
                     position_usd = remaining
                 if position_usd <= 0:
                     continue
