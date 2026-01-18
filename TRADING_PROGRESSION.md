@@ -18,6 +18,7 @@
 ## January 18, 2026 - Dashboard Fees & Slippage (Live)
 - Watchdog dashboard can now pull Coinbase fills to display fee totals and exit slippage vs order targets.
 - Exit slippage now pulls from raw close rows (with order IDs) so results populate under live filters.
+- Slippage lookup now handles Coinbase GetOrderResponse mappings so target prices resolve.
 
 ## January 18, 2026 - Paper TP1 Move-SL Logging
 - Added explicit logging when paper trades move SL to entry after TP1 so the journal reflects those adjustments.

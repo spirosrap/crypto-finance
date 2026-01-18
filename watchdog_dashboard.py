@@ -18,6 +18,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
@@ -118,6 +119,20 @@ def _normalize_order_payload(payload: Any) -> Dict[str, Any]:
         if "order" in payload and isinstance(payload["order"], dict):
             return payload["order"]
         return payload
+    if isinstance(payload, Mapping):
+        order = payload.get("order")
+        if isinstance(order, dict):
+            return order
+        return dict(payload)
+    if hasattr(payload, "get"):
+        try:
+            order = payload.get("order")
+            if isinstance(order, dict):
+                return order
+            if isinstance(order, Mapping):
+                return dict(order)
+        except Exception:
+            pass
     order = getattr(payload, "order", None)
     if isinstance(order, dict):
         return order
