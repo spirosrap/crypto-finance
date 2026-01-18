@@ -332,6 +332,42 @@ def _fetch_open_stop_orders(exchange: "ccxt.Exchange", ccxt_symbol: str) -> List
     return stop_orders
 
 
+def _fetch_current_price(exchange: "ccxt.Exchange", ccxt_symbol: str) -> Optional[float]:
+    try:
+        ticker = exchange.fetch_ticker(ccxt_symbol)
+    except Exception:
+        return None
+    if isinstance(ticker, dict):
+        for key in ("last", "mark", "close", "bid", "ask"):
+            value = ticker.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _clamp_sl_to_market(
+    entry_price: float,
+    current_price: Optional[float],
+    side: str,
+    buffer_bps: float = 5.0,
+) -> Tuple[float, bool]:
+    if current_price is None:
+        return entry_price, False
+    side_norm = (side or "").upper()
+    buffer_mult = buffer_bps / 10000.0
+    if side_norm == "LONG":
+        if entry_price >= current_price:
+            return current_price * (1.0 - buffer_mult), True
+    elif side_norm == "SHORT":
+        if entry_price <= current_price:
+            return current_price * (1.0 + buffer_mult), True
+    return entry_price, False
+
+
 def _compute_end_time(exp: str) -> str:
     now = datetime.now(UTC)
     if exp.endswith("d"):
@@ -478,13 +514,25 @@ def _move_sl_to_entry_for_partial(
         return False
 
     tp_price, end_time = tp_selection
+    current_price = _fetch_current_price(exchange, ccxt_symbol)
+    sl_price, clamped = _clamp_sl_to_market(entry_price, current_price, side)
+    if clamped:
+        logger.warning(
+            "Entry SL %.6f invalid vs current %.6f for %s; clamped SL to %.6f",
+            entry_price,
+            current_price if current_price is not None else float("nan"),
+            product_id,
+            sl_price,
+        )
 
     # Cancel existing stop orders and place new one at entry
+    sl_label = "entry" if not clamped else "clamped"
     logger.info(
-        "Found %d stop order(s) for %s; canceling and moving SL to entry %.6f (tp=%.6f)",
+        "Found %d stop order(s) for %s; canceling and moving SL to %s %.6f (tp=%.6f)",
         len(stop_orders),
         product_id,
-        entry_price,
+        sl_label,
+        sl_price,
         tp_price,
     )
 
@@ -492,8 +540,8 @@ def _move_sl_to_entry_for_partial(
         for order in stop_orders:
             logger.info("[DRY RUN] Would cancel order %s", order.get("id"))
         logger.info(
-            "[DRY RUN] Would place new bracket at entry %.6f (tp=%.6f, size=%.6f)",
-            entry_price,
+            "[DRY RUN] Would place new bracket at SL %.6f (tp=%.6f, size=%.6f)",
+            sl_price,
             tp_price,
             remaining_size,
         )
@@ -522,7 +570,7 @@ def _move_sl_to_entry_for_partial(
         side,
         remaining_size,
         tp_price,
-        entry_price,
+        sl_price,
         end_time_override=end_time,
     )
     return result is not None
