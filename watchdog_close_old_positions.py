@@ -84,6 +84,7 @@ LOG_HEADERS = [
 
 
 CHECKPOINT_PATH = Path('trade_logs') / 'watchdog_tp_sl_checkpoint.json'
+SL_MOVE_CHECKPOINT_PATH = Path('trade_logs') / 'watchdog_sl_move_checkpoint.json'
 UTC = timezone.utc
 
 
@@ -161,6 +162,354 @@ def _product_to_ccxt_symbol(product_id: str) -> str:
     else:
         raise ValueError(f"Unsupported INTX product id format: {product_id}")
     return f"{base}/USDC:USDC"
+
+
+# ---------------------------------------------------------------------------
+# SL-to-Entry after TP1 partial fill
+# ---------------------------------------------------------------------------
+
+
+def _load_sl_move_checkpoint() -> Dict[str, Any]:
+    """Load checkpoint of partial fills that have already had SL moved."""
+    path = SL_MOVE_CHECKPOINT_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        return {"processed_partials": []}
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return {"processed_partials": []}
+
+
+def _store_sl_move_checkpoint(data: Dict[str, Any]) -> None:
+    """Store checkpoint of processed partial fills."""
+    path = SL_MOVE_CHECKPOINT_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
+
+
+def _partial_key(event: "PartialFillEvent") -> str:
+    """Generate unique key for a partial fill event."""
+    return f"{event.product_id}|{event.order_id}|{event.time.isoformat()}"
+
+
+def _get_positions_with_entry(cb: CoinbaseService) -> Dict[str, Dict[str, Any]]:
+    """Return current perp positions with entry price, keyed by product symbol."""
+    logger = logging.getLogger(__name__)
+
+    # Get portfolio UUID
+    ports = cb.client.get_portfolios()
+    portfolio_uuid = None
+    if isinstance(ports, dict):
+        portfolios_list = ports.get('portfolios', [])
+    else:
+        portfolios_list = getattr(ports, 'portfolios', []) or []
+
+    for p in portfolios_list:
+        if isinstance(p, dict):
+            p_type, p_uuid = p.get('type'), p.get('uuid')
+        else:
+            p_type, p_uuid = getattr(p, 'type', None), getattr(p, 'uuid', None)
+        if p_type == 'INTX' and p_uuid:
+            portfolio_uuid = p_uuid
+            break
+
+    if not portfolio_uuid:
+        logger.debug("No INTX portfolio found")
+        return {}
+
+    try:
+        response = cb.client.list_perps_positions(portfolio_uuid=portfolio_uuid)
+    except Exception as exc:
+        logger.debug("list_perps_positions failed: %s", exc)
+        return {}
+
+    if isinstance(response, dict):
+        positions_raw = response.get("positions", []) or []
+    else:
+        positions_raw = getattr(response, "positions", []) or []
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for pos in positions_raw:
+        # Extract symbol
+        symbol = None
+        for key in ('symbol', 'product_id', 'productId', 'product'):
+            val = pos.get(key) if isinstance(pos, dict) else getattr(pos, key, None)
+            if val:
+                symbol = str(val).strip().upper()
+                break
+        if not symbol:
+            continue
+
+        # Extract net size
+        net_size = None
+        for key in ('net_size', 'netSize', 'size', 'position_size'):
+            val = pos.get(key) if isinstance(pos, dict) else getattr(pos, key, None)
+            if val is not None:
+                try:
+                    net_size = float(val)
+                    break
+                except (TypeError, ValueError):
+                    continue
+        if net_size is None or net_size == 0:
+            continue
+
+        # Extract entry price (VWAP)
+        entry_price = None
+        for key in ('vwap', 'entry_price', 'average_entry', 'avg_entry_price'):
+            val = pos.get(key) if isinstance(pos, dict) else getattr(pos, key, None)
+            if val is not None:
+                try:
+                    entry_price = float(val)
+                    break
+                except (TypeError, ValueError):
+                    continue
+
+        result[symbol] = {
+            "net_size": net_size,
+            "entry_price": entry_price,
+            "side": "LONG" if net_size > 0 else "SHORT",
+        }
+
+    return result
+
+
+def _fetch_open_stop_orders(exchange: "ccxt.Exchange", ccxt_symbol: str) -> List[Dict[str, Any]]:
+    """Fetch open orders for a symbol and filter to stop-loss/bracket orders."""
+    logger = logging.getLogger(__name__)
+    try:
+        orders = exchange.fetch_open_orders(ccxt_symbol)
+    except Exception as exc:
+        logger.warning("Failed to fetch open orders for %s: %s", ccxt_symbol, exc)
+        return []
+
+    stop_orders = []
+    for order in orders:
+        # Identify stop/bracket orders by type or trigger price
+        order_type = (order.get("type") or "").lower()
+        trigger_price = order.get("triggerPrice") or order.get("stopPrice")
+        order_config = order.get("info", {}).get("order_configuration", {})
+        is_bracket = "trigger_bracket" in str(order_config).lower()
+
+        if trigger_price or "stop" in order_type or is_bracket:
+            stop_orders.append(order)
+
+    return stop_orders
+
+
+def _place_stop_loss_order(
+    exchange: "ccxt.Exchange",
+    ccxt_symbol: str,
+    product_id: str,
+    side: str,
+    size: float,
+    stop_price: float,
+    expiry: str = "30d",
+) -> Optional[Dict[str, Any]]:
+    """Place a new stop-loss order at the given price."""
+    logger = logging.getLogger(__name__)
+
+    # Determine bracket side (opposite of position side)
+    bracket_side = "SELL" if side == "LONG" else "BUY"
+
+    # Compute end time
+    def _compute_end_time(exp: str) -> str:
+        now = datetime.now(UTC)
+        if exp.endswith("d"):
+            days = int(exp[:-1])
+            end = now + timedelta(days=days)
+        elif exp.endswith("h"):
+            hours = int(exp[:-1])
+            end = now + timedelta(hours=hours)
+        else:
+            end = now + timedelta(days=30)
+        return end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    end_time = _compute_end_time(expiry)
+
+    # Use a stop-limit order very close to stop price (effectively market on trigger)
+    # Set limit price slightly worse than stop to ensure fill
+    limit_price = stop_price * 0.995 if bracket_side == "SELL" else stop_price * 1.005
+
+    payload = {
+        "client_order_id": f"sl-moved-{int(time.time()*1000)}",
+        "product_id": product_id,
+        "side": bracket_side,
+        "order_configuration": {
+            "stop_limit_stop_limit_gtd": {
+                "base_size": exchange.amount_to_precision(ccxt_symbol, size),
+                "stop_price": exchange.price_to_precision(ccxt_symbol, stop_price),
+                "limit_price": exchange.price_to_precision(ccxt_symbol, limit_price),
+                "stop_direction": "STOP_DIRECTION_STOP_DOWN" if bracket_side == "SELL" else "STOP_DIRECTION_STOP_UP",
+                "end_time": end_time,
+            }
+        },
+    }
+
+    logger.info("Placing new SL order for %s at %s (size=%s, side=%s)", product_id, stop_price, size, bracket_side)
+    try:
+        response = exchange.v3PrivatePostBrokerageOrders(payload)
+        if not bool(response.get("success", True)):
+            logger.error("SL order rejected: %s", response.get("error_response", response))
+            return None
+        logger.info("SL order placed: %s", response.get("order_id", response))
+        return response
+    except Exception as exc:
+        logger.error("Failed to place SL order for %s: %s", product_id, exc)
+        return None
+
+
+def _move_sl_to_entry_for_partial(
+    cb: CoinbaseService,
+    exchange: "ccxt.Exchange",
+    event: "PartialFillEvent",
+    position_info: Dict[str, Any],
+    dry_run: bool = False,
+) -> bool:
+    """
+    Move stop-loss to entry price after a TP1 partial fill.
+
+    Returns True if SL was successfully moved (or would be in dry_run mode).
+    """
+    logger = logging.getLogger(__name__)
+    product_id = event.product_id
+    entry_price = position_info.get("entry_price")
+    remaining_size = abs(position_info.get("net_size", 0))
+    side = position_info.get("side", event.side)
+
+    if entry_price is None:
+        logger.warning("Cannot move SL for %s: entry price unknown", product_id)
+        return False
+
+    if remaining_size <= 0:
+        logger.debug("No remaining position for %s after partial", product_id)
+        return False
+
+    try:
+        ccxt_symbol = _product_to_ccxt_symbol(product_id)
+    except ValueError as exc:
+        logger.warning("Cannot convert product %s to CCXT symbol: %s", product_id, exc)
+        return False
+
+    # Fetch existing stop orders
+    stop_orders = _fetch_open_stop_orders(exchange, ccxt_symbol)
+    if not stop_orders:
+        logger.info("No existing stop orders found for %s; placing new SL at entry", product_id)
+        if dry_run:
+            logger.info("[DRY RUN] Would place SL at entry %.6f for %s (size=%.6f)", entry_price, product_id, remaining_size)
+            return True
+        result = _place_stop_loss_order(exchange, ccxt_symbol, product_id, side, remaining_size, entry_price)
+        return result is not None
+
+    # Cancel existing stop orders and place new one at entry
+    logger.info("Found %d stop order(s) for %s; canceling and moving SL to entry %.6f", len(stop_orders), product_id, entry_price)
+
+    if dry_run:
+        for order in stop_orders:
+            logger.info("[DRY RUN] Would cancel order %s", order.get("id"))
+        logger.info("[DRY RUN] Would place new SL at entry %.6f (size=%.6f)", entry_price, remaining_size)
+        return True
+
+    # Cancel existing orders
+    canceled_count = 0
+    for order in stop_orders:
+        order_id = order.get("id")
+        try:
+            exchange.cancel_order(order_id, ccxt_symbol)
+            logger.info("Canceled stop order %s for %s", order_id, product_id)
+            canceled_count += 1
+        except Exception as exc:
+            logger.warning("Failed to cancel order %s: %s", order_id, exc)
+
+    if canceled_count == 0:
+        logger.warning("Could not cancel any stop orders for %s; skipping SL move", product_id)
+        return False
+
+    # Place new SL at entry
+    result = _place_stop_loss_order(exchange, ccxt_symbol, product_id, side, remaining_size, entry_price)
+    return result is not None
+
+
+def _process_sl_moves_after_tp1(
+    cb: CoinbaseService,
+    new_partials: List["PartialFillEvent"],
+    dry_run: bool = False,
+) -> int:
+    """
+    Process partial fill events and move SL to entry for positions that had TP1 hit.
+
+    Returns count of successfully moved stop-losses.
+    """
+    logger = logging.getLogger(__name__)
+
+    if not new_partials:
+        return 0
+
+    # Load checkpoint of already-processed partials
+    checkpoint = _load_sl_move_checkpoint()
+    processed_keys = set(checkpoint.get("processed_partials", []))
+
+    # Filter to unprocessed partials
+    to_process = [p for p in new_partials if _partial_key(p) not in processed_keys]
+    if not to_process:
+        logger.debug("No new partials to process for SL moves")
+        return 0
+
+    # Get current positions with entry prices
+    positions = _get_positions_with_entry(cb)
+    if not positions:
+        logger.debug("No open positions found")
+        return 0
+
+    # Initialize CCXT exchange
+    try:
+        exchange = _ensure_ccxt_exchange()
+    except Exception as exc:
+        logger.error("Cannot initialize CCXT for SL moves: %s", exc)
+        return 0
+
+    moved_count = 0
+    newly_processed = []
+
+    for event in to_process:
+        product_id = event.product_id
+        position_info = positions.get(product_id)
+
+        if position_info is None:
+            logger.debug("No open position for %s after partial; skipping SL move", product_id)
+            newly_processed.append(_partial_key(event))
+            continue
+
+        # Check that remaining position is same direction as partial
+        partial_side = event.side
+        position_side = position_info.get("side")
+        if partial_side != position_side:
+            logger.debug("Position side %s != partial side %s for %s; skipping", position_side, partial_side, product_id)
+            newly_processed.append(_partial_key(event))
+            continue
+
+        logger.info(
+            "TP1 partial detected for %s (qty=%.6f, pnl=%.2f); moving SL to entry",
+            product_id,
+            event.qty,
+            event.realized_pnl,
+        )
+
+        success = _move_sl_to_entry_for_partial(cb, exchange, event, position_info, dry_run=dry_run)
+        if success:
+            moved_count += 1
+            logger.info("SL moved to entry for %s%s", product_id, " [DRY RUN]" if dry_run else "")
+
+        newly_processed.append(_partial_key(event))
+
+    # Update checkpoint
+    if newly_processed and not dry_run:
+        all_processed = list(processed_keys) + newly_processed
+        # Keep only last 500 entries to prevent unbounded growth
+        checkpoint["processed_partials"] = all_processed[-500:]
+        _store_sl_move_checkpoint(checkpoint)
+
+    return moved_count
 
 
 def _get_value(obj: Any, key: str) -> Any:
@@ -1673,7 +2022,13 @@ def _active_positions(cb: CoinbaseService) -> Dict[str, tuple[float, Optional[da
     return nets
 
 
-def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -> None:
+def _log_tp_sl_once(
+    cb: CoinbaseService,
+    limit: int,
+    bootstrap_existing: bool,
+    move_sl_after_tp1: bool = False,
+    move_sl_dry_run: bool = False,
+) -> None:
     logger = logging.getLogger(__name__)
 
     raw_fills = fetch_fills(cb, limit=limit)
@@ -1827,10 +2182,18 @@ def _log_tp_sl_once(cb: CoinbaseService, limit: int, bootstrap_existing: bool) -
         logger.info("TP/SL logging complete; appended %d new records", appended)
     if appended_partials:
         logger.info("Partial fill logging complete; appended %d new records", appended_partials)
-    elif pending_cycles:
-        logger.info("TP/SL logging deferred %d cycle(s) because matching positions are still open.", pending_cycles)
-    else:
-        logger.info("TP/SL logging found no new rows after deduplication")
+
+    # Move SL to entry after TP1 partial fills if enabled
+    if move_sl_after_tp1 and new_partials:
+        sl_moved = _process_sl_moves_after_tp1(cb, new_partials, dry_run=move_sl_dry_run)
+        if sl_moved:
+            logger.info("Moved SL to entry for %d position(s) after TP1 partial%s", sl_moved, " [DRY RUN]" if move_sl_dry_run else "")
+
+    if not appended and not appended_partials:
+        if pending_cycles:
+            logger.info("TP/SL logging deferred %d cycle(s) because matching positions are still open.", pending_cycles)
+        else:
+            logger.info("TP/SL logging found no new rows after deduplication")
 
 
 def _order_close_success(result: Any) -> bool:
@@ -2586,6 +2949,10 @@ def main() -> None:
     ap.add_argument("--fills-interval", type=int, default=0, help="If >0, poll fills continuously every N seconds")
     ap.add_argument("--fills-bootstrap-existing", action="store_true",
                     help="On first run, log existing fill cycles instead of only new ones")
+    ap.add_argument("--move-sl-after-tp1", action="store_true",
+                    help="Move stop-loss to entry price after TP1 partial fill is detected")
+    ap.add_argument("--move-sl-dry-run", action="store_true",
+                    help="Dry run mode for --move-sl-after-tp1 (log actions without executing)")
     ap.add_argument("--no-log-closures", action="store_true",
                     help="Skip writing age-based closure rows to watchdog_closed_positions.csv")
     ap.add_argument("--recent-order-grace-minutes", type=int, default=30,
@@ -2611,7 +2978,13 @@ def main() -> None:
         cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
 
         def _log_once() -> None:
-            _log_tp_sl_once(cb, limit=int(args.fills_limit), bootstrap_existing=bool(args.fills_bootstrap_existing))
+            _log_tp_sl_once(
+                cb,
+                limit=int(args.fills_limit),
+                bootstrap_existing=bool(args.fills_bootstrap_existing),
+                move_sl_after_tp1=bool(args.move_sl_after_tp1),
+                move_sl_dry_run=bool(args.move_sl_dry_run),
+            )
 
         if args.fills_interval and args.fills_interval > 0:
             while True:
