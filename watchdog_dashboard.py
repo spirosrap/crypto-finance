@@ -2454,9 +2454,18 @@ def main() -> None:
 
                     st.markdown("**Per-cycle exit cost**")
                     cycle_df = slippage_df.copy()
-                    opened = pd.to_datetime(cycle_df.get("opened_at"), utc=True, errors="coerce")
-                    closed = pd.to_datetime(cycle_df.get("closed_at"), utc=True, errors="coerce")
-                    cycle_df["_group_time"] = opened.where(opened.notna(), closed)
+                    opened_series = cycle_df["opened_at"] if "opened_at" in cycle_df.columns else None
+                    closed_series = cycle_df["closed_at"] if "closed_at" in cycle_df.columns else None
+                    opened = pd.to_datetime(opened_series, utc=True, errors="coerce") if opened_series is not None else None
+                    closed = pd.to_datetime(closed_series, utc=True, errors="coerce") if closed_series is not None else None
+                    if opened is None and closed is None:
+                        cycle_df["_group_time"] = pd.NaT
+                    elif opened is None:
+                        cycle_df["_group_time"] = closed
+                    elif closed is None:
+                        cycle_df["_group_time"] = opened
+                    else:
+                        cycle_df["_group_time"] = opened.where(opened.notna(), closed)
                     cycle_df["_group_time"] = pd.to_datetime(cycle_df["_group_time"], utc=True, errors="coerce")
                     cycle_df = cycle_df.dropna(subset=["_group_time"])
                     if cycle_df.empty:
