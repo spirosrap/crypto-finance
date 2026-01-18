@@ -2377,6 +2377,11 @@ def main() -> None:
 
                 slippage_df = st.session_state.get("live_slippage_df")
                 if isinstance(slippage_df, pd.DataFrame) and not slippage_df.empty:
+                    if "fee_usd" not in slippage_df.columns:
+                        slippage_df = slippage_df.copy()
+                        slippage_df["fee_usd"] = 0.0
+                        slippage_df["total_cost_usd"] = slippage_df["slippage_usd"]
+                        st.caption("Slippage data cached before fee tracking was added — recompute to include exit fees.")
                     total_slip = float(slippage_df["slippage_usd"].sum())
                     avg_slip = float(slippage_df["slippage_usd"].mean())
                     avg_bps = float(slippage_df["slippage_bps"].mean())
