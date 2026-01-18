@@ -9,7 +9,6 @@ RUN_PAPER=${RUN_PAPER:-1}
 RUN_PAPER_UPDATE=${RUN_PAPER_UPDATE:-1}
 LIVE_DELAY_SECONDS=${LIVE_DELAY_SECONDS:-10}
 LIVE_SLEEP_SECONDS=${LIVE_SLEEP_SECONDS:-2}
-BASELINE_LIMIT_BPS=${BASELINE_LIMIT_BPS:-5}
 BRACKET_WAIT_SECONDS=${BRACKET_WAIT_SECONDS:-60}
 
 cd "${REPO_ROOT}"
@@ -100,7 +99,6 @@ SCAN_CMD=(
   --baseline-atr-mult 0.8
   --baseline-rr 1.5
   --baseline-atr-mode clipped
-  --baseline-limit-bps ${BASELINE_LIMIT_BPS}
   --baseline-leverage 50
   --baseline-expiry 30d
   --baseline-partial-tp-rr 0.8

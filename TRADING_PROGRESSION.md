@@ -15,6 +15,9 @@
 - `ccxt_trade_perp.py` now waits for limit fills before sending brackets and offers `--place-brackets` to attach TP/SL to a filled position if brackets were skipped.
 - Added a configurable bracket wait window (`--bracket-wait-seconds`) and corrected INTX position side detection so short brackets attach correctly.
 
+## January 18, 2026 - Gate-Scan Live Entries Back to Market
+- Reverted gate-scan live execution to market orders (removed `--baseline-limit-bps` from the runner).
+
 ## January 17, 2026 - Dust Cleanup Added to Watchdog
 - Watchdog close runner can now optionally close tiny residual positions by notional (`--dust-notional-usd`) while preserving the usual age-based expiry flow.
 
