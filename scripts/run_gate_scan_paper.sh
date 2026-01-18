@@ -10,6 +10,7 @@ RUN_PAPER_UPDATE=${RUN_PAPER_UPDATE:-1}
 LIVE_DELAY_SECONDS=${LIVE_DELAY_SECONDS:-10}
 LIVE_SLEEP_SECONDS=${LIVE_SLEEP_SECONDS:-2}
 BASELINE_LIMIT_BPS=${BASELINE_LIMIT_BPS:-5}
+BRACKET_WAIT_SECONDS=${BRACKET_WAIT_SECONDS:-60}
 
 cd "${REPO_ROOT}"
 
@@ -211,6 +212,9 @@ if [[ "${RUN_LIVE}" == "1" && "${daily_stop_live_active}" != "1" && "${live_paus
   while IFS= read -r line; do
     if [[ "${line}" == python\ ccxt_trade_perp.py* ]]; then
       line=${line/#python /SKIP_LOAD_MARKETS=1 ${PYTHON_BIN} }
+      if [[ "${line}" != *"--bracket-wait-seconds"* ]]; then
+        line="${line} --bracket-wait-seconds ${BRACKET_WAIT_SECONDS}"
+      fi
       echo "Executing live command: ${line}"
       if ! eval "${line}"; then
         echo "Live command failed (continuing): ${line}"

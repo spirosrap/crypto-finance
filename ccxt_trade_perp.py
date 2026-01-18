@@ -23,7 +23,7 @@ import json
 import time
 import traceback
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import ccxt  # type: ignore
 
@@ -495,6 +495,61 @@ def place_trigger_bracket_order(
     return response
 
 
+def submit_brackets(
+    exchange: ccxt.Exchange,
+    meta: MarketMeta,
+    entry_side: str,
+    base_size: float,
+    tp_price: float,
+    sl_price: float,
+    tp1_price: Optional[float],
+    tp1_pct: float,
+    leverage: float,
+    expiry: str,
+    dry_run: bool,
+) -> Dict:
+    if tp1_price is not None and tp1_pct > 0:
+        size_tp1 = base_size * (tp1_pct / 100.0)
+        size_tp2 = base_size - size_tp1
+        response: Dict[str, Any] = {}
+        if size_tp1 > 0:
+            response["tp1"] = place_trigger_bracket_order(
+                exchange,
+                meta,
+                entry_side,
+                size_tp1,
+                tp1_price,
+                sl_price,
+                leverage,
+                expiry,
+                dry_run,
+            )
+        if size_tp2 > 0:
+            response["tp2"] = place_trigger_bracket_order(
+                exchange,
+                meta,
+                entry_side,
+                size_tp2,
+                tp_price,
+                sl_price,
+                leverage,
+                expiry,
+                dry_run,
+            )
+        return response
+    return place_trigger_bracket_order(
+        exchange,
+        meta,
+        entry_side,
+        base_size,
+        tp_price,
+        sl_price,
+        leverage,
+        expiry,
+        dry_run,
+    )
+
+
 def place_market_order_with_targets_rest(
     product_id: str,
     side: str,
@@ -531,6 +586,152 @@ def place_market_order_with_targets_rest(
         raise RuntimeError(f"REST market+bracket order failed: {result['error']}")
     logger.info("REST market+bracket order placed for %s (%s).", product_id, side)
     return {"success": True, "via": "rest", "response": result}
+
+
+def _load_rest_service():
+    try:
+        from coinbaseservice import CoinbaseService
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(f"Coinbase REST client unavailable: {exc}") from exc
+
+    api_key, api_secret = get_perps_credentials()
+    if not api_key or not api_secret:
+        raise RuntimeError("Missing perps API credentials for Coinbase REST client.")
+    return CoinbaseService(api_key=api_key, api_secret=api_secret)
+
+
+def _fetch_intx_positions(service) -> list:
+    try:
+        ports = service.client.get_portfolios()
+    except Exception as exc:
+        logger.warning("Failed to fetch portfolios for INTX positions: %s", exc)
+        return []
+
+    portfolios = []
+    if isinstance(ports, dict):
+        portfolios = ports.get("portfolios") or []
+    elif hasattr(ports, "portfolios"):
+        portfolios = getattr(ports, "portfolios") or []
+
+    portfolio_uuid = None
+    fallback_uuid = None
+    for port in portfolios:
+        if isinstance(port, dict):
+            port_type = port.get("type") or port.get("portfolio_type")
+            port_uuid = port.get("uuid") or port.get("id")
+        else:
+            port_type = getattr(port, "type", None) or getattr(port, "portfolio_type", None)
+            port_uuid = getattr(port, "uuid", None) or getattr(port, "id", None)
+        if port_uuid and fallback_uuid is None:
+            fallback_uuid = port_uuid
+        if (port_type or "").upper() == "INTX":
+            portfolio_uuid = port_uuid
+            break
+        if port_type and any(token in port_type.upper() for token in ("PERP", "PERPETUAL", "DERIV", "INTX")):
+            portfolio_uuid = port_uuid
+            break
+
+    if not portfolio_uuid:
+        portfolio_uuid = fallback_uuid
+    if not portfolio_uuid:
+        logger.warning("INTX portfolio not found while checking open positions.")
+        return []
+
+    try:
+        breakdown = service.client.get_portfolio_breakdown(portfolio_uuid=portfolio_uuid)
+    except Exception as exc:
+        logger.warning("Failed to fetch INTX portfolio breakdown: %s", exc)
+        return []
+
+    if not isinstance(breakdown, dict):
+        breakdown = vars(breakdown) if hasattr(breakdown, "__dict__") else {}
+    breakdown_obj = breakdown.get("breakdown") or getattr(breakdown, "breakdown", None)
+    if not isinstance(breakdown_obj, dict):
+        breakdown_obj = vars(breakdown_obj) if hasattr(breakdown_obj, "__dict__") else {}
+
+    positions = breakdown_obj.get("perp_positions") or getattr(breakdown_obj, "perp_positions", None) or []
+    if not positions:
+        positions = breakdown_obj.get("perpetual_positions") or getattr(breakdown_obj, "perpetual_positions", None) or []
+    if not positions and isinstance(breakdown_obj, dict):
+        for value in breakdown_obj.values():
+            if isinstance(value, list) and value:
+                sample = value[0]
+                if isinstance(sample, dict) and ("product_id" in sample or "symbol" in sample):
+                    positions = value
+                    break
+    if not isinstance(positions, list):
+        if hasattr(positions, "__iter__"):
+            positions = list(positions)
+        else:
+            positions = []
+    return positions
+
+
+def _normalize_position_side(raw_side: Optional[str], net_value: float) -> Optional[str]:
+    if raw_side:
+        upper = str(raw_side).upper()
+        if "SHORT" in upper:
+            return "SELL"
+        if "LONG" in upper:
+            return "BUY"
+    if net_value < 0:
+        return "SELL"
+    if net_value > 0:
+        return "BUY"
+    return None
+
+
+def _extract_position_size(positions: list, product_id: str) -> tuple[Optional[str], float]:
+    for pos in positions:
+        if isinstance(pos, dict):
+            sym = pos.get("symbol")
+            pid = pos.get("product_id")
+            pid = sym if (sym and "-PERP-" in sym) else (pid or sym)
+            net_size = pos.get("net_size")
+            side_hint = pos.get("position_side")
+        else:
+            sym = getattr(pos, "symbol", None)
+            pid = getattr(pos, "product_id", None)
+            pid = sym if (sym and "-PERP-" in sym) else (pid or sym)
+            net_size = getattr(pos, "net_size", None)
+            side_hint = getattr(pos, "position_side", None)
+
+        if pid != product_id:
+            continue
+
+        try:
+            net_value = float(net_size or 0.0)
+        except (TypeError, ValueError):
+            return None, 0.0
+
+        if abs(net_value) < 1e-9:
+            return None, 0.0
+
+        side = _normalize_position_side(side_hint, net_value)
+        return side, abs(net_value)
+    return None, 0.0
+
+
+def fetch_open_position(service, product_id: str) -> tuple[Optional[str], float]:
+    positions = _fetch_intx_positions(service)
+    return _extract_position_size(positions, product_id)
+
+
+def wait_for_open_position(
+    service,
+    product_id: str,
+    entry_side: Optional[str] = None,
+    timeout: int = 60,
+    poll_interval: float = 2.0,
+) -> tuple[Optional[str], float]:
+    deadline = time.time() + timeout
+    desired = entry_side.upper() if entry_side else None
+    while time.time() < deadline:
+        side, size = fetch_open_position(service, product_id)
+        if size > 0 and (desired is None or side == desired):
+            return side, size
+        time.sleep(poll_interval)
+    return None, 0.0
 
 
 def _summarize_ccxt_response(response: object, max_len: int = 600) -> str:
@@ -630,8 +831,8 @@ def wait_for_fill(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Trade Coinbase perps using CCXT with optional bracket orders.")
     parser.add_argument("--product", default="BTC-PERP-INTX", help="Perpetual product id (e.g., BTC-PERP-INTX or CCXT symbol).")
-    parser.add_argument("--side", choices=["BUY", "SELL"], required=True, help="Entry side.")
-    parser.add_argument("--size", type=float, required=True, help="Position size in USD notional.")
+    parser.add_argument("--side", choices=["BUY", "SELL"], help="Entry side.")
+    parser.add_argument("--size", type=float, help="Position size in USD notional.")
     parser.add_argument("--leverage", type=float, default=5.0, help="Leverage (default 5x).")
     parser.add_argument("--tp", type=float, required=True, help="Take-profit price.")
     parser.add_argument("--sl", type=float, required=True, help="Stop-loss trigger price.")
@@ -641,6 +842,8 @@ def main() -> None:
     parser.add_argument("--no-rest-fallback", action="store_true", help="Disable REST fallback on CCXT entry failure.")
     parser.add_argument("--limit", type=float, help="Optional entry limit price (omit for market).")
     parser.add_argument("--expiry", choices=["GTC", "12h", "24h", "30d"], default="30d", help="GTD expiry horizon for limit entries.")
+    parser.add_argument("--place-brackets", action="store_true", help="Place TP/SL brackets for an existing open position (no entry).")
+    parser.add_argument("--bracket-wait-seconds", type=int, default=60, help="Extra wait for limit fills before skipping bracket placement.")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without placing orders.")
     args = parser.parse_args()
 
@@ -653,10 +856,6 @@ def main() -> None:
             except Exception as exc:
                 logger.warning("load_markets failed under SKIP_LOAD_MARKETS=1: %s", exc)
         meta = get_market_meta(exchange, args.product)
-        current_price = fetch_reference_price(exchange, meta.ccxt_symbol)
-        entry_price = args.limit or current_price
-
-        base_size = calculate_base_size(args.size, entry_price, meta)
         tp_price = quantize_price(args.tp, meta.price_precision)
         sl_price = quantize_price(args.sl, meta.price_precision)
         tp1_pct = float(args.tp1_pct or 0.0)
@@ -672,6 +871,44 @@ def main() -> None:
                 logger.warning("REST fallback disabled; TP1 requires CCXT order flow.")
         if args.tp1_move_sl:
             logger.warning("TP1 move-SL is not supported yet for live orders; ignoring --tp1-move-sl.")
+
+        if args.place_brackets:
+            service = _load_rest_service()
+            found_side, position_size = wait_for_open_position(
+                service,
+                meta.market["id"],
+                entry_side=args.side,
+                timeout=60,
+            )
+            if position_size <= 0:
+                raise RuntimeError(f"No open position found for {meta.market['id']}; brackets not placed.")
+            logger.info("Found open position for %s: %s (size=%.8f)", meta.market["id"], found_side, position_size)
+            bracket_response = submit_brackets(
+                exchange,
+                meta,
+                found_side or (args.side or "BUY"),
+                position_size,
+                tp_price,
+                sl_price,
+                tp1_price,
+                tp1_pct,
+                args.leverage,
+                args.expiry,
+                args.dry_run,
+            )
+            print("\n=== Bracket Summary ===")
+            if args.dry_run:
+                print("Bracket response: dry run (no orders sent).")
+            else:
+                print(f"Bracket response: {bracket_response}")
+            return
+
+        if args.side is None or args.size is None:
+            raise RuntimeError("--side and --size are required unless --place-brackets is set.")
+
+        current_price = fetch_reference_price(exchange, meta.ccxt_symbol)
+        entry_price = args.limit or current_price
+        base_size = calculate_base_size(args.size, entry_price, meta)
 
         logger.info("Reference price: %.2f", current_price)
         logger.info("Computed base size: %.8f %s", base_size, meta.market["base"])
@@ -749,96 +986,92 @@ def main() -> None:
 
         bracket_response = {}
         if not args.dry_run and not skip_bracket:
-            entry_order_id = entry_order.get("id")
-            entry_status = entry_order.get("status")
-            if entry_order_id and entry_status != "closed":
-                logger.info("Waiting for entry order %s to fill before submitting bracket…", entry_order_id)
-                final_state = wait_for_fill(exchange, meta.ccxt_symbol, entry_order_id)
-                if final_state and final_state.get("status") != "closed":
-                    logger.warning("Entry order %s not filled (status=%s); bracket submission skipped.", entry_order_id, final_state.get("status"))
-                    bracket_response = {"error": "entry_not_filled"}
-                else:
-                    bracket_response = {}
-                    if tp1_price is not None and tp1_pct > 0:
-                        size_tp1 = base_size * (tp1_pct / 100.0)
-                        size_tp2 = base_size - size_tp1
-                        if size_tp1 > 0:
-                            bracket_response["tp1"] = place_trigger_bracket_order(
-                                exchange,
-                                meta,
-                                args.side,
-                                size_tp1,
-                                tp1_price,
-                                sl_price,
-                                args.leverage,
-                                args.expiry,
-                                args.dry_run,
-                            )
-                        if size_tp2 > 0:
-                            bracket_response["tp2"] = place_trigger_bracket_order(
-                                exchange,
-                                meta,
-                                args.side,
-                                size_tp2,
-                                tp_price,
-                                sl_price,
-                                args.leverage,
-                                args.expiry,
-                                args.dry_run,
-                            )
+            entry_order_id = None
+            if isinstance(entry_order, dict):
+                entry_order_id = entry_order.get("id") or entry_order.get("order_id")
+                success = entry_order.get("success_response")
+                if isinstance(success, dict):
+                    entry_order_id = entry_order_id or success.get("order_id")
+            if args.limit is not None:
+                if entry_order_id:
+                    logger.info("Waiting for entry order %s to fill before submitting bracket…", entry_order_id)
+                    final_state = wait_for_fill(exchange, meta.ccxt_symbol, entry_order_id)
+                    if final_state and final_state.get("status") != "closed":
+                        logger.warning(
+                            "Entry order %s not filled (status=%s); bracket submission skipped.",
+                            entry_order_id,
+                            final_state.get("status"),
+                        )
+                        bracket_response = {"error": "entry_not_filled"}
+                        if args.bracket_wait_seconds > 0:
+                            try:
+                                service = _load_rest_service()
+                                found_side, position_size = wait_for_open_position(
+                                    service,
+                                    meta.market["id"],
+                                    entry_side=args.side,
+                                    timeout=args.bracket_wait_seconds,
+                                )
+                                if position_size > 0:
+                                    logger.info(
+                                        "Entry filled after wait; submitting brackets for %s (size=%.8f).",
+                                        meta.market["id"],
+                                        position_size,
+                                    )
+                                    bracket_response = submit_brackets(
+                                        exchange,
+                                        meta,
+                                        found_side or args.side,
+                                        position_size,
+                                        tp_price,
+                                        sl_price,
+                                        tp1_price,
+                                        tp1_pct,
+                                        args.leverage,
+                                        args.expiry,
+                                        args.dry_run,
+                                    )
+                                else:
+                                    logger.info(
+                                        "Entry still not filled after %ss; brackets not placed.",
+                                        args.bracket_wait_seconds,
+                                    )
+                            except Exception as exc:
+                                logger.warning("Bracket wait check failed: %s", exc)
                     else:
-                        bracket_response = place_trigger_bracket_order(
+                        bracket_response = submit_brackets(
                             exchange,
                             meta,
                             args.side,
                             base_size,
                             tp_price,
                             sl_price,
-                            args.leverage,
-                            args.expiry,
-                            args.dry_run,
-                        )
-            else:
-                bracket_response = {}
-                if tp1_price is not None and tp1_pct > 0:
-                    size_tp1 = base_size * (tp1_pct / 100.0)
-                    size_tp2 = base_size - size_tp1
-                    if size_tp1 > 0:
-                        bracket_response["tp1"] = place_trigger_bracket_order(
-                            exchange,
-                            meta,
-                            args.side,
-                            size_tp1,
                             tp1_price,
-                            sl_price,
-                            args.leverage,
-                            args.expiry,
-                            args.dry_run,
-                        )
-                    if size_tp2 > 0:
-                        bracket_response["tp2"] = place_trigger_bracket_order(
-                            exchange,
-                            meta,
-                            args.side,
-                            size_tp2,
-                            tp_price,
-                            sl_price,
+                            tp1_pct,
                             args.leverage,
                             args.expiry,
                             args.dry_run,
                         )
                 else:
-                    bracket_response = place_trigger_bracket_order(
-                        exchange,
-                        meta,
-                        args.side,
-                        base_size,
-                        tp_price,
-                        sl_price,
-                        args.leverage,
-                        args.expiry,
-                        args.dry_run,
+                    logger.warning(
+                        "Entry order id unavailable for limit order; bracket submission skipped. "
+                        "Use --place-brackets after fill."
                     )
+                    bracket_response = {"error": "entry_id_missing"}
+            else:
+                bracket_response = submit_brackets(
+                    exchange,
+                    meta,
+                    args.side,
+                    base_size,
+                    tp_price,
+                    sl_price,
+                    tp1_price,
+                    tp1_pct,
+                    args.leverage,
+                    args.expiry,
+                    args.dry_run,
+                )
     except Exception as exc:
         context = (
             f"product={args.product} side={args.side} size={args.size} "
