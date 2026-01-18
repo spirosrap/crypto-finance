@@ -20,6 +20,7 @@
 - Exit slippage now pulls from raw close rows (with order IDs) so results populate under live filters.
 - Slippage lookup now handles Coinbase GetOrderResponse mappings so target prices resolve.
 - Slippage target extraction now handles Coinbase order configuration objects (trigger bracket/stop-limit payloads).
+- Slippage panel now sums exit fees alongside slippage to show total exit cost (fees + slip).
 
 ## January 18, 2026 - Paper TP1 Move-SL Logging
 - Added explicit logging when paper trades move SL to entry after TP1 so the journal reflects those adjustments.

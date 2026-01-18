@@ -277,6 +277,27 @@ def _extract_target_price(order_payload: Any, reason: str) -> Optional[float]:
     return _select_limit_target(config)
 
 
+def _extract_order_fee(order_payload: Any) -> Optional[float]:
+    order = _normalize_order_payload(order_payload)
+    if not order:
+        return None
+    fee_value = _coerce_float(order.get("total_fees"))
+    if fee_value is None:
+        commission = order.get("commission_detail_total")
+        if isinstance(commission, dict):
+            fee_value = _coerce_float(commission.get("total_commission"))
+        else:
+            try:
+                commission_dict = vars(commission)
+            except TypeError:
+                commission_dict = None
+            if isinstance(commission_dict, dict):
+                fee_value = _coerce_float(commission_dict.get("total_commission"))
+    if fee_value is None:
+        fee_value = _coerce_float(order.get("fee"))
+    return fee_value
+
+
 def _compute_exit_slippage(
     exit_price: float,
     target_price: float,
@@ -352,8 +373,10 @@ def build_exit_slippage_table(
             float(target_price),
             str(row.get("position_side") or ""),
         )
+        fee_usd = _extract_order_fee(order_payload) or 0.0
         size = abs(float(row.get("net_size") or 0.0))
         slippage_usd = slippage_price * size
+        total_cost_usd = slippage_usd + fee_usd
         rows.append(
             {
                 "product_id": row.get("product_id"),
@@ -365,6 +388,8 @@ def build_exit_slippage_table(
                 "slippage_price": slippage_price,
                 "slippage_bps": slippage_bps,
                 "slippage_usd": slippage_usd,
+                "fee_usd": fee_usd,
+                "total_cost_usd": total_cost_usd,
                 "order_id": order_id,
             }
         )
@@ -2355,10 +2380,21 @@ def main() -> None:
                     total_slip = float(slippage_df["slippage_usd"].sum())
                     avg_slip = float(slippage_df["slippage_usd"].mean())
                     avg_bps = float(slippage_df["slippage_bps"].mean())
+                    total_fees = float(slippage_df["fee_usd"].sum())
+                    avg_fees = float(slippage_df["fee_usd"].mean())
+                    total_cost = float(slippage_df["total_cost_usd"].sum())
+                    avg_cost = float(slippage_df["total_cost_usd"].mean())
                     slip_cols = st.columns(3)
                     slip_cols[0].metric("Exit slippage (total)", f"{total_slip:+.2f}")
                     slip_cols[1].metric("Exit slippage (avg)", f"{avg_slip:+.2f}")
                     slip_cols[2].metric("Exit slippage (avg bps)", f"{avg_bps:+.2f}")
+
+                    fee_cols = st.columns(3)
+                    fee_cols[0].metric("Exit fees (total)", f"{total_fees:+.2f}")
+                    fee_cols[1].metric("Exit fees (avg)", f"{avg_fees:+.2f}")
+                    fee_cols[2].metric("Exit cost (fees+slip)", f"{total_cost:+.2f}")
+
+                    st.caption(f"Avg exit cost per order: {avg_cost:+.2f}")
                     st.dataframe(
                         slippage_df.sort_values("closed_at", ascending=False).head(50),
                         use_container_width=True,

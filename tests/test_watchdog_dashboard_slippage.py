@@ -6,6 +6,7 @@ import pandas as pd
 from watchdog_dashboard import (
     _compute_exit_slippage,
     _extract_target_price,
+    _extract_order_fee,
     build_exit_slippage_table,
 )
 
@@ -35,6 +36,23 @@ class TestWatchdogDashboardSlippage(unittest.TestCase):
         }
         self.assertEqual(_extract_target_price(order, "stop_loss"), 95.0)
         self.assertEqual(_extract_target_price(order, "take_profit"), 94.0)
+
+    def test_extract_order_fee(self):
+        order = {
+            "total_fees": "1.25",
+            "commission_detail_total": {"total_commission": "2.00"},
+            "fee": "0.50",
+        }
+        self.assertEqual(_extract_order_fee(order), 1.25)
+
+        order = {
+            "commission_detail_total": {"total_commission": "2.00"},
+            "fee": "0.50",
+        }
+        self.assertEqual(_extract_order_fee(order), 2.0)
+
+        order = {"fee": "0.50"}
+        self.assertEqual(_extract_order_fee(order), 0.5)
 
     def test_compute_exit_slippage(self):
         slippage_price, slippage_bps = _compute_exit_slippage(95.0, 100.0, "LONG")
@@ -78,7 +96,8 @@ class TestWatchdogDashboardSlippage(unittest.TestCase):
                             "limit_price": "100",
                             "stop_trigger_price": "90",
                         }
-                    }
+                    },
+                    "total_fees": "0.50",
                 }
             return {
                 "order_configuration": {
@@ -86,7 +105,8 @@ class TestWatchdogDashboardSlippage(unittest.TestCase):
                         "limit_price": "100",
                         "stop_trigger_price": "110",
                     }
-                }
+                },
+                "fee": "0.25",
             }
 
         result = build_exit_slippage_table(trades, fetch_order, max_orders=0)
@@ -94,6 +114,8 @@ class TestWatchdogDashboardSlippage(unittest.TestCase):
         self.assertIn("slippage_usd", result.columns)
         slippage_values = sorted(result["slippage_usd"].tolist())
         self.assertEqual(slippage_values, [5.0, 10.0])
+        fee_values = sorted(result["fee_usd"].tolist())
+        self.assertEqual(fee_values, [0.25, 0.5])
 
 
 if __name__ == "__main__":
