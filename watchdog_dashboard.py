@@ -2417,9 +2417,12 @@ def main() -> None:
                     fee_cols = st.columns(3)
                     fee_cols[0].metric("Exit fees (total)", f"{total_fees:+.2f}")
                     fee_cols[1].metric("Exit fees (avg)", f"{avg_fees:+.2f}")
-                    fee_cols[2].metric("Exit cost (fees+slip)", f"{total_cost:+.2f}")
+                    fee_cols[2].metric("Exit fees + net slippage", f"{total_cost:+.2f}")
 
-                    st.caption(f"Avg exit cost per order: {avg_cost:+.2f}")
+                    st.caption(
+                        f"Avg exit fees + net slippage per order: {avg_cost:+.2f} "
+                        "(exit orders only — not the fills panel)"
+                    )
                     st.markdown("**Breakdown by closure reason**")
                     reason_df = slippage_df.copy()
                     reason_df["closure_reason"] = reason_df["closure_reason"].fillna("unknown").astype(str)
