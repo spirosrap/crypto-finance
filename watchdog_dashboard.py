@@ -85,6 +85,53 @@ LOG_HEARTBEAT_STALE_MULTIPLIER = 3.0
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
 
 
+@st.cache_data(ttl=60)
+def fetch_intx_balance() -> Dict[str, float]:
+    """Fetch actual INTX portfolio balance from Coinbase.
+
+    Returns dict with keys: total_balance, unrealized_pnl, available_balance.
+    Cached for 60 seconds to avoid rate limits.
+    """
+    result = {"total_balance": 0.0, "unrealized_pnl": 0.0, "available_balance": 0.0, "error": None}
+    if not API_KEY_PERPS or not API_SECRET_PERPS:
+        result["error"] = "No API credentials configured"
+        return result
+
+    try:
+        cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
+        portfolios = cb.client.get_portfolios()
+        intx_uuid = None
+        if hasattr(portfolios, "portfolios"):
+            for p in portfolios.portfolios:
+                pdict = p if isinstance(p, dict) else getattr(p, "__dict__", {})
+                if pdict.get("type") == "INTX":
+                    intx_uuid = pdict.get("uuid")
+                    break
+
+        if not intx_uuid:
+            result["error"] = "INTX portfolio not found"
+            return result
+
+        breakdown = cb.client.get_portfolio_breakdown(intx_uuid)
+        if hasattr(breakdown, "breakdown"):
+            bd = breakdown.breakdown
+            if hasattr(bd, "portfolio_balances"):
+                bal = bd.portfolio_balances
+                if hasattr(bal, "total_balance"):
+                    tb = bal.total_balance
+                    result["total_balance"] = float(tb.get("value", 0) if isinstance(tb, dict) else getattr(tb, "value", 0))
+                if hasattr(bal, "perp_unrealized_pnl"):
+                    upnl = bal.perp_unrealized_pnl
+                    result["unrealized_pnl"] = float(upnl.get("value", 0) if isinstance(upnl, dict) else getattr(upnl, "value", 0))
+                if hasattr(bal, "total_cash_equivalent_balance"):
+                    avail = bal.total_cash_equivalent_balance
+                    result["available_balance"] = float(avail.get("value", 0) if isinstance(avail, dict) else getattr(avail, "value", 0))
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
+
+
 def load_watchdog_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"{path} not found")
@@ -1934,6 +1981,42 @@ def main() -> None:
     summary_row3[1].metric("Worst day", f"{metrics['worst_day']:.2f}")
     summary_row3[2].metric("Max drawdown", f"{metrics['max_drawdown']:.2f}")
     summary_row3[3].metric("Max drawdown %", f"{metrics['max_drawdown_pct']:.2f}%")
+
+    # Show actual Coinbase balance for live mode
+    if source_mode == "live":
+        intx_balance = fetch_intx_balance()
+        if intx_balance.get("error"):
+            st.caption(f"Could not fetch actual balance: {intx_balance['error']}")
+        else:
+            actual_bal = intx_balance["total_balance"]
+            unrealized = intx_balance["unrealized_pnl"]
+            calculated_equity = metrics["ending_equity"]
+            # Delta = calculated - actual (positive means CSV overstates, likely due to fees)
+            delta_fees = calculated_equity - actual_bal
+
+            balance_row = st.columns(4)
+            balance_row[0].metric(
+                "Actual Balance",
+                f"${actual_bal:.2f}",
+                help="Real-time balance from Coinbase INTX portfolio",
+            )
+            balance_row[1].metric(
+                "Unrealized P&L",
+                f"${unrealized:+.2f}",
+                help="Unrealized P&L from open positions",
+            )
+            balance_row[2].metric(
+                "Fees & Slippage",
+                f"${delta_fees:+.2f}",
+                delta=f"{delta_fees:+.2f}",
+                delta_color="inverse",
+                help="Difference between calculated equity and actual balance (fees, funding, slippage)",
+            )
+            balance_row[3].metric(
+                "Actual P&L",
+                f"${actual_bal - starting_equity:+.2f}",
+                help=f"Actual profit/loss from starting equity (${starting_equity:.2f})",
+            )
 
     recent_window = metrics.get("recent_trade_window", 0)
     recent_cols = st.columns(3)
