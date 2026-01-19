@@ -11,6 +11,10 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit now auto‑close live/paper and suppress new entries until the daily reset or a confirmed daily close re-enters range±buffer (latched; intraday moves don’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live resumed after the Jan 1 stop and is stronger post‑guard; paper resumed after its halt and is catching up. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 19, 2026 - Move-SL Bracket Safety + Price Formatting
+- Watchdog now places the replacement TP/SL bracket *before* canceling existing stops so a failed replace never leaves positions unprotected.
+- Replacement bracket prices are rounded/formatted to the product’s increment (cache/CCXT) to reduce INVALID_LIMIT_PRICE preview rejections.
+
 ## January 18, 2026 - Move-SL Bracket Clamped to Market
 - When moving SL to entry after TP1, watchdog now clamps the SL to a valid side of market if the entry is on the wrong side (prevents Coinbase invalid stop errors).
 - The replacement bracket still preserves TP and remaining size; cron `--move-sl-after-tp1` now succeeds even if entry is above/below market.

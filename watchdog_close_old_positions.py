@@ -381,6 +381,86 @@ def _compute_end_time(exp: str) -> str:
     return end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+_MARKET_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _load_cached_markets() -> Dict[str, Any]:
+    global _MARKET_CACHE
+    if _MARKET_CACHE is not None:
+        return _MARKET_CACHE
+    cache_path = REPO_ROOT / "cache" / "coinbaseadvanced_markets.json"
+    if not cache_path.exists():
+        _MARKET_CACHE = {}
+        return _MARKET_CACHE
+    try:
+        _MARKET_CACHE = json.loads(cache_path.read_text())
+    except Exception:
+        _MARKET_CACHE = {}
+    return _MARKET_CACHE
+
+
+def _lookup_price_increment_cached(product_id: str) -> Optional[float]:
+    markets = _load_cached_markets()
+    if not markets:
+        return None
+    pid = (product_id or "").upper()
+    for entry in markets.values():
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("id", "")).upper() != pid:
+            continue
+        info = entry.get("info", {}) if isinstance(entry.get("info", {}), dict) else {}
+        inc = _coerce_numeric(info.get("price_increment"))
+        if inc:
+            return float(inc)
+        prec = entry.get("precision", {}) if isinstance(entry.get("precision", {}), dict) else {}
+        inc = _coerce_numeric(prec.get("price"))
+        if inc:
+            return float(inc)
+    return None
+
+
+def _resolve_price_increment(
+    exchange: "ccxt.Exchange",
+    ccxt_symbol: str,
+    product_id: str,
+) -> float:
+    inc = None
+    try:
+        market = exchange.market(ccxt_symbol)
+        if isinstance(market, dict):
+            prec = market.get("precision", {}) if isinstance(market.get("precision", {}), dict) else {}
+            inc = _coerce_numeric(prec.get("price"))
+    except Exception:
+        inc = None
+    if not inc:
+        inc = _lookup_price_increment_cached(product_id)
+    if not inc:
+        inc = 0.01
+    return float(inc)
+
+
+def _decimals_from_increment(inc: float) -> int:
+    if inc >= 1:
+        return 0
+    s = f"{inc:.12f}".rstrip("0").rstrip(".")
+    if "." in s:
+        return max(0, len(s.split(".")[1]))
+    return 0
+
+
+def _round_to_increment(value: float, inc: float) -> float:
+    if inc <= 0:
+        return value
+    steps = round(value / inc)
+    return steps * inc
+
+
+def _format_price(value: float, inc: float) -> str:
+    decimals = _decimals_from_increment(inc)
+    return f"{value:.{decimals}f}"
+
+
 def _place_bracket_order(
     exchange: "ccxt.Exchange",
     ccxt_symbol: str,
@@ -397,6 +477,11 @@ def _place_bracket_order(
 
     bracket_side = "SELL" if side == "LONG" else "BUY"
     end_time = end_time_override or _compute_end_time(expiry)
+    price_increment = _resolve_price_increment(exchange, ccxt_symbol, product_id)
+    tp_rounded = _round_to_increment(tp_price, price_increment)
+    sl_rounded = _round_to_increment(sl_price, price_increment)
+    tp_str = _format_price(tp_rounded, price_increment)
+    sl_str = _format_price(sl_rounded, price_increment)
 
     payload = {
         "client_order_id": f"sl-moved-{int(time.time()*1000)}",
@@ -405,18 +490,20 @@ def _place_bracket_order(
         "order_configuration": {
             "trigger_bracket_gtd": {
                 "base_size": exchange.amount_to_precision(ccxt_symbol, size),
-                "limit_price": exchange.price_to_precision(ccxt_symbol, tp_price),
-                "stop_trigger_price": exchange.price_to_precision(ccxt_symbol, sl_price),
+                "limit_price": tp_str,
+                "stop_trigger_price": sl_str,
                 "end_time": end_time,
             }
         },
     }
 
     logger.info(
-        "Placing new bracket for %s (tp=%s, sl=%s, size=%s, side=%s)",
+        "Placing new bracket for %s (tp=%s→%s, sl=%s→%s, size=%s, side=%s)",
         product_id,
         tp_price,
+        tp_str,
         sl_price,
+        sl_str,
         size,
         bracket_side,
     )
@@ -457,6 +544,8 @@ def _select_tp_from_brackets(
         if not cfg:
             continue
         tp_price = _coerce_numeric(cfg.get("limit_price"))
+        if tp_price is None:
+            tp_price = _coerce_numeric(cfg.get("take_profit_price"))
         if tp_price is None:
             continue
         end_time = cfg.get("end_time")
@@ -547,21 +636,6 @@ def _move_sl_to_entry_for_partial(
         )
         return True
 
-    # Cancel existing orders
-    canceled_count = 0
-    for order in stop_orders:
-        order_id = order.get("id")
-        try:
-            exchange.cancel_order(order_id, ccxt_symbol)
-            logger.info("Canceled stop order %s for %s", order_id, product_id)
-            canceled_count += 1
-        except Exception as exc:
-            logger.warning("Failed to cancel order %s: %s", order_id, exc)
-
-    if canceled_count == 0:
-        logger.warning("Could not cancel any stop orders for %s; skipping SL move", product_id)
-        return False
-
     # Place new bracket with TP preserved and SL moved to entry
     result = _place_bracket_order(
         exchange,
@@ -573,7 +647,30 @@ def _move_sl_to_entry_for_partial(
         sl_price,
         end_time_override=end_time,
     )
-    return result is not None
+    if result is None:
+        logger.warning(
+            "Failed to place replacement bracket for %s; leaving existing stop orders intact",
+            product_id,
+        )
+        return False
+
+    # Cancel existing orders after replacement is confirmed
+    canceled_count = 0
+    for order in stop_orders:
+        order_id = order.get("id")
+        try:
+            exchange.cancel_order(order_id, ccxt_symbol)
+            logger.info("Canceled stop order %s for %s", order_id, product_id)
+            canceled_count += 1
+        except Exception as exc:
+            logger.warning("Failed to cancel order %s: %s", order_id, exc)
+
+    if canceled_count == 0:
+        logger.warning(
+            "Placed replacement bracket for %s but failed to cancel old stop orders; manual cleanup may be required",
+            product_id,
+        )
+    return True
 
 
 def _process_sl_moves_after_tp1(
