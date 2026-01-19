@@ -14,6 +14,7 @@
 ## January 19, 2026 - Move-SL Bracket Safety + Price Formatting
 - Watchdog now places the replacement TP/SL bracket *before* canceling existing stops so a failed replace never leaves positions unprotected.
 - Replacement bracket prices are rounded/formatted to the product’s increment (cache/CCXT) to reduce INVALID_LIMIT_PRICE preview rejections.
+- Move-SL now prefers the fill-derived entry price (pre‑partial) over Coinbase’s post‑partial VWAP for the new bracket SL.
 
 ## January 18, 2026 - Move-SL Bracket Clamped to Market
 - When moving SL to entry after TP1, watchdog now clamps the SL to a valid side of market if the entry is on the wrong side (prevents Coinbase invalid stop errors).

@@ -573,7 +573,8 @@ def _move_sl_to_entry_for_partial(
     """
     logger = logging.getLogger(__name__)
     product_id = event.product_id
-    entry_price = position_info.get("entry_price")
+    entry_price = event.entry_price if getattr(event, "entry_price", None) else position_info.get("entry_price")
+    entry_source = "fill" if getattr(event, "entry_price", None) else "position"
     remaining_size = abs(position_info.get("net_size", 0))
     side = position_info.get("side", event.side)
 
@@ -607,15 +608,16 @@ def _move_sl_to_entry_for_partial(
     sl_price, clamped = _clamp_sl_to_market(entry_price, current_price, side)
     if clamped:
         logger.warning(
-            "Entry SL %.6f invalid vs current %.6f for %s; clamped SL to %.6f",
+            "Entry SL %.6f (%s) invalid vs current %.6f for %s; clamped SL to %.6f",
             entry_price,
+            entry_source,
             current_price if current_price is not None else float("nan"),
             product_id,
             sl_price,
         )
 
     # Cancel existing stop orders and place new one at entry
-    sl_label = "entry" if not clamped else "clamped"
+    sl_label = f"entry[{entry_source}]" if not clamped else "clamped"
     logger.info(
         "Found %d stop order(s) for %s; canceling and moving SL to %s %.6f (tp=%.6f)",
         len(stop_orders),
