@@ -29,6 +29,7 @@
 ## January 20, 2026 - Move-SL Brackets Now Send Leverage
 - Watchdog now includes `leverage` + `margin_type=CROSS` when reissuing TP/SL brackets after TP1.
 - Bracket leverage is pulled from the live position payload, mirroring the ccxt trade entry behavior.
+- Documented the move‑SL leverage behavior in `README.md`.
 
 ## January 20, 2026 - BTC Dust Threshold Raised
 - BTC position closed; ~$9 dust remained open because the dust threshold was $5.
