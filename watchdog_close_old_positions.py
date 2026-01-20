@@ -300,10 +300,22 @@ def _get_positions_with_entry(cb: CoinbaseService) -> Dict[str, Dict[str, Any]]:
             if entry_price is not None:
                 break
 
+        leverage = None
+        for key in ('leverage', 'current_leverage', 'lever'):
+            val = pos.get(key) if isinstance(pos, dict) else getattr(pos, key, None)
+            if val is None:
+                continue
+            try:
+                leverage = float(val)
+                break
+            except (TypeError, ValueError):
+                continue
+
         result[symbol] = {
             "net_size": net_size,
             "entry_price": entry_price,
             "side": side,
+            "leverage": leverage,
         }
 
     return result
@@ -469,6 +481,7 @@ def _place_bracket_order(
     size: float,
     tp_price: float,
     sl_price: float,
+    leverage: Optional[float] = None,
     expiry: str = "30d",
     end_time_override: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -496,6 +509,9 @@ def _place_bracket_order(
             }
         },
     }
+    if leverage:
+        payload["leverage"] = str(leverage)
+        payload["margin_type"] = "CROSS"
 
     logger.info(
         "Placing new bracket for %s (tp=%s→%s, sl=%s→%s, size=%s, side=%s)",
@@ -577,6 +593,7 @@ def _move_sl_to_entry_for_partial(
     entry_source = "fill" if getattr(event, "entry_price", None) else "position"
     remaining_size = abs(position_info.get("net_size", 0))
     side = position_info.get("side", event.side)
+    leverage = position_info.get("leverage")
 
     if entry_price is None:
         logger.warning("Cannot move SL for %s: entry price unknown", product_id)
@@ -647,6 +664,7 @@ def _move_sl_to_entry_for_partial(
         remaining_size,
         tp_price,
         sl_price,
+        leverage=leverage,
         end_time_override=end_time,
     )
     if result is None:

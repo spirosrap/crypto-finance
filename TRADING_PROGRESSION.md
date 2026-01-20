@@ -22,6 +22,14 @@
 - Reclassified prior `partial_take` rows in `trade_logs/watchdog_closed_positions.csv` as `partial_tp` or `partial_sl`.
 - Watchdog now labels partial fills as TP vs SL based on entry/exit direction so new rows are tagged correctly.
 
+## January 20, 2026 - Margin Buffer for 1x Leverage
+- Live positions are still reporting leverage=1 even when entries send leverage=50, which tightens margin headroom.
+- Operationally keeping a larger INTX margin buffer to avoid “insufficient funds” on new entries.
+
+## January 20, 2026 - Move-SL Brackets Now Send Leverage
+- Watchdog now includes `leverage` + `margin_type=CROSS` when reissuing TP/SL brackets after TP1.
+- Bracket leverage is pulled from the live position payload, mirroring the ccxt trade entry behavior.
+
 ## January 20, 2026 - BTC Dust Threshold Raised
 - BTC position closed; ~$9 dust remained open because the dust threshold was $5.
 - Raising dust threshold to $10 to auto-close small remnants like this.
