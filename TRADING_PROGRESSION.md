@@ -15,6 +15,10 @@
 - BTC position closed; ~$9 dust remained open because the dust threshold was $5.
 - Raising dust threshold to $10 to auto-close small remnants like this.
 
+## January 20, 2026 - Leverage Request vs Position Leverage
+- Gate-scan entries sent `leverage=50` in Coinbase order payloads, but live positions reported leverage 1 on the INTX portfolio.
+- Order fetch confirmed leverage=50 was accepted on the entry orders; positions still reflected 1x, so Coinbase appears to enforce 1x at the position/account level.
+
 ## January 19, 2026 - DOGE Excluded from Perps Pipeline
 - Reviewed 168 closed trades from `watchdog_closed_positions.csv`; DOGE showed a poor win rate with 10+ stop losses vs ~3 take profits.
 - Added `DOGE-PERP-INTX` to `config/excluded_perps.txt` to filter it from future gate-scan entries.
