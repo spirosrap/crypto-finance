@@ -207,9 +207,9 @@ def _select_bracket_target(config: Dict[str, Any], reason: str) -> Optional[floa
         tp_price = _coerce_float(bracket.get("limit_price"))
         sl_price = _coerce_float(bracket.get("stop_trigger_price"))
         normalized = (reason or "").lower()
-        if normalized in {"stop_loss", "expired_breakeven"} and sl_price is not None:
+        if normalized in {"stop_loss", "expired_breakeven", "partial_sl"} and sl_price is not None:
             return sl_price
-        if normalized in {"take_profit", "partial_take"} and tp_price is not None:
+        if normalized in {"take_profit", "partial_take", "partial_tp"} and tp_price is not None:
             return tp_price
         return tp_price if tp_price is not None else sl_price
     return None
@@ -233,7 +233,7 @@ def _select_stop_limit_target(config: Dict[str, Any], reason: str) -> Optional[f
         stop_price = _coerce_float(stop_cfg.get("stop_price") or stop_cfg.get("stop_trigger_price"))
         limit_price = _coerce_float(stop_cfg.get("limit_price"))
         normalized = (reason or "").lower()
-        if normalized in {"stop_loss", "expired_breakeven"} and stop_price is not None:
+        if normalized in {"stop_loss", "expired_breakeven", "partial_sl"} and stop_price is not None:
             return stop_price
         return limit_price if limit_price is not None else stop_price
     return None
@@ -264,6 +264,11 @@ def _classify_partial_leg(
     tp_dist = abs(exit_price - tp_price)
     sl_dist = abs(exit_price - sl_price)
     return "tp" if tp_dist <= sl_dist else "sl"
+
+
+def _is_partial_reason(reason: str) -> bool:
+    normalized = (reason or "").lower()
+    return normalized == "partial_take" or normalized.startswith("partial_")
 
 
 def _extract_target_price(order_payload: Any, reason: str) -> Optional[float]:
@@ -375,12 +380,20 @@ def build_exit_slippage_table(
         target_leg = None
         target_price = None
 
-        if closure_reason.lower() == "partial_take" and (tp_price is not None or sl_price is not None):
-            target_leg = _classify_partial_leg(exit_price, tp_price, sl_price)
-            if target_leg == "tp":
-                target_price = tp_price
-            elif target_leg == "sl":
-                target_price = sl_price
+        normalized_reason = closure_reason.lower()
+        if _is_partial_reason(normalized_reason) and (tp_price is not None or sl_price is not None):
+            if normalized_reason == "partial_tp":
+                target_leg = "tp"
+                target_price = tp_price if tp_price is not None else sl_price
+            elif normalized_reason == "partial_sl":
+                target_leg = "sl"
+                target_price = sl_price if sl_price is not None else tp_price
+            else:
+                target_leg = _classify_partial_leg(exit_price, tp_price, sl_price)
+                if target_leg == "tp":
+                    target_price = tp_price
+                elif target_leg == "sl":
+                    target_price = sl_price
 
         if target_price is None:
             target_price = _extract_target_price(order_payload, closure_reason)
@@ -457,7 +470,10 @@ def collapse_trade_rows(df: pd.DataFrame, include_partial_only: bool = False) ->
         profit_loss=("profit_loss", "sum"),
         abs_size=("_abs_size", lambda s: s.sum(min_count=1)),
         pl_pct_weight=("_pl_pct_weighted", lambda s: s.sum(min_count=1)),
-        has_non_partial=("closure_reason", lambda s: (s.astype(str).str.lower() != "partial_take").any()),
+        has_non_partial=(
+            "closure_reason",
+            lambda s: (~s.astype(str).str.lower().apply(_is_partial_reason)).any(),
+        ),
     ).reset_index()
 
     aggregated["profit_loss_pct"] = np.where(
@@ -504,7 +520,7 @@ def filter_paper_trade_batches(df: pd.DataFrame, include_partials: bool = False)
         if "partial_only" in trades.columns:
             partial_mask = trades["partial_only"].fillna(False)
         elif "closure_reason" in trades.columns:
-            partial_mask = trades["closure_reason"].astype(str).str.lower().eq("partial_take")
+            partial_mask = trades["closure_reason"].astype(str).str.lower().apply(_is_partial_reason)
         else:
             partial_mask = False
         if not isinstance(partial_mask, pd.Series):
@@ -1623,7 +1639,7 @@ def main() -> None:
     include_partials = st.sidebar.checkbox(
         "Include partial exits",
         value=include_partials_default,
-        help="Include partial_take-only closures in metrics/filters before a full close.",
+        help="Include partial TP/SL closures in metrics/filters before a full close.",
     )
     if isinstance(st.session_state.get("dashboard_state"), dict):
         existing_filters = st.session_state["dashboard_state"].get("date_filters", {})
