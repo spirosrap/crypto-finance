@@ -1481,6 +1481,26 @@ def _reason_priority(reason: str) -> int:
     return order.get(normalized, 1)
 
 
+def _is_partial_reason(reason: str) -> bool:
+    normalized = (reason or '').strip().lower()
+    return normalized.startswith('partial_') or normalized == 'partial_take'
+
+
+def _classify_partial_reason(
+    side: str,
+    entry_price: Optional[float],
+    exit_price: Optional[float],
+    *,
+    eps: float = 1e-9,
+) -> str:
+    if entry_price is None or exit_price is None:
+        return 'partial_take'
+    side_norm = (side or '').strip().upper()
+    if side_norm == 'SHORT':
+        return 'partial_tp' if exit_price <= entry_price + eps else 'partial_sl'
+    return 'partial_tp' if exit_price >= entry_price - eps else 'partial_sl'
+
+
 def _parse_log_float(value: str) -> Optional[float]:
     if value is None:
         return None
@@ -1737,7 +1757,7 @@ def _logged_partial_totals_for_cycle(
         for row in reader:
             if (row.get('product_id') or '') != cycle.product_id:
                 continue
-            if (row.get('closure_reason') or '').strip().lower() != 'partial_take':
+            if not _is_partial_reason(row.get('closure_reason', '')):
                 continue
             order_id = (row.get('order_id') or '').strip()
             if order_id and order_id in exclude:
@@ -2215,6 +2235,7 @@ def _partial_to_record(
                 "Failed to derive MAE/MFE for partial %s: %s", event.product_id, exc
             )
 
+    closure_reason = _classify_partial_reason(event.side, event.entry_price, event.exit_price)
     record = _create_closure_record(
         product_id=event.product_id,
         position_side=event.side,
@@ -2225,7 +2246,7 @@ def _partial_to_record(
         entry_price=event.entry_price,
         exit_price=event.exit_price,
         pnl=event.realized_pnl,
-        closure_reason='partial_take',
+        closure_reason=closure_reason,
         mae=mae,
         mfe=mfe,
         order_id=event.order_id,

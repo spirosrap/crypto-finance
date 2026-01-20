@@ -18,6 +18,10 @@
 - **Half size** if expectancy is between 0.00 and 0.24 **or** profit factor is between 0.90 and 0.99.
 - **Pause live** if expectancy < 0.00 **or** profit factor < 0.90.
 
+## January 20, 2026 - Partial Exit Labeling Fixed
+- Reclassified prior `partial_take` rows in `trade_logs/watchdog_closed_positions.csv` as `partial_tp` or `partial_sl`.
+- Watchdog now labels partial fills as TP vs SL based on entry/exit direction so new rows are tagged correctly.
+
 ## January 20, 2026 - BTC Dust Threshold Raised
 - BTC position closed; ~$9 dust remained open because the dust threshold was $5.
 - Raising dust threshold to $10 to auto-close small remnants like this.
