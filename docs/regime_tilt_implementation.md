@@ -62,44 +62,90 @@ All changes are in `scripts/symbol_snapshot.py`. No changes to `run_gate_scan_pa
 **Location:** After `_vol_regime_ratios()` function (~line 710)
 
 ```python
+import logging
+
+_logger = logging.getLogger(__name__)
+
+# BTC symbol fallback list - finder may expect different formats
+_BTC_SYMBOLS = ["BTC", "BTC-USD", "BTC-USDT", "BTCUSD"]
+
+
 def _detect_btc_regime(
     finder: "ShortTermCryptoFinder",
     ema_period: int = 20,
     confirm_days: int = 2,
+    buffer_bps: float = 0.0,
 ) -> str:
     """
     Detect BTC trend regime based on daily close vs EMA.
 
+    Args:
+        finder: ShortTermCryptoFinder instance for candle data
+        ema_period: EMA period (default 20)
+        confirm_days: Consecutive closes required to confirm regime (default 2)
+        buffer_bps: Buffer in basis points to reduce whipsaw (e.g., 20 = 0.2%)
+                    Bullish requires close > EMA * (1 + buffer_bps/10000)
+                    Bearish requires close < EMA * (1 - buffer_bps/10000)
+
     Returns:
-        'bullish' - BTC above EMA for confirm_days consecutive closes
-        'bearish' - BTC below EMA for confirm_days consecutive closes
+        'bullish' - BTC above EMA (+buffer) for confirm_days consecutive closes
+        'bearish' - BTC below EMA (-buffer) for confirm_days consecutive closes
         'neutral' - Mixed or insufficient data
     """
+    # Try multiple BTC symbol formats
+    df = None
+    used_symbol = None
+    for btc_symbol in _BTC_SYMBOLS:
+        try:
+            df = finder._get_candle_data(btc_symbol, interval="1d", limit=ema_period + confirm_days + 5)
+            if df is not None and len(df) >= ema_period + confirm_days:
+                used_symbol = btc_symbol
+                break
+        except Exception:
+            continue
+
+    if df is None or len(df) < ema_period + confirm_days:
+        _logger.warning("Regime detection: could not fetch BTC daily candles; defaulting to neutral")
+        return "neutral"
+
     try:
-        # Fetch BTC daily candles
-        btc_symbol = "BTC"
-        df = finder._get_candle_data(btc_symbol, interval="1d", limit=ema_period + confirm_days + 5)
-        if df is None or len(df) < ema_period + confirm_days:
-            return "neutral"
+        # Sort and drop incomplete current candle if present
+        df = df.sort_index()
+        # Check if last candle is incomplete (timestamp is today UTC)
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc)
+        last_ts = df.index[-1]
+        if hasattr(last_ts, 'date') and last_ts.date() == now_utc.date():
+            # Last candle is today (incomplete) - drop it
+            df = df.iloc[:-1]
+            if len(df) < ema_period + confirm_days:
+                _logger.warning("Regime detection: insufficient confirmed candles after dropping incomplete")
+                return "neutral"
 
         # Calculate EMA
-        df = df.sort_index()
         df["ema"] = df["close"].ewm(span=ema_period, adjust=False).mean()
 
-        # Check last N closes vs EMA
+        # Apply buffer
+        buffer_mult = buffer_bps / 10000.0
+        df["ema_upper"] = df["ema"] * (1 + buffer_mult)
+        df["ema_lower"] = df["ema"] * (1 - buffer_mult)
+
+        # Check last N confirmed closes vs EMA (with buffer)
         recent = df.tail(confirm_days)
-        above_count = (recent["close"] > recent["ema"]).sum()
-        below_count = (recent["close"] < recent["ema"]).sum()
+        above_count = (recent["close"] > recent["ema_upper"]).sum()
+        below_count = (recent["close"] < recent["ema_lower"]).sum()
 
         if above_count == confirm_days:
+            _logger.info(f"Regime detection ({used_symbol}): BULLISH - {confirm_days} closes above EMA{ema_period} (+{buffer_bps}bps)")
             return "bullish"
         elif below_count == confirm_days:
+            _logger.info(f"Regime detection ({used_symbol}): BEARISH - {confirm_days} closes below EMA{ema_period} (-{buffer_bps}bps)")
             return "bearish"
         else:
+            _logger.info(f"Regime detection ({used_symbol}): NEUTRAL - mixed signals in last {confirm_days} closes")
             return "neutral"
     except Exception as e:
-        # Log but don't fail - default to neutral
-        print(f"Regime detection error: {e}")
+        _logger.error(f"Regime detection error: {e}")
         return "neutral"
 ```
 
@@ -130,6 +176,12 @@ parser.add_argument(
     type=float,
     default=70.0,
     help="Percentage allocation for favored side when regime active (default: 70).",
+)
+parser.add_argument(
+    "--regime-buffer-bps",
+    type=float,
+    default=0.0,
+    help="Buffer in basis points to reduce whipsaw (e.g., 20 = 0.2%%). Default: 0 (no buffer).",
 )
 ```
 
@@ -228,9 +280,11 @@ def _select_balanced_rows(
             finder,
             ema_period=regime_ema_period,
             confirm_days=regime_confirm_days,
+            buffer_bps=regime_buffer_bps,
         )
         tilt_pct_display = regime_tilt_pct if regime != "neutral" else 50
-        print(f"Regime: {regime.upper()} (BTC vs {regime_ema_period} EMA, {regime_confirm_days}d confirm) → {tilt_pct_display:.0f}/{100-tilt_pct_display:.0f} tilt")
+        buffer_note = f", {regime_buffer_bps:.0f}bps buffer" if regime_buffer_bps > 0 else ""
+        print(f"Regime: {regime.upper()} (BTC vs {regime_ema_period} EMA, {regime_confirm_days}d confirm{buffer_note}) → {tilt_pct_display:.0f}/{100-tilt_pct_display:.0f} tilt")
 ```
 
 ### 5. Update `gate_scan()` Function Signature
@@ -246,6 +300,7 @@ def gate_scan(
     regime_ema_period: int,      # ADD
     regime_confirm_days: int,    # ADD
     regime_tilt_pct: float,      # ADD
+    regime_buffer_bps: float,    # ADD
     perf_filter: bool,
     ...
 ```
@@ -326,6 +381,7 @@ gate_scan(
     regime_ema_period=args.regime_ema_period,
     regime_confirm_days=args.regime_confirm_days,
     regime_tilt_pct=args.regime_tilt_pct,
+    regime_buffer_bps=args.regime_buffer_bps,
     perf_filter=args.perf_filter,
     ...
 )
@@ -366,6 +422,12 @@ python scripts/symbol_snapshot.py --gate-scan --balanced --regime-tilt --regime-
 # Faster regime detection (10 EMA, 1-day confirm)
 python scripts/symbol_snapshot.py --gate-scan --balanced --regime-tilt --regime-ema-period 10 --regime-confirm-days 1 --top 15
 
+# Add buffer to reduce whipsaw in choppy markets (20bps = 0.2%)
+python scripts/symbol_snapshot.py --gate-scan --balanced --regime-tilt --regime-buffer-bps 20 --top 15
+
+# Conservative: 3-day confirm + buffer for choppy conditions
+python scripts/symbol_snapshot.py --gate-scan --balanced --regime-tilt --regime-confirm-days 3 --regime-buffer-bps 20 --top 15
+
 # Check regime only (dry run)
 python scripts/symbol_snapshot.py --gate-scan --balanced --regime-tilt --top 15 2>&1 | grep "Regime:"
 ```
@@ -402,6 +464,35 @@ To disable regime tilt without code changes, simply remove `--regime-tilt` from 
 
 ---
 
+## Observability & Monitoring
+
+### Suppression Logging
+
+Track suppression frequency to ensure the reversal guard isn't overly strict. Add a counter in `gate_scan()`:
+
+```python
+# At module level or in gate_scan scope
+_suppression_counts = {"total": 0, "regime_bullish": 0, "regime_bearish": 0, "regime_neutral": 0}
+
+# After _select_balanced_rows returns
+if balance_meta.get("suppressed"):
+    _suppression_counts["total"] += 1
+    _suppression_counts[f"regime_{regime}"] += 1
+    _logger.info(f"Gate-scan suppressed (total={_suppression_counts['total']}): {regime} regime, L={balance_meta['longs']}, S={balance_meta['shorts']}")
+```
+
+If suppression rate exceeds ~30-40% over a week, consider loosening the minimum requirement or adding a fallback mode.
+
+### Dashboard Integration
+
+Surface regime in `watchdog_dashboard.py` so you can track if tilt helps:
+
+1. **Current regime indicator** - Show detected regime (bullish/bearish/neutral) in dashboard header
+2. **Regime history** - Log regime changes to a file for post-hoc analysis
+3. **P&L by regime** - Split closed trade stats by the regime active at entry time
+
+---
+
 ## Future Enhancements (Optional)
 
 1. **Multi-timeframe confirmation**: Check 4h + daily alignment
@@ -409,20 +500,26 @@ To disable regime tilt without code changes, simply remove `--regime-tilt` from 
 3. **Volatility adjustment**: Reduce tilt during high VIX/volatility periods
 4. **Per-symbol regime**: Check each alt vs its own EMA (more complex)
 5. **Gradual tilt**: 60/40 for weak regime, 70/30 for strong regime
+6. **Regime buffer auto-tune**: Increase buffer automatically in choppy markets (high whipsaw count)
 
 ---
 
 ## Testing Checklist
 
 - [ ] Regime detection returns correct value for current BTC state
+- [ ] BTC symbol fallback works (tries BTC, BTC-USD, etc.)
+- [ ] Incomplete daily candle is dropped (no partial-day flips)
+- [ ] Buffer option reduces false signals (`--regime-buffer-bps 20`)
 - [ ] Neutral regime maintains 50/50 split
 - [ ] Bullish regime produces more longs than shorts (when balance passes)
 - [ ] Bearish regime produces more shorts than longs (when balance passes)
 - [ ] **Imbalance suppression works:** If unfavored side has fewer candidates than its allocation requires, output is suppressed
 - [ ] Suppression message clearly indicates "reversal protection"
+- [ ] Suppression count is logged for monitoring
 - [ ] Output messages clearly indicate regime and allocation
 - [ ] Shell script works with new flag
 - [ ] No regression in existing balanced behavior when flag not used
+- [ ] Logging uses project logger (not print)
 
 ### Specific Test Cases
 
