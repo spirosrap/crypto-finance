@@ -23,6 +23,15 @@
 - Things look OK, but I would have preferred equal shorts/longs; maybe that is too much to ask.
 - Each gate-scan produces a balanced suggestion, which may be enough for now.
 
+## January 21, 2026 - Future: Regime Tilt for Position Allocation
+- Analyzed recent trades (Jan 15-21): shorts ~76% win rate (+$95), longs ~29% win rate (-$85), net ~+$10.
+- Longs are bleeding in the current bearish regime, offsetting short gains.
+- Designed a regime tilt feature: detect BTC trend (vs 20 EMA) and allocate 70/30 to favored side instead of 50/50.
+- Key insight: current `--balanced` suppression when imbalanced (e.g., 60L/6S) acts as reversal protection—don't loosen this.
+- Implementation preserves strict balance check first, only applies tilt when both sides have enough candidates.
+- Full implementation plan documented in `docs/regime_tilt_implementation.md`.
+- **Status:** Not yet implemented. Monitor partial TP system (TP1 at 0.8R) for another week; if longs still bleed, implement regime tilt.
+
 ## January 20, 2026 - Next Paper Checkpoint Rules
 - The Jan 15 paper checkpoint is now met, so size stays at full unless the next checkpoint fails.
 - Next checkpoint: evaluate **60 new paper trades** (still anchored to the Jan 15 change date).
