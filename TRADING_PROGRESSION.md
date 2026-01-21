@@ -11,6 +11,12 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 now reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard now tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. Recent issue: Coinbase accepted leverage=50 on entry orders but positions reported 1×, so margin headroom is tighter than expected. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 21, 2026 - Trade Env Updated (Latest + Caps)
+- Updated the trade conda environment to latest packages where possible.
+- Removed Electrum to avoid stale attrs caps.
+- Kept caps for numpy (<2.2.0), protobuf (<6.0.0dev with exclusions), and nvidia-nccl-cu12==2.26.2 to stay compatible with torch/tensorflow/numba.
+- Bumped `requirements.txt` minimums to match installed versions.
+
 ## January 21, 2026 - Stable Tape, Short-Heavy Basket
 - Trading still seems stable today.
 - Current basket has 4 shorts (1 carried from yesterday).
