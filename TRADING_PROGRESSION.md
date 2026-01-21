@@ -29,7 +29,7 @@
 - Designed a regime tilt feature: detect BTC trend (vs 20 EMA) and allocate 70/30 to favored side instead of 50/50.
 - Key insight: current `--balanced` suppression when imbalanced (e.g., 60L/6S) acts as reversal protection—don't loosen this.
 - Implementation preserves strict balance check first, only applies tilt when both sides have enough candidates.
-- Full implementation plan documented in `docs/regime_tilt_implementation.md`.
+- Full implementation plan documented in `docs/plans/regime_tilt_implementation.md`.
 - **Status:** Not yet implemented. Monitor partial TP system (TP1 at 0.8R) for another week; if longs still bleed, implement regime tilt.
 
 ## January 20, 2026 - Next Paper Checkpoint Rules

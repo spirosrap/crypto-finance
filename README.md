@@ -48,7 +48,7 @@ For others, this repo can be useful as:
 - **Live Snapshot Updater (cron)**: `scripts/update_live_snapshot.py` runs every 5 minutes to refresh live positions + USDC balance and write `logs/live_snapshot.json` for the dashboard; logs to `logs/live_snapshot_update.log`.
 
 - **Dashboard Heartbeats**: `watchdog_dashboard.py` now shows log heartbeat ages (gate scan / paper update / fill poll / live snapshot). These warn if cron pipelines are stale even when no trades close.
-- **Cron snapshot**: `docs/cron.md` captures the current crontab so the pipeline can be restored quickly on a new machine (`crontab docs/cron.md`, then adjust paths/envs).
+- **Cron snapshot**: `docs/pipelines/cron.md` captures the current crontab so the pipeline can be restored quickly on a new machine (`crontab docs/pipelines/cron.md`, then adjust paths/envs).
 - **Paper Progress Check**: `scripts/paper_trade_progress.py` prints progress to the 100‑trade target, win%, avg%, expectancy, and TP/SL/expiry split.
 - **Drawdown Breakdown**: `scripts/drawdown_breakdown.py` compares paper vs live over a rolling window (default 24h), highlighting closure reasons, loss symbols, ATR bucket stops, and spread‑OK stop rates.
 - **Paper Equity Report**: `scripts/paper_equity_report.py` writes a shareable equity curve (HTML + PNG) and `watchdog_dashboard.py` can export the same. Note: equity is daily‑aggregated, so one trading day = one point (drawdown reads 0% when there’s only one day).

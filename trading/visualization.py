@@ -38,5 +38,5 @@ def plot_trades(candles: List[Dict[str, Any]], trades: List[TradeRecord],
     fig.autofmt_xdate()
 
     plt.tight_layout()
-    plt.savefig('trades_and_balance.png')
+    plt.savefig('docs/assets/trades_and_balance.png')
     plt.close()

@@ -164,7 +164,7 @@ python scripts/baseline_finder_from_snapshot.py \
 - Pair it with `short_term_crypto_finder.py --plain-output finder_short.txt` to loop: scan → trade execution → `watchdog_reporting.py` review.
 - **Freqtrade bridge** – export finder results to `signals/freqtrade_signals.json` via
   `python export_finder_signals.py --file finder_short.txt` and let the new
-  `FinderBridgeStrategy` drive a Freqtrade bot (see `docs/freqtrade_bridge.md`).
+  `FinderBridgeStrategy` drive a Freqtrade bot (see `docs/pipelines/freqtrade_bridge.md`).
 - For expectancy/drawdown snapshots, run the legacy metrics helper with a matching window:
   ```bash
   python watchdog_stats.py --start-date 2025-10-01 --r-basis avg_loss

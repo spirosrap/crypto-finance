@@ -1,6 +1,6 @@
 # Cron Jobs Snapshot
 # Install on a new machine with:
-#   crontab docs/cron.md
+#   crontab docs/pipelines/cron.md
 # Notes:
 # - Update /home/spiros/crypto-finance if the repo lives elsewhere.
 # - Update /home/spiros/anaconda3/envs/trade/bin/python if the env path differs.
