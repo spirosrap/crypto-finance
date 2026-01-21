@@ -109,15 +109,31 @@ def _detect_btc_regime(
         return "neutral"
 
     try:
-        # Sort and drop incomplete current candle if present
+        # Sort and normalize index timezone
         df = df.sort_index()
+        # Ensure index is UTC for consistent comparison
+        # If tz-aware, convert to UTC; if naive, assume UTC (document this assumption)
+        if hasattr(df.index, 'tz') and df.index.tz is not None:
+            df.index = df.index.tz_convert("UTC")
+        # else: treat naive index as UTC (exchange data typically UTC)
+
         # Check if last candle is incomplete (timestamp is today UTC)
         from datetime import datetime, timezone
+        import pandas as pd
         now_utc = datetime.now(timezone.utc)
         last_ts = df.index[-1]
-        if hasattr(last_ts, 'date') and last_ts.date() == now_utc.date():
+        # Handle both Timestamp and datetime index types
+        if isinstance(last_ts, pd.Timestamp):
+            last_date = last_ts.date()
+        elif hasattr(last_ts, 'date'):
+            last_date = last_ts.date()
+        else:
+            last_date = None
+
+        if last_date == now_utc.date():
             # Last candle is today (incomplete) - drop it
             df = df.iloc[:-1]
+            _logger.debug(f"Regime detection: dropped incomplete candle for {now_utc.date()}")
             if len(df) < ema_period + confirm_days:
                 _logger.warning("Regime detection: insufficient confirmed candles after dropping incomplete")
                 return "neutral"
@@ -211,6 +227,9 @@ def _select_balanced_rows(
 
 ```python
     # STEP 1: Calculate regime-aware slot allocation
+    # Note: int() truncates, which slightly favors the favored side when top is odd.
+    # E.g., top=15, tilt=70% → bullish gets 10L/5S, bearish gets 5L/10S.
+    # This asymmetry is intentional (favor the trend); use round() if symmetric rounding preferred.
     if regime == "bullish":
         long_slots = int(top * (tilt_pct / 100.0))
         short_slots = top - long_slots
@@ -228,6 +247,10 @@ def _select_balanced_rows(
 
     if len(longs) < min_required_per_side or len(shorts) < min_required_per_side:
         # Imbalance detected - suppress output (potential reversal)
+        _logger.info(
+            f"Gate-scan SUPPRESSED (reversal protection): regime={regime}, "
+            f"available L={len(longs)}/S={len(shorts)}, required min={min_required_per_side} per side"
+        )
         return [], {
             "longs": len(longs),
             "shorts": len(shorts),
