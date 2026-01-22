@@ -1,6 +1,6 @@
 # ChatGPT Trades Analysis
 
-This repository contains two legacy programs to analyze trades from `trade_logs/chatgpt_trades.csv` and determine if they were wins or losses based on whether the price action (including wicks) reached the take profit or stop loss levels.
+This repository contains two legacy programs to analyze trades from `trade_logs/archive/chatgpt_trades.csv` and determine if they were wins or losses based on whether the price action (including wicks) reached the take profit or stop loss levels.
 
 ## Programs Overview
 
@@ -79,7 +79,7 @@ python retired_tools/analyze_chatgpt_trades.py
 
 ## CSV File Format
 
-The programs expect a CSV file at `trade_logs/chatgpt_trades.csv` with the following columns:
+The programs expect a CSV file at `trade_logs/archive/chatgpt_trades.csv` with the following columns:
 
 | Column | Description | Example |
 |--------|-------------|---------|

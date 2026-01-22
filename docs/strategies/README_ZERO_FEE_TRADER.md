@@ -10,14 +10,14 @@ Intraday trading loop designed for the INTX perpetual venue where taker fees are
    ```bash
    python auto_zero_fee_trader.py --products BTC-PERP-INTX --granularity ONE_MINUTE --poll 30 --max-iterations 5
    ```
-   This runs in paper mode by default and logs paper fills to `trade_logs/zero_fee_paper_trades.csv`.
+   This runs in paper mode by default and logs paper fills to `trade_logs/archive/zero_fee_paper_trades.csv`.
 4. **Live Launch** – once dry runs look good, enable live trading: 
    ```bash
    export AUTO_ZERO_FEE_BASE_USD=5
    export AUTO_ZERO_FEE_LEVERAGE=50
    python auto_zero_fee_trader.py --granularity ONE_MINUTE --poll 30 --live
    ```
-   Drop the environment overrides if you prefer the built-in defaults (see below). Live executions are logged to `trade_logs/zero_fee_live_trades.csv` (entries, exchange brackets, and exits) for audit.
+   Drop the environment overrides if you prefer the built-in defaults (see below). Live executions are logged to `trade_logs/archive/zero_fee_live_trades.csv` (entries, exchange brackets, and exits) for audit.
 
 ## Architecture Overview
 
@@ -91,8 +91,8 @@ Any parameter is overridable via command-line flags where exposed (e.g., `--prod
 - **Funding & Margin** – cross leverage defaults to 50×. Keep sufficient USDC in the INTX portfolio; Coinbase enforces minimum base sizes (~0.001 BTC) and rejects orders below the threshold.
 - **Max Age** – positions are auto-liquidated after `AUTO_ZERO_FEE_MAX_MINUTES` (default 45). Tighten this if you want faster churn.
 - **Guardrails** – adjust stop/take-profit percentages, ATR multiple, and cooldown to match volatility regimes. For high-event windows (Fed, CPI, etc.) consider raising `AUTO_ZERO_FEE_MIN_VOL_RATIO` or disabling the bot.
-- **Logging** – execution logs flow to stdout and to `logs/short_term_crypto_finder/`. Paper trades append to `trade_logs/zero_fee_paper_trades.csv`; live fills (entries, bracket placements, exits) are mirrored to `trade_logs/zero_fee_live_trades.csv`.
-- **Bracket Orders** – every live entry posts a Coinbase bracket (stop + take-profit). If the API rejects the bracket, the bot logs a warning and continues enforcing stops locally; investigate `trade_logs/zero_fee_live_trades.csv` (event=`bracket`) for the failure reason.
+- **Logging** – execution logs flow to stdout and to `logs/short_term_crypto_finder/`. Paper trades append to `trade_logs/archive/zero_fee_paper_trades.csv`; live fills (entries, bracket placements, exits) are mirrored to `trade_logs/archive/zero_fee_live_trades.csv`.
+- **Bracket Orders** – every live entry posts a Coinbase bracket (stop + take-profit). If the API rejects the bracket, the bot logs a warning and continues enforcing stops locally; investigate `trade_logs/archive/zero_fee_live_trades.csv` (event=`bracket`) for the failure reason.
 - **Failsafes** – if the process dies, stops/targets are no longer enforced. Run inside `tmux` or systemd and set alerting around PnL and margin usage.
 
 ## Troubleshooting

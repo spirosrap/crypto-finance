@@ -76,7 +76,7 @@
 - Run a baseline comparison on the same entries to sanity-check whether rule changes are improving exits (not just picking different trades):
   - `python scripts/watchdog_baseline_backtest.py --mode atr_raw`
   - `python scripts/watchdog_baseline_backtest.py --mode atr_clipped`
-  - Load the output CSVs in `watchdog_dashboard.py` by changing the sidebar “CSV path” to `trade_logs/watchdog_closed_positions_baseline_*.csv`.
+  - Load the output CSVs in `watchdog_dashboard.py` by changing the sidebar “CSV path” to `trade_logs/archive/watchdog_closed_positions_baseline_*.csv`.
 - Refresh watchlist levels and news schedule; archive outdated screenshots.
 - Reset position sizing if weekly drawdown <= plan and mental capital restored.
 

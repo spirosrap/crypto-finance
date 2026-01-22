@@ -398,7 +398,7 @@
 ## December 24, 2025 - Paper Trades Green Again
 - Paper open P/L is back in the green (+17.51 unrealized across 7 open trades), with several positions up ~1–2% as they head toward expiry.
 - Gate scan confirms the opportunity window is narrowing again: top‑15 RR gaps are wider and no symbols are near the 2.0 gate.
-- Replayed the old short-term entries with baseline exits (`atr_mult=0.8`, `rr=1.5`, `atr_clipped`) and saved the dashboard-ready output to `trade_logs/watchdog_closed_positions_baseline_short_term.csv`.
+- Replayed the old short-term entries with baseline exits (`atr_mult=0.8`, `rr=1.5`, `atr_clipped`) and saved the dashboard-ready output to `trade_logs/archive/watchdog_closed_positions_baseline_short_term.csv`.
 
 ## December 23, 2025 - Paper Trades Tracking
 - Paper trading is ongoing and currently green, with most trades on track to expire positive.
@@ -417,7 +417,7 @@
 - Added `scripts/paper_trade_progress.py` to report paper-trade count vs target, win%, avg%, expectancy, and TP/SL/expiry split in one line.
 
 ## December 21, 2025 - Baseline Option 1 (ATR*RR) Re-Test
-- Ran baseline stats with `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` on `trade_logs/watchdog_closed_positions_short_term.csv` (output: `trade_logs/watchdog_closed_positions_baseline_atr_clipped_rr1p5_mult0p8.csv`).
+- Ran baseline stats with `atr_mult=0.8`, `rr=1.5`, `atr_mode=clipped` on `trade_logs/archive/watchdog_closed_positions_short_term.csv` (output: `trade_logs/archive/watchdog_closed_positions_baseline_atr_clipped_rr1p5_mult0p8.csv`).
 - Result: improved win% and avg% in the 1.0–1.5× ATR buckets versus the earlier baseline, suggesting a better fit for 24h expiry.
 - Table (ATR cap ratio buckets):
 ```
@@ -443,7 +443,7 @@ bucket        n   win%    avg%    med%  avg_mae  avg_mfe  avg_ratio
 - Decision: skip the trade and stay aligned with the low‑volatility preference.
 
 ## December 20, 2025 - Baseline vs Current Exit Comparison (Short-Term)
-- Compared actual exits vs baseline exits on `trade_logs/watchdog_closed_positions_short_term.csv` (n=331).
+- Compared actual exits vs baseline exits on `trade_logs/archive/watchdog_closed_positions_short_term.csv` (n=331).
 - Baseline (ATR raw) outperformed: win% 55.0 vs 42.9, avg% 0.187 vs -0.006, baseline better on 57.7% of trades (65 loss→win flips).
 - Baseline (ATR clipped) also outperformed: win% 53.8 vs 42.9, avg% 0.175 vs -0.006, baseline better on 55.3% of trades (62 loss→win flips).
 - Decision: keep running the **new RR/ATR rules** until I log ~50 trades, then re‑evaluate before switching exit logic. Currently only ~5 trades into the new regime, so it’s too early to judge.
