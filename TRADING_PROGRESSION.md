@@ -17,6 +17,14 @@
 - This appears to be a guardrail effect from the reported imbalance in suggested trades.
 - I am OK with that for now, but if trade counts stay very low for longer, I will need to rethink.
 
+## January 22, 2026 - TP1 Hit Rate Analysis (Jan 15+)
+- Analyzed 79 trades since Jan 15 (when TP1/TP2 partial system went live).
+- **Shorts (44 trades):** TP1 hit rate 97% (31/32 clear cases). Only 1 full stop before TP1. The 0.8R target is perfectly calibrated for shorts.
+- **Longs (35 trades):** TP1 hit rate 50% (7/14 clear cases), but 40% are partial_sl—meaning they hit TP1, then the remainder stopped at entry after SL move. Longs are reaching TP1 more than raw numbers suggest.
+- **Move-SL-to-entry working:** Partial SL + expired_breakeven trades show the system protecting capital after TP1.
+- Net P/L for period: +$32.44 (~$0.41/trade).
+- **Conclusion:** 0.8R TP1 is well-calibrated. No changes needed. Shorts run to TP2; longs bank partial then exit at breakeven—both are acceptable outcomes.
+
 ## January 21, 2026 - Trade Env Updated (Latest + Caps)
 - Updated the trade conda environment to latest packages where possible.
 - Removed Electrum to avoid stale attrs caps.
