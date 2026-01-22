@@ -507,32 +507,9 @@ def filter_paper_trade_batches(df: pd.DataFrame, include_partials: bool = False)
     if trades.empty:
         return df
 
-    trades["_closed_date"] = trades["closed_at"].dt.date
-    trades["_opened_batch"] = trades["opened_at"].dt.floor("15min")
-
-    counts = (
-        trades.groupby(["_closed_date", "_opened_batch"]).size().reset_index(name="count")
-    )
-    if counts.empty:
-        return trades.drop(columns=["_closed_date", "_opened_batch"])
-
-    counts = counts.sort_values(["_closed_date", "count", "_opened_batch"])
-    dominant = counts.groupby("_closed_date").tail(1)
-    keep_keys = set(zip(dominant["_closed_date"], dominant["_opened_batch"]))
-
-    mask = trades.apply(lambda row: (row["_closed_date"], row["_opened_batch"]) in keep_keys, axis=1)
-    if include_partials:
-        if "partial_only" in trades.columns:
-            partial_mask = trades["partial_only"].fillna(False)
-        elif "closure_reason" in trades.columns:
-            partial_mask = trades["closure_reason"].astype(str).str.lower().apply(_is_partial_reason)
-        else:
-            partial_mask = False
-        if not isinstance(partial_mask, pd.Series):
-            partial_mask = pd.Series([False] * len(trades), index=trades.index)
-        mask = mask | partial_mask
-    filtered = trades.loc[mask].drop(columns=["_closed_date", "_opened_batch"])
-    return filtered.sort_values("closed_at").reset_index(drop=True)
+    # Keep all batches; only remove exact duplicate rows (can occur after re-runs).
+    trades = trades.drop_duplicates()
+    return trades.sort_values("closed_at").reset_index(drop=True)
 
 
 def load_range_break_status() -> Optional[dict]:
