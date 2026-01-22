@@ -474,6 +474,7 @@ def collapse_trade_rows(df: pd.DataFrame, include_partial_only: bool = False) ->
             "closure_reason",
             lambda s: (~s.astype(str).str.lower().apply(_is_partial_reason)).any(),
         ),
+        closure_count=("closure_reason", "size"),
     ).reset_index()
 
     aggregated["profit_loss_pct"] = np.where(
@@ -482,11 +483,15 @@ def collapse_trade_rows(df: pd.DataFrame, include_partial_only: bool = False) ->
         np.nan,
     )
     aggregated = aggregated.drop(columns=["abs_size", "pl_pct_weight"])
+    # A trade is considered fully closed if:
+    # 1. It has a non-partial closure (take_profit, stop_loss, expired_breakeven, dust), OR
+    # 2. It has 2+ closures (partials that sum to full close, e.g., partial_tp + partial_sl)
+    aggregated["is_fully_closed"] = aggregated["has_non_partial"] | (aggregated["closure_count"] >= 2)
     if include_partial_only:
-        aggregated["partial_only"] = ~aggregated["has_non_partial"]
-        aggregated = aggregated.drop(columns=["has_non_partial"])
+        aggregated["partial_only"] = ~aggregated["is_fully_closed"]
+        aggregated = aggregated.drop(columns=["has_non_partial", "closure_count", "is_fully_closed"])
     else:
-        aggregated = aggregated[aggregated["has_non_partial"]].drop(columns=["has_non_partial"])
+        aggregated = aggregated[aggregated["is_fully_closed"]].drop(columns=["has_non_partial", "closure_count", "is_fully_closed"])
     aggregated = aggregated.sort_values("closed_at").reset_index(drop=True)
     return aggregated
 
