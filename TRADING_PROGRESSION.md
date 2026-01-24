@@ -11,6 +11,12 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 now reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard now tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. Recent issue: Coinbase accepted leverage=50 on entry orders but positions reported 1×, so margin headroom is tighter than expected. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 24, 2026 - Stable Tape, Short-Only Bias (5 Live)
+- Tape still feels stable; live basket has 5 positions and they are all shorts.
+- P/L is steady, but a sharp spike (5 fast losses) could erase a lot of gains.
+- TP1 partials should soften the damage if that shock hits.
+- Surprising how many shorts keep firing; bearish conditions still seem to dominate.
+
 ## January 23, 2026 - Stable Tape, Shorts Still Leading
 - The system keeps leaning short even though the suggestions are balanced; the top selections are mostly shorts.
 - Things still feel surprisingly stable, which is usually the point where the system breaks.
