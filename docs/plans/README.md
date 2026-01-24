@@ -4,5 +4,6 @@ This folder holds draft plans and future improvements that are not yet implement
 
 ## Current drafts
 - `regime_tilt_implementation.md`
+- `risk_filter_refinement.md`
 - `simplified_bot_v2_planning.md`
 - `vps_pipeline_setup.md`
