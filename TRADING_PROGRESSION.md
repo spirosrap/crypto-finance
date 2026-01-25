@@ -11,6 +11,12 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 now reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard now tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. Recent issue: Coinbase accepted leverage=50 on entry orders but positions reported 1×, so margin headroom is tighter than expected. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 25, 2026 - Stable Weekend Drift (Muted TP1)
+- Trading remains stable with small gains; overall stats still look OK.
+- No big losses or big wins showing up in the blotter.
+- This weekend, TP1 hits slowed down compared to the prior cadence.
+- No SL hits either; likely a low‑motion weekend tape.
+
 ## January 24, 2026 - Risk Filter Refinement Plan (Light-Touch)
 - Logged the current active filters (market-cap, liquidity/VMC, spread margin, risk level, ATR caps); the 1.5 ATR ratio is a gate-scan baseline flag, not a live gate.
 - Plan is a refined volatility/stability filter that remains **optional** and **warn-first**, keeping the range-break circuit as the primary stop.
