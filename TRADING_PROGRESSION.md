@@ -15,6 +15,7 @@
 - Close logic now sends **reduce-only** market orders so a close cannot flip into a new position.
 - Applied to CoinbaseService close-all flow and watchdog close-old-positions CCXT path.
 - Triggered by the COMP close that likely over-bought and opened an unintended long.
+- Possible contributing factor: overlapping watchdog runs (cron + manual) could have doubled a close attempt with stale size.
 
 ## January 27, 2026 - First Loss Day After Long Profit Stretch
 - Yesterday broke a ~10-day run of small daily profits, but the loss was modest.
