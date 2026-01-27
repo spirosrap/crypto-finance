@@ -16,6 +16,7 @@
 - Applied to CoinbaseService close-all flow and watchdog close-old-positions CCXT path.
 - Triggered by the COMP close that likely over-bought and opened an unintended long.
 - Possible contributing factor: overlapping watchdog runs (cron + manual) could have doubled a close attempt with stale size.
+- CCXT close can reject `reduceOnly`; added REST fallback with reduce-only when that error appears.
 
 ## January 27, 2026 - Short Bias Back (18:43)
 - At 18:43 the system is leaning short again; P/L around −$8.

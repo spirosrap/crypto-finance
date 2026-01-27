@@ -28,6 +28,7 @@ import logging
 import os
 import sys
 import time
+import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -2966,19 +2967,56 @@ def _close_position(
         params = {
             "marginMode": "cross",
             "timeInForce": "IOC",
-            # Ensure close orders cannot flip the position.
+            # Note: some Coinbase CCXT endpoints reject reduceOnly; fallback handles that.
             "reduceOnly": True,
         }
         if leverage:
             params["leverage"] = str(leverage)
-        result = exchange.create_order(
-            ccxt_symbol,
-            "market",
-            side.lower(),
-            close_size,
-            None,
-            params,
-        )
+        try:
+            result = exchange.create_order(
+                ccxt_symbol,
+                "market",
+                side.lower(),
+                close_size,
+                None,
+                params,
+            )
+        except Exception as exc:
+            msg = str(exc)
+            if "reduceOnly" in msg or "reduce_only" in msg:
+                logger.warning(
+                    "CCXT rejected reduceOnly for %s; falling back to REST close.",
+                    product_id,
+                )
+                # REST fallback with reduce_only
+                order_config = {
+                    "market_market_ioc": {
+                        "base_size": str(close_size),
+                        "reduce_only": True,
+                    }
+                }
+                try:
+                    response = cb.client.create_order(
+                        client_order_id=f"close_{uuid.uuid4().hex[:16]}_{int(time.time())}",
+                        product_id=product_id,
+                        side=side,
+                        order_configuration=order_config,
+                        leverage=leverage,
+                        margin_type="CROSS",
+                    )
+                    if isinstance(response, dict) and response.get("success", True):
+                        logger.info(
+                            "Closed %s position via REST %s %s",
+                            product_id,
+                            side,
+                            close_size,
+                        )
+                        return True, None, response.get("order_id")
+                    logger.error("REST close rejected for %s: %s", product_id, response)
+                except Exception as rest_exc:
+                    logger.error("REST close failed for %s: %s", product_id, rest_exc)
+                return False, None, None
+            raise
         order_id = _extract_order_id(result)
         fill_price = _extract_avg_filled_price(result)
         if fill_price is None and isinstance(result, dict):
