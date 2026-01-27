@@ -22,6 +22,10 @@
 - Feels like it keeps leaning into shorts even as conditions shift, getting clipped before it adapts.
 - Concern: could be the second negative day in a row, eating into the prior run of gains.
 
+## January 27, 2026 - Back Positive (19:11)
+- After the dip, P/L is back in the green.
+- The swings are hard to watch even when the system stabilizes.
+
 ## January 27, 2026 - First Loss Day After Long Profit Stretch
 - Yesterday broke a ~10-day run of small daily profits, but the loss was modest.
 - Conditions look like they are stabilizing again.
