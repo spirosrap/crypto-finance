@@ -1510,8 +1510,15 @@ def _classify_partial_reason(
     entry_price: Optional[float],
     exit_price: Optional[float],
     *,
+    realized_pnl: Optional[float] = None,
+    pnl_eps: float = 1e-9,
     eps: float = 1e-9,
 ) -> str:
+    if realized_pnl is not None:
+        if realized_pnl > pnl_eps:
+            return 'partial_tp'
+        if realized_pnl < -pnl_eps:
+            return 'partial_sl'
     if entry_price is None or exit_price is None:
         return 'partial_take'
     side_norm = (side or '').strip().upper()
@@ -2254,7 +2261,12 @@ def _partial_to_record(
                 "Failed to derive MAE/MFE for partial %s: %s", event.product_id, exc
             )
 
-    closure_reason = _classify_partial_reason(event.side, event.entry_price, event.exit_price)
+    closure_reason = _classify_partial_reason(
+        event.side,
+        event.entry_price,
+        event.exit_price,
+        realized_pnl=event.realized_pnl,
+    )
     record = _create_closure_record(
         product_id=event.product_id,
         position_side=event.side,
@@ -3269,7 +3281,12 @@ def main() -> None:
                     help="Recompute exit price/PnL for the most recent N logged closures and exit")
     ap.add_argument("--skip-close", action="store_true", help="Skip the age-based closing step")
     ap.add_argument("--log-fills", action="store_true", help="Log take-profit/stop-loss closures from recent fills")
-    ap.add_argument("--fills-limit", type=int, default=1500, help="Number of recent fills to fetch when logging TP/SL closures")
+    ap.add_argument(
+        "--fills-limit",
+        type=int,
+        default=5000,
+        help="Number of recent fills to fetch when logging TP/SL closures",
+    )
     ap.add_argument("--fills-interval", type=int, default=0, help="If >0, poll fills continuously every N seconds")
     ap.add_argument("--fills-bootstrap-existing", action="store_true",
                     help="On first run, log existing fill cycles instead of only new ones")

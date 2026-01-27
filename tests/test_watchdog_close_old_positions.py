@@ -99,6 +99,40 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(side, 'FUTURES_POSITION_SIDE_LONG')
         self.assertEqual(lev, '30')
 
+    def test_classify_partial_reason_prefers_realized_pnl(self) -> None:
+        reason = self.module._classify_partial_reason(
+            'SHORT',
+            100.0,
+            95.0,
+            realized_pnl=-0.25,
+        )
+        self.assertEqual(reason, 'partial_sl')
+
+        reason = self.module._classify_partial_reason(
+            'LONG',
+            100.0,
+            105.0,
+            realized_pnl=-0.1,
+        )
+        self.assertEqual(reason, 'partial_sl')
+
+        reason = self.module._classify_partial_reason(
+            'SHORT',
+            100.0,
+            105.0,
+            realized_pnl=0.4,
+        )
+        self.assertEqual(reason, 'partial_tp')
+
+    def test_classify_partial_reason_falls_back_to_prices(self) -> None:
+        reason = self.module._classify_partial_reason(
+            'SHORT',
+            100.0,
+            95.0,
+            realized_pnl=0.0,
+        )
+        self.assertEqual(reason, 'partial_tp')
+
     def test_record_position_close_appends_csv(self) -> None:
         opened_at = datetime(2025, 10, 5, 0, 0, 0)
         close_time = opened_at + timedelta(hours=1)
