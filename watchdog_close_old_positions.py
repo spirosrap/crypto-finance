@@ -2966,6 +2966,8 @@ def _close_position(
         params = {
             "marginMode": "cross",
             "timeInForce": "IOC",
+            # Ensure close orders cannot flip the position.
+            "reduceOnly": True,
         }
         if leverage:
             params["leverage"] = str(leverage)

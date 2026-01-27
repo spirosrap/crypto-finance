@@ -1095,7 +1095,9 @@ class CoinbaseService:
                         
                         order_config = {
                             "market_market_ioc": {
-                                "base_size": str(close_size)
+                                "base_size": str(close_size),
+                                # Prevent accidental flips when closing.
+                                "reduce_only": True,
                             }
                         }
                         
