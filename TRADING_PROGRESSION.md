@@ -13,7 +13,7 @@
 
 ## January 27, 2026 - Reduce-Only Close Orders
 - Close logic now sends **reduce-only** market orders so a close cannot flip into a new position.
-- Applied to CoinbaseService close-all flow and watchdog close-old-positions CCXT path.
+- Applied to CoinbaseService close-all flow (now CCXT) and watchdog close-old-positions CCXT path.
 - Triggered by the COMP close that likely over-bought and opened an unintended long.
 
 ## January 27, 2026 - First Loss Day After Long Profit Stretch

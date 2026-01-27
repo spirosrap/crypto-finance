@@ -7,6 +7,11 @@ import uuid
 import logging
 from typing import Tuple, List
 from historicaldata import HistoricalData
+
+try:
+    import ccxt  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    ccxt = None
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from concurrent.futures import wait
 
@@ -20,6 +25,8 @@ class CoinbaseService:
             except ValueError:
                 timeout = 30
         self.client = RESTClient(api_key=api_key, api_secret=api_secret, timeout=timeout)
+        self.api_key = api_key
+        self.api_secret = api_secret
         self.DEFAULT_FEE_RATE = 0.005  # 0.5%
         self.MAX_RETRIES = 1
         self.RETRY_DELAY_SECONDS = 60
@@ -27,6 +34,39 @@ class CoinbaseService:
         self.BRACKET_ORDER_STOP_LOSS_MULTIPLIER = 0.98
         self.historical_data = HistoricalData(self.client)  # Initialize HistoricalData
         self.logger = logging.getLogger(__name__)
+        self._ccxt_exchange = None
+
+    def _ensure_ccxt_exchange(self):
+        if self._ccxt_exchange is not None:
+            return self._ccxt_exchange
+        if ccxt is None:
+            raise RuntimeError("ccxt package is required to close positions; install ccxt and retry.")
+        if not self.api_key or not self.api_secret:
+            raise RuntimeError("Missing API credentials for CCXT close (set API_KEY_PERPS/API_SECRET_PERPS).")
+        exchange = ccxt.coinbaseadvanced(
+            {
+                "apiKey": self.api_key,
+                "secret": self.api_secret,
+                "enableRateLimit": True,
+                "timeout": 30000,
+            }
+        )
+        exchange.load_markets()
+        self._ccxt_exchange = exchange
+        return exchange
+
+    @staticmethod
+    def _product_to_ccxt_symbol(product_id: str) -> str:
+        product = (product_id or "").strip().upper()
+        if not product:
+            raise ValueError("Empty product id cannot be mapped to CCXT symbol.")
+        if product.endswith("-PERP-INTX"):
+            base = product[: -len("-PERP-INTX")]
+        elif product.endswith("-INTX-PERP"):
+            base = product[: -len("-INTX-PERP")]
+        else:
+            raise ValueError(f"Unsupported INTX product id format: {product_id}")
+        return f"{base}/USDC:USDC"
 
     # --- Internal helpers for precision/formatting ---
     def _compute_end_time(self, expiry: str | None) -> str:
@@ -1092,33 +1132,47 @@ class CoinbaseService:
                         close_size = abs(position_size) * size_pct
                         
                         self.logger.info(f"Attempting to close {position_side} position for {position_symbol}: {close_size} ({size_pct*100}%) using {side} order")
-                        
-                        order_config = {
-                            "market_market_ioc": {
-                                "base_size": str(close_size),
-                                # Prevent accidental flips when closing.
-                                "reduce_only": True,
-                            }
+                        try:
+                            exchange = self._ensure_ccxt_exchange()
+                            ccxt_symbol = self._product_to_ccxt_symbol(position_symbol)
+                        except Exception as exc:
+                            self.logger.error("CCXT close unavailable: %s", exc)
+                            return False
+
+                        params = {
+                            "marginMode": "cross",
+                            "timeInForce": "IOC",
+                            "reduceOnly": True,
                         }
-                        
-                        result = self.client.create_order(
-                            client_order_id=client_order_id,
-                            product_id=position_symbol,
-                            side=side,
-                            order_configuration=order_config,
-                            leverage=leverage,
-                            margin_type="CROSS"
+                        if leverage:
+                            params["leverage"] = str(leverage)
+
+                        result = exchange.create_order(
+                            ccxt_symbol,
+                            "market",
+                            side.lower(),
+                            close_size,
+                            None,
+                            params,
                         )
-                        
-                        if isinstance(result, dict) and result.get('success', True):
-                            self.logger.info(f"Successfully closed position for {position_symbol} with {size_pct*100}% size")
+
+                        if isinstance(result, dict) and result.get("status") in (None, "closed"):
+                            self.logger.info(
+                                "Successfully closed position for %s with %s%% size via CCXT",
+                                position_symbol,
+                                size_pct * 100,
+                            )
                             return True
-                        
-                        error_response = result.get('error_response', {}) if isinstance(result, dict) else str(result)
-                        self.logger.warning(f"Failed to close position with {size_pct*100}% size: {error_response}")
-                        
+
+                        self.logger.warning(
+                            "Close order may not have completed for %s (size_pct=%s): %s",
+                            position_symbol,
+                            size_pct,
+                            result,
+                        )
+
                         # If error is not related to insufficient funds, break the loop
-                        if 'PREVIEW_INSUFFICIENT_FUNDS' not in str(error_response):
+                        if isinstance(result, dict) and "insufficient" not in str(result).lower():
                             break
                             
                     except Exception as e:
