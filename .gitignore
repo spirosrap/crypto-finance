@@ -103,3 +103,7 @@ finder_long.txt
 finder_short.txt
 finder_short_baseline.txt
 scripts/trade_analyzer/analytics_summary.json
+node_modules/
+package-lock.json
+package.json
+npm-debug.log*
