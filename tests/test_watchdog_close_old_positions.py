@@ -649,6 +649,166 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertAlmostEqual(qty, 3.0)
         self.assertAlmostEqual(pnl, -0.5)
 
+    def test_logged_partial_order_ids_for_cycle(self) -> None:
+        log_path = self.module._log_file_path()
+        opened_at = datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC)
+        closed_at = opened_at + timedelta(minutes=10)
+        later_closed = opened_at + timedelta(minutes=20)
+
+        with log_path.open('w', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=self.module.LOG_HEADERS)
+            writer.writeheader()
+            writer.writerow({
+                'closed_at': closed_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'product_id': 'ARB-PERP-INTX',
+                'position_side': 'LONG',
+                'net_size': '2',
+                'leverage': '',
+                'opened_at': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'closure_reason': 'partial_take',
+                'entry_price': '0.21',
+                'exit_price': '0.22',
+                'profit_loss': '1.0',
+                'profit_loss_pct': '0.5',
+                'mae': '',
+                'mfe': '',
+                'duration_seconds': '600',
+                'order_id': 'p1',
+            })
+            writer.writerow({
+                'closed_at': later_closed.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'product_id': 'ARB-PERP-INTX',
+                'position_side': 'LONG',
+                'net_size': '3',
+                'leverage': '',
+                'opened_at': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'closure_reason': 'partial_take',
+                'entry_price': '0.21',
+                'exit_price': '0.20',
+                'profit_loss': '-0.5',
+                'profit_loss_pct': '-0.25',
+                'mae': '',
+                'mfe': '',
+                'duration_seconds': '1200',
+                'order_id': 'p2',
+            })
+            writer.writerow({
+                'closed_at': later_closed.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'product_id': 'ARB-PERP-INTX',
+                'position_side': 'LONG',
+                'net_size': '3',
+                'leverage': '',
+                'opened_at': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'closure_reason': 'stop_loss',
+                'entry_price': '0.21',
+                'exit_price': '0.20',
+                'profit_loss': '-0.5',
+                'profit_loss_pct': '-0.25',
+                'mae': '',
+                'mfe': '',
+                'duration_seconds': '1200',
+                'order_id': 'skip',
+            })
+            writer.writerow({
+                'closed_at': later_closed.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'product_id': 'BTC-PERP-INTX',
+                'position_side': 'LONG',
+                'net_size': '1',
+                'leverage': '',
+                'opened_at': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                'closure_reason': 'partial_take',
+                'entry_price': '50000',
+                'exit_price': '50500',
+                'profit_loss': '5',
+                'profit_loss_pct': '0.01',
+                'mae': '',
+                'mfe': '',
+                'duration_seconds': '1200',
+                'order_id': 'other',
+            })
+
+        cycle = self.module.Cycle(
+            product_id='ARB-PERP-INTX',
+            side='LONG',
+            start_time=opened_at,
+            end_time=opened_at + timedelta(hours=1),
+            entry_qty=5.0,
+            entry_value=1.05,
+            exit_qty=5.0,
+            exit_value=1.0,
+            realized_pnl=0.5,
+            fees=0.0,
+            closing_order_id='close',
+        )
+
+        order_ids = self.module._logged_partial_order_ids_for_cycle(cycle, exclude_order_ids={'p1'})
+        self.assertEqual(order_ids, {'p2'})
+
+    def test_log_tp_sl_promotes_single_partial_order(self) -> None:
+        opened_at = datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC)
+        closed_at = opened_at + timedelta(minutes=5)
+        cycle = self.module.Cycle(
+            product_id='BTC-PERP-INTX',
+            side='LONG',
+            start_time=opened_at,
+            end_time=closed_at,
+            entry_qty=1.0,
+            entry_value=100.0,
+            exit_qty=1.0,
+            exit_value=105.0,
+            realized_pnl=5.0,
+            fees=0.0,
+            closing_order_id='close',
+        )
+        partial = self.module.PartialFillEvent(
+            product_id='BTC-PERP-INTX',
+            side='LONG',
+            time=closed_at,
+            qty=1.0,
+            entry_price=100.0,
+            exit_price=105.0,
+            realized_pnl=5.0,
+            fees=0.0,
+            order_id='partial1',
+            open_time=opened_at,
+        )
+        fill = self.module.Fill(
+            'BTC-PERP-INTX',
+            'BUY',
+            1.0,
+            100.0,
+            0.0,
+            opened_at,
+            'fill1',
+        )
+
+        def patch(name: str, value: Any) -> None:
+            original = getattr(self.module, name)
+            setattr(self.module, name, value)
+            self.addCleanup(lambda name=name, original=original: setattr(self.module, name, original))
+
+        patch('fetch_fills', lambda cb, limit=0: [{'dummy': True}])
+        patch('_convert_fill', lambda raw: fill)
+        patch('_detect_cycles_with_partials', lambda fills: ([cycle], [partial]))
+        patch('_load_checkpoint', lambda: None)
+        patch('_is_new_cycle', lambda cycle, checkpoint, bootstrap_existing: True)
+        patch('_is_new_partial', lambda event, checkpoint, bootstrap_existing: True)
+        patch('_active_positions', lambda cb: {})
+        patch('_breakeven_threshold', lambda: 0.0)
+        patch('compute_mae_mfe_from_history', lambda **kwargs: (None, None))
+        patch('_store_checkpoint', lambda *args, **kwargs: None)
+        patch('_store_fill_checkpoint', lambda *args, **kwargs: None)
+
+        self.module._log_tp_sl_once(SimpleNamespace(), limit=1, bootstrap_existing=True)
+
+        log_path = self.module._log_file_path()
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].get('order_id'), 'partial1')
+        self.assertEqual(rows[0].get('closure_reason'), 'take_profit')
+
     def test_cycle_to_record_breakeven(self) -> None:
         cycle = self.module._process_product_fills([
             self.module.Fill('SOL-PERP-INTX', 'SELL', 1.0, 50.0, 0.0, datetime(2025, 10, 5, 2, 0, tzinfo=UTC), '21'),

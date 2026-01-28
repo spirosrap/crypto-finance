@@ -1493,6 +1493,7 @@ def _reason_priority(reason: str) -> int:
         'stop_loss': 3,
         'manual': 2,
         'manual_close': 2,
+        'expired_breakeven': 2,
         'expired': 0,
         '': 0,
     }
@@ -1805,6 +1806,44 @@ def _logged_partial_totals_for_cycle(
             total_pnl += pnl
 
     return total_qty, total_pnl
+
+
+def _logged_partial_order_ids_for_cycle(
+    cycle: Cycle,
+    *,
+    exclude_order_ids: Optional[Iterable[str]] = None,
+    tolerance_seconds: int = 60,
+) -> set[str]:
+    path = _ensure_log_file()
+    if not path.exists():
+        return set()
+
+    exclude = {oid for oid in (exclude_order_ids or []) if oid}
+    tolerance = abs(int(tolerance_seconds))
+    order_ids: set[str] = set()
+
+    with path.open(newline='') as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            if (row.get('product_id') or '') != cycle.product_id:
+                continue
+            if not _is_partial_reason(row.get('closure_reason', '')):
+                continue
+            order_id = (row.get('order_id') or '').strip()
+            if not order_id or order_id in exclude:
+                continue
+            row_open = _parse_log_datetime(row.get('opened_at', ''))
+            if not _time_close(row_open, cycle.start_time, tolerance):
+                continue
+            row_close = _parse_log_datetime(row.get('closed_at', ''))
+            if row_close is not None:
+                if row_close < cycle.start_time - timedelta(seconds=tolerance):
+                    continue
+                if row_close > cycle.end_time + timedelta(seconds=tolerance):
+                    continue
+            order_ids.add(order_id)
+
+    return order_ids
 
 
 def _remaining_cycle_after_partials(
@@ -2424,6 +2463,12 @@ def _log_tp_sl_once(
             cycle,
             exclude_order_ids={event.order_id for event in cycle_partials if event.order_id},
         )
+        logged_partial_order_ids = _logged_partial_order_ids_for_cycle(
+            cycle,
+            exclude_order_ids={event.order_id for event in cycle_partials if event.order_id},
+        )
+        partial_order_ids = {event.order_id for event in cycle_partials if event.order_id}
+        partial_order_ids.update(logged_partial_order_ids)
         total_partial_qty = partial_qty + logged_partial_qty
         total_partial_pnl = partial_pnl + logged_partial_pnl
 
@@ -2431,6 +2476,33 @@ def _log_tp_sl_once(
             remaining_qty = max(0.0, cycle.entry_qty - total_partial_qty)
             remaining_pnl = cycle.realized_pnl - total_partial_pnl
             if remaining_qty <= max(1e-12, cycle.entry_qty * 0.01):
+                if len(partial_order_ids) == 1:
+                    promote_order_id = next(iter(partial_order_ids))
+                    record = _cycle_to_record(cycle, threshold, mae_mfe_fetcher=_mae_mfe_fetcher)
+                    record["order_id"] = promote_order_id
+                    if _record_position_close_if_new(record):
+                        appended += 1
+                        logger.info(
+                            "Promoted partial close for %s at %s to full close (order_id=%s, reason=%s, pnl=%s)",
+                            cycle.product_id,
+                            cycle.end_time.isoformat(),
+                            promote_order_id,
+                            record['closure_reason'],
+                            record['profit_loss'],
+                        )
+                    else:
+                        logger.info(
+                            "Promoted partial close for %s at %s to full close (order_id=%s) [updated]",
+                            cycle.product_id,
+                            cycle.end_time.isoformat(),
+                            promote_order_id,
+                        )
+                else:
+                    logger.debug(
+                        "Partial fills fully close %s at %s but multiple order_ids; keeping partial rows",
+                        cycle.product_id,
+                        cycle.end_time.isoformat(),
+                    )
                 latest_logged_cycle = cycle
                 continue
             entry_price = cycle.entry_value / cycle.entry_qty if cycle.entry_qty else None
