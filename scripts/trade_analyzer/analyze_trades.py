@@ -136,6 +136,27 @@ def calculate_kelly(win_rate, avg_win, avg_loss):
     return max(0, min(kelly, 1.0))  # Clamp between 0 and 1
 
 
+def calculate_rolling_metrics(trades, window=10):
+    """Calculate rolling win rate and P/L over specified window."""
+    if len(trades) < window:
+        return None
+    
+    results = []
+    for i in range(window - 1, len(trades)):
+        window_trades = trades[i - window + 1:i + 1]
+        pls = [t['pl'] for t in window_trades]
+        wins = sum(1 for p in pls if p > 0)
+        win_rate = wins / window * 100
+        total_pl = sum(pls)
+        results.append({
+            'trade_num': i + 1,
+            'win_rate': win_rate,
+            'pl': total_pl,
+            'wins': wins,
+        })
+    return results
+
+
 def print_section(title):
     print(f"\n{'='*62}")
     print(f"  {title}")
@@ -339,6 +360,27 @@ def main():
     print_section("RECENT TREND (last 20 trades)")
     print(f"  P/L: ${recent_pl:.2f} | {recent_wins}/20 wins ({recent_wins/20*100:.0f}%)")
     
+    # Rolling metrics (10 and 20 trade windows)
+    print_section("ROLLING METRICS")
+    
+    for window in [10, 20]:
+        rolling = calculate_rolling_metrics(trades, window)
+        if rolling:
+            # Get last entry for current stats
+            current = rolling[-1]
+            # Compare to first in window for trend
+            trend = current['win_rate'] - rolling[0]['win_rate']
+            trend_arrow = "↑" if trend > 0 else "↓" if trend < 0 else "→"
+            
+            print(f"\n  Last {window} trades:")
+            print(f"    Win Rate: {current['win_rate']:.0f}% {trend_arrow} ({rolling[0]['win_rate']:.0f}% → {current['win_rate']:.0f}%)")
+            print(f"    P/L: ${current['pl']:.2f} ({current['wins']}W/{window - current['wins']}L)")
+            
+            # Show trend over time
+            print(f"    Recent Win Rates: ", end="")
+            recent_wr = [r['win_rate'] for r in rolling[-5:]]
+            print(" / ".join(f"{wr:.0f}%" for wr in recent_wr))
+    
     # Export comprehensive summary to JSON
     summary = {
         'generated_at': datetime.now().isoformat(),
@@ -370,6 +412,8 @@ def main():
             'wins': recent_wins,
             'win_rate': recent_wins / 20 * 100,
         },
+        'rolling_10': calculate_rolling_metrics(trades, 10)[-5:] if len(trades) >= 10 else [],
+        'rolling_20': calculate_rolling_metrics(trades, 20)[-5:] if len(trades) >= 20 else [],
     }
     
     json_path = OUTPUT_DIR / "analytics_summary.json"
