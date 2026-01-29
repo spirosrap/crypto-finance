@@ -1,2 +1,1 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,partial_tp_pct,partial_tp_rr,partial_tp_price,partial_tp_done,partial_tp_move_sl,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
-5e97201aef,ETH,ETH-PERP-INTX,SHORT,2952.3,2952.3,2828.3,50.0,0.8,2886.172,True,True,125.0,50.0,2026-01-29T06:33:34Z,2026-01-30T06:33:34Z,OPEN,2846.1,2026-01-29T15:05:02Z,4.5,3.5972,0.0,1,5.0,,
