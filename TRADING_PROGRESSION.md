@@ -24,10 +24,13 @@
 
 ## January 28, 2026 - 100/150 Checkpoints + Plan References
 - Stay the course to **150 live trades** unless the **100‑trade checkpoint** says to pause or descale.
-- At **100 trades**: decide **continue vs pause vs descale** based on the live checkpoint rules (PF/drawdown/expectancy from Jan 25).
-- At **150 trades**: evaluate light‑touch improvements, starting with:
+- At **100 trades**: **stats‑gated decision** (PF / drawdown / expectancy from Jan 25 rules).
+  - **Continue unchanged** only if PF > 1.0 and expectancy > 0 with acceptable drawdown.
+  - **Pause or descale** if PF ≤ 1.0 **or** expectancy ≤ 0 **or** drawdown is above threshold.
+- At **150 trades**: **only if stats remain favorable**, evaluate light‑touch improvements, starting with:
   - `docs/plans/risk_filter_refinement.md` (vol/stability filter, warn‑first).
   - `docs/plans/tp1_time_stop_plan.md` (no‑TP1 time‑stop to cut drag without shrinking winners).
+  - `docs/plans/regime_tilt_implementation.md` (side‑allocation tilt if long/short split stays imbalanced).
 - No scale‑up until 150; only adjust if stats remain favorable.
 
 ## January 28, 2026 - Tape Stabilizing, Equity Giveback
