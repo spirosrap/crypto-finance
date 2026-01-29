@@ -11,6 +11,11 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 now reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard now tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. Recent issue: Coinbase accepted leverage=50 on entry orders but positions reported 1×, so margin headroom is tighter than expected. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 29, 2026 - Stable Tape, Mixed Long/Short
+- Trading has stabilized further; retained some profit since the latest counting tweak (more than prior attempts).
+- Current live bias: two longs and two shorts around breakeven; longs are dragging while shorts are modest wins.
+- Longs may stay weak for a while, but they still occasionally offset short losses, so they stay in the mix for now.
+
 ## January 28, 2026 - 100/150 Checkpoints + Plan References
 - Stay the course to **150 live trades** unless the **100‑trade checkpoint** says to pause or descale.
 - At **100 trades**: decide **continue vs pause vs descale** based on the live checkpoint rules (PF/drawdown/expectancy from Jan 25).
@@ -18,11 +23,6 @@
   - `docs/plans/risk_filter_refinement.md` (vol/stability filter, warn‑first).
   - `docs/plans/tp1_time_stop_plan.md` (no‑TP1 time‑stop to cut drag without shrinking winners).
 - No scale‑up until 150; only adjust if stats remain favorable.
-
-## January 29, 2026 - Stable Tape, Mixed Long/Short
-- Trading has stabilized further; retained some profit since the latest counting tweak (more than prior attempts).
-- Current live bias: two longs and two shorts around breakeven; longs are dragging while shorts are modest wins.
-- Longs may stay weak for a while, but they still occasionally offset short losses, so they stay in the mix for now.
 
 ## January 28, 2026 - Tape Stabilizing, Equity Giveback
 - Tape looks more stable today, but a few losses pulled back equity that had been slowly accumulating over a long stretch.
