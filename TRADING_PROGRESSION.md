@@ -11,11 +11,11 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 now reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard now tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. Recent issue: Coinbase accepted leverage=50 on entry orders but positions reported 1×, so margin headroom is tighter than expected. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
-## January 29, 2026 - Checkpoint Plan Finalized (100→150)
-- **At 100 trades (review only):** If PF > 0 and system stable → implement **regime tilt** (70/30 allocation to favored side based on BTC trend vs 20 EMA). No other changes.
-- **At 150 trades (decision point):** Evaluate regime tilt impact. If stats hold (PF > 1.3, maxDD < 10%) → consider adding **TP1 time-stop to longs only** (16h window, tighten SL to breakeven if TP1 not hit).
-- **Rationale:** Shorts show 97% TP1 hit rate vs longs at 50%. Longs at 29% win rate vs shorts at 76%. Regime tilt addresses directional bias; time-stop addresses long drag without affecting winners.
-- **Sequencing:** One change at a time. Regime tilt first (backed by clear data), then time-stop (isolates each improvement's impact).
+## January 29, 2026 - Checkpoint Plan Clarified (100→150)
+- **At 100 trades (review only):** no implementation changes. Decide **continue vs pause vs descale** based on PF / drawdown / expectancy.
+- **At 150 trades (decision point):** only if stats remain favorable, apply **one change at a time** following the sequencing in the Jan 28 plan entry.
+- **Rationale:** Avoid stacking changes; measure impact per step before moving to the next.
+ - **Sequencing (brief):** Regime tilt → long‑only tightening → symbol overrides (per‑symbol RR/stop tweaks, e.g., BTC/ETH long RR>2.5 while keeping APT/SEI unchanged); stop if expectancy improves or trade count drops too much.
 
 ## January 29, 2026 - Stable Tape, Mixed Long/Short
 - Trading has stabilized further; retained some profit since the latest counting tweak (more than prior attempts).
@@ -27,10 +27,12 @@
 - At **100 trades**: **stats‑gated decision** (PF / drawdown / expectancy from Jan 25 rules).
   - **Continue unchanged** only if PF > 1.0 and expectancy > 0 with acceptable drawdown.
   - **Pause or descale** if PF ≤ 1.0 **or** expectancy ≤ 0 **or** drawdown is above threshold.
-- At **150 trades**: **only if stats remain favorable**, evaluate light‑touch improvements, starting with:
-  - `docs/plans/risk_filter_refinement.md` (vol/stability filter, warn‑first).
-  - `docs/plans/tp1_time_stop_plan.md` (no‑TP1 time‑stop to cut drag without shrinking winners).
-  - `docs/plans/regime_tilt_implementation.md` (side‑allocation tilt if long/short split stays imbalanced).
+- At **150 trades**: **only if stats remain favorable**, apply **one change at a time**, in this order:
+  1. **Regime tilt** (`docs/plans/regime_tilt_implementation.md`) — reversible, doesn’t alter entry mechanics.
+  2. **Long‑only tightening** (`docs/plans/long_entry_review.md`) — adjust ATR cap **or** RR (not both); run 30–50 trades.
+  3. **Symbol overrides** (`docs/plans/long_entry_review.md`) — BTC/ETH long RR > 2.5; keep APT/SEI unchanged.
+  4. **Optional**: risk‑filter refinement (`docs/plans/risk_filter_refinement.md`) and TP1 time‑stop (`docs/plans/tp1_time_stop_plan.md`) if drag persists.
+- After each step, re‑evaluate; **stop if expectancy improves** or **trade count drops too much**.
 - No scale‑up until 150; only adjust if stats remain favorable.
 
 ## January 28, 2026 - Tape Stabilizing, Equity Giveback
