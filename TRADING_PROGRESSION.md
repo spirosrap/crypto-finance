@@ -11,6 +11,12 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 now reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard now tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. Recent issue: Coinbase accepted leverage=50 on entry orders but positions reported 1×, so margin headroom is tighter than expected. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 29, 2026 - Checkpoint Plan Finalized (100→150)
+- **At 100 trades (review only):** If PF > 0 and system stable → implement **regime tilt** (70/30 allocation to favored side based on BTC trend vs 20 EMA). No other changes.
+- **At 150 trades (decision point):** Evaluate regime tilt impact. If stats hold (PF > 1.3, maxDD < 10%) → consider adding **TP1 time-stop to longs only** (16h window, tighten SL to breakeven if TP1 not hit).
+- **Rationale:** Shorts show 97% TP1 hit rate vs longs at 50%. Longs at 29% win rate vs shorts at 76%. Regime tilt addresses directional bias; time-stop addresses long drag without affecting winners.
+- **Sequencing:** One change at a time. Regime tilt first (backed by clear data), then time-stop (isolates each improvement's impact).
+
 ## January 29, 2026 - Stable Tape, Mixed Long/Short
 - Trading has stabilized further; retained some profit since the latest counting tweak (more than prior attempts).
 - Current live bias: two longs and two shorts around breakeven; longs are dragging while shorts are modest wins.
