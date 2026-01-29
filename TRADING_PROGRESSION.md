@@ -15,7 +15,9 @@
 - **At 100 trades (review only):** no implementation changes. Decide **continue vs pause vs descale** based on PF / drawdown / expectancy.
 - **At 150 trades (decision point):** only if stats remain favorable, apply **one change at a time** following the sequencing in the Jan 28 plan entry.
 - **Rationale:** Avoid stacking changes; measure impact per step before moving to the next.
- - **Sequencing (brief):** Regime tilt → long‑only tightening → symbol overrides (per‑symbol RR/stop tweaks, e.g., BTC/ETH long RR>2.5 while keeping APT/SEI unchanged); stop if expectancy improves or trade count drops too much.
+- **Sequencing (brief):** Regime tilt → long‑only tightening → symbol overrides (per‑symbol RR/stop tweaks, e.g., BTC/ETH long RR>2.5 while keeping APT/SEI unchanged); stop if expectancy improves or trade count drops too much.
+- **If 150 calls for descale:** reduce size first, then apply one defensive change (prefer long‑only tightening or TP1 time‑stop; tilt only if short edge is clearly dominant).
+- **Plan links:** long‑only tightening (`docs/plans/long_entry_review.md`) and TP1 time‑stop (`docs/plans/tp1_time_stop_plan.md`).
 
 ## January 29, 2026 - Stable Tape, Mixed Long/Short
 - Trading has stabilized further; retained some profit since the latest counting tweak (more than prior attempts).
@@ -33,6 +35,7 @@
   3. **Symbol overrides** (`docs/plans/long_entry_review.md`) — BTC/ETH long RR > 2.5; keep APT/SEI unchanged.
   4. **Optional**: risk‑filter refinement (`docs/plans/risk_filter_refinement.md`) and TP1 time‑stop (`docs/plans/tp1_time_stop_plan.md`) if drag persists.
 - After each step, re‑evaluate; **stop if expectancy improves** or **trade count drops too much**.
+- **If 150 trades requires descale:** cut size first, then pick **one defensive improvement** (prefer long‑only tightening or TP1 time‑stop). Use regime tilt only if short edge is strong and stable.
 - No scale‑up until 150; only adjust if stats remain favorable.
 
 ## January 28, 2026 - Tape Stabilizing, Equity Giveback
