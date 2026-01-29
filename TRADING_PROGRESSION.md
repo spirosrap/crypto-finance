@@ -19,6 +19,11 @@
   - `docs/plans/tp1_time_stop_plan.md` (no‑TP1 time‑stop to cut drag without shrinking winners).
 - No scale‑up until 150; only adjust if stats remain favorable.
 
+## January 29, 2026 - Stable Tape, Mixed Long/Short
+- Trading has stabilized further; retained some profit since the latest counting tweak (more than prior attempts).
+- Current live bias: two longs and two shorts around breakeven; longs are dragging while shorts are modest wins.
+- Longs may stay weak for a while, but they still occasionally offset short losses, so they stay in the mix for now.
+
 ## January 28, 2026 - Tape Stabilizing, Equity Giveback
 - Tape looks more stable today, but a few losses pulled back equity that had been slowly accumulating over a long stretch.
 - Positive: the drawdown was less severe than it felt yesterday, though that doesn’t guarantee improvement from here.
