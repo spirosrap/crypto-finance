@@ -11,6 +11,12 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 now reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard now tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. Recent issue: Coinbase accepted leverage=50 on entry orders but positions reported 1×, so margin headroom is tighter than expected. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 30, 2026 - Bearish Selloff, Shorts Held
+- Yesterday saw a big sell‑off; the system’s bearish bias worked OK and recovered most of the prior losses.
+- It was scary watching it keep shorting after such a sharp drop (reversal felt imminent), but the new shorts did not get clipped as expected.
+- Notable: BTC attempted to push below 80K — these are very bearish conditions.
+- Hoping the system can handle reversals while staying profitable through drawdowns going forward.
+
 ## January 29, 2026 - Checkpoint Plan Clarified (100→150)
 - **At 100 trades (review only):** no implementation changes. Decide **continue vs pause vs descale** based on PF / drawdown / expectancy.
 - **At 150 trades (decision point):** only if stats remain favorable, apply **one change at a time** following the sequencing in the Jan 28 plan entry.
