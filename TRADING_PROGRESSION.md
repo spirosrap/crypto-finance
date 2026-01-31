@@ -16,6 +16,11 @@
 - Yesterday most trades were shorts, but the direction wasn’t decisive; some trades closed positive while others hit stop losses.
 - Overall P/L is up from the recent big drawdown.
 
+## January 31, 2026 - Bracket Failure Guard (ETC Unprotected)
+- Found a live ETC entry where the bracket placement failed (`PREVIEW_INVALID_LIMIT_PRICE`), leaving the position briefly unprotected.
+- Added a guard in `ccxt_trade_perp.py`: if CCXT bracket placement fails, retry via Coinbase REST; if that fails, **auto‑close** the position to avoid unprotected exposure.
+- Outcome: brackets should now always attach, or the position is flattened immediately.
+
 ## January 31, 2026 - 100-Trade Checkpoint Reached
 - Dashboard shows 100 trades; PF ~1.24, expectancy ~0.48, max drawdown ~-3.61%.
 - Decision: **continue unchanged** to 150 (per checkpoint rules). No scaling or parameter changes at 100.
