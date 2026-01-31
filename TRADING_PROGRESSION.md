@@ -16,6 +16,12 @@
 - Yesterday most trades were shorts, but the direction wasn’t decisive; some trades closed positive while others hit stop losses.
 - Overall P/L is up from the recent big drawdown.
 
+## January 31, 2026 - 100-Trade Checkpoint Reached
+- Dashboard shows 100 trades; PF ~1.24, expectancy ~0.48, max drawdown ~-3.61%.
+- Decision: **continue unchanged** to 150 (per checkpoint rules). No scaling or parameter changes at 100.
+- Watch item: recent Sharpe dipped below overall; monitor but no action unless expectancy degrades.
+- Plan to 150: maintain current settings, log outcomes, and only consider the one-at-a-time improvements at 150 if stats remain favorable.
+
 ## January 30, 2026 - Bearish Selloff, Shorts Held
 - Yesterday saw a big sell‑off; the system’s bearish bias worked OK and recovered most of the prior losses.
 - It was scary watching it keep shorting after such a sharp drop (reversal felt imminent), but the new shorts did not get clipped as expected.
