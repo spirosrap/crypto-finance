@@ -550,6 +550,166 @@ def submit_brackets(
     )
 
 
+def _bracket_response_has_error(response: object) -> bool:
+    if not response:
+        return True
+    if isinstance(response, dict):
+        if response.get("error"):
+            return True
+        for key in ("tp1", "tp2"):
+            value = response.get(key)
+            if isinstance(value, dict) and value.get("error"):
+                return True
+    return False
+
+
+def _should_attempt_bracket_fallback(response: object) -> bool:
+    if not isinstance(response, dict):
+        return True
+    if response.get("error") in {"entry_not_filled", "entry_id_missing"}:
+        return False
+    return True
+
+
+def _place_brackets_via_rest(
+    product_id: str,
+    entry_order_id: Optional[str],
+    entry_side: str,
+    base_size: float,
+    tp_price: float,
+    sl_price: float,
+    tp1_price: Optional[float],
+    tp1_pct: float,
+    leverage: float,
+    expiry: str,
+) -> Dict[str, Any]:
+    service = _load_rest_service()
+    position_side, position_size = fetch_open_position(service, product_id)
+    if position_size > 0:
+        base_size = position_size
+        entry_side = position_side or entry_side
+
+    if not entry_order_id:
+        return {"error": "missing_entry_order_id_for_rest"}
+
+    tp1_pct_val = float(tp1_pct or 0.0)
+    leverage_str = str(leverage) if leverage else None
+
+    if tp1_price is not None and tp1_pct_val > 0:
+        size_tp1 = base_size * (tp1_pct_val / 100.0)
+        size_tp2 = base_size - size_tp1
+        tp1_resp = service.place_bracket_after_fill(
+            product_id,
+            entry_order_id,
+            size_tp1,
+            tp1_price,
+            sl_price,
+            leverage=leverage_str,
+            expiry=expiry,
+        )
+        if isinstance(tp1_resp, dict) and tp1_resp.get("error"):
+            return {"error": "rest_tp1_failed", "response": tp1_resp}
+        tp2_resp = service.place_bracket_after_fill(
+            product_id,
+            entry_order_id,
+            size_tp2,
+            tp_price,
+            sl_price,
+            leverage=leverage_str,
+            expiry=expiry,
+        )
+        if isinstance(tp2_resp, dict) and tp2_resp.get("error"):
+            return {"error": "rest_tp2_failed", "response": tp2_resp}
+        return {"via": "rest", "tp1": tp1_resp, "tp2": tp2_resp}
+
+    tp_resp = service.place_bracket_after_fill(
+        product_id,
+        entry_order_id,
+        base_size,
+        tp_price,
+        sl_price,
+        leverage=leverage_str,
+        expiry=expiry,
+    )
+    if isinstance(tp_resp, dict) and tp_resp.get("error"):
+        return {"error": "rest_tp_failed", "response": tp_resp}
+    return {"via": "rest", "tp": tp_resp}
+
+
+def _close_unprotected_position(product_id: str) -> Dict[str, Any]:
+    service = _load_rest_service()
+    service.close_all_positions(product_id=product_id)
+    return {"via": "close", "product_id": product_id}
+
+
+def _submit_brackets_safe(
+    exchange: ccxt.Exchange,
+    meta: MarketMeta,
+    entry_order_id: Optional[str],
+    entry_side: str,
+    base_size: float,
+    tp_price: float,
+    sl_price: float,
+    tp1_price: Optional[float],
+    tp1_pct: float,
+    leverage: float,
+    expiry: str,
+    dry_run: bool,
+) -> Dict[str, Any]:
+    if dry_run:
+        return {"status": "dry_run"}
+
+    try:
+        response = submit_brackets(
+            exchange,
+            meta,
+            entry_side,
+            base_size,
+            tp_price,
+            sl_price,
+            tp1_price,
+            tp1_pct,
+            leverage,
+            expiry,
+            dry_run,
+        )
+    except Exception as exc:
+        logger.error("Bracket placement failed: %s", exc)
+        response = {"error": str(exc)}
+
+    if _bracket_response_has_error(response) and _should_attempt_bracket_fallback(response):
+        logger.warning("Bracket placement failed; attempting REST fallback to avoid unprotected position.")
+        try:
+            rest_response = _place_brackets_via_rest(
+                meta.market["id"],
+                entry_order_id,
+                entry_side,
+                base_size,
+                tp_price,
+                sl_price,
+                tp1_price,
+                tp1_pct,
+                leverage,
+                expiry,
+            )
+            if not _bracket_response_has_error(rest_response):
+                return rest_response
+            response = {"error": "rest_bracket_failed", "response": rest_response}
+        except Exception as exc:
+            logger.error("REST bracket fallback failed: %s", exc)
+            response = {"error": "rest_bracket_failed", "exception": str(exc)}
+
+        logger.error("Closing unprotected position for %s after bracket failure.", meta.market["id"])
+        try:
+            close_resp = _close_unprotected_position(meta.market["id"])
+            response = {"error": "brackets_failed_closed", "close": close_resp, "prior": response}
+        except Exception as exc:
+            logger.error("Failed to close unprotected position for %s: %s", meta.market["id"], exc)
+            response = {"error": "brackets_failed_close_failed", "prior": response, "exception": str(exc)}
+
+    return response
+
+
 def place_market_order_with_targets_rest(
     product_id: str,
     side: str,
@@ -883,9 +1043,10 @@ def main() -> None:
             if position_size <= 0:
                 raise RuntimeError(f"No open position found for {meta.market['id']}; brackets not placed.")
             logger.info("Found open position for %s: %s (size=%.8f)", meta.market["id"], found_side, position_size)
-            bracket_response = submit_brackets(
+            bracket_response = _submit_brackets_safe(
                 exchange,
                 meta,
+                None,
                 found_side or (args.side or "BUY"),
                 position_size,
                 tp_price,
@@ -1018,9 +1179,10 @@ def main() -> None:
                                         meta.market["id"],
                                         position_size,
                                     )
-                                    bracket_response = submit_brackets(
+                                    bracket_response = _submit_brackets_safe(
                                         exchange,
                                         meta,
+                                        entry_order_id,
                                         found_side or args.side,
                                         position_size,
                                         tp_price,
@@ -1039,9 +1201,10 @@ def main() -> None:
                             except Exception as exc:
                                 logger.warning("Bracket wait check failed: %s", exc)
                     else:
-                        bracket_response = submit_brackets(
+                        bracket_response = _submit_brackets_safe(
                             exchange,
                             meta,
+                            entry_order_id,
                             args.side,
                             base_size,
                             tp_price,
@@ -1059,9 +1222,10 @@ def main() -> None:
                     )
                     bracket_response = {"error": "entry_id_missing"}
             else:
-                bracket_response = submit_brackets(
+                bracket_response = _submit_brackets_safe(
                     exchange,
                     meta,
+                    entry_order_id,
                     args.side,
                     base_size,
                     tp_price,
