@@ -11,6 +11,11 @@
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 now reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard now tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. Recent issue: Coinbase accepted leverage=50 on entry orders but positions reported 1×, so margin headroom is tighter than expected. Checkpoints: 100 live closes and 150 paper closes for scale/tweak decisions.
 
+## January 31, 2026 - Tape Stabilizing After Selloff
+- Trading looks more stable now; BTC appears to be stabilizing after the 82–83K selloff.
+- Yesterday most trades were shorts, but the direction wasn’t decisive; some trades closed positive while others hit stop losses.
+- Overall P/L is up from the recent big drawdown.
+
 ## January 30, 2026 - Bearish Selloff, Shorts Held
 - Yesterday saw a big sell‑off; the system’s bearish bias worked OK and recovered most of the prior losses.
 - It was scary watching it keep shorting after such a sharp drop (reversal felt imminent), but the new shorts did not get clipped as expected.
