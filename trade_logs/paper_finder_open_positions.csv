@@ -1,1 +1,2 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,partial_tp_pct,partial_tp_rr,partial_tp_price,partial_tp_done,partial_tp_move_sl,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
+c65067c289,ETC,ETC-PERP-INTX,SHORT,9.94,9.94,9.4629,50.0,0.8,9.68552,True,True,125.0,50.0,2026-01-31T14:28:04Z,2026-02-01T14:28:04Z,OPEN,9.464,2026-01-31T17:25:02Z,5.99,4.7887,0.0,1,5.0,,
