@@ -3,6 +3,6 @@ model_reasoning_effort = "xhigh"
 approval_policy = "untrusted"
 
 [features]
-web_search_request = true
+web_search = "live"
 streamable-shell = true
 rmcp_client = true
