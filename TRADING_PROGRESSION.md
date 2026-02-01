@@ -2,11 +2,21 @@
 
 
 ## Quick Links
+- [February 2026](#february-2026)
 - [January 2026](#january-2026)
 - [December 2025](#december-2025)
 - [November 2025](#november-2025)
 - [October 2025](#october-2025)
 - [June 2025](#june-2025)
+
+## February 2026
+**State at a glance (February recap):** New month kickoff; continue updating as additional logs land and the 100-trade checkpoint feeds into 150-trade decisions.
+
+## February 1, 2026 - Volatility Spike, Sparse Qualifiers
+- BTC sold off sharply and traded near 75K; shorts from yesterday were winners across the board.
+- After the selloff, the system took fewer trades (only 1–2 in the 4h window), likely because volatility was too high for most candidates.
+- A BTC long started green but flipped negative on a spike; current live mix includes a BCH and BTC short/long pair.
+- BCH is close to SL and BTC is around breakeven; hoping the system can absorb reversals while staying profitable through drawdowns.
 
 ## January 2026
 **State at a glance (January recap):** Baseline ATR exits (0.8× ATR stop, 1.5R target) with ATR ≤ 1.5× cap, spread/VMC gates, and cluster caps (10 total / 3 per bucket). Daily stop (−4%/−$40) + BTC range‑break circuit auto‑close live/paper and suppress entries until reset or confirmed re‑entry (latched; intraday doesn’t clear). Risk defaults live in `config/risk_thresholds.yaml`. Automation: gate‑scan every 4h; paper updates + fills polling + live snapshot every 5m. Live TP1 reissues brackets with SL moved to entry (fill‑derived, clamped/rounded) and preserves TP; dust threshold bumped to $10 after a ~$9 BTC remainder. Dashboard tracks fees + exit slippage; CCXT guardrails reduce v3 “index out of range” errors. **100 live trades reached** (PF ~1.24, expectancy ~0.48, win rate ~54%, max drawdown ~−3.61%, ending equity ~1048). **Decision at 100:** continue unchanged to 150; monitor recent Sharpe dip but no action unless expectancy degrades. Improvements remain one‑at‑a‑time at 150 if stats stay favorable (regime tilt → long‑only tightening → symbol overrides; optional risk‑filter/TP1 time‑stop).
