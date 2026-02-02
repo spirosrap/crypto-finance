@@ -10,7 +10,13 @@
 - [June 2025](#june-2025)
 
 ## February 2026
-**State at a glance (February recap):** New month kickoff; continue updating as additional logs land and the 100-trade checkpoint feeds into 150-trade decisions.
+**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Monitoring PF/expectancy as the system gives back gains near breakeven; focus is sustaining PF>0 through the 150-trade checkpoint.
+
+## February 2, 2026 - Stop-Loss Cluster, Unfavorable Regime
+- Yesterday only a few longs/shorts per 4h were taken, and both sides hit stop losses.
+- This feels like a uniquely unfavorable regime; a handful of trades keep failing in sequence.
+- BTC longs are still firing every 4h and still failing; P/L is back near breakeven after 100+ trades.
+- It feels like profits keep getting given back — watching to see if PF stays > 0 by trade 150.
 
 ## February 1, 2026 - Volatility Spike, Sparse Qualifiers
 - BTC sold off sharply and traded near 75K; shorts from yesterday were winners across the board.
