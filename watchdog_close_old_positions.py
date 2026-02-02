@@ -2083,16 +2083,12 @@ def _process_product_fills_core(
             crossed_flat = False
             matched_qty = 0.0
             matched_entry_value = 0.0
-            matched_entry_time = 0.0
             matched_pnl = 0.0
             while remaining > eps and short_inventory:
                 lot = short_inventory[0]
                 match_qty = min(remaining, lot['qty'])
                 matched_qty += match_qty
                 matched_entry_value += lot['price'] * match_qty
-                lot_time = _as_utc(lot.get('time'))
-                if lot_time:
-                    matched_entry_time += lot_time.timestamp() * match_qty
                 matched_pnl += (lot['price'] - fill.price) * match_qty
                 realized += (lot['price'] - fill.price) * match_qty
                 exit_qty += match_qty
@@ -2109,12 +2105,6 @@ def _process_product_fills_core(
                 short_qty = 0.0
             if collect_partials and matched_qty > eps and not crossed_flat and short_qty > eps:
                 avg_entry = matched_entry_value / matched_qty if matched_qty > eps else fill.price
-                avg_entry_time = None
-                if matched_entry_time > 0 and matched_qty > eps:
-                    avg_entry_time = datetime.fromtimestamp(
-                        matched_entry_time / matched_qty,
-                        tz=timezone.utc,
-                    )
                 fee_share = (fill.fee * (matched_qty / fill.size)) if fill.size > eps else 0.0
                 partials.append(
                     PartialFillEvent(
@@ -2127,7 +2117,7 @@ def _process_product_fills_core(
                         realized_pnl=matched_pnl - fee_share,
                         fees=fee_share,
                         order_id=fill.order_id or '',
-                        open_time=avg_entry_time or cycle_start,
+                        open_time=cycle_start,
                     )
                 )
             if crossed_flat:
@@ -2135,7 +2125,7 @@ def _process_product_fills_core(
             if remaining > eps:
                 if long_qty == 0.0 and short_qty == 0.0:
                     start_new_cycle('LONG', fill.time)
-                long_inventory.append({'qty': remaining, 'price': fill.price, 'time': fill.time})
+                long_inventory.append({'qty': remaining, 'price': fill.price})
                 long_qty += remaining
                 entry_qty += remaining
                 entry_value += fill.price * remaining
@@ -2144,16 +2134,12 @@ def _process_product_fills_core(
             crossed_flat = False
             matched_qty = 0.0
             matched_entry_value = 0.0
-            matched_entry_time = 0.0
             matched_pnl = 0.0
             while remaining > eps and long_inventory:
                 lot = long_inventory[0]
                 match_qty = min(remaining, lot['qty'])
                 matched_qty += match_qty
                 matched_entry_value += lot['price'] * match_qty
-                lot_time = _as_utc(lot.get('time'))
-                if lot_time:
-                    matched_entry_time += lot_time.timestamp() * match_qty
                 matched_pnl += (fill.price - lot['price']) * match_qty
                 realized += (fill.price - lot['price']) * match_qty
                 exit_qty += match_qty
@@ -2170,12 +2156,6 @@ def _process_product_fills_core(
                 long_qty = 0.0
             if collect_partials and matched_qty > eps and not crossed_flat and long_qty > eps:
                 avg_entry = matched_entry_value / matched_qty if matched_qty > eps else fill.price
-                avg_entry_time = None
-                if matched_entry_time > 0 and matched_qty > eps:
-                    avg_entry_time = datetime.fromtimestamp(
-                        matched_entry_time / matched_qty,
-                        tz=timezone.utc,
-                    )
                 fee_share = (fill.fee * (matched_qty / fill.size)) if fill.size > eps else 0.0
                 partials.append(
                     PartialFillEvent(
@@ -2188,7 +2168,7 @@ def _process_product_fills_core(
                         realized_pnl=matched_pnl - fee_share,
                         fees=fee_share,
                         order_id=fill.order_id or '',
-                        open_time=avg_entry_time or cycle_start,
+                        open_time=cycle_start,
                     )
                 )
             if crossed_flat:
@@ -2196,7 +2176,7 @@ def _process_product_fills_core(
             if remaining > eps:
                 if long_qty == 0.0 and short_qty == 0.0:
                     start_new_cycle('SHORT', fill.time)
-                short_inventory.append({'qty': remaining, 'price': fill.price, 'time': fill.time})
+                short_inventory.append({'qty': remaining, 'price': fill.price})
                 short_qty += remaining
                 entry_qty += remaining
                 entry_value += fill.price * remaining

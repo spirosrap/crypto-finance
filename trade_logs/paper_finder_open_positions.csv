@@ -1,1 +1,2 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,partial_tp_pct,partial_tp_rr,partial_tp_price,partial_tp_done,partial_tp_move_sl,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
+cd0d97ebb6,BTC,BTC-PERP-INTX,LONG,78229.57,76195.6,81280.52,50.0,0.8,79856.746,False,True,250.0,50.0,2026-01-31T18:26:45Z,2026-02-01T18:26:45Z,OPEN,78715.6,2026-02-01T11:40:03Z,1.55,0.6213,0.0,1,5.0,,
