@@ -10,7 +10,12 @@
 - [June 2025](#june-2025)
 
 ## February 2026
-**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Monitoring PF/expectancy as the system gives back gains near breakeven; focus is sustaining PF>0 through the 150-trade checkpoint.
+**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+
+## February 2, 2026 - Long Imbalance, Repeating BTC Setup
+- The system is not taking many trades because suggestions are imbalanced, mostly longs.
+- Currently there is one BTC trade running; it is the same setup that keeps reappearing, sometimes as a short and other times as a long.
+- Hoping PF stays > 0 through the 150th trade.
 
 ## February 2, 2026 - Stop-Loss Cluster, Unfavorable Regime
 - Yesterday only a few longs/shorts per 4h were taken, and both sides hit stop losses.
