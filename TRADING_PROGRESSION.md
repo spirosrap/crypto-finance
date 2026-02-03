@@ -10,7 +10,12 @@
 - [June 2025](#june-2025)
 
 ## February 2026
-**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is now excluded from gate-scan entries while still serving as the trend/range-break anchor. Monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+
+## February 3, 2026 - BTC Excluded From Entries (Trend Anchor Retained)
+- BTC removed from the gate-scan trading universe due to outsized losses (excluded via `config/excluded_perps.txt`).
+- BTC remains the trend/range-break anchor to guide regime context and guard behavior.
+- We may reactivate BTC trading if conditions improve.
 
 ## February 2, 2026 - Long Imbalance, Repeating BTC Setup
 - The system is not taking many trades because suggestions are imbalanced, mostly longs.
