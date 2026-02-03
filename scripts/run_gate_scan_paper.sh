@@ -89,6 +89,7 @@ SCAN_CMD=(
   --top 15
   --scan-limit 200
   --balanced
+  --regime-tilt
   --min-score-long 55
   --min-score-short 60
   --perf-filter

@@ -10,7 +10,12 @@
 - [June 2025](#june-2025)
 
 ## February 2026
-**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is now excluded from gate-scan entries while still serving as the trend/range-break anchor. Monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is excluded from gate-scan entries while still serving as the trend/range-break anchor. Regime tilt is now active for gate-scan (BTC EMA20, 2-day confirm, 70/30) with imbalance suppression. Monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+
+## February 3, 2026 - Regime Tilt Enabled (Gate-Scan)
+- Enabled regime tilt in gate-scan: BTC daily close vs EMA20 with 2-day confirm drives 70/30 long/short allocation.
+- Imbalance suppression remains in place (insufficient unfavored-side candidates => no output).
+- BTC stays excluded from entries but continues as the trend/range-break anchor; revisit if conditions improve.
 
 ## February 3, 2026 - BTC Excluded From Entries (Trend Anchor Retained)
 - BTC removed from the gate-scan trading universe due to outsized losses (excluded via `config/excluded_perps.txt`).

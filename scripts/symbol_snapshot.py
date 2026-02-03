@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 from datetime import date, datetime, timedelta, timezone
@@ -39,6 +40,14 @@ LIVE_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "watchdog_closed_positions.csv
 PAPER_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "paper_finder_closed_positions.csv"
 RANGE_BREAK_STATUS_PATH = REPO_ROOT / "logs" / "range_break_status.json"
 DAILY_STOP_HISTORY_PATH = REPO_ROOT / "logs" / "daily_stop_history.json"
+_LOGGER = logging.getLogger(__name__)
+_BTC_SYMBOLS = ["BTC-USD", "BTC-USDC", "BTC-USDT", "BTCUSD"]
+_SUPPRESSION_COUNTS = {
+    "total": 0,
+    "regime_bullish": 0,
+    "regime_bearish": 0,
+    "regime_neutral": 0,
+}
 
 from short_term_crypto_finder import (
     PROFILE_PRESETS,
@@ -705,6 +714,94 @@ def _vol_regime_ratios(
     return atr7_to_21, tr1_to_atr7
 
 
+def _detect_btc_regime(
+    finder: "ShortTermCryptoFinder",
+    ema_period: int = 20,
+    confirm_days: int = 2,
+    buffer_bps: float = 0.0,
+) -> str:
+    """Detect BTC trend regime based on daily close vs EMA."""
+    if ema_period <= 0 or confirm_days <= 0:
+        return "neutral"
+    df = None
+    used_symbol = None
+    days_needed = max(ema_period + confirm_days + 5, 35)
+    for btc_symbol in _BTC_SYMBOLS:
+        try:
+            candidate = finder.get_historical_data(btc_symbol, days=days_needed)
+        except Exception:
+            continue
+        if candidate is not None and len(candidate) >= ema_period + confirm_days:
+            df = candidate
+            used_symbol = btc_symbol
+            break
+
+    if df is None or len(df) < ema_period + confirm_days:
+        _LOGGER.warning("Regime detection: could not fetch BTC daily candles; defaulting to neutral")
+        return "neutral"
+
+    try:
+        df = df.sort_index()
+        if hasattr(df.index, "tz") and df.index.tz is not None:
+            df.index = df.index.tz_convert("UTC")
+
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc)
+        last_ts = df.index[-1]
+        try:
+            last_date = last_ts.date()
+        except Exception:
+            last_date = None
+        if last_date == now_utc.date():
+            df = df.iloc[:-1]
+            _LOGGER.debug("Regime detection: dropped incomplete candle for %s", now_utc.date())
+            if len(df) < ema_period + confirm_days:
+                _LOGGER.warning("Regime detection: insufficient confirmed candles after dropping incomplete")
+                return "neutral"
+
+        close_col = "close" if "close" in df.columns else "price"
+        closes = df[close_col].astype(float)
+        df["ema"] = closes.ewm(span=ema_period, adjust=False).mean()
+
+        buffer_mult = buffer_bps / 10000.0
+        ema_upper = df["ema"] * (1 + buffer_mult)
+        ema_lower = df["ema"] * (1 - buffer_mult)
+        recent = df.tail(confirm_days)
+        recent_closes = recent[close_col]
+        recent_upper = ema_upper.tail(confirm_days)
+        recent_lower = ema_lower.tail(confirm_days)
+        above_count = (recent_closes > recent_upper).sum()
+        below_count = (recent_closes < recent_lower).sum()
+
+        if above_count == confirm_days:
+            _LOGGER.info(
+                "Regime detection (%s): BULLISH - %s closes above EMA%s (+%sbps)",
+                used_symbol,
+                confirm_days,
+                ema_period,
+                buffer_bps,
+            )
+            return "bullish"
+        if below_count == confirm_days:
+            _LOGGER.info(
+                "Regime detection (%s): BEARISH - %s closes below EMA%s (-%sbps)",
+                used_symbol,
+                confirm_days,
+                ema_period,
+                buffer_bps,
+            )
+            return "bearish"
+        _LOGGER.info(
+            "Regime detection (%s): NEUTRAL - mixed signals in last %s closes",
+            used_symbol,
+            confirm_days,
+        )
+        return "neutral"
+    except Exception as exc:
+        _LOGGER.error("Regime detection error: %s", exc)
+        return "neutral"
+
+
 def _print_side(label: str, metric) -> None:
     if not metric:
         print(f"{label}: n/a")
@@ -867,27 +964,77 @@ def _gate_scan_sort_key(row: Dict[str, object]) -> Tuple[float, float]:
 def _select_balanced_rows(
     rows: List[Dict[str, object]],
     top: int,
-) -> Tuple[List[Dict[str, object]], Dict[str, int]]:
+    regime: str = "neutral",
+    tilt_pct: float = 70.0,
+) -> Tuple[List[Dict[str, object]], Dict[str, object]]:
     if top <= 0 or not rows:
-        return [], {"longs": 0, "shorts": 0, "min_per_side": 0}
+        return [], {
+            "longs": 0,
+            "shorts": 0,
+            "long_slots": 0,
+            "short_slots": 0,
+            "min_required": 0,
+            "selected_longs": 0,
+            "selected_shorts": 0,
+            "regime": regime,
+            "suppressed": False,
+        }
     longs = [row for row in rows if str(row.get("best_side") or "").upper() == "LONG"]
     shorts = [row for row in rows if str(row.get("best_side") or "").upper() == "SHORT"]
     longs.sort(key=_gate_scan_sort_key)
     shorts.sort(key=_gate_scan_sort_key)
-    min_per_side = top // 2
-    if min_per_side and (len(longs) < min_per_side or len(shorts) < min_per_side):
-        return [], {"longs": len(longs), "shorts": len(shorts), "min_per_side": min_per_side}
+    if regime == "bullish":
+        long_slots = int(top * (tilt_pct / 100.0))
+        short_slots = top - long_slots
+    elif regime == "bearish":
+        long_slots = top - int(top * (tilt_pct / 100.0))
+        short_slots = int(top * (tilt_pct / 100.0))
+    else:
+        long_slots = top // 2
+        short_slots = top // 2
+    min_required_per_side = min(long_slots, short_slots)
+    if min_required_per_side and (len(longs) < min_required_per_side or len(shorts) < min_required_per_side):
+        _LOGGER.info(
+            "Gate-scan SUPPRESSED (reversal protection): regime=%s, available L=%s/S=%s, required min=%s per side",
+            regime,
+            len(longs),
+            len(shorts),
+            min_required_per_side,
+        )
+        return [], {
+            "longs": len(longs),
+            "shorts": len(shorts),
+            "long_slots": long_slots,
+            "short_slots": short_slots,
+            "min_required": min_required_per_side,
+            "regime": regime,
+            "suppressed": True,
+            "suppression_reason": "insufficient_balance",
+        }
     selected: List[Dict[str, object]] = []
-    if min_per_side:
-        selected.extend(longs[:min_per_side])
-        selected.extend(shorts[:min_per_side])
+    if long_slots:
+        selected.extend(longs[:long_slots])
+    if short_slots:
+        selected.extend(shorts[:short_slots])
     remaining = top - len(selected)
     if remaining > 0:
-        remainder_pool = longs[min_per_side:] + shorts[min_per_side:]
+        remainder_pool = longs[long_slots:] + shorts[short_slots:]
         remainder_pool.sort(key=_gate_scan_sort_key)
         selected.extend(remainder_pool[:remaining])
     selected.sort(key=_gate_scan_sort_key)
-    return selected, {"longs": len(longs), "shorts": len(shorts), "min_per_side": min_per_side}
+    final_longs = sum(1 for r in selected if str(r.get("best_side") or "").upper() == "LONG")
+    final_shorts = len(selected) - final_longs
+    return selected, {
+        "longs": len(longs),
+        "shorts": len(shorts),
+        "long_slots": long_slots,
+        "short_slots": short_slots,
+        "min_required": min_required_per_side,
+        "selected_longs": final_longs,
+        "selected_shorts": final_shorts,
+        "regime": regime,
+        "suppressed": False,
+    }
 
 
 def _rr_driver_line(
@@ -1215,6 +1362,11 @@ def gate_scan(
     range_break_atr_mult: float,
     range_break_confirmed_only: bool,
     balanced: bool,
+    regime_tilt: bool,
+    regime_ema_period: int,
+    regime_confirm_days: int,
+    regime_tilt_pct: float,
+    regime_buffer_bps: float,
     perf_filter: bool,
     perf_source: str,
     perf_lookback_days: Optional[int],
@@ -1237,6 +1389,31 @@ def gate_scan(
     if not coins:
         print("No symbols retrieved (check connectivity or liquidity filters).")
         return
+
+    if regime_tilt and not balanced:
+        print("Regime tilt requested without --balanced; ignoring tilt.")
+        regime_tilt = False
+
+    regime = "neutral"
+    if regime_tilt:
+        regime = _detect_btc_regime(
+            finder,
+            ema_period=regime_ema_period,
+            confirm_days=regime_confirm_days,
+            buffer_bps=regime_buffer_bps,
+        )
+        tilt_pct_display = regime_tilt_pct if regime != "neutral" else 50.0
+        buffer_note = f", {regime_buffer_bps:.0f}bps buffer" if regime_buffer_bps > 0 else ""
+        print(
+            "Regime: {regime} (BTC vs {ema} EMA, {days}d confirm{buffer}) -> {long_pct:.0f}/{short_pct:.0f} tilt".format(
+                regime=regime.upper(),
+                ema=regime_ema_period,
+                days=regime_confirm_days,
+                buffer=buffer_note,
+                long_pct=tilt_pct_display,
+                short_pct=100 - tilt_pct_display,
+            )
+        )
 
     perf_excluded: set[str] = set()
     perf_meta: Optional[dict] = None
@@ -1506,19 +1683,42 @@ def gate_scan(
 
     rows.sort(key=_gate_scan_sort_key)
     top_rows = rows[:top]
+    balance_meta: Optional[Dict[str, object]] = None
     balance_note = None
     if balanced:
-        top_rows, balance_meta = _select_balanced_rows(rows, top)
-        min_per_side = balance_meta["min_per_side"]
-        balance_note = (
-            "Balanced gate-scan: LONG={longs}, SHORT={shorts}, min_per_side={min_per_side}.".format(
-                longs=balance_meta["longs"],
-                shorts=balance_meta["shorts"],
-                min_per_side=min_per_side,
-            )
+        top_rows, balance_meta = _select_balanced_rows(
+            rows,
+            top,
+            regime=regime if regime_tilt else "neutral",
+            tilt_pct=regime_tilt_pct,
         )
-        if min_per_side and (balance_meta["longs"] < min_per_side or balance_meta["shorts"] < min_per_side):
-            balance_note += " Insufficient balance; output suppressed."
+        if balance_meta.get("suppressed"):
+            if regime_tilt and regime != "neutral":
+                balance_note = (
+                    "Regime-tilted gate-scan ({regime}): LONG={longs}, SHORT={shorts}, "
+                    "min_required={min_required}. Insufficient balance; output suppressed (reversal protection).".format(
+                        **balance_meta
+                    )
+                )
+            else:
+                balance_note = (
+                    "Balanced gate-scan: LONG={longs}, SHORT={shorts}, "
+                    "min_required={min_required}. Insufficient balance; output suppressed.".format(
+                        **balance_meta
+                    )
+                )
+        else:
+            if regime_tilt and regime != "neutral":
+                balance_note = (
+                    "Regime-tilted gate-scan ({regime}): selected LONG={selected_longs}, SHORT={selected_shorts} "
+                    "(target {long_slots}/{short_slots}, available {longs}/{shorts}).".format(**balance_meta)
+                )
+            else:
+                balance_note = (
+                    "Balanced gate-scan: LONG={longs}, SHORT={shorts}, selected={selected_longs}/{selected_shorts}.".format(
+                        **balance_meta
+                    )
+                )
 
     def _write_range_break_status() -> None:
         if range_break_info is None:
@@ -1592,6 +1792,20 @@ def gate_scan(
     print(range_break_msg)
     if balance_note:
         print(balance_note)
+    if balance_meta and balance_meta.get("suppressed"):
+        _SUPPRESSION_COUNTS["total"] += 1
+        regime_key = f"regime_{balance_meta.get('regime')}"
+        if regime_key in _SUPPRESSION_COUNTS:
+            _SUPPRESSION_COUNTS[regime_key] += 1
+        _LOGGER.info(
+            "Gate-scan suppressed (total=%s): %s regime, L=%s, S=%s",
+            _SUPPRESSION_COUNTS["total"],
+            balance_meta.get("regime"),
+            balance_meta.get("longs"),
+            balance_meta.get("shorts"),
+        )
+        _write_range_break_status()
+        return
     print(f"Top {len(top_rows)} closest to RR {rr_target}:")
 
     def _leverage_text(value: Optional[float]) -> Optional[str]:
@@ -2014,6 +2228,35 @@ def main() -> None:
         help="Require a balanced LONG/SHORT mix in gate-scan output (needs >= floor(top/2) per side).",
     )
     parser.add_argument(
+        "--regime-tilt",
+        action="store_true",
+        help="Tilt long/short allocation based on BTC regime (70/30 split favoring trend direction).",
+    )
+    parser.add_argument(
+        "--regime-ema-period",
+        type=int,
+        default=20,
+        help="EMA period for regime detection (default: 20).",
+    )
+    parser.add_argument(
+        "--regime-confirm-days",
+        type=int,
+        default=2,
+        help="Consecutive days required to confirm regime (default: 2).",
+    )
+    parser.add_argument(
+        "--regime-tilt-pct",
+        type=float,
+        default=70.0,
+        help="Percentage allocation for favored side when regime active (default: 70).",
+    )
+    parser.add_argument(
+        "--regime-buffer-bps",
+        type=float,
+        default=0.0,
+        help="Buffer in basis points to reduce whipsaw (e.g., 20 = 0.2%%). Default: 0 (no buffer).",
+    )
+    parser.add_argument(
         "--min-score-long",
         type=float,
         default=0.0,
@@ -2254,6 +2497,11 @@ def main() -> None:
             range_break_atr_mult=args.range_break_atr_mult,
             range_break_confirmed_only=bool(args.range_break_confirmed_only),
             balanced=args.balanced,
+            regime_tilt=args.regime_tilt,
+            regime_ema_period=args.regime_ema_period,
+            regime_confirm_days=args.regime_confirm_days,
+            regime_tilt_pct=args.regime_tilt_pct,
+            regime_buffer_bps=args.regime_buffer_bps,
             perf_filter=args.perf_filter,
             perf_source=args.perf_source,
             perf_lookback_days=args.perf_lookback_days,
