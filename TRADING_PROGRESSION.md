@@ -10,7 +10,12 @@
 - [June 2025](#june-2025)
 
 ## February 2026
-**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is excluded from gate-scan entries while still serving as the trend/range-break anchor. Regime tilt is now active for gate-scan (BTC EMA20, 2-day confirm, 70/30) with imbalance suppression. Monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is excluded from gate-scan entries while still serving as the trend/range-break anchor. Regime tilt is now active for gate-scan (BTC EMA20, 2-day confirm, 70/30) with imbalance suppression. Entries remain sparse after the regime tilt tweak; currently only BCH is qualifying, and BTC likely would have qualified if it were not excluded. Monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+
+## February 4, 2026 - Few Entries After Regime Tilt Tweak
+- The system is still taking very few entries.
+- Right now only BCH is qualifying; BTC likely would have qualified as well if it were not excluded.
+- After the regime tilt tweak, I am waiting to see how performance looks from here.
 
 ## February 3, 2026 - Regime Tilt Enabled (Gate-Scan)
 - Enabled regime tilt in gate-scan: BTC daily close vs EMA20 with 2-day confirm drives 70/30 long/short allocation.
