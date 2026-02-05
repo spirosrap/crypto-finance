@@ -36,6 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 EXCLUDED_PERPS_PATH = REPO_ROOT / "config" / "excluded_perps.txt"
+SUPPORTED_PERPS_PATH = REPO_ROOT / "derived_perps_intx.txt"
 LIVE_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "watchdog_closed_positions.csv"
 PAPER_CLOSED_LOG_PATH = REPO_ROOT / "trade_logs" / "paper_finder_closed_positions.csv"
 RANGE_BREAK_STATUS_PATH = REPO_ROOT / "logs" / "range_break_status.json"
@@ -48,6 +49,7 @@ _SUPPRESSION_COUNTS = {
     "regime_bearish": 0,
     "regime_neutral": 0,
 }
+_SUPPORTED_PERPS: Optional[set[str]] = None
 
 from short_term_crypto_finder import (
     PROFILE_PRESETS,
@@ -202,6 +204,67 @@ def _load_excluded_perps(path: Path = EXCLUDED_PERPS_PATH) -> tuple[set[str], se
             if candidate:
                 excluded_symbols.add(candidate.upper())
     return excluded_products, excluded_symbols
+
+
+def _load_supported_perps(path: Path = SUPPORTED_PERPS_PATH) -> set[str]:
+    entries: set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                value = line.strip().upper()
+                if not value or value.startswith("#"):
+                    continue
+                entries.add(value)
+    except FileNotFoundError:
+        _LOGGER.warning("Supported perps list %s not found; skipping symbol validation.", path)
+    except Exception as exc:
+        _LOGGER.warning("Unable to load supported perps from %s (%s)", path, exc)
+    return entries
+
+
+def _supported_perps() -> set[str]:
+    global _SUPPORTED_PERPS
+    if _SUPPORTED_PERPS is None:
+        _SUPPORTED_PERPS = _load_supported_perps()
+    return _SUPPORTED_PERPS
+
+
+def _perp_base_from_product(product_id: str) -> str:
+    value = (product_id or "").upper().strip()
+    if not value:
+        return ""
+    for suffix in ("-PERP-INTX", "-INTX-PERP"):
+        if value.endswith(suffix):
+            return value[: -len(suffix)]
+    if "-" in value:
+        return value.split("-")[0]
+    return value
+
+
+def _candidate_perp_products(product_id: str) -> set[str]:
+    base = _perp_base_from_product(product_id)
+    if not base:
+        return set()
+    bases = {base}
+    canonical = canonical_perp_symbol(base)
+    if canonical:
+        bases.add(canonical)
+    if base.startswith("1000") and len(base) > 4:
+        bases.add(base[4:])
+    candidates = {f"{b}-PERP-INTX" for b in bases if b}
+    if "-" in product_id:
+        candidates.add(product_id.upper())
+    return candidates
+
+
+def _is_supported_perp_product(product_id: str, supported: Optional[set[str]] = None) -> bool:
+    product_id = (product_id or "").upper().strip()
+    if not product_id:
+        return False
+    products = supported if supported is not None else _supported_perps()
+    if not products:
+        return True
+    return any(candidate in products for candidate in _candidate_perp_products(product_id))
 
 
 def _metric_score(metric: object) -> Optional[float]:
@@ -974,6 +1037,7 @@ def _select_balanced_rows(
             "long_slots": 0,
             "short_slots": 0,
             "min_required": 0,
+            "min_per_side": 0,
             "selected_longs": 0,
             "selected_shorts": 0,
             "regime": regime,
@@ -1007,6 +1071,7 @@ def _select_balanced_rows(
             "long_slots": long_slots,
             "short_slots": short_slots,
             "min_required": min_required_per_side,
+            "min_per_side": min_required_per_side,
             "regime": regime,
             "suppressed": True,
             "suppression_reason": "insufficient_balance",
@@ -1030,6 +1095,7 @@ def _select_balanced_rows(
         "long_slots": long_slots,
         "short_slots": short_slots,
         "min_required": min_required_per_side,
+        "min_per_side": min_required_per_side,
         "selected_longs": final_longs,
         "selected_shorts": final_shorts,
         "regime": regime,
@@ -1842,6 +1908,7 @@ def gate_scan(
             return
         open_symbols = _load_open_perp_symbols() if (baseline_max_open or baseline_max_per_cluster or not baseline_include_open) else set()
         skip_symbols = set() if baseline_include_open else set(open_symbols)
+        supported_perps = _supported_perps()
         leverage_text = _leverage_text(
             baseline_leverage if baseline_leverage is not None else getattr(cfg, "report_leverage", None)
         )
@@ -1858,6 +1925,7 @@ def gate_scan(
         skipped_open: List[str] = []
         skipped_capacity: List[str] = []
         skipped_cluster: List[str] = []
+        skipped_unsupported: List[str] = []
         for row in top_rows:
             if not row.get("baseline_pass"):
                 continue
@@ -1866,6 +1934,11 @@ def gate_scan(
                 continue
             if symbol in skip_symbols:
                 skipped_open.append(symbol)
+                continue
+            base_symbol = canonical_perp_symbol(symbol) or symbol
+            product = f"{base_symbol}-PERP-INTX"
+            if not _is_supported_perp_product(product, supported_perps):
+                skipped_unsupported.append(product)
                 continue
             if baseline_max_open > 0 and total_open >= baseline_max_open:
                 skipped_capacity.append(symbol)
@@ -1906,8 +1979,6 @@ def gate_scan(
                         partial_tp = entry - risk * baseline_partial_tp_rr
                     if partial_tp > 0:
                         partial_tp_txt = _fmt_price(partial_tp, precision)
-            base_symbol = canonical_perp_symbol(symbol) or symbol
-            product = f"{base_symbol}-PERP-INTX"
             side_ccxt = "BUY" if side == "LONG" else "SELL"
             cmd = f"python ccxt_trade_perp.py --product {product} --side {side_ccxt} --size {size_usd:.2f}"
             if leverage_text:
@@ -1958,11 +2029,16 @@ def gate_scan(
             print(f"Max open reached (skipping): {', '.join(sorted(set(skipped_capacity)))}")
         if skipped_cluster:
             print(f"Cluster cap reached (skipping): {', '.join(sorted(set(skipped_cluster)))}")
+        if skipped_unsupported:
+            print(f"Unsupported perps (skipping): {', '.join(sorted(set(skipped_unsupported)))}")
         if commands:
             print("Commands:")
             print("\n".join(commands))
         else:
-            print("Commands: none (no baseline-pass symbols without open positions).")
+            suffix = "no baseline-pass symbols without open positions"
+            if skipped_unsupported:
+                suffix += " or supported perps"
+            print(f"Commands: none ({suffix}).")
 
     def _print_baseline_paper_command() -> None:
         if not baseline_paper_command or not top_rows:

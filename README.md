@@ -23,6 +23,7 @@ For others, this repo can be useful as:
     - Gate scan (long-term): `python scripts/long_term_snapshot.py --gate-scan --profile wide --top 15 --scan-limit 200`
   - Gate proximity view (short-term): `python scripts/symbol_snapshot.py --gate-scan [--scan-limit N] [--balanced]`.
     - Use `--baseline-commands` to print ccxt trade commands for baseline-pass symbols; open live positions are auto-skipped (and listed).
+    - Live baseline commands skip perps missing from `derived_perps_intx.txt` (thousand-unit aliases handled); if the list is missing, validation is skipped.
     - Use `--baseline-paper-command` to emit a one-shot `baseline_finder_from_snapshot.py` command for paper trades (skips open live/paper positions unless `--baseline-include-open` is set).
     - `--balanced` balances the candidate list; baseline-pass filters, open-position skips, and cluster caps can still reduce the final command count.
     - Performance filter: `--perf-filter` optionally excludes underperforming products using closed‑trade logs (configure with `--perf-source`, `--perf-lookback-days`, `--perf-min-trades`, `--perf-drop-worst`, `--perf-min-expectancy`).

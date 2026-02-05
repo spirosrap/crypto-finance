@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -134,3 +135,28 @@ class TestSymbolSnapshot(unittest.TestCase):
         self.assertEqual(meta["min_per_side"], 1)
         self.assertEqual(meta["longs"], 1)
         self.assertEqual(meta["shorts"], 0)
+
+    def test_load_supported_perps_parses_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "perps.txt"
+            path.write_text("# comment\nBTC-PERP-INTX\n\nETH-PERP-INTX\n", encoding="utf-8")
+            perps = self.symbol_snapshot._load_supported_perps(path)
+            self.assertSetEqual(perps, {"BTC-PERP-INTX", "ETH-PERP-INTX"})
+
+    def test_is_supported_perp_product_handles_thousand_aliases(self):
+        supported = {"SHIB-PERP-INTX"}
+        self.assertTrue(
+            self.symbol_snapshot._is_supported_perp_product("1000SHIB-PERP-INTX", supported)
+        )
+        supported = {"1000SHIB-PERP-INTX"}
+        self.assertTrue(
+            self.symbol_snapshot._is_supported_perp_product("SHIB-PERP-INTX", supported)
+        )
+        self.assertFalse(
+            self.symbol_snapshot._is_supported_perp_product("AWE-PERP-INTX", {"BTC-PERP-INTX"})
+        )
+
+    def test_is_supported_perp_product_allows_missing_list(self):
+        self.assertTrue(
+            self.symbol_snapshot._is_supported_perp_product("AWE-PERP-INTX", set())
+        )
