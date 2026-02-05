@@ -33,6 +33,13 @@ Keep the 24h hard expiry. Add an optional **TP1 time-stop**:
 - `--tp1-time-stop-close-pct 50`
 - `--tp1-time-stop-side longs|shorts|both` (optional)
 
+### Defaults (when implemented)
+- Hours: `12`
+- Action: `tighten_sl`
+- Close pct: `50` (only applies if `partial_close`)
+- Side: `both`
+- Grace window: `60` minutes since last order/fill
+
 ## Implementation Notes
 - Leverage existing partial-fill detection: TP1 hit can be inferred from `partial_tp` fills or bracket status.
 - Add a new closure reason label if a partial close is triggered (e.g., `time_stop_no_tp1`).
