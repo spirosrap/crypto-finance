@@ -52,6 +52,9 @@ The grace window is a short cooldown applied **after any recent fill/order activ
 after a fresh fill. It is **not** tied to TP1 and does not replace the 12h timer; it
 only delays the action when recent fills occur.
 
+### Timing Anchor
+The 12h timer is anchored to the **first entry fill** (not the last partial fill).
+
 ## Implementation Notes
 - Leverage existing partial-fill detection: TP1 hit can be inferred from `partial_tp` fills or bracket status.
 - Add a new closure reason label if a partial close is triggered (e.g., `time_stop_no_tp1`).
