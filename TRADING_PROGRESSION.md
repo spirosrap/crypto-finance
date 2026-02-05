@@ -10,7 +10,13 @@
 - [June 2025](#june-2025)
 
 ## February 2026
-**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is excluded from gate-scan entries while still serving as the trend/range-break anchor. Regime tilt is now active for gate-scan (BTC EMA20, 2-day confirm, 70/30) with imbalance suppression. Entries remain sparse after the regime tilt tweak; currently only BCH is qualifying, and BTC likely would have qualified if it were not excluded. Monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is excluded from gate-scan entries while still serving as the trend/range-break anchor. Regime tilt is now active for gate-scan (BTC EMA20, 2-day confirm, 70/30) with imbalance suppression. Entries remain sparse after the regime tilt tweak; currently only BCH is qualifying, and BTC likely would have qualified if it were not excluded. Feb 5 brought another BTC down day toward the Nov 2021 ATH zone (~69K); overnight had no trades on imbalance, and daytime produced a single BCH trade that hit TP1 but not TP2. Recent commentary flags mid-$70K as near-term support, with a deeper $70K–$73K / ~$68K zone if the selloff persists. Monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+
+## February 5, 2026 - BTC Down Day Near 2021 ATH Zone
+- Another down day for BTC, leaning toward the Nov 2021 ATH zone (~69K).
+- No trades were taken overnight, likely due to suggestion imbalance.
+- The day only produced one BCH trade; it hit TP1 but not TP2.
+- Support watch: recent market commentary points to mid-$70K as near-term support, with $70K–$73K and ~$68K as deeper zones if the slide continues.
 
 ## February 4, 2026 - Few Entries After Regime Tilt Tweak
 - The system is still taking very few entries.
