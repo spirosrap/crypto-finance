@@ -27,6 +27,12 @@ Keep the 24h hard expiry. Add an optional **TP1 time-stop**:
 - Apply this rule **once per position**, and only if TP1 was not hit.
 - Optionally apply the rule only to the weaker side (e.g., longs) if side stats diverge.
 
+### Conditional Action (optional)
+If we want the alternative to trigger only when the trade is already underwater:
+- **LONG**: if `mark_price < entry_price` at the time-stop, use `partial_close`; otherwise `tighten_sl`.
+- **SHORT**: if `mark_price > entry_price` at the time-stop, use `partial_close`; otherwise `tighten_sl`.
+This keeps “soft protection” for slow winners but cuts drag when price has already slipped past entry.
+
 ## Configuration (proposed)
 - `--tp1-time-stop-hours 12` (or 16)
 - `--tp1-time-stop-action tighten_sl|partial_close`
