@@ -341,6 +341,41 @@ def _flatten_cycles(cycles_by_product: Dict[str, List[Dict[str, Any]]]) -> List[
     return flattened
 
 
+def build_fill_cycle_trades(fills: List[Dict[str, Any]]) -> pd.DataFrame:
+    """Return a trade-like DataFrame from Coinbase fills (net of fees)."""
+    if not fills:
+        return pd.DataFrame()
+    cycles_by_product = compute_round_trip_cycles(fills)
+    rows: List[Dict[str, Any]] = []
+    for product_id, cycles in cycles_by_product.items():
+        for cycle in cycles:
+            end_time = cycle.get("end_time")
+            if not end_time:
+                continue
+            rows.append(
+                {
+                    "product_id": product_id,
+                    "position_side": "UNKNOWN",
+                    "opened_at": cycle.get("start_time"),
+                    "closed_at": end_time,
+                    "profit_loss": cycle.get("realized_pnl"),
+                    "profit_loss_pct": np.nan,
+                    "closure_reason": "fill_cycle",
+                    "gross_pnl": cycle.get("gross_pnl"),
+                    "fees": cycle.get("fees"),
+                }
+            )
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows)
+    df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True, errors="coerce")
+    df["opened_at"] = pd.to_datetime(df["opened_at"], utc=True, errors="coerce")
+    df["profit_loss"] = pd.to_numeric(df["profit_loss"], errors="coerce")
+    df["profit_loss_pct"] = pd.to_numeric(df["profit_loss_pct"], errors="coerce")
+    df = df.dropna(subset=["closed_at"]).sort_values("closed_at").reset_index(drop=True)
+    return df
+
+
 def build_exit_slippage_table(
     trades: pd.DataFrame,
     fetch_order: Callable[[str], Any],
@@ -1623,6 +1658,32 @@ def main() -> None:
         value=include_partials_default,
         help="Include partial TP/SL closures in metrics/filters before a full close.",
     )
+    fill_adjusted = False
+    fill_limit = 500
+    if source_mode == "live":
+        fill_adjusted_default = bool(view_defaults.get("fill_adjusted", False))
+        fill_limit_default = int(view_defaults.get("fill_limit", 500) or 500)
+        fill_adjusted = st.sidebar.checkbox(
+            "Use fill-adjusted PnL (fills)",
+            value=fill_adjusted_default,
+            help=(
+                "Compute realized PnL from Coinbase fills (fees included; spread/slippage implicit). "
+                "Requires fetching fills in the session."
+            ),
+        )
+        fill_limit = st.sidebar.number_input(
+            "Fill limit (for fill-adjusted PnL)",
+            min_value=100,
+            max_value=2000,
+            value=fill_limit_default,
+            step=100,
+        )
+        if (
+            fill_adjusted
+            and (not API_KEY_PERPS or not API_SECRET_PERPS)
+            and not st.session_state.get("live_fills_cache")
+        ):
+            st.sidebar.error("Perps API keys missing — fill-adjusted PnL unavailable.")
     if isinstance(st.session_state.get("dashboard_state"), dict):
         existing_filters = st.session_state["dashboard_state"].get("date_filters", {})
         updated_filters = {
@@ -1647,6 +1708,9 @@ def main() -> None:
             _save_dashboard_state(st.session_state["dashboard_state"])
         existing_views = st.session_state["dashboard_state"].get("view_options", {})
         updated_views = {"include_partials": bool(include_partials)}
+        if source_mode == "live":
+            updated_views["fill_adjusted"] = bool(fill_adjusted)
+            updated_views["fill_limit"] = int(fill_limit)
         if existing_views.get(source_mode) != updated_views:
             existing_views[source_mode] = updated_views
             st.session_state["dashboard_state"]["view_options"] = existing_views
@@ -1678,6 +1742,34 @@ def main() -> None:
     except Exception as exc:
         st.error(f"Failed to load data: {exc}")
         st.stop()
+
+    fill_trades_df = None
+    fill_adjusted_active = False
+    fill_adjusted_note = None
+    if source_mode == "live" and fill_adjusted:
+        fills_cache = st.session_state.get("live_fills_cache")
+        if (not API_KEY_PERPS or not API_SECRET_PERPS) and not fills_cache:
+            fill_adjusted_note = "Perps API keys missing — fill-adjusted PnL unavailable."
+        loaded_at = st.session_state.get("live_fills_loaded_at")
+        if fills_cache and loaded_at:
+            st.sidebar.caption(f"Fills cached: {loaded_at}")
+        if not fills_cache and API_KEY_PERPS and API_SECRET_PERPS:
+            if st.sidebar.button("Fetch fills for fill-adjusted PnL"):
+                with st.spinner("Fetching Coinbase fills..."):
+                    try:
+                        st.session_state["live_fills_cache"] = _fetch_live_fills(int(fill_limit))
+                        st.session_state["live_fills_loaded_at"] = datetime.now(UTC).isoformat()
+                        fills_cache = st.session_state.get("live_fills_cache")
+                    except Exception as exc:
+                        st.sidebar.error(f"Failed to fetch fills: {exc}")
+        if fills_cache:
+            fill_trades_df = build_fill_cycle_trades(fills_cache)
+            if fill_trades_df.empty:
+                fill_adjusted_note = "No closed fill cycles found in cached fills."
+            else:
+                fill_adjusted_active = True
+        elif API_KEY_PERPS and API_SECRET_PERPS:
+            fill_adjusted_note = "Fill-adjusted PnL requires Coinbase fills (fetch in sidebar)."
 
     trade_view_df = collapse_trade_rows(trades_df, include_partial_only=include_partials)
     if source_mode == "paper":
@@ -1824,21 +1916,45 @@ def main() -> None:
 
             pnl_filtered = pnl_filtered.loc[mask].copy()
 
-    if filtered.empty and pnl_filtered.empty:
+    fill_filtered = None
+    if fill_adjusted_active and fill_trades_df is not None:
+        fill_filtered = apply_filters(
+            fill_trades_df,
+            start_str,
+            end_str,
+            filter_start_count,
+            filter_end_count,
+            int(effective_tail_last),
+            symbols=selected_products or None,
+        )
+        if fill_filtered.empty:
+            fill_adjusted_note = "Fill-adjusted PnL selected but no fill cycles match the filters."
+            fill_adjusted_active = False
+
+    if filtered.empty and pnl_filtered.empty and not (fill_adjusted_active and fill_filtered is not None and not fill_filtered.empty):
         st.warning("No trades match the selected filters.")
         st.stop()
 
     equity_source = pnl_filtered
-    if count_filters_active and not filtered.empty:
+    metrics_source = filtered
+    if fill_adjusted_active and fill_filtered is not None and not fill_filtered.empty:
+        equity_source = fill_filtered
+        metrics_source = fill_filtered
+    elif count_filters_active and not filtered.empty:
         equity_source = filtered
 
     daily, metrics = build_daily_equity(
         equity_source,
         float(starting_equity),
-        metrics_trades=filtered,
+        metrics_trades=metrics_source,
     )
 
-    summary_notes = ["Visualise equity, drawdowns, and daily performance derived from watchdog logs."]
+    summary_notes = ["Visualise equity, drawdowns, and daily performance derived from trade logs."]
+    if fill_adjusted_active:
+        summary_notes.append("P&L source: fill-adjusted (fills, net of fees; spread/slippage implicit)")
+        summary_notes.append("Trade table remains log-based")
+    elif fill_adjusted and fill_adjusted_note:
+        summary_notes.append(f"Fill-adjusted PnL unavailable: {fill_adjusted_note}")
     if selected_products:
         summary_notes.append(f"Products: {', '.join(selected_products)}")
     if date_preset != "Custom":
@@ -1847,12 +1963,19 @@ def main() -> None:
         summary_notes.append("Custom date window")
     if summary_notes:
         st.caption(" | ".join(summary_notes))
+    if fill_adjusted and fill_adjusted_note and not fill_adjusted_active:
+        st.warning(fill_adjusted_note)
 
     daily_pnl_today = None
     open_pnl_today = None
     try:
         today = datetime.now(UTC).date()
-        daily_pnl_today = trades_df.loc[trades_df["closed_at"].dt.date == today, "profit_loss"].sum()
+        if fill_adjusted_active and fill_trades_df is not None:
+            daily_pnl_today = fill_trades_df.loc[
+                fill_trades_df["closed_at"].dt.date == today, "profit_loss"
+            ].sum()
+        else:
+            daily_pnl_today = trades_df.loc[trades_df["closed_at"].dt.date == today, "profit_loss"].sum()
         daily_pnl_today = float(daily_pnl_today)
     except Exception:
         daily_pnl_today = None
@@ -2299,7 +2422,7 @@ def main() -> None:
                     "Fills to fetch",
                     min_value=100,
                     max_value=2000,
-                    value=500,
+                    value=int(fill_limit) if fill_limit else 500,
                     step=100,
                     help="Pull recent fills to compute actual fees and fill-based PnL.",
                     key="fills_limit",

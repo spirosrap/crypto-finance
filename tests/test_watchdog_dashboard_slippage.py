@@ -8,6 +8,7 @@ from watchdog_dashboard import (
     _compute_exit_slippage,
     _extract_target_price,
     _extract_order_fee,
+    build_fill_cycle_trades,
     build_exit_slippage_table,
 )
 
@@ -127,6 +128,27 @@ class TestWatchdogDashboardSlippage(unittest.TestCase):
         self.assertEqual(slippage_values, [5.0, 10.0])
         fee_values = sorted(result["fee_usd"].tolist())
         self.assertEqual(fee_values, [0.25, 0.5])
+
+    def test_build_fill_cycle_trades(self):
+        now = datetime.now(timezone.utc)
+        fills = [
+            {"product_id": "BTC-PERP-INTX", "side": "BUY", "size": 1.0, "price": 100.0, "fee": 0.1, "time": now},
+            {"product_id": "BTC-PERP-INTX", "side": "BUY", "size": 1.0, "price": 102.0, "fee": 0.1, "time": now},
+            {"product_id": "BTC-PERP-INTX", "side": "SELL", "size": 2.0, "price": 105.0, "fee": 0.2, "time": now},
+        ]
+        df = build_fill_cycle_trades(fills)
+        self.assertEqual(len(df), 1)
+        row = df.iloc[0]
+        self.assertEqual(row["product_id"], "BTC-PERP-INTX")
+        self.assertAlmostEqual(row["profit_loss"], 7.6, places=4)
+
+    def test_build_fill_cycle_trades_requires_close(self):
+        now = datetime.now(timezone.utc)
+        fills = [
+            {"product_id": "ETH-PERP-INTX", "side": "BUY", "size": 1.0, "price": 100.0, "fee": 0.1, "time": now},
+        ]
+        df = build_fill_cycle_trades(fills)
+        self.assertTrue(df.empty)
 
 
 if __name__ == "__main__":
