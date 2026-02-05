@@ -46,6 +46,12 @@ This keeps “soft protection” for slow winners but cuts drag when price has a
 - Side: `both`
 - Grace window: `60` minutes since last order/fill
 
+### Grace Window Clarification
+The grace window is a short cooldown applied **after any recent fill/order activity**
+(most commonly late/partial entry fills), so the time-stop does not fire immediately
+after a fresh fill. It is **not** tied to TP1 and does not replace the 12h timer; it
+only delays the action when recent fills occur.
+
 ## Implementation Notes
 - Leverage existing partial-fill detection: TP1 hit can be inferred from `partial_tp` fills or bracket status.
 - Add a new closure reason label if a partial close is triggered (e.g., `time_stop_no_tp1`).
