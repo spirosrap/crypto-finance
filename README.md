@@ -38,7 +38,6 @@ For others, this repo can be useful as:
 - **Breakout Suite**: `scripts/breakout_scanner.py` (finder-style output, near-breakout logs), `scripts/run_breakout_autotrade.py` (cron-friendly runner with lock; currently paused).
 - **Watchdogs/Closers**: `watchdog_close_old_positions.py` (24h timeout + optional dust cleanup), `watchdog_dashboard.py` for monitoring (Streamlit).
   - Live TP1 protection: `watchdog_close_old_positions.py --move-sl-after-tp1` replaces the remaining bracket after a TP1 partial, keeping TP and moving SL to entry (uses fill-derived entry when available, clamps/rounds to valid increments, only cancels old stops after the new bracket is accepted, and sends `leverage`/`margin_type=CROSS` from the live position).
-  - Dashboard supports a fill-adjusted P&L toggle (Coinbase fills net of fees, partial fills weighted) for a truer live edge read.
 - **Support**: `add_position_from_finder.py` to stage/execute trades from finder-format text. `ccxt_trade_perp.py --place-brackets` can attach TP/SL brackets to an already-filled limit entry if brackets were skipped; limit entries now wait for fills before bracket submission (tunable via `--bracket-wait-seconds`).
 - **Baseline Paper Helper**: `scripts/baseline_finder_from_snapshot.py` to turn snapshot picks into `finder_short_baseline.txt` and optionally open them in `paper_finder_simulator.py`.
   - After opening paper trades, run `python paper_finder_simulator.py update` so the dashboard shows live P/L.
