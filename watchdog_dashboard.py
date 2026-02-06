@@ -31,6 +31,21 @@ except Exception:  # pragma: no cover - optional dependency
 from coinbaseservice import CoinbaseService
 from fills_pnl import compute_round_trip_cycles, fetch_fills
 from trading.risk_thresholds import load_risk_thresholds
+from research_agent.regime_detector import (
+    build_key_levels,
+    get_regime_status,
+    load_trading_alpha_markdown,
+    scan_opportunities,
+    upsert_regime_history_csv,
+    write_daily_json_outputs,
+)
+from research_agent.portfolio_tracker import (
+    build_positions_alignment_table,
+    fetch_portfolio_balances,
+    fetch_recent_fills_last_24h,
+    get_coinbase_perps_credentials,
+    portfolio_sync_enabled,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent
 if str(REPO_ROOT) not in sys.path:
@@ -1425,6 +1440,71 @@ def main() -> None:
             st.sidebar.warning("Install streamlit-autorefresh to enable auto-refresh without reloading the page.")
         else:
             st_autorefresh(interval=int(refresh_interval * 1000), key="watchdog_autorefresh")
+
+    # ------------------------------------------------------------------
+    # Coinbase regime + key levels (public) and portfolio sync (private)
+    # ------------------------------------------------------------------
+    with st.sidebar.expander("Coinbase snapshot", expanded=False):
+        enable_coinbase_public = st.checkbox(
+            "Enable market data (public)",
+            value=True,
+            help="Uses Coinbase Exchange public endpoints for candles/stats; no API keys needed.",
+            key="enable_coinbase_public",
+        )
+        products_raw = st.text_input(
+            "Market products",
+            value="BTC-USD,ETH-USD,SOL-USD",
+            help="Comma-separated Coinbase product ids (public market data).",
+            key="coinbase_market_products",
+        )
+        ema_period = st.number_input(
+            "EMA period (days)",
+            min_value=5,
+            max_value=200,
+            value=20,
+            step=1,
+            key="coinbase_ema_period",
+        )
+        neutral_band_pct = st.number_input(
+            "Neutral band (%)",
+            min_value=0.0,
+            max_value=10.0,
+            value=2.0,
+            step=0.25,
+            help="Inside +/- this % distance from EMA is treated as NEUTRAL.",
+            key="coinbase_neutral_band_pct",
+        )
+        stop_buffer_pct = st.number_input(
+            "Stop buffer (%)",
+            min_value=0.25,
+            max_value=20.0,
+            value=2.0,
+            step=0.25,
+            help="Used for max position sizing and the key-level setup notes.",
+            key="coinbase_stop_buffer_pct",
+        )
+        risk_budget_usd = st.number_input(
+            "Risk budget (USD)",
+            min_value=0.0,
+            value=float(DAILY_STOP_USD or 0.0),
+            step=10.0,
+            help="Used for max position sizing (notional = risk / stop%).",
+            key="coinbase_risk_budget_usd",
+        )
+        enable_coinbase_private = st.checkbox(
+            "Enable portfolio sync (private)",
+            value=portfolio_sync_enabled(),
+            help="Requires Coinbase Advanced Trade API keys; used for balances/fills tables.",
+            key="enable_coinbase_private",
+        )
+
+    market_products = [
+        item.strip().upper()
+        for item in str(products_raw or "").split(",")
+        if item.strip()
+    ]
+    if not market_products:
+        market_products = ["BTC-USD", "ETH-USD", "SOL-USD"]
     if "paper_update_log" not in st.session_state:
         st.session_state["paper_update_log"] = ""
     if "live_update_log" not in st.session_state:
@@ -1981,6 +2061,37 @@ def main() -> None:
             )
     range_slot.markdown("<div style=\"margin-bottom:0.6rem;\"></div>", unsafe_allow_html=True)
 
+    # ------------------------------------------------------------------
+    # Coinbase: preload market snapshot (used later for display + alignment)
+    # ------------------------------------------------------------------
+    coinbase_statuses: Dict[str, Dict[str, Any]] = {}
+    regimes_by_asset: Dict[str, str] = {}
+    snapshot_errors: List[str] = []
+
+    if enable_coinbase_public:
+        for pid in market_products:
+            try:
+                coinbase_statuses[pid] = get_regime_status(
+                    pid,
+                    ema_period=int(ema_period),
+                    neutral_band_pct=float(neutral_band_pct),
+                    candles_granularity=86400,
+                )
+            except Exception as exc:
+                snapshot_errors.append(f"{pid}: {exc}")
+
+    if coinbase_statuses:
+        for pid, status in coinbase_statuses.items():
+            base_asset = str(pid).split("-")[0].upper()
+            if status.get("regime"):
+                regimes_by_asset[base_asset] = str(status.get("regime"))
+        st.session_state["coinbase_regimes_by_asset"] = regimes_by_asset
+        st.session_state["coinbase_regime_statuses"] = coinbase_statuses
+    else:
+        st.session_state["coinbase_regimes_by_asset"] = {}
+        st.session_state["coinbase_regime_statuses"] = {}
+    st.session_state["coinbase_snapshot_errors"] = snapshot_errors
+
     with st.expander("Metric glossary", expanded=False):
         glossary = metrics.get("metric_glossary", {})
         if glossary:
@@ -2129,6 +2240,14 @@ def main() -> None:
                         "expires_in": "Time Left",
                     }
                 )
+                regimes = st.session_state.get("coinbase_regimes_by_asset", {})
+                if isinstance(regimes, dict) and regimes:
+                    aligned = display_df.rename(columns={"Symbol": "Product"}).copy()
+                    aligned = build_positions_alignment_table(aligned, regimes)
+                    if "Regime" in aligned.columns:
+                        display_df["Regime"] = aligned["Regime"]
+                    if "Alignment" in aligned.columns:
+                        display_df["Alignment"] = aligned["Alignment"]
                 st.dataframe(
                     display_df.style.format(
                         {
@@ -2167,6 +2286,9 @@ def main() -> None:
                         "time_left_display": "Time Left",
                     }
                 )
+                regimes = st.session_state.get("coinbase_regimes_by_asset", {})
+                if isinstance(regimes, dict) and regimes:
+                    display_df = build_positions_alignment_table(display_df, regimes)
                 st.dataframe(
                     display_df.style.format(
                         {
@@ -2288,6 +2410,349 @@ def main() -> None:
         reasons = metrics.get("recent_degradation_reasons") or []
         joined_reasons = " ".join(reasons) if reasons else "Recent performance is weaker than the broader sample."
         st.warning(f"Recent degradation detected: {joined_reasons}")
+
+    st.markdown("---")
+    st.header("Coinbase Regime, Key Levels, Portfolio")
+
+    def _format_usd(value: Optional[float]) -> str:
+        if value is None:
+            return "n/a"
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        return f"${v:,.2f}"
+
+    def _format_usd_compact(value: Optional[float]) -> str:
+        if value is None:
+            return "n/a"
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return "n/a"
+        abs_v = abs(v)
+        if abs_v >= 1e12:
+            return f"${v / 1e12:.2f}T"
+        if abs_v >= 1e9:
+            return f"${v / 1e9:.2f}B"
+        if abs_v >= 1e6:
+            return f"${v / 1e6:.2f}M"
+        if abs_v >= 1e3:
+            return f"${v / 1e3:.2f}K"
+        return f"${v:,.2f}"
+
+    snapshot_errors = st.session_state.get("coinbase_snapshot_errors") or []
+    if isinstance(snapshot_errors, list) and snapshot_errors:
+        st.warning("Coinbase market snapshot errors:\n" + "\n".join(str(x) for x in snapshot_errors))
+
+    coinbase_statuses = st.session_state.get("coinbase_regime_statuses")
+    if not isinstance(coinbase_statuses, dict):
+        coinbase_statuses = {}
+
+    if not enable_coinbase_public:
+        st.info("Coinbase public market snapshot is disabled (enable it in the sidebar).")
+    elif not coinbase_statuses:
+        st.info("Coinbase market snapshot unavailable (no products resolved).")
+    else:
+        btc_pid = "BTC-USD" if "BTC-USD" in coinbase_statuses else next(iter(coinbase_statuses.keys()))
+        btc_status = coinbase_statuses[btc_pid]
+
+        st.subheader("Regime Detection (BTC vs Daily EMA)")
+        reg_cols = st.columns(5)
+        reg_cols[0].metric("Current price", _format_usd(btc_status.get("current_price")))
+        reg_cols[1].metric(f"{int(ema_period)}D EMA", _format_usd(btc_status.get("ema_20")))
+        reg_cols[2].metric("Distance", f"{float(btc_status.get('distance_pct') or 0.0):+.2f}%")
+        reg_cols[3].metric("Regime", str(btc_status.get("regime") or "n/a"))
+        reg_cols[4].metric("Tilt", str(btc_status.get("recommendation") or "n/a"))
+
+        st.subheader("Coinbase Market Overview")
+        overview_rows: List[Dict[str, Any]] = []
+        for pid, status in coinbase_statuses.items():
+            price = float(status.get("current_price") or 0.0)
+            ema_val = float(status.get("ema_20") or 0.0)
+            open_24h = status.get("24h_open")
+            change_pct = None
+            if open_24h not in (None, 0, 0.0):
+                try:
+                    change_pct = (price - float(open_24h)) / float(open_24h) * 100.0
+                except Exception:
+                    change_pct = None
+            signal = "Above EMA" if ema_val and price > ema_val else "Below EMA"
+            overview_rows.append(
+                {
+                    "Asset": str(pid).upper(),
+                    "Price": _format_usd(price),
+                    "24h Change": f"{change_pct:+.2f}%" if change_pct is not None else "n/a",
+                    "24h Volume": _format_usd_compact(status.get("24h_volume_usd")),
+                    "Signal": signal,
+                }
+            )
+        overview_df = pd.DataFrame(overview_rows).sort_values("Asset")
+        st.dataframe(overview_df, use_container_width=True, hide_index=True)
+
+        st.subheader(f"{btc_pid} Key Levels (Coinbase)")
+        btc_levels = build_key_levels(btc_status)
+        lvl_cols = st.columns(6)
+        lvl_cols[0].metric("Current", _format_usd(btc_levels.get("current")))
+        lvl_cols[1].metric("EMA (daily)", _format_usd(btc_levels.get("ema_20")))
+        lvl_cols[2].metric("24h open", _format_usd(btc_levels.get("daily_open")))
+        lvl_cols[3].metric("24h high", _format_usd(btc_levels.get("24h_high")))
+        lvl_cols[4].metric("24h low", _format_usd(btc_levels.get("24h_low")))
+        lvl_cols[5].metric("24h volume", _format_usd_compact(btc_levels.get("24h_volume_usd")))
+
+        st.markdown("**Trade setup logic (rule of thumb)**")
+        st.code(
+            "\n".join(
+                [
+                    f"- If price > {int(ema_period)}D EMA -> prefer LONGS (70% allocation)",
+                    f"- If price < {int(ema_period)}D EMA -> prefer SHORTS (70% allocation)",
+                    f"- Entry: pullback to EMA or breakout above 24h high ({btc_levels.get('24h_high')})",
+                    f"- Stop: {stop_buffer_pct:.2f}% beyond EMA, or beyond 24h low ({btc_levels.get('24h_low')})",
+                    "- Exits: TP1 50% at 0.5R, TP2 remaining at 1.5R (per your playbook)",
+                ]
+            ),
+            language="text",
+        )
+
+        st.subheader("Trade Opportunities")
+        opps = scan_opportunities(coinbase_statuses)
+        if not opps:
+            st.caption("No opportunity notes generated.")
+        else:
+            for idx, line in enumerate(opps[:3], start=1):
+                st.markdown(f"{idx}. {line}")
+
+        # Persist artifacts for this run date (best-effort; errors ignored).
+        try:
+            run_date = date.today()
+            levels_payload = {pid: build_key_levels(status) for pid, status in coinbase_statuses.items()}
+            regimes_payload = {pid: status for pid, status in coinbase_statuses.items()}
+            write_daily_json_outputs(run_date, levels=levels_payload, regimes=regimes_payload)
+            btc_for_history = coinbase_statuses.get("BTC-USD") or btc_status
+            history_path = Path(os.getenv("REGIME_HISTORY_CSV", "regime_history_BTC.csv"))
+            upsert_regime_history_csv(
+                history_path,
+                run_date=run_date,
+                price=float(btc_for_history.get("current_price") or 0.0),
+                ema=float(btc_for_history.get("ema_20") or 0.0),
+                regime=str(btc_for_history.get("regime") or ""),
+            )
+        except Exception:
+            pass
+
+        with st.expander("Daily briefing", expanded=False):
+            eth_status = coinbase_statuses.get("ETH-USD")
+            sol_status = coinbase_statuses.get("SOL-USD")
+
+            def _brief_line(pid: str, status: Optional[Dict[str, Any]]) -> str:
+                if not status:
+                    return f"- {pid}: n/a"
+                dist = float(status.get("distance_pct") or 0.0)
+                side = "above" if dist >= 0 else "below"
+                return f"- {pid}: {status.get('regime')} ({dist:+.2f}% {side} {int(ema_period)}D EMA)"
+
+            cash_available = st.session_state.get("live_usdc_balance") if source_mode == "live" else None
+            allocated_usd = None
+            if isinstance(open_positions_df, pd.DataFrame) and not open_positions_df.empty and "notional" in open_positions_df.columns:
+                try:
+                    allocated_usd = float(pd.to_numeric(open_positions_df["notional"], errors="coerce").abs().sum())
+                except Exception:
+                    allocated_usd = None
+
+            max_position_usd = None
+            stop_pct = max(float(stop_buffer_pct), 0.01) / 100.0
+            try:
+                max_position_usd = (float(risk_budget_usd) / stop_pct) if risk_budget_usd and stop_pct else None
+            except Exception:
+                max_position_usd = None
+
+            btc_support = btc_levels.get("ema_20")
+            btc_resistance = btc_levels.get("24h_high")
+
+            checkpoint_start = os.getenv("TRADE_CHECKPOINT_START", "2026-01-15").strip() or "2026-01-15"
+            try:
+                checkpoint_target = int(os.getenv("TRADE_CHECKPOINT_TARGET", "150") or "150")
+            except (TypeError, ValueError):
+                checkpoint_target = 150
+            trades_since = None
+            try:
+                start_ts = pd.Timestamp(checkpoint_start, tz=UTC)
+                if isinstance(trade_view_df, pd.DataFrame) and "closed_at" in trade_view_df.columns:
+                    trades_since = int(trade_view_df.loc[trade_view_df["closed_at"] >= start_ts].shape[0])
+            except Exception:
+                trades_since = None
+
+            lines = [
+                "=== COINBASE DAILY BRIEFING ===",
+                f"Date: {date.today().isoformat()}",
+                "",
+                "Checkpoint:",
+                (
+                    f"- Trades since {checkpoint_start}: {trades_since} / {checkpoint_target} "
+                    f"(remaining {max(checkpoint_target - trades_since, 0)})"
+                    if trades_since is not None
+                    else f"- Trades since {checkpoint_start}: n/a"
+                ),
+                "",
+                "Market Regime:",
+                _brief_line("BTC", btc_status if btc_pid.startswith("BTC") else coinbase_statuses.get("BTC-USD")),
+                _brief_line("ETH", eth_status),
+                _brief_line("SOL", sol_status),
+                "",
+                "Recommendation:",
+                f"- BTC tilt: {btc_status.get('recommendation')}",
+                f"- Bias follows BTC vs {int(ema_period)}D EMA",
+                "",
+                "Key Levels Today:",
+                f"- BTC Support: {btc_support:,.2f} / Resistance: {btc_resistance:,.2f}"
+                if isinstance(btc_support, (int, float)) and isinstance(btc_resistance, (int, float))
+                else "- BTC Support/Resistance: n/a",
+                "",
+                "Your Portfolio:",
+                f"- Cash available: {_format_usd(cash_available) if cash_available is not None else 'n/a'}",
+                f"- Allocated (open positions): {_format_usd(allocated_usd) if allocated_usd is not None else 'n/a'}",
+                f"- Max position size (risk={float(risk_budget_usd):.2f} @ stop={stop_buffer_pct:.2f}%): {_format_usd(max_position_usd) if max_position_usd is not None else 'n/a'}",
+            ]
+            st.code("\n".join(lines), language="text")
+
+            alpha_md = load_trading_alpha_markdown(date.today())
+            if alpha_md:
+                st.markdown("**Research notes (`1_trading_alpha.md`)**")
+                st.markdown(alpha_md)
+            else:
+                st.caption("No `1_trading_alpha.md` found in `research_agent/knowledge_vault/` for today.")
+
+    if source_mode == "live":
+        st.markdown("---")
+        with st.expander("Coinbase portfolio (balances & recent fills)", expanded=False):
+            if not enable_coinbase_private:
+                st.info("Private portfolio sync is disabled (enable it in the sidebar).")
+            else:
+                key, secret = get_coinbase_perps_credentials()
+                if not key or not secret:
+                    st.info(
+                        "Missing Coinbase API keys for portfolio sync "
+                        "(set API_KEY_PERPS/API_SECRET_PERPS or COINBASE_PERP_API_KEY/COINBASE_PERP_API_SECRET)."
+                    )
+                else:
+                    now = datetime.now(UTC)
+                    ttl_sec = 300
+
+                    if "coinbase_portfolio_cache" not in st.session_state:
+                        st.session_state["coinbase_portfolio_cache"] = None
+                    if "coinbase_portfolio_loaded_at" not in st.session_state:
+                        st.session_state["coinbase_portfolio_loaded_at"] = ""
+                    if "coinbase_recent_fills_cache" not in st.session_state:
+                        st.session_state["coinbase_recent_fills_cache"] = None
+                    if "coinbase_recent_fills_loaded_at" not in st.session_state:
+                        st.session_state["coinbase_recent_fills_loaded_at"] = ""
+
+                    def _cache_age_seconds(ts_iso: str) -> float:
+                        if not ts_iso:
+                            return math.inf
+                        try:
+                            parsed = datetime.fromisoformat(str(ts_iso).replace("Z", "+00:00")).astimezone(UTC)
+                        except Exception:
+                            return math.inf
+                        return (now - parsed).total_seconds()
+
+                    refresh_portfolio = st.button("Refresh portfolio balances", key="refresh_coinbase_portfolio")
+                    cache_age = _cache_age_seconds(st.session_state.get("coinbase_portfolio_loaded_at", ""))
+                    if refresh_portfolio or cache_age > ttl_sec:
+                        try:
+                            cb = CoinbaseService(api_key=key, api_secret=secret)
+                            st.session_state["coinbase_portfolio_cache"] = fetch_portfolio_balances(cb)
+                            st.session_state["coinbase_portfolio_loaded_at"] = now.isoformat()
+                        except Exception as exc:
+                            st.session_state["coinbase_portfolio_cache"] = None
+                            st.session_state["coinbase_portfolio_loaded_at"] = ""
+                            st.warning(f"Portfolio fetch failed: {exc}")
+
+                    payload = st.session_state.get("coinbase_portfolio_cache") or {}
+                    totals = payload.get("totals") if isinstance(payload, dict) else None
+                    if not isinstance(totals, dict):
+                        totals = {}
+
+                    allocated_usd = None
+                    if isinstance(open_positions_df, pd.DataFrame) and not open_positions_df.empty:
+                        if "notional" in open_positions_df.columns:
+                            try:
+                                allocated_usd = float(
+                                    pd.to_numeric(open_positions_df["notional"], errors="coerce").abs().sum()
+                                )
+                            except Exception:
+                                allocated_usd = None
+
+                    cash_available = st.session_state.get("live_usdc_balance")
+                    total_balance = totals.get("total_balance")
+                    if total_balance in (None, 0, 0.0) and cash_available is not None and allocated_usd is not None:
+                        total_balance = float(cash_available) + float(allocated_usd)
+
+                    bal_cols = st.columns(3)
+                    bal_cols[0].metric(
+                        "Total balance (USD)",
+                        f"{float(total_balance):,.2f}" if total_balance is not None else "n/a",
+                    )
+                    bal_cols[1].metric(
+                        "Available cash (USDC)",
+                        f"{float(cash_available):,.2f}" if cash_available is not None else "n/a",
+                    )
+                    bal_cols[2].metric(
+                        "Allocated (open positions)",
+                        f"{float(allocated_usd):,.2f}" if allocated_usd is not None else "n/a",
+                    )
+
+                    portfolios_rows = payload.get("portfolios") if isinstance(payload, dict) else None
+                    if isinstance(portfolios_rows, list) and portfolios_rows:
+                        st.caption("Portfolios (best-effort)")
+                        st.dataframe(pd.DataFrame(portfolios_rows), use_container_width=True, hide_index=True)
+
+                    st.markdown("**Recent fills (last 24h)**")
+                    refresh_fills = st.button("Refresh fills (24h)", key="refresh_coinbase_fills_24h")
+                    fills_age = _cache_age_seconds(st.session_state.get("coinbase_recent_fills_loaded_at", ""))
+                    if refresh_fills or fills_age > ttl_sec:
+                        try:
+                            cb = CoinbaseService(api_key=key, api_secret=secret)
+                            st.session_state["coinbase_recent_fills_cache"] = fetch_recent_fills_last_24h(cb, limit=500)
+                            st.session_state["coinbase_recent_fills_loaded_at"] = now.isoformat()
+                        except Exception as exc:
+                            st.session_state["coinbase_recent_fills_cache"] = None
+                            st.session_state["coinbase_recent_fills_loaded_at"] = ""
+                            st.warning(f"Fills fetch failed: {exc}")
+
+                    fills_cache = st.session_state.get("coinbase_recent_fills_cache")
+                    if fills_cache:
+                        fills_rows = []
+                        for f in fills_cache[:200]:
+                            ts = f.get("time")
+                            fills_rows.append(
+                                {
+                                    "Time": ts.isoformat() if isinstance(ts, datetime) else str(ts),
+                                    "Product": f.get("product_id"),
+                                    "Side": f.get("side"),
+                                    "Size": f.get("size"),
+                                    "Price": f.get("price"),
+                                    "Fee": f.get("fee"),
+                                }
+                            )
+                        fills_df = pd.DataFrame(fills_rows)
+                        st.dataframe(
+                            fills_df.style.format(
+                                {
+                                    "Size": "{:.6f}",
+                                    "Price": "{:.4f}",
+                                    "Fee": "{:.4f}",
+                                }
+                            ),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    else:
+                        loaded_at = st.session_state.get("coinbase_recent_fills_loaded_at")
+                        if loaded_at:
+                            st.caption(f"No fills found in the last 24h (loaded at {loaded_at}).")
+                        else:
+                            st.caption("No fills loaded.")
 
     if source_mode == "live":
         st.markdown("---")
