@@ -67,6 +67,9 @@ market_analysis.txt
 market_analyzer.log.1
 trade_btc_perp.log
 .env
+regime_history_BTC.csv
+research_agent/knowledge_vault/*/coinbase_levels.json
+research_agent/knowledge_vault/*/regime_status.json
 order_monitor.log
 monitor_orders.log
 output.txt
