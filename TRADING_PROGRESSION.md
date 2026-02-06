@@ -10,7 +10,13 @@
 - [June 2025](#june-2025)
 
 ## February 2026
-**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is excluded from gate-scan entries while still serving as the trend/range-break anchor. Regime tilt is now active for gate-scan (BTC EMA20, 2-day confirm, 70/30) with imbalance suppression. Entries remain sparse after the regime tilt tweak; currently only BCH is qualifying, and BTC likely would have qualified if it were not excluded. Feb 5 brought another BTC down day toward the Nov 2021 ATH zone (~69K); overnight had no trades on imbalance, and daytime produced a single BCH trade that hit TP1 but not TP2. Recent commentary flags mid-$70K as near-term support, with a deeper $70K–$73K / ~$68K zone if the selloff persists. Monitoring PF/expectancy as the system gives back gains near breakeven, with focus on sustaining PF>0 through the 150-trade checkpoint.
+**State at a glance (February recap):** Volatility-heavy start; recent 4h windows show few trades and more stops than wins. Trade flow is constrained by long-heavy suggestions and repeated BTC setups; BTC is excluded from gate-scan entries while still serving as the trend/range-break anchor. Regime tilt is now active for gate-scan (BTC EMA20, 2-day confirm, 70/30) with imbalance suppression. Entries remain sparse after the regime tilt tweak; currently only BCH is qualifying, and BTC likely would have qualified if it were not excluded. Feb 5 produced no overnight trades on imbalance and only one BCH trade (TP1 hit, TP2 not). Feb 6 saw a sharp BTC selloff down toward ~60K and again no trades due to imbalance; in outsized moves like this, the system typically stands down to avoid getting hurt by reversal whipsaws or by trying to "hope" the reversal. Conditions read as bearish for BTC; monitoring PF/expectancy as the system approaches the 150-trade checkpoint.
+
+## February 6, 2026 - BTC Flush to ~60K, Imbalance Stand-Down
+- Yesterday (Feb 5) the system did not take any trades, likely due to suggestion imbalance.
+- BTC had a large downside move to around 60K.
+- In these big moves, the system tends to stop taking trades to avoid getting hurt on reversals (or taking trades purely hoping for one).
+- Overall conditions remain very bearish for BTC.
 
 ## February 5, 2026 - BTC Down Day Near 2021 ATH Zone
 - Another down day for BTC, leaning toward the Nov 2021 ATH zone (~69K).
