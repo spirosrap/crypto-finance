@@ -2500,22 +2500,63 @@ def main() -> None:
         lvl_cols[4].metric("24h low", _format_usd(btc_levels.get("24h_low")))
         lvl_cols[5].metric("24h volume", _format_usd_compact(btc_levels.get("24h_volume_usd")))
 
+        baseline_atr_mult = float(RISK_THRESHOLDS.get("baseline_atr_mult", 0.8) or 0.8)
+        baseline_tp2_rr = float(RISK_THRESHOLDS.get("baseline_rr", 1.5) or 1.5)
+        baseline_entry_buffer_pct = _coerce_float(
+            RISK_THRESHOLDS.get("baseline_setup_entry_buffer_pct", os.getenv("BASELINE_SETUP_ENTRY_BUFFER_PCT", "0.3"))
+        )
+        if baseline_entry_buffer_pct is None or baseline_entry_buffer_pct < 0:
+            baseline_entry_buffer_pct = 0.3
+        baseline_tp1_rr = _coerce_float(
+            RISK_THRESHOLDS.get("baseline_partial_tp_rr", os.getenv("BASELINE_PARTIAL_TP_RR", "0.8"))
+        )
+        if baseline_tp1_rr is None or baseline_tp1_rr <= 0:
+            baseline_tp1_rr = 0.8
+        baseline_tp1_pct = _coerce_float(
+            RISK_THRESHOLDS.get("baseline_partial_tp_pct", os.getenv("BASELINE_PARTIAL_TP_PCT", "50"))
+        )
+        if baseline_tp1_pct is None or baseline_tp1_pct <= 0:
+            baseline_tp1_pct = 50.0
+
         st.markdown("**Trade setup logic (rule of thumb)**")
+        btc_ema_value = _coerce_float(btc_levels.get("ema_20"))
+        long_reclaim_trigger = None
+        short_reject_trigger = None
+        if btc_ema_value and btc_ema_value > 0:
+            long_reclaim_trigger = btc_ema_value * (1.0 + float(baseline_entry_buffer_pct) / 100.0)
+            short_reject_trigger = btc_ema_value * (1.0 - float(baseline_entry_buffer_pct) / 100.0)
         st.code(
             "\n".join(
                 [
                     f"- If price > {int(ema_period)}D EMA -> prefer LONGS (70% allocation)",
                     f"- If price < {int(ema_period)}D EMA -> prefer SHORTS (70% allocation)",
-                    f"- Entry: pullback to EMA or breakout above 24h high ({btc_levels.get('24h_high')})",
-                    f"- Stop: {stop_buffer_pct:.2f}% beyond EMA, or beyond 24h low ({btc_levels.get('24h_low')})",
-                    "- Exits: TP1 50% at 0.5R, TP2 remaining at 1.5R (per your playbook)",
+                    (
+                        f"- Reclaim LONG trigger: daily close >= {_format_usd(long_reclaim_trigger)} "
+                        f"(EMA +{baseline_entry_buffer_pct:.2f}%)"
+                        if long_reclaim_trigger is not None
+                        else "- Reclaim LONG trigger: n/a"
+                    ),
+                    (
+                        f"- Rejection SHORT trigger: daily close <= {_format_usd(short_reject_trigger)} "
+                        f"(EMA -{baseline_entry_buffer_pct:.2f}%)"
+                        if short_reject_trigger is not None
+                        else "- Rejection SHORT trigger: n/a"
+                    ),
+                    f"- Setup levels use baseline ATR model: SL distance = ATR7 x {baseline_atr_mult:.2f} (clipped ATR)",
+                    f"- Exits: TP1 {baseline_tp1_pct:.0f}% at {baseline_tp1_rr:.2f}R, TP2 remainder at {baseline_tp2_rr:.2f}R",
                 ]
             ),
             language="text",
         )
 
         st.subheader("Trade Opportunities")
-        opps = scan_opportunities(coinbase_statuses)
+        opps = scan_opportunities(
+            coinbase_statuses,
+            sl_atr_mult=baseline_atr_mult,
+            tp1_rr=float(baseline_tp1_rr),
+            tp2_rr=baseline_tp2_rr,
+            entry_buffer_pct=float(baseline_entry_buffer_pct),
+        )
         if not opps:
             st.caption("No opportunity notes generated.")
         else:

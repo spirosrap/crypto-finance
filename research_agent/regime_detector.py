@@ -21,6 +21,26 @@ from research_agent.coinbase_api import (
 
 DEFAULT_EMA_PERIOD = 20
 DEFAULT_NEUTRAL_BAND_PCT = 2.0
+DEFAULT_ATR_PERIOD = 7
+DEFAULT_ATR_MODE = (os.getenv("BASELINE_ATR_MODE", "clipped") or "clipped").strip().lower()
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw in (None, ""):
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+DEFAULT_MAX_ATR_USD = _env_float("SHORT_MAX_ATR_USD", 3000.0)
+DEFAULT_MAX_ATR_BPS = _env_float("SHORT_MAX_ATR_BPS", 400.0)
+DEFAULT_SETUP_SL_ATR_MULT = _env_float("BASELINE_SETUP_SL_ATR_MULT", 0.8)
+DEFAULT_SETUP_TP1_RR = _env_float("BASELINE_PARTIAL_TP_RR", 0.8)
+DEFAULT_SETUP_TP2_RR = _env_float("BASELINE_TP2_RR", 1.5)
+DEFAULT_SETUP_ENTRY_BUFFER_PCT = _env_float("BASELINE_SETUP_ENTRY_BUFFER_PCT", 0.3)
 
 
 def calculate_ema(prices: Sequence[float], period: int) -> float:
@@ -38,6 +58,60 @@ def calculate_ema(prices: Sequence[float], period: int) -> float:
     for price in prices[1:]:
         ema = (float(price) - ema) * multiplier + ema
     return float(ema)
+
+
+def _dynamic_atr_bps(price: float) -> float:
+    if price >= 20000:
+        return 325.0
+    if price >= 2000:
+        return 350.0
+    if price >= 200:
+        return 400.0
+    return 450.0
+
+
+def _effective_atr_cap_usd(
+    price: float,
+    *,
+    max_atr_usd: Optional[float],
+    max_atr_bps: Optional[float],
+) -> Optional[float]:
+    caps: List[float] = []
+    if max_atr_usd and max_atr_usd > 0:
+        caps.append(float(max_atr_usd))
+    if price > 0:
+        tier_bps = _dynamic_atr_bps(price)
+        eff_bps = tier_bps
+        if max_atr_bps and max_atr_bps > 0:
+            eff_bps = min(float(max_atr_bps), tier_bps)
+        caps.append(price * eff_bps / 10000.0)
+    return min(caps) if caps else None
+
+
+def calculate_atr_wilder(candles: Sequence[Candle], period: int = DEFAULT_ATR_PERIOD) -> float:
+    """ATR using Wilder smoothing from normalized candle data."""
+
+    if period <= 0:
+        raise ValueError("period must be positive")
+    if len(candles) < period + 1:
+        return 0.0
+
+    prev_close = float(candles[0].close)
+    true_ranges: List[float] = []
+    for candle in candles[1:]:
+        high = float(candle.high)
+        low = float(candle.low)
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        true_ranges.append(float(tr))
+        prev_close = float(candle.close)
+
+    if len(true_ranges) < period:
+        return 0.0
+
+    atr = sum(true_ranges[:period]) / float(period)
+    for tr in true_ranges[period:]:
+        atr = ((atr * float(period - 1)) + float(tr)) / float(period)
+    return max(0.0, float(atr))
 
 
 def _format_regime(distance_pct: float, neutral_band_pct: float) -> Tuple[str, str]:
@@ -61,6 +135,10 @@ def get_regime_status(
     ema_period: int = DEFAULT_EMA_PERIOD,
     neutral_band_pct: float = DEFAULT_NEUTRAL_BAND_PCT,
     candles_granularity: int = 86400,
+    atr_period: int = DEFAULT_ATR_PERIOD,
+    atr_mode: str = DEFAULT_ATR_MODE,
+    max_atr_usd: Optional[float] = DEFAULT_MAX_ATR_USD,
+    max_atr_bps: Optional[float] = DEFAULT_MAX_ATR_BPS,
 ) -> Dict[str, Any]:
     """Return regime status based on price vs daily EMA."""
 
@@ -73,6 +151,13 @@ def get_regime_status(
     current_price = coerce_float(stats.get("last"))
     if current_price is None:
         raise ValueError(f"Missing 'last' in stats for {product_id}")
+
+    atr_raw = calculate_atr_wilder(candles, period=int(atr_period))
+    atr_cap = _effective_atr_cap_usd(float(current_price), max_atr_usd=max_atr_usd, max_atr_bps=max_atr_bps)
+    atr_mode_norm = (atr_mode or "raw").strip().lower()
+    atr_used = float(atr_raw)
+    if atr_mode_norm == "clipped" and atr_cap is not None:
+        atr_used = min(float(atr_raw), float(atr_cap))
 
     distance_pct = ((float(current_price) - float(ema_20)) / float(ema_20)) * 100.0 if ema_20 else 0.0
     regime, recommendation = _format_regime(distance_pct, float(neutral_band_pct))
@@ -99,6 +184,11 @@ def get_regime_status(
         "24h_volume_usd": float(volume_24h_usd) if volume_24h_usd is not None else None,
         "ema_period": int(ema_period),
         "neutral_band_pct": float(neutral_band_pct),
+        "atr_period": int(atr_period),
+        "atr_mode": atr_mode_norm,
+        "atr_raw": float(round(atr_raw, 2)),
+        "atr_used": float(round(atr_used, 2)),
+        "atr_cap_usd": float(round(atr_cap, 2)) if atr_cap is not None else None,
     }
 
 
@@ -153,6 +243,7 @@ def build_key_levels(product_status: Dict[str, Any]) -> Dict[str, Any]:
         "24h_high": product_status.get("24h_high"),
         "24h_low": product_status.get("24h_low"),
         "24h_volume_usd": product_status.get("24h_volume_usd"),
+        "atr_used": product_status.get("atr_used"),
     }
 
 
@@ -161,6 +252,10 @@ def scan_opportunities(
     *,
     pullback_band_pct: float = 0.5,
     breakout_band_pct: float = 0.5,
+    sl_atr_mult: float = DEFAULT_SETUP_SL_ATR_MULT,
+    tp1_rr: float = DEFAULT_SETUP_TP1_RR,
+    tp2_rr: float = DEFAULT_SETUP_TP2_RR,
+    entry_buffer_pct: float = DEFAULT_SETUP_ENTRY_BUFFER_PCT,
 ) -> List[str]:
     """Create lightweight trade opportunity notes from regime + 24h levels."""
 
@@ -168,6 +263,7 @@ def scan_opportunities(
     for pid, status in statuses.items():
         price = float(status.get("current_price") or 0.0)
         ema = float(status.get("ema_20") or 0.0)
+        atr_used = float(status.get("atr_used") or status.get("atr_raw") or 0.0)
         high = status.get("24h_high")
 
         if ema:
@@ -175,7 +271,46 @@ def scan_opportunities(
         else:
             dist_to_ema_pct = 0.0
 
-        if ema and abs(dist_to_ema_pct) <= pullback_band_pct and price > 0:
+        risk = max(0.0, atr_used * float(sl_atr_mult))
+        if ema and risk > 0 and price > 0:
+            entry_buf = max(0.0, float(entry_buffer_pct)) / 100.0
+            long_entry = ema * (1.0 + entry_buf)
+            short_entry = ema * (1.0 - entry_buf)
+            long_sl = ema - risk
+            long_tp1 = ema + (risk * float(tp1_rr))
+            long_tp2 = ema + (risk * float(tp2_rr))
+            short_sl = ema + risk
+            short_tp1 = ema - (risk * float(tp1_rr))
+            short_tp2 = ema - (risk * float(tp2_rr))
+            entries_txt = (
+                f"Entries: LONG reclaim close >= {long_entry:,.2f} "
+                f"(EMA {ema:,.2f} +{entry_buffer_pct:.2f}%) | "
+                f"SHORT rejection close <= {short_entry:,.2f} "
+                f"(EMA {ema:,.2f} -{entry_buffer_pct:.2f}%)"
+            )
+            levels_txt = (
+                f"SL={sl_atr_mult:.2f}xATR, TP1={tp1_rr:.2f}R, TP2={tp2_rr:.2f}R "
+                f"(ATR{int(status.get('atr_period') or DEFAULT_ATR_PERIOD)} used={atr_used:,.2f})"
+            )
+            if abs(dist_to_ema_pct) <= pullback_band_pct:
+                opportunities.append(
+                    f"{pid}: At EMA zone {ema:,.2f}. Long hold/reclaim above EMA or short rejection below EMA. "
+                    f"{entries_txt}. {levels_txt}. LONG SL {long_sl:,.2f} TP1 {long_tp1:,.2f} TP2 {long_tp2:,.2f} | "
+                    f"SHORT SL {short_sl:,.2f} TP1 {short_tp1:,.2f} TP2 {short_tp2:,.2f}"
+                )
+            elif price > ema:
+                opportunities.append(
+                    f"{pid}: Above EMA {ema:,.2f}. Suggested LONG on pullback/hold above EMA; SHORT only on rejection back below EMA. "
+                    f"{entries_txt}. {levels_txt}. LONG SL {long_sl:,.2f} TP1 {long_tp1:,.2f} TP2 {long_tp2:,.2f} | "
+                    f"SHORT SL {short_sl:,.2f} TP1 {short_tp1:,.2f} TP2 {short_tp2:,.2f}"
+                )
+            else:
+                opportunities.append(
+                    f"{pid}: Below EMA {ema:,.2f}. Suggested SHORT on rejection near EMA; LONG only after reclaim close above EMA. "
+                    f"{entries_txt}. {levels_txt}. SHORT SL {short_sl:,.2f} TP1 {short_tp1:,.2f} TP2 {short_tp2:,.2f} | "
+                    f"LONG SL {long_sl:,.2f} TP1 {long_tp1:,.2f} TP2 {long_tp2:,.2f}"
+                )
+        elif ema and abs(dist_to_ema_pct) <= pullback_band_pct and price > 0:
             opportunities.append(f"{pid}: Pullback to EMA around {ema:,.2f} (in zone)")
         elif ema and price > ema:
             opportunities.append(f"{pid}: Prefer pullback entries near EMA {ema:,.2f}")
