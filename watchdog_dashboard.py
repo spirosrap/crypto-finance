@@ -602,6 +602,95 @@ def _prepare_open_positions_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _base_asset_from_product(value: Any) -> str:
+    text = str(value or "").upper().strip()
+    if not text:
+        return ""
+    if "-PERP-" in text:
+        return text.split("-PERP-")[0]
+    if "-" in text:
+        return text.split("-")[0]
+    return text
+
+
+def _extract_open_position_assets(df: pd.DataFrame) -> List[str]:
+    if df is None or df.empty:
+        return []
+    assets: set[str] = set()
+    for col in ("symbol", "product_id", "Symbol", "Product"):
+        if col not in df.columns:
+            continue
+        series = df[col].dropna().astype(str)
+        for raw in series:
+            base = _base_asset_from_product(raw)
+            if base:
+                assets.add(base)
+    return sorted(assets)
+
+
+def _candidate_market_products_for_asset(asset: str, market_products: List[str]) -> List[str]:
+    base = str(asset or "").upper().strip()
+    if not base:
+        return []
+    candidates: List[str] = []
+    seen: set[str] = set()
+    for product in market_products:
+        pid = str(product or "").upper().strip()
+        if not pid:
+            continue
+        if _base_asset_from_product(pid) == base and pid not in seen:
+            seen.add(pid)
+            candidates.append(pid)
+    for quote in ("USD", "USDC", "USDT"):
+        pid = f"{base}-{quote}"
+        if pid not in seen:
+            seen.add(pid)
+            candidates.append(pid)
+    return candidates
+
+
+def _enrich_regimes_for_open_positions(
+    *,
+    open_positions_df: pd.DataFrame,
+    enable_coinbase_public: bool,
+    market_products: List[str],
+    ema_period: int,
+    neutral_band_pct: float,
+    coinbase_statuses: Dict[str, Dict[str, Any]],
+    regimes_by_asset: Dict[str, str],
+    snapshot_errors: List[str],
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str], List[str]]:
+    if not enable_coinbase_public or open_positions_df is None or open_positions_df.empty:
+        return coinbase_statuses, regimes_by_asset, snapshot_errors
+
+    seen_errors = set(snapshot_errors)
+    for asset in _extract_open_position_assets(open_positions_df):
+        if asset in regimes_by_asset:
+            continue
+        for pid in _candidate_market_products_for_asset(asset, market_products):
+            status = coinbase_statuses.get(pid)
+            if status is None:
+                try:
+                    status = get_regime_status(
+                        pid,
+                        ema_period=int(ema_period),
+                        neutral_band_pct=float(neutral_band_pct),
+                        candles_granularity=86400,
+                    )
+                    coinbase_statuses[pid] = status
+                except Exception as exc:
+                    msg = f"{pid}: {exc}"
+                    if msg not in seen_errors:
+                        snapshot_errors.append(msg)
+                        seen_errors.add(msg)
+                    continue
+            regime = status.get("regime") if isinstance(status, dict) else None
+            if regime:
+                regimes_by_asset[asset] = str(regime)
+                break
+    return coinbase_statuses, regimes_by_asset, snapshot_errors
+
+
 def _load_dashboard_state() -> dict:
     if not STATE_PATH.exists():
         return {}
@@ -2085,12 +2174,6 @@ def main() -> None:
             base_asset = str(pid).split("-")[0].upper()
             if status.get("regime"):
                 regimes_by_asset[base_asset] = str(status.get("regime"))
-        st.session_state["coinbase_regimes_by_asset"] = regimes_by_asset
-        st.session_state["coinbase_regime_statuses"] = coinbase_statuses
-    else:
-        st.session_state["coinbase_regimes_by_asset"] = {}
-        st.session_state["coinbase_regime_statuses"] = {}
-    st.session_state["coinbase_snapshot_errors"] = snapshot_errors
 
     with st.expander("Metric glossary", expanded=False):
         glossary = metrics.get("metric_glossary", {})
@@ -2105,6 +2188,24 @@ def main() -> None:
             st.session_state.get("live_positions_df", pd.DataFrame())
         )
         total_unrealized = st.session_state.get("live_total_unrealized", 0.0)
+
+    coinbase_statuses, regimes_by_asset, snapshot_errors = _enrich_regimes_for_open_positions(
+        open_positions_df=open_positions_df,
+        enable_coinbase_public=enable_coinbase_public,
+        market_products=market_products,
+        ema_period=int(ema_period),
+        neutral_band_pct=float(neutral_band_pct),
+        coinbase_statuses=coinbase_statuses,
+        regimes_by_asset=regimes_by_asset,
+        snapshot_errors=snapshot_errors,
+    )
+    if regimes_by_asset:
+        st.session_state["coinbase_regimes_by_asset"] = regimes_by_asset
+        st.session_state["coinbase_regime_statuses"] = coinbase_statuses
+    else:
+        st.session_state["coinbase_regimes_by_asset"] = {}
+        st.session_state["coinbase_regime_statuses"] = {}
+    st.session_state["coinbase_snapshot_errors"] = snapshot_errors
 
     if pipeline_snapshot is not None:
         if total_unrealized is not None:
