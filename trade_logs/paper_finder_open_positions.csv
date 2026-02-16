@@ -1,1 +1,2 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,partial_tp_pct,partial_tp_rr,partial_tp_price,partial_tp_done,partial_tp_move_sl,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
+453bcbe893,LTC,LTC-PERP-INTX,SHORT,54.68,56.43,52.055,50.0,0.8,53.28,False,True,250.0,50.0,2026-02-16T02:32:23Z,2026-02-17T02:32:23Z,OPEN,53.96,2026-02-16T06:05:02Z,3.29,1.3168,0.0,1,5.0,,
