@@ -1251,6 +1251,66 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(stored_fill_checkpoint.get('time'), event_time)
         self.assertEqual(stored_fill_checkpoint.get('order_id'), partial.order_id)
 
+    def test_log_tp_sl_skips_boundary_anchored_stale_partial_without_active_position(self) -> None:
+        old_open = datetime(2025, 8, 27, 19, 7, 51, tzinfo=UTC)
+        event_time = datetime(2026, 2, 18, 14, 32, 22, tzinfo=UTC)
+        partial = self.module.PartialFillEvent(
+            product_id='BTC-PERP-INTX',
+            side='LONG',
+            time=event_time,
+            qty=0.0037,
+            entry_price=78961.964865,
+            exit_price=67241.1,
+            realized_pnl=-43.44,
+            fees=0.0,
+            order_id='166eba0f-a05b-4000-a844-78c2dc996d0c',
+            open_time=old_open,
+        )
+        boundary_fill = self.module.Fill(
+            'BTC-PERP-INTX',
+            'BUY',
+            0.0037,
+            81748.12973,
+            0.0,
+            old_open,
+            'historic-boundary',
+        )
+
+        def patch(name: str, value: Any) -> None:
+            original = getattr(self.module, name)
+            setattr(self.module, name, value)
+            self.addCleanup(lambda name=name, original=original: setattr(self.module, name, original))
+
+        stored_fill_checkpoint: Dict[str, Any] = {}
+
+        patch('fetch_fills', lambda cb, limit=0: [{'dummy': True}])
+        patch('_convert_fill', lambda raw: boundary_fill)
+        patch('_detect_cycles_with_partials', lambda fills: ([], [partial]))
+        patch('_load_checkpoint', lambda: {'last_time': (event_time - timedelta(minutes=1)).isoformat()})
+        patch('_is_new_cycle', lambda cycle, checkpoint, bootstrap_existing: False)
+        patch('_is_new_partial', lambda event, checkpoint, bootstrap_existing: True)
+        patch('_active_positions', lambda cb: {})
+        patch('_breakeven_threshold', lambda: 0.0)
+        patch('compute_mae_mfe_from_history', lambda **kwargs: (None, None))
+        patch('_store_checkpoint', lambda *args, **kwargs: None)
+        patch(
+            '_store_fill_checkpoint',
+            lambda *args, **kwargs: stored_fill_checkpoint.update(
+                {'time': args[0], 'order_id': args[1]}
+            ),
+        )
+
+        self.module._ensure_log_file()
+        self.module._log_tp_sl_once(SimpleNamespace(), limit=1, bootstrap_existing=True)
+
+        log_path = self.module._log_file_path()
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(rows, [])
+        self.assertEqual(stored_fill_checkpoint.get('time'), event_time)
+        self.assertEqual(stored_fill_checkpoint.get('order_id'), partial.order_id)
+
     def test_cycle_to_record_breakeven(self) -> None:
         cycle = self.module._process_product_fills([
             self.module.Fill('SOL-PERP-INTX', 'SELL', 1.0, 50.0, 0.0, datetime(2025, 10, 5, 2, 0, tzinfo=UTC), '21'),

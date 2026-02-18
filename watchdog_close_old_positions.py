@@ -1342,6 +1342,35 @@ def _is_likely_boundary_truncated_partial(
     return (event_time_utc - event_open_utc) >= timedelta(hours=max(0.0, open_age_hours_threshold))
 
 
+def _is_boundary_anchored_stale_span(
+    *,
+    open_time: Optional[datetime],
+    close_time: Optional[datetime],
+    earliest_fill_time: Optional[datetime],
+    stale_age_hours_threshold: float = 24.0,
+    boundary_tolerance_seconds: int = 1,
+) -> bool:
+    """Detect stale spans anchored to the fill-window boundary.
+
+    This catches false positives produced when historical fill windows are truncated
+    and the first available fill is misinterpreted as the opening leg of a fresh event.
+    """
+
+    open_utc = _as_utc(open_time)
+    close_utc = _as_utc(close_time)
+    earliest_utc = _as_utc(earliest_fill_time)
+    if open_utc is None or close_utc is None or earliest_utc is None:
+        return False
+
+    if close_utc <= open_utc:
+        return False
+
+    if abs((open_utc - earliest_utc).total_seconds()) > max(0, boundary_tolerance_seconds):
+        return False
+
+    return (close_utc - open_utc) >= timedelta(hours=max(0.0, stale_age_hours_threshold))
+
+
 def compute_mae_mfe_from_history(
     cb: CoinbaseService,
     product_id: str,
@@ -2498,6 +2527,25 @@ def _log_tp_sl_once(
     latest_logged_partial: Optional[PartialFillEvent] = None
 
     for event in new_partials:
+        if _is_boundary_anchored_stale_span(
+            open_time=event.open_time,
+            close_time=event.time,
+            earliest_fill_time=earliest_fill_by_product.get(event.product_id),
+        ):
+            logger.warning(
+                "Skipping boundary-anchored stale partial for %s at %s "
+                "(event_open=%s, earliest_fill=%s, order_id=%s).",
+                event.product_id,
+                event.time.isoformat(),
+                _as_utc(event.open_time).isoformat() if _as_utc(event.open_time) else "unknown",
+                _as_utc(earliest_fill_by_product.get(event.product_id)).isoformat()
+                if _as_utc(earliest_fill_by_product.get(event.product_id))
+                else "unknown",
+                event.order_id or "",
+            )
+            latest_logged_partial = event
+            continue
+
         active_entry = active_positions.get(event.product_id)
         if active_entry is not None:
             net_value, opened_at = active_entry
@@ -2537,6 +2585,25 @@ def _log_tp_sl_once(
         latest_logged_partial = event
 
     for cycle in new_cycles:
+        if _is_boundary_anchored_stale_span(
+            open_time=cycle.start_time,
+            close_time=cycle.end_time,
+            earliest_fill_time=earliest_fill_by_product.get(cycle.product_id),
+        ):
+            logger.warning(
+                "Skipping boundary-anchored stale cycle for %s at %s "
+                "(start=%s, earliest_fill=%s, order_id=%s).",
+                cycle.product_id,
+                cycle.end_time.isoformat(),
+                cycle.start_time.isoformat(),
+                _as_utc(earliest_fill_by_product.get(cycle.product_id)).isoformat()
+                if _as_utc(earliest_fill_by_product.get(cycle.product_id))
+                else "unknown",
+                cycle.closing_order_id or "",
+            )
+            latest_logged_cycle = cycle
+            continue
+
         active_entry = active_positions.get(cycle.product_id)
         if active_entry is not None:
             net_value, opened_at = active_entry
