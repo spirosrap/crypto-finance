@@ -68,6 +68,10 @@ def _daily_pnl_today(log_path: Path) -> Optional[float]:
     df["closed_at"] = pd.to_datetime(df["closed_at"], utc=True, errors="coerce")
     df["profit_loss"] = pd.to_numeric(df["profit_loss"], errors="coerce")
     df = df.dropna(subset=["closed_at", "profit_loss"])
+    dedup_cols = [col for col in ("closed_at", "product_id", "closure_reason", "net_size", "profit_loss") if col in df.columns]
+    if dedup_cols:
+        # partial closes sometimes emit duplicate rows (same time/product/pnl); avoid double-counting
+        df = df.drop_duplicates(subset=dedup_cols)
     if df.empty:
         return 0.0
     today = datetime.now(UTC).date()
