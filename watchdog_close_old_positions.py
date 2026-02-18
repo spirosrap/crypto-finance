@@ -2523,7 +2523,7 @@ def _log_tp_sl_once(
         if _record_position_close_if_new(record):
             appended_partials += 1
             logger.info(
-                "Recorded partial closure for %s at %s (pnl=%s)",
+                "Recorded partial closure for %s at %s (pnl=%s, close_path=tp_sl_fill_partial)",
                 event.product_id,
                 event.time.isoformat(),
                 record['profit_loss'],
@@ -2601,7 +2601,7 @@ def _log_tp_sl_once(
                     appended += 1
                     logger.info(
                         "Recorded single-order multi-fill close for %s at %s "
-                        "(order_id=%s, reason=%s, pnl=%s)",
+                        "(order_id=%s, reason=%s, pnl=%s, close_path=tp_sl_fill_cycle)",
                         cycle.product_id,
                         cycle.end_time.isoformat(),
                         cycle.closing_order_id,
@@ -2610,7 +2610,8 @@ def _log_tp_sl_once(
                     )
                 else:
                     logger.info(
-                        "Recorded single-order multi-fill close for %s at %s (order_id=%s) [updated]",
+                        "Recorded single-order multi-fill close for %s at %s "
+                        "(order_id=%s, close_path=tp_sl_fill_cycle) [updated]",
                         cycle.product_id,
                         cycle.end_time.isoformat(),
                         cycle.closing_order_id,
@@ -2627,7 +2628,8 @@ def _log_tp_sl_once(
                     if _record_position_close_if_new(record):
                         appended += 1
                         logger.info(
-                            "Promoted partial close for %s at %s to full close (order_id=%s, reason=%s, pnl=%s)",
+                            "Promoted partial close for %s at %s to full close "
+                            "(order_id=%s, reason=%s, pnl=%s, close_path=tp_sl_fill_cycle)",
                             cycle.product_id,
                             cycle.end_time.isoformat(),
                             promote_order_id,
@@ -2636,7 +2638,8 @@ def _log_tp_sl_once(
                         )
                     else:
                         logger.info(
-                            "Promoted partial close for %s at %s to full close (order_id=%s) [updated]",
+                            "Promoted partial close for %s at %s to full close "
+                            "(order_id=%s, close_path=tp_sl_fill_cycle) [updated]",
                             cycle.product_id,
                             cycle.end_time.isoformat(),
                             promote_order_id,
@@ -2673,7 +2676,8 @@ def _log_tp_sl_once(
         if _record_position_close_if_new(record):
             appended += 1
             logger.info(
-                "Recorded TP/SL closure for %s at %s (reason=%s, pnl=%s)",
+                "Recorded TP/SL closure for %s at %s "
+                "(reason=%s, pnl=%s, close_path=tp_sl_fill_cycle)",
                 cycle.product_id,
                 cycle.end_time.isoformat(),
                 record['closure_reason'],
@@ -3175,7 +3179,7 @@ def _close_position(
     net_size: float,
     position_side: str,
     leverage: str,
-) -> tuple[bool, Optional[float], Optional[str]]:
+) -> tuple[bool, Optional[float], Optional[str], str]:
     logger = logging.getLogger(__name__)
     # Determine closing side
     side = 'BUY' if _position_is_short(position_side, net_size) else 'SELL'
@@ -3187,7 +3191,7 @@ def _close_position(
         ccxt_symbol = _product_to_ccxt_symbol(product_id)
     except Exception as exc:
         logger.error("Unable to initialise CCXT exchange: %s", exc)
-        return False, None, None
+        return False, None, None, "ccxt_init_failed"
 
     # Cancel open orders for this product first (Coinbase REST, then CCXT as fallback)
     try:
@@ -3234,7 +3238,8 @@ def _close_position(
                 )
             ):
                 logger.warning(
-                    "CCXT close failed for %s (%s); falling back to REST close.",
+                    "CCXT close failed for %s (%s); falling back to REST close "
+                    "(close_path=rest_fallback_close).",
                     product_id,
                     msg,
                 )
@@ -3256,16 +3261,16 @@ def _close_position(
                     )
                     if isinstance(response, dict) and response.get("success", True):
                         logger.info(
-                            "Closed %s position via REST %s %s",
+                            "Closed %s position via REST %s %s (close_path=rest_fallback_close)",
                             product_id,
                             side,
                             close_size,
                         )
-                        return True, None, response.get("order_id")
+                        return True, None, response.get("order_id"), "rest_fallback_close"
                     logger.error("REST close rejected for %s: %s", product_id, response)
                 except Exception as rest_exc:
                     logger.error("REST close failed for %s: %s", product_id, rest_exc)
-                return False, None, None
+                return False, None, None, "rest_fallback_close"
             raise
         order_id = _extract_order_id(result)
         fill_price = _extract_avg_filled_price(result)
@@ -3277,18 +3282,18 @@ def _close_position(
             if fill_price is None:
                 fill_price = _lookup_order_fill_price(cb, order_id, product_id)
             logger.info(
-                "Closed %s position via %s %s at %s",
+                "Closed %s position via %s %s at %s (close_path=ccxt_close_position)",
                 product_id,
                 side,
                 close_size,
                 f"price~{fill_price:.6f}" if fill_price is not None else "unknown price",
             )
-            return True, fill_price, order_id
+            return True, fill_price, order_id, "ccxt_close_position"
         logger.error("Close order did not report success for %s: %s", product_id, result)
-        return False, None, order_id
+        return False, None, order_id, "ccxt_close_position"
     except Exception as e:
         logger.error(f"Error closing position for {product_id} via CCXT: {e}")
-        return False, None, None
+        return False, None, None, "ccxt_close_position"
 
 
 def run_once(
@@ -3361,7 +3366,7 @@ def run_once(
                 dust_notional,
                 dust_notional_usd,
             )
-            closed, execution_price, close_order_id = _close_position(
+            closed, execution_price, close_order_id, close_path = _close_position(
                 cb, symbol, net_size, position_side, leverage
             )
             if closed:
@@ -3393,13 +3398,27 @@ def run_once(
                 )
                 if log_closures:
                     _record_position_close(record)
-                    logger.info(f"Recorded dust closure for {symbol} to {_log_file_path()}")
+                    logger.info(
+                        "Recorded dust closure for %s to %s (close_path=%s)",
+                        symbol,
+                        _log_file_path(),
+                        close_path,
+                    )
                 else:
                     logger.info(
-                        "Closure logging disabled; skipping CSV append for %s (reason=dust, pnl=%s)",
+                        "Closure logging disabled; skipping CSV append for %s "
+                        "(reason=dust, pnl=%s, close_path=%s)",
                         symbol,
                         pnl_for_record,
+                        close_path,
                     )
+            else:
+                logger.warning(
+                    "Dust close failed for %s (close_path=%s, order_id=%s)",
+                    symbol,
+                    close_path,
+                    close_order_id or "",
+                )
             continue
 
         opened_at = _extract_position_open_time(pos)
@@ -3436,7 +3455,7 @@ def run_once(
             if initial_pnl_estimate is None:
                 initial_pnl_estimate = _calculate_pnl(net_size, entry_price, mark_price)
 
-            closed, execution_price, close_order_id = _close_position(
+            closed, execution_price, close_order_id, close_path = _close_position(
                 cb, symbol, net_size, position_side, leverage
             )
             if closed:
@@ -3488,14 +3507,28 @@ def run_once(
                 )
                 if log_closures:
                     _record_position_close(record)
-                    logger.info(f"Recorded closure for {symbol} to {_log_file_path()}")
+                    logger.info(
+                        "Recorded closure for %s to %s (close_path=%s)",
+                        symbol,
+                        _log_file_path(),
+                        close_path,
+                    )
                 else:
                     logger.info(
-                        "Closure logging disabled; skipping CSV append for %s (reason=%s, pnl=%s)",
+                        "Closure logging disabled; skipping CSV append for %s "
+                        "(reason=%s, pnl=%s, close_path=%s)",
                         symbol,
                         closure_reason,
                         pnl_for_record,
+                        close_path,
                     )
+            else:
+                logger.warning(
+                    "Expiry close failed for %s (close_path=%s, order_id=%s)",
+                    symbol,
+                    close_path,
+                    close_order_id or "",
+                )
         else:
             # Report time remaining until threshold
             deadline = opened_at + timedelta(hours=max_age_hours)

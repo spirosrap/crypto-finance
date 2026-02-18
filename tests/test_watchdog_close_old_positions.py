@@ -323,7 +323,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.module._ensure_ccxt_exchange = lambda: DummyExchange()
         self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
 
-        closed, fill_price, order_id = self.module._close_position(
+        closed, fill_price, order_id, close_path = self.module._close_position(
             cb,
             product_id='BTC-PERP-INTX',
             net_size=-1.0,
@@ -334,6 +334,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertTrue(closed)
         self.assertAlmostEqual(fill_price or 0.0, 3.5)
         self.assertEqual(order_id, 'abc123')
+        self.assertEqual(close_path, 'ccxt_close_position')
 
     def test_close_position_fetches_fill_price_from_fills(self) -> None:
         recorded_kwargs: dict = {}
@@ -377,7 +378,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.module._ensure_ccxt_exchange = lambda: DummyExchange()
         self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
 
-        closed, fill_price, order_id = self.module._close_position(
+        closed, fill_price, order_id, close_path = self.module._close_position(
             cb,
             product_id='ADA-PERP-INTX',
             net_size=2.0,
@@ -388,6 +389,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertTrue(closed)
         self.assertAlmostEqual(fill_price or 0.0, 12.34)
         self.assertEqual(order_id, 'fill123')
+        self.assertEqual(close_path, 'ccxt_close_position')
         self.assertIn('order_id', recorded_kwargs)
 
     def test_close_position_short_alias_submits_buy(self) -> None:
@@ -418,7 +420,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.module._ensure_ccxt_exchange = lambda: DummyExchange()
         self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
 
-        closed, _, order_id = self.module._close_position(
+        closed, _, order_id, close_path = self.module._close_position(
             cb,
             product_id='SOL-PERP-INTX',
             net_size=-2.0,
@@ -428,6 +430,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
 
         self.assertTrue(closed)
         self.assertEqual(order_id, 'short-close')
+        self.assertEqual(close_path, 'ccxt_close_position')
         self.assertEqual(submitted_sides, ['buy'])
 
     def test_close_position_client_order_id_error_falls_back_to_rest(self) -> None:
@@ -461,7 +464,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.module._ensure_ccxt_exchange = lambda: DummyExchange()
         self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
 
-        closed, fill_price, order_id = self.module._close_position(
+        closed, fill_price, order_id, close_path = self.module._close_position(
             cb,
             product_id='LTC-PERP-INTX',
             net_size=-1.0,
@@ -472,6 +475,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertTrue(closed)
         self.assertIsNone(fill_price)
         self.assertEqual(order_id, 'rest-close-1')
+        self.assertEqual(close_path, 'rest_fallback_close')
         self.assertEqual(rest_kwargs.get('product_id'), 'LTC-PERP-INTX')
         self.assertEqual(rest_kwargs.get('side'), 'BUY')
         self.assertTrue(rest_kwargs.get('client_order_id'))
@@ -509,7 +513,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.module._ensure_ccxt_exchange = lambda: DummyExchange()
         self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
 
-        closed, fill_price, order_id = self.module._close_position(
+        closed, fill_price, order_id, close_path = self.module._close_position(
             cb,
             product_id='SEI-PERP-INTX',
             net_size=10.0,
@@ -520,6 +524,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertTrue(closed)
         self.assertIsNone(fill_price)
         self.assertEqual(order_id, 'rest-close-2')
+        self.assertEqual(close_path, 'rest_fallback_close')
         self.assertEqual(rest_kwargs.get('product_id'), 'SEI-PERP-INTX')
         self.assertEqual(rest_kwargs.get('side'), 'SELL')
 
@@ -564,7 +569,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
 
         def dummy_close(*args, **kwargs):
             closed['called'] = True
-            return True, 2.6, 'dust-order'
+            return True, 2.6, 'dust-order', 'ccxt_close_position'
 
         original_cb = self.module.CoinbaseService
         original_close = self.module._close_position
@@ -611,7 +616,7 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
 
         def dummy_close(*args, **kwargs):
             closed['called'] = True
-            return True, 2.6, 'dust-order'
+            return True, 2.6, 'dust-order', 'ccxt_close_position'
 
         original_cb = self.module.CoinbaseService
         original_close = self.module._close_position
