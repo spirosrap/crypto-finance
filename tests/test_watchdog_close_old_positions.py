@@ -99,6 +99,36 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(side, 'FUTURES_POSITION_SIDE_LONG')
         self.assertEqual(lev, '30')
 
+    def test_infer_open_time_from_orders_short_alias_uses_sell_entries(self) -> None:
+        opened_at = datetime(2025, 10, 4, 12, 0, 0, tzinfo=UTC)
+        partial_close_at = opened_at + timedelta(minutes=5)
+        orders = [
+            {
+                'side': 'SELL',
+                'filled_size': '1.0',
+                'created_time': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            },
+            {
+                'side': 'BUY',
+                'filled_size': '0.2',
+                'created_time': partial_close_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            },
+        ]
+
+        original_orders = self.module._orders_for_product
+        self.module._orders_for_product = lambda *args, **kwargs: orders
+        self.addCleanup(lambda: setattr(self.module, '_orders_for_product', original_orders))
+
+        inferred = self.module._infer_open_time_from_orders(
+            cb=SimpleNamespace(),
+            portfolio_uuid='uuid',
+            product_id='BTC-PERP-INTX',
+            expected_net=-1.0,
+            position_side='SHORT',
+        )
+
+        self.assertEqual(inferred, opened_at)
+
     def test_classify_partial_reason_prefers_realized_pnl(self) -> None:
         reason = self.module._classify_partial_reason(
             'SHORT',
@@ -360,6 +390,139 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(order_id, 'fill123')
         self.assertIn('order_id', recorded_kwargs)
 
+    def test_close_position_short_alias_submits_buy(self) -> None:
+        submitted_sides = []
+
+        def cancel_all_orders(**kwargs):
+            return None
+
+        client = SimpleNamespace(
+            get_order=lambda **kwargs: {},
+            list_fills=lambda **kwargs: {'fills': []},
+        )
+        cb = SimpleNamespace(cancel_all_orders=cancel_all_orders, client=client)
+
+        class DummyExchange:
+            def cancel_all_orders(self, symbol=None):
+                return None
+
+            def create_order(self, *args, **kwargs):
+                submitted_sides.append(args[2] if len(args) > 2 else kwargs.get('side'))
+                return {
+                    'success': True,
+                    'order_id': 'short-close',
+                    'average_filled_price': '10.0',
+                }
+
+        original_exchange = self.module._ensure_ccxt_exchange
+        self.module._ensure_ccxt_exchange = lambda: DummyExchange()
+        self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
+
+        closed, _, order_id = self.module._close_position(
+            cb,
+            product_id='SOL-PERP-INTX',
+            net_size=-2.0,
+            position_side='SHORT',
+            leverage='2',
+        )
+
+        self.assertTrue(closed)
+        self.assertEqual(order_id, 'short-close')
+        self.assertEqual(submitted_sides, ['buy'])
+
+    def test_close_position_client_order_id_error_falls_back_to_rest(self) -> None:
+        rest_kwargs: Dict[str, Any] = {}
+
+        def cancel_all_orders(**kwargs):
+            return None
+
+        def rest_create_order(**kwargs):
+            rest_kwargs.update(kwargs)
+            return {
+                'success': True,
+                'order_id': 'rest-close-1',
+            }
+
+        client = SimpleNamespace(
+            create_order=rest_create_order,
+            get_order=lambda **kwargs: {},
+            list_fills=lambda **kwargs: {'fills': []},
+        )
+        cb = SimpleNamespace(cancel_all_orders=cancel_all_orders, client=client)
+
+        class DummyExchange:
+            def cancel_all_orders(self, symbol=None):
+                return None
+
+            def create_order(self, *args, **kwargs):
+                raise Exception("coinbaseadvanced closePosition() requires a clientOrderId parameter")
+
+        original_exchange = self.module._ensure_ccxt_exchange
+        self.module._ensure_ccxt_exchange = lambda: DummyExchange()
+        self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
+
+        closed, fill_price, order_id = self.module._close_position(
+            cb,
+            product_id='LTC-PERP-INTX',
+            net_size=-1.0,
+            position_side='SHORT',
+            leverage='5',
+        )
+
+        self.assertTrue(closed)
+        self.assertIsNone(fill_price)
+        self.assertEqual(order_id, 'rest-close-1')
+        self.assertEqual(rest_kwargs.get('product_id'), 'LTC-PERP-INTX')
+        self.assertEqual(rest_kwargs.get('side'), 'BUY')
+        self.assertTrue(rest_kwargs.get('client_order_id'))
+
+    def test_close_position_margin_mode_error_falls_back_to_rest(self) -> None:
+        rest_kwargs: Dict[str, Any] = {}
+
+        def cancel_all_orders(**kwargs):
+            return None
+
+        def rest_create_order(**kwargs):
+            rest_kwargs.update(kwargs)
+            return {
+                'success': True,
+                'order_id': 'rest-close-2',
+            }
+
+        client = SimpleNamespace(
+            create_order=rest_create_order,
+            get_order=lambda **kwargs: {},
+            list_fills=lambda **kwargs: {'fills': []},
+        )
+        cb = SimpleNamespace(cancel_all_orders=cancel_all_orders, client=client)
+
+        class DummyExchange:
+            def cancel_all_orders(self, symbol=None):
+                return None
+
+            def create_order(self, *args, **kwargs):
+                raise Exception(
+                    'coinbaseadvanced {"error":"unknown","error_details":"proto: (line 1:85): unknown field \\"marginMode\\""}'
+                )
+
+        original_exchange = self.module._ensure_ccxt_exchange
+        self.module._ensure_ccxt_exchange = lambda: DummyExchange()
+        self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
+
+        closed, fill_price, order_id = self.module._close_position(
+            cb,
+            product_id='SEI-PERP-INTX',
+            net_size=10.0,
+            position_side='LONG',
+            leverage='5',
+        )
+
+        self.assertTrue(closed)
+        self.assertIsNone(fill_price)
+        self.assertEqual(order_id, 'rest-close-2')
+        self.assertEqual(rest_kwargs.get('product_id'), 'SEI-PERP-INTX')
+        self.assertEqual(rest_kwargs.get('side'), 'SELL')
+
     def test_dust_notional_helper(self) -> None:
         notional = self.module._dust_notional_usd(
             net_size=2.0,
@@ -423,6 +586,50 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         with log_path.open(newline='') as handle:
             rows = list(csv.DictReader(handle))
         self.assertEqual(rows[0]['closure_reason'], 'dust')
+
+    def test_run_once_closes_dust_positions_when_logging_disabled(self) -> None:
+        pos = {
+            'product_id': 'SUI-PERP-INTX',
+            'net_size': '1.0',
+            'position_side': 'LONG',
+            'leverage': '5',
+            'mark_price': '2.5',
+        }
+
+        class DummyClient:
+            def get_portfolios(self):
+                return {'portfolios': [{'type': 'INTX', 'uuid': 'uuid'}]}
+
+            def get_portfolio_breakdown(self, portfolio_uuid=None):
+                return {'breakdown': {'perp_positions': [pos]}}
+
+        class DummyCB:
+            def __init__(self, *args, **kwargs):
+                self.client = DummyClient()
+
+        closed = {}
+
+        def dummy_close(*args, **kwargs):
+            closed['called'] = True
+            return True, 2.6, 'dust-order'
+
+        original_cb = self.module.CoinbaseService
+        original_close = self.module._close_position
+        self.module.CoinbaseService = DummyCB
+        self.module._close_position = dummy_close
+        self.addCleanup(lambda: setattr(self.module, 'CoinbaseService', original_cb))
+        self.addCleanup(lambda: setattr(self.module, '_close_position', original_close))
+
+        self.module.run_once(
+            max_age_hours=24,
+            product_filter=None,
+            log_closures=False,
+            recent_order_grace_minutes=0,
+            dust_notional_usd=5.0,
+        )
+
+        self.assertTrue(closed.get('called'))
+        self.assertFalse(self.module._log_file_path().exists())
 
     def test_compute_mae_mfe_handles_empty_candles(self) -> None:
         cb = SimpleNamespace(

@@ -2967,7 +2967,7 @@ def _infer_open_time_from_orders(cb: CoinbaseService, portfolio_uuid: str, produ
         pass
 
     # Fallback heuristic: accumulate orders of the current position side from newest backward
-    want_side = 'SELL' if position_side == 'FUTURES_POSITION_SIDE_SHORT' else 'BUY'
+    want_side = 'SELL' if _position_is_short(position_side, expected_net) else 'BUY'
     acc = 0.0
     for o in sorted(orders_sorted, key=order_time, reverse=True):
         side = (g(o, 'side') or '').upper()
@@ -3016,6 +3016,15 @@ def _extract_symbol_and_size(pos: Any) -> tuple[Optional[str], float, str, str]:
     return symbol, size, normalized_side or side_field, leverage
 
 
+def _position_is_short(position_side: str, net_size: float) -> bool:
+    normalized = (position_side or "").upper()
+    if "SHORT" in normalized:
+        return True
+    if "LONG" in normalized:
+        return False
+    return net_size < 0
+
+
 def _close_position(
     cb: CoinbaseService,
     product_id: str,
@@ -3025,7 +3034,7 @@ def _close_position(
 ) -> tuple[bool, Optional[float], Optional[str]]:
     logger = logging.getLogger(__name__)
     # Determine closing side
-    side = 'BUY' if position_side == 'FUTURES_POSITION_SIDE_SHORT' else 'SELL'
+    side = 'BUY' if _position_is_short(position_side, net_size) else 'SELL'
     close_size = abs(net_size)
 
     # Market IOC close via CCXT
@@ -3048,14 +3057,11 @@ def _close_position(
         pass
 
     try:
+        # Keep CCXT params minimal for Coinbase close_position compatibility.
         params = {
-            "marginMode": "cross",
-            "timeInForce": "IOC",
-            # Note: some Coinbase CCXT endpoints reject reduceOnly; fallback handles that.
             "reduceOnly": True,
         }
-        if leverage:
-            params["leverage"] = str(leverage)
+        params["clientOrderId"] = f"close_{uuid.uuid4().hex[:16]}_{int(time.time())}"
         try:
             result = exchange.create_order(
                 ccxt_symbol,
@@ -3067,10 +3073,26 @@ def _close_position(
             )
         except Exception as exc:
             msg = str(exc)
-            if "reduceOnly" in msg or "reduce_only" in msg:
+            msg_lower = msg.lower()
+            if (
+                "reduceonly" in msg_lower
+                or "reduce_only" in msg_lower
+                or (
+                    "clientorderid" in msg_lower
+                    and "closeposition" in msg_lower
+                )
+                or (
+                    "unknown field" in msg_lower
+                    and (
+                        "marginmode" in msg_lower
+                        or "timeinforce" in msg_lower
+                    )
+                )
+            ):
                 logger.warning(
-                    "CCXT rejected reduceOnly for %s; falling back to REST close.",
+                    "CCXT close failed for %s (%s); falling back to REST close.",
                     product_id,
+                    msg,
                 )
                 # REST fallback with reduce_only
                 order_config = {
