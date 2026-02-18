@@ -1271,6 +1271,77 @@ def _as_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+def _is_likely_boundary_truncated_cycle(
+    *,
+    cycle: "Cycle",
+    earliest_fill_time: Optional[datetime],
+    active_net_size: float,
+    active_opened_at: Optional[datetime],
+    boundary_tolerance_seconds: int = 1,
+    open_close_tolerance_seconds: int = 300,
+) -> bool:
+    """Detect likely false-positive cycles caused by truncated historical fill windows.
+
+    If a cycle starts exactly at the first available fill for a product and the account is
+    currently open in the opposite direction with an open time near the cycle close, this
+    usually indicates an entry fill was misclassified as closing legacy inventory.
+    """
+
+    if earliest_fill_time is None:
+        return False
+    if abs(active_net_size) <= 1e-9:
+        return False
+
+    if abs((cycle.start_time - earliest_fill_time).total_seconds()) > max(0, boundary_tolerance_seconds):
+        return False
+
+    opposite_direction = (
+        (active_net_size > 0 and cycle.side == 'SHORT')
+        or (active_net_size < 0 and cycle.side == 'LONG')
+    )
+    if not opposite_direction:
+        return False
+
+    opened_utc = _as_utc(active_opened_at)
+    if opened_utc is None:
+        return False
+
+    return abs((opened_utc - cycle.end_time).total_seconds()) <= max(0, open_close_tolerance_seconds)
+
+
+def _is_likely_boundary_truncated_partial(
+    *,
+    event: "PartialFillEvent",
+    active_net_size: float,
+    active_opened_at: Optional[datetime],
+    open_age_hours_threshold: float = 24.0,
+    close_open_tolerance_seconds: int = 300,
+) -> bool:
+    """Detect likely false partials created by truncated fill history replay."""
+
+    if abs(active_net_size) <= 1e-9:
+        return False
+
+    event_side = (event.side or "").upper()
+    opposite_direction = (
+        (active_net_size > 0 and event_side == "SHORT")
+        or (active_net_size < 0 and event_side == "LONG")
+    )
+    if not opposite_direction:
+        return False
+
+    active_open_utc = _as_utc(active_opened_at)
+    event_time_utc = _as_utc(event.time)
+    event_open_utc = _as_utc(event.open_time)
+    if active_open_utc is None or event_time_utc is None or event_open_utc is None:
+        return False
+
+    if abs((active_open_utc - event_time_utc).total_seconds()) > max(0, close_open_tolerance_seconds):
+        return False
+
+    return (event_time_utc - event_open_utc) >= timedelta(hours=max(0.0, open_age_hours_threshold))
+
+
 def compute_mae_mfe_from_history(
     cb: CoinbaseService,
     product_id: str,
@@ -2382,6 +2453,12 @@ def _log_tp_sl_once(
         logger.info("No fills parsed successfully")
         return
 
+    earliest_fill_by_product: Dict[str, datetime] = {}
+    for fill in fills:
+        previous = earliest_fill_by_product.get(fill.product_id)
+        if previous is None or fill.time < previous:
+            earliest_fill_by_product[fill.product_id] = fill.time
+
     cycles, partials = _detect_cycles_with_partials(fills)
     if not cycles and not partials:
         logger.debug("No closed cycles detected in recent fills")
@@ -2421,6 +2498,27 @@ def _log_tp_sl_once(
     latest_logged_partial: Optional[PartialFillEvent] = None
 
     for event in new_partials:
+        active_entry = active_positions.get(event.product_id)
+        if active_entry is not None:
+            net_value, opened_at = active_entry
+            if _is_likely_boundary_truncated_partial(
+                event=event,
+                active_net_size=net_value,
+                active_opened_at=opened_at,
+            ):
+                logger.warning(
+                    "Skipping likely boundary-truncated partial for %s at %s "
+                    "(event_side=%s, event_open=%s, active_net=%s, active_opened_at=%s, order_id=%s).",
+                    event.product_id,
+                    event.time.isoformat(),
+                    event.side,
+                    _as_utc(event.open_time).isoformat() if _as_utc(event.open_time) else "unknown",
+                    net_value,
+                    _as_utc(opened_at).isoformat() if _as_utc(opened_at) else "unknown",
+                    event.order_id or "",
+                )
+                latest_logged_partial = event
+                continue
         record = _partial_to_record(event, mae_mfe_fetcher=_mae_mfe_fetcher)
         if _record_position_close_if_new(record):
             appended_partials += 1
@@ -2442,6 +2540,24 @@ def _log_tp_sl_once(
         active_entry = active_positions.get(cycle.product_id)
         if active_entry is not None:
             net_value, opened_at = active_entry
+            if _is_likely_boundary_truncated_cycle(
+                cycle=cycle,
+                earliest_fill_time=earliest_fill_by_product.get(cycle.product_id),
+                active_net_size=net_value,
+                active_opened_at=opened_at,
+            ):
+                logger.warning(
+                    "Skipping likely boundary-truncated cycle for %s at %s "
+                    "(start=%s, active_net=%s, active_opened_at=%s, order_id=%s).",
+                    cycle.product_id,
+                    cycle.end_time.isoformat(),
+                    cycle.start_time.isoformat(),
+                    net_value,
+                    _as_utc(opened_at).isoformat() if _as_utc(opened_at) else "unknown",
+                    cycle.closing_order_id or "",
+                )
+                latest_logged_cycle = cycle
+                continue
             if abs(net_value) > 1e-6:
                 opened_ts = _as_utc(opened_at)
                 same_direction = (net_value > 0 and cycle.side == 'LONG') or (net_value < 0 and cycle.side == 'SHORT')
@@ -2473,6 +2589,34 @@ def _log_tp_sl_once(
         total_partial_pnl = partial_pnl + logged_partial_pnl
 
         if total_partial_qty > 0:
+            single_order_partial_close = (
+                bool(cycle.closing_order_id)
+                and len(partial_order_ids) == 1
+                and cycle.closing_order_id in partial_order_ids
+            )
+            if single_order_partial_close:
+                record = _cycle_to_record(cycle, threshold, mae_mfe_fetcher=_mae_mfe_fetcher)
+                record["order_id"] = cycle.closing_order_id
+                if _record_position_close_if_new(record):
+                    appended += 1
+                    logger.info(
+                        "Recorded single-order multi-fill close for %s at %s "
+                        "(order_id=%s, reason=%s, pnl=%s)",
+                        cycle.product_id,
+                        cycle.end_time.isoformat(),
+                        cycle.closing_order_id,
+                        record['closure_reason'],
+                        record['profit_loss'],
+                    )
+                else:
+                    logger.info(
+                        "Recorded single-order multi-fill close for %s at %s (order_id=%s) [updated]",
+                        cycle.product_id,
+                        cycle.end_time.isoformat(),
+                        cycle.closing_order_id,
+                    )
+                latest_logged_cycle = cycle
+                continue
             remaining_qty = max(0.0, cycle.entry_qty - total_partial_qty)
             remaining_pnl = cycle.realized_pnl - total_partial_pnl
             if remaining_qty <= max(1e-12, cycle.entry_qty * 0.01):

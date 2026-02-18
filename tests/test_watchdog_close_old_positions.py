@@ -1016,6 +1016,193 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(rows[0].get('order_id'), 'partial1')
         self.assertEqual(rows[0].get('closure_reason'), 'take_profit')
 
+    def test_log_tp_sl_collapses_same_order_multifill_close(self) -> None:
+        opened_at = datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC)
+        closed_at = opened_at + timedelta(minutes=5)
+        cycle = self.module.Cycle(
+            product_id='BTC-PERP-INTX',
+            side='LONG',
+            start_time=opened_at,
+            end_time=closed_at,
+            entry_qty=1.0,
+            entry_value=100.0,
+            exit_qty=1.0,
+            exit_value=105.0,
+            realized_pnl=5.0,
+            fees=0.0,
+            closing_order_id='ord_same',
+        )
+        partial = self.module.PartialFillEvent(
+            product_id='BTC-PERP-INTX',
+            side='LONG',
+            time=closed_at,
+            qty=0.8,
+            entry_price=100.0,
+            exit_price=105.0,
+            realized_pnl=4.0,
+            fees=0.0,
+            order_id='ord_same',
+            open_time=opened_at,
+        )
+        fill = self.module.Fill(
+            'BTC-PERP-INTX',
+            'BUY',
+            1.0,
+            100.0,
+            0.0,
+            opened_at,
+            'fill1',
+        )
+
+        def patch(name: str, value: Any) -> None:
+            original = getattr(self.module, name)
+            setattr(self.module, name, value)
+            self.addCleanup(lambda name=name, original=original: setattr(self.module, name, original))
+
+        patch('fetch_fills', lambda cb, limit=0: [{'dummy': True}])
+        patch('_convert_fill', lambda raw: fill)
+        patch('_detect_cycles_with_partials', lambda fills: ([cycle], [partial]))
+        patch('_load_checkpoint', lambda: None)
+        patch('_is_new_cycle', lambda cycle, checkpoint, bootstrap_existing: True)
+        patch('_is_new_partial', lambda event, checkpoint, bootstrap_existing: True)
+        patch('_active_positions', lambda cb: {})
+        patch('_breakeven_threshold', lambda: 0.0)
+        patch('compute_mae_mfe_from_history', lambda **kwargs: (None, None))
+        patch('_store_checkpoint', lambda *args, **kwargs: None)
+        patch('_store_fill_checkpoint', lambda *args, **kwargs: None)
+
+        self.module._log_tp_sl_once(SimpleNamespace(), limit=1, bootstrap_existing=True)
+
+        log_path = self.module._log_file_path()
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].get('order_id'), 'ord_same')
+        self.assertEqual(rows[0].get('closure_reason'), 'take_profit')
+        self.assertEqual(rows[0].get('profit_loss'), '5')
+
+    def test_log_tp_sl_skips_boundary_truncated_cycle(self) -> None:
+        boundary_start = datetime(2025, 8, 27, 19, 7, 51, tzinfo=UTC)
+        closed_at = datetime(2026, 2, 18, 10, 33, 46, tzinfo=UTC)
+        cycle = self.module.Cycle(
+            product_id='BTC-PERP-INTX',
+            side='LONG',
+            start_time=boundary_start,
+            end_time=closed_at,
+            entry_qty=0.0037,
+            entry_value=302.468080001,
+            exit_qty=0.0037,
+            exit_value=251.50047,
+            realized_pnl=-51.04,
+            fees=0.0,
+            closing_order_id='27a538d0-547c-4209-8748-8180c69d8641',
+        )
+        fill = self.module.Fill(
+            'BTC-PERP-INTX',
+            'BUY',
+            0.0037,
+            81748.12973,
+            0.0,
+            boundary_start,
+            'historic-buy',
+        )
+
+        def patch(name: str, value: Any) -> None:
+            original = getattr(self.module, name)
+            setattr(self.module, name, value)
+            self.addCleanup(lambda name=name, original=original: setattr(self.module, name, original))
+
+        stored_checkpoint: Dict[str, Any] = {}
+
+        patch('fetch_fills', lambda cb, limit=0: [{'dummy': True}])
+        patch('_convert_fill', lambda raw: fill)
+        patch('_detect_cycles_with_partials', lambda fills: ([cycle], []))
+        patch('_load_checkpoint', lambda: None)
+        patch('_is_new_cycle', lambda cycle, checkpoint, bootstrap_existing: True)
+        patch('_is_new_partial', lambda event, checkpoint, bootstrap_existing: False)
+        patch('_active_positions', lambda cb: {'BTC-PERP-INTX': (-0.0037, closed_at)})
+        patch('_breakeven_threshold', lambda: 0.0)
+        patch('compute_mae_mfe_from_history', lambda **kwargs: (None, None))
+        patch(
+            '_store_checkpoint',
+            lambda *args, **kwargs: stored_checkpoint.update(
+                {'time': args[0], 'order_id': args[1]}
+            ),
+        )
+        patch('_store_fill_checkpoint', lambda *args, **kwargs: None)
+
+        self.module._ensure_log_file()
+        self.module._log_tp_sl_once(SimpleNamespace(), limit=1, bootstrap_existing=True)
+
+        log_path = self.module._log_file_path()
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(rows, [])
+        self.assertEqual(stored_checkpoint.get('time'), closed_at)
+        self.assertEqual(stored_checkpoint.get('order_id'), cycle.closing_order_id)
+
+    def test_log_tp_sl_skips_boundary_truncated_partial(self) -> None:
+        old_open = datetime(2025, 8, 27, 19, 7, 51, tzinfo=UTC)
+        event_time = datetime(2026, 2, 18, 10, 33, 46, tzinfo=UTC)
+        partial = self.module.PartialFillEvent(
+            product_id='BTC-PERP-INTX',
+            side='LONG',
+            time=event_time,
+            qty=0.0037,
+            entry_price=81748.12973,
+            exit_price=67973.1,
+            realized_pnl=-51.04,
+            fees=0.0,
+            order_id='27a538d0-547c-4209-8748-8180c69d8641',
+            open_time=old_open,
+        )
+        fill = self.module.Fill(
+            'BTC-PERP-INTX',
+            'SELL',
+            0.0037,
+            67973.1,
+            0.0,
+            event_time,
+            '27a538d0-547c-4209-8748-8180c69d8641',
+        )
+
+        def patch(name: str, value: Any) -> None:
+            original = getattr(self.module, name)
+            setattr(self.module, name, value)
+            self.addCleanup(lambda name=name, original=original: setattr(self.module, name, original))
+
+        stored_fill_checkpoint: Dict[str, Any] = {}
+
+        patch('fetch_fills', lambda cb, limit=0: [{'dummy': True}])
+        patch('_convert_fill', lambda raw: fill)
+        patch('_detect_cycles_with_partials', lambda fills: ([], [partial]))
+        patch('_load_checkpoint', lambda: {'last_time': (event_time - timedelta(minutes=1)).isoformat()})
+        patch('_is_new_cycle', lambda cycle, checkpoint, bootstrap_existing: False)
+        patch('_is_new_partial', lambda event, checkpoint, bootstrap_existing: True)
+        patch('_active_positions', lambda cb: {'BTC-PERP-INTX': (-0.0037, event_time)})
+        patch('_breakeven_threshold', lambda: 0.0)
+        patch('compute_mae_mfe_from_history', lambda **kwargs: (None, None))
+        patch('_store_checkpoint', lambda *args, **kwargs: None)
+        patch(
+            '_store_fill_checkpoint',
+            lambda *args, **kwargs: stored_fill_checkpoint.update(
+                {'time': args[0], 'order_id': args[1]}
+            ),
+        )
+
+        self.module._ensure_log_file()
+        self.module._log_tp_sl_once(SimpleNamespace(), limit=1, bootstrap_existing=True)
+
+        log_path = self.module._log_file_path()
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(rows, [])
+        self.assertEqual(stored_fill_checkpoint.get('time'), event_time)
+        self.assertEqual(stored_fill_checkpoint.get('order_id'), partial.order_id)
+
     def test_cycle_to_record_breakeven(self) -> None:
         cycle = self.module._process_product_fills([
             self.module.Fill('SOL-PERP-INTX', 'SELL', 1.0, 50.0, 0.0, datetime(2025, 10, 5, 2, 0, tzinfo=UTC), '21'),
