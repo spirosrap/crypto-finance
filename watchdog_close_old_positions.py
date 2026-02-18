@@ -3250,6 +3250,7 @@ def _close_position(
                         "reduce_only": True,
                     }
                 }
+                rest_order_id: Optional[str] = None
                 try:
                     response = cb.client.create_order(
                         client_order_id=f"close_{uuid.uuid4().hex[:16]}_{int(time.time())}",
@@ -3259,18 +3260,25 @@ def _close_position(
                         leverage=leverage,
                         margin_type="CROSS",
                     )
-                    if isinstance(response, dict) and response.get("success", True):
+                    rest_order_id = _extract_order_id(response)
+                    if _order_close_success(response):
                         logger.info(
                             "Closed %s position via REST %s %s (close_path=rest_fallback_close)",
                             product_id,
                             side,
                             close_size,
                         )
-                        return True, None, response.get("order_id"), "rest_fallback_close"
-                    logger.error("REST close rejected for %s: %s", product_id, response)
+                        return True, None, rest_order_id, "rest_fallback_close"
+                    logger.error(
+                        "REST close rejected for %s (success=%s, order_id=%s): %s",
+                        product_id,
+                        _get_value(response, "success"),
+                        rest_order_id or "",
+                        response,
+                    )
                 except Exception as rest_exc:
                     logger.error("REST close failed for %s: %s", product_id, rest_exc)
-                return False, None, None, "rest_fallback_close"
+                return False, None, rest_order_id, "rest_fallback_close"
             raise
         order_id = _extract_order_id(result)
         fill_price = _extract_avg_filled_price(result)
