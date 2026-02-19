@@ -1024,6 +1024,36 @@ def _gate_scan_sort_key(row: Dict[str, object]) -> Tuple[float, float]:
             -(headroom_val if headroom_val is not None else -1e9))
 
 
+def _regime_tilt_split(regime: str, tilt_pct: float) -> Tuple[float, float]:
+    """Return suggested (long_pct, short_pct) for a regime."""
+    try:
+        favored_pct = float(tilt_pct)
+    except Exception:
+        favored_pct = 70.0
+    favored_pct = max(0.0, min(100.0, favored_pct))
+    if regime == "bullish":
+        return favored_pct, 100.0 - favored_pct
+    if regime == "bearish":
+        return 100.0 - favored_pct, favored_pct
+    return 50.0, 50.0
+
+
+def _regime_slot_targets(top: int, regime: str, tilt_pct: float) -> Tuple[int, int]:
+    """Return (long_slots, short_slots) target counts for a regime."""
+    if top <= 0:
+        return 0, 0
+    if regime == "bullish":
+        long_slots = int(top * (tilt_pct / 100.0))
+        short_slots = top - long_slots
+    elif regime == "bearish":
+        long_slots = top - int(top * (tilt_pct / 100.0))
+        short_slots = int(top * (tilt_pct / 100.0))
+    else:
+        long_slots = top // 2
+        short_slots = top // 2
+    return long_slots, short_slots
+
+
 def _select_balanced_rows(
     rows: List[Dict[str, object]],
     top: int,
@@ -1047,15 +1077,7 @@ def _select_balanced_rows(
     shorts = [row for row in rows if str(row.get("best_side") or "").upper() == "SHORT"]
     longs.sort(key=_gate_scan_sort_key)
     shorts.sort(key=_gate_scan_sort_key)
-    if regime == "bullish":
-        long_slots = int(top * (tilt_pct / 100.0))
-        short_slots = top - long_slots
-    elif regime == "bearish":
-        long_slots = top - int(top * (tilt_pct / 100.0))
-        short_slots = int(top * (tilt_pct / 100.0))
-    else:
-        long_slots = top // 2
-        short_slots = top // 2
+    long_slots, short_slots = _regime_slot_targets(top, regime, tilt_pct)
     min_required_per_side = min(long_slots, short_slots)
     if min_required_per_side and (len(longs) < min_required_per_side or len(shorts) < min_required_per_side):
         _LOGGER.info(
@@ -1461,6 +1483,9 @@ def gate_scan(
         regime_tilt = False
 
     regime = "neutral"
+    regime_long_pct = 50.0
+    regime_short_pct = 50.0
+    regime_long_slots, regime_short_slots = _regime_slot_targets(top, "neutral", regime_tilt_pct)
     if regime_tilt:
         regime = _detect_btc_regime(
             finder,
@@ -1468,16 +1493,18 @@ def gate_scan(
             confirm_days=regime_confirm_days,
             buffer_bps=regime_buffer_bps,
         )
-        tilt_pct_display = regime_tilt_pct if regime != "neutral" else 50.0
+        regime_long_pct, regime_short_pct = _regime_tilt_split(regime, regime_tilt_pct)
+        regime_long_slots, regime_short_slots = _regime_slot_targets(top, regime, regime_tilt_pct)
         buffer_note = f", {regime_buffer_bps:.0f}bps buffer" if regime_buffer_bps > 0 else ""
         print(
-            "Regime: {regime} (BTC vs {ema} EMA, {days}d confirm{buffer}) -> {long_pct:.0f}/{short_pct:.0f} tilt".format(
+            "Regime: {regime} (BTC vs {ema} EMA, {days}d confirm{buffer}) -> "
+            "{long_pct:.0f}/{short_pct:.0f} tilt".format(
                 regime=regime.upper(),
                 ema=regime_ema_period,
                 days=regime_confirm_days,
                 buffer=buffer_note,
-                long_pct=tilt_pct_display,
-                short_pct=100 - tilt_pct_display,
+                long_pct=regime_long_pct,
+                short_pct=regime_short_pct,
             )
         )
 
@@ -1749,42 +1776,54 @@ def gate_scan(
 
     rows.sort(key=_gate_scan_sort_key)
     top_rows = rows[:top]
-    balance_meta: Optional[Dict[str, object]] = None
+    suggestion_meta: Optional[Dict[str, object]] = None
     balance_note = None
     if balanced:
-        top_rows, balance_meta = _select_balanced_rows(
+        suggestion_regime = regime if regime_tilt else "neutral"
+        top_rows, suggestion_meta = _select_balanced_rows(
             rows,
             top,
-            regime=regime if regime_tilt else "neutral",
+            regime=suggestion_regime,
             tilt_pct=regime_tilt_pct,
         )
-        if balance_meta.get("suppressed"):
+        if suggestion_meta.get("suppressed"):
             if regime_tilt and regime != "neutral":
                 balance_note = (
                     "Regime-tilted gate-scan ({regime}): LONG={longs}, SHORT={shorts}, "
-                    "min_required={min_required}. Insufficient balance; output suppressed (reversal protection).".format(
-                        **balance_meta
+                    "min_required={min_required}. Insufficient balance; output suppressed.".format(
+                        **suggestion_meta
                     )
                 )
             else:
                 balance_note = (
                     "Balanced gate-scan: LONG={longs}, SHORT={shorts}, "
                     "min_required={min_required}. Insufficient balance; output suppressed.".format(
-                        **balance_meta
+                        **suggestion_meta
                     )
                 )
         else:
             if regime_tilt and regime != "neutral":
                 balance_note = (
                     "Regime-tilted gate-scan ({regime}): selected LONG={selected_longs}, SHORT={selected_shorts} "
-                    "(target {long_slots}/{short_slots}, available {longs}/{shorts}).".format(**balance_meta)
+                    "(target {long_slots}/{short_slots}, available {longs}/{shorts}).".format(**suggestion_meta)
                 )
             else:
                 balance_note = (
                     "Balanced gate-scan: LONG={longs}, SHORT={shorts}, selected={selected_longs}/{selected_shorts}.".format(
-                        **balance_meta
+                        **suggestion_meta
                     )
                 )
+        if regime_tilt and regime != "neutral":
+            balance_note += (
+                " Regime suggestion ({regime}): target LONG={long_slots}, SHORT={short_slots} "
+                "({long_pct:.0f}/{short_pct:.0f}).".format(
+                    regime=regime,
+                    long_slots=regime_long_slots,
+                    short_slots=regime_short_slots,
+                    long_pct=regime_long_pct,
+                    short_pct=regime_short_pct,
+                )
+            )
 
     def _write_range_break_status() -> None:
         if range_break_info is None:
@@ -1858,17 +1897,17 @@ def gate_scan(
     print(range_break_msg)
     if balance_note:
         print(balance_note)
-    if balance_meta and balance_meta.get("suppressed"):
+    if suggestion_meta and suggestion_meta.get("suppressed"):
         _SUPPRESSION_COUNTS["total"] += 1
-        regime_key = f"regime_{balance_meta.get('regime')}"
+        regime_key = f"regime_{suggestion_meta.get('regime')}"
         if regime_key in _SUPPRESSION_COUNTS:
             _SUPPRESSION_COUNTS[regime_key] += 1
         _LOGGER.info(
             "Gate-scan suppressed (total=%s): %s regime, L=%s, S=%s",
             _SUPPRESSION_COUNTS["total"],
-            balance_meta.get("regime"),
-            balance_meta.get("longs"),
-            balance_meta.get("shorts"),
+            suggestion_meta.get("regime"),
+            suggestion_meta.get("longs"),
+            suggestion_meta.get("shorts"),
         )
         _write_range_break_status()
         return

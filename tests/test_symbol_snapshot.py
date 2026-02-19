@@ -300,6 +300,16 @@ class TestSymbolSnapshot(unittest.TestCase):
         self.assertEqual(result, "bullish")
         self.assertGreaterEqual(call_count["n"], 2)
 
+    def test_regime_tilt_split_bearish_is_30_70(self):
+        long_pct, short_pct = self.symbol_snapshot._regime_tilt_split("bearish", 70.0)
+        self.assertEqual(long_pct, 30.0)
+        self.assertEqual(short_pct, 70.0)
+
+    def test_regime_slot_targets_bearish_top15(self):
+        long_slots, short_slots = self.symbol_snapshot._regime_slot_targets(15, "bearish", 70.0)
+        self.assertEqual(long_slots, 5)
+        self.assertEqual(short_slots, 10)
+
     # ------------------------------------------------------------------
     # _select_balanced_rows with regime tilt tests
     # ------------------------------------------------------------------
