@@ -1371,6 +1371,26 @@ def _is_boundary_anchored_stale_span(
     return (close_utc - open_utc) >= timedelta(hours=max(0.0, stale_age_hours_threshold))
 
 
+def _is_outside_visible_fill_window(
+    *,
+    open_time: Optional[datetime],
+    earliest_fill_time: Optional[datetime],
+    tolerance_seconds: int = 1,
+) -> bool:
+    """Return True when inferred open_time predates visible fill history.
+
+    When fill pagination/windowing omits older history, cycle reconstruction can
+    infer an opening leg that is earlier than the earliest fetched fill. Those
+    inferred spans are unreliable and should not be logged as fresh closures.
+    """
+
+    open_utc = _as_utc(open_time)
+    earliest_utc = _as_utc(earliest_fill_time)
+    if open_utc is None or earliest_utc is None:
+        return False
+    return open_utc < (earliest_utc - timedelta(seconds=max(0, tolerance_seconds)))
+
+
 def compute_mae_mfe_from_history(
     cb: CoinbaseService,
     product_id: str,
@@ -2053,6 +2073,76 @@ def _is_new_partial(event: PartialFillEvent, checkpoint: Dict[str, Any], bootstr
     return False
 
 
+def _checkpoint_time(checkpoint: Dict[str, Any]) -> Optional[datetime]:
+    raw = checkpoint.get('last_fill_time') or checkpoint.get('last_time')
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return _as_utc(parsed)
+
+
+def _fills_lookback_hours() -> float:
+    raw = os.environ.get('WATCHDOG_FILLS_LOOKBACK_HOURS', '168')
+    try:
+        hours = float(raw)
+    except (TypeError, ValueError):
+        logging.getLogger(__name__).warning(
+            "Invalid WATCHDOG_FILLS_LOOKBACK_HOURS=%r; defaulting to 168h",
+            raw,
+        )
+        return 168.0
+    return max(0.0, hours)
+
+
+def _trim_fills_for_checkpoint(
+    fills: List[Fill],
+    checkpoint: Dict[str, Any],
+    lookback_hours: Optional[float] = None,
+) -> List[Fill]:
+    """Trim fills to a recent checkpoint window to avoid stale inventory anchoring."""
+
+    if not fills or not checkpoint:
+        return fills
+
+    checkpoint_time = _checkpoint_time(checkpoint)
+    if checkpoint_time is None:
+        return fills
+
+    hours = _fills_lookback_hours() if lookback_hours is None else max(0.0, float(lookback_hours))
+    if hours <= 0:
+        return fills
+
+    cutoff = checkpoint_time - timedelta(hours=hours)
+    trimmed: List[Fill] = []
+    for fill in fills:
+        fill_time = _as_utc(fill.time)
+        if fill_time is None or fill_time >= cutoff:
+            trimmed.append(fill)
+
+    if not trimmed:
+        logging.getLogger(__name__).warning(
+            "Checkpoint fill-window trim returned no fills (checkpoint=%s, cutoff=%s); "
+            "using full fill set.",
+            checkpoint_time.isoformat(),
+            cutoff.isoformat(),
+        )
+        return fills
+
+    logging.getLogger(__name__).debug(
+        "Trimmed fills for checkpoint window: kept %s/%s fills from %s onward "
+        "(checkpoint=%s, lookback_hours=%.1f).",
+        len(trimmed),
+        len(fills),
+        cutoff.isoformat(),
+        checkpoint_time.isoformat(),
+        hours,
+    )
+    return trimmed
+
+
 def _convert_fill(raw: Dict[str, Any]) -> Optional[Fill]:
     try:
         product_id = raw['product_id']
@@ -2482,6 +2572,9 @@ def _log_tp_sl_once(
         logger.info("No fills parsed successfully")
         return
 
+    checkpoint = _load_checkpoint()
+    fills = _trim_fills_for_checkpoint(fills, checkpoint)
+
     earliest_fill_by_product: Dict[str, datetime] = {}
     for fill in fills:
         previous = earliest_fill_by_product.get(fill.product_id)
@@ -2493,7 +2586,6 @@ def _log_tp_sl_once(
         logger.debug("No closed cycles detected in recent fills")
         return
 
-    checkpoint = _load_checkpoint()
     threshold = _breakeven_threshold()
     new_cycles = [c for c in cycles if _is_new_cycle(c, checkpoint, bootstrap_existing)]
     new_partials = [p for p in partials if _is_new_partial(p, checkpoint, bootstrap_existing)]
@@ -2527,6 +2619,24 @@ def _log_tp_sl_once(
     latest_logged_partial: Optional[PartialFillEvent] = None
 
     for event in new_partials:
+        if _is_outside_visible_fill_window(
+            open_time=event.open_time,
+            earliest_fill_time=earliest_fill_by_product.get(event.product_id),
+        ):
+            logger.warning(
+                "Skipping partial outside visible fill window for %s at %s "
+                "(event_open=%s, earliest_fill=%s, order_id=%s).",
+                event.product_id,
+                event.time.isoformat(),
+                _as_utc(event.open_time).isoformat() if _as_utc(event.open_time) else "unknown",
+                _as_utc(earliest_fill_by_product.get(event.product_id)).isoformat()
+                if _as_utc(earliest_fill_by_product.get(event.product_id))
+                else "unknown",
+                event.order_id or "",
+            )
+            latest_logged_partial = event
+            continue
+
         if _is_boundary_anchored_stale_span(
             open_time=event.open_time,
             close_time=event.time,
@@ -2585,6 +2695,24 @@ def _log_tp_sl_once(
         latest_logged_partial = event
 
     for cycle in new_cycles:
+        if _is_outside_visible_fill_window(
+            open_time=cycle.start_time,
+            earliest_fill_time=earliest_fill_by_product.get(cycle.product_id),
+        ):
+            logger.warning(
+                "Skipping cycle outside visible fill window for %s at %s "
+                "(start=%s, earliest_fill=%s, order_id=%s).",
+                cycle.product_id,
+                cycle.end_time.isoformat(),
+                cycle.start_time.isoformat(),
+                _as_utc(earliest_fill_by_product.get(cycle.product_id)).isoformat()
+                if _as_utc(earliest_fill_by_product.get(cycle.product_id))
+                else "unknown",
+                cycle.closing_order_id or "",
+            )
+            latest_logged_cycle = cycle
+            continue
+
         if _is_boundary_anchored_stale_span(
             open_time=cycle.start_time,
             close_time=cycle.end_time,

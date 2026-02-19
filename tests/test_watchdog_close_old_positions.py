@@ -1311,6 +1311,68 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(stored_fill_checkpoint.get('time'), event_time)
         self.assertEqual(stored_fill_checkpoint.get('order_id'), partial.order_id)
 
+    def test_log_tp_sl_skips_partial_outside_visible_fill_window(self) -> None:
+        # Open time predates the earliest fetched fill for this product.
+        old_open = datetime(2025, 8, 27, 19, 7, 51, tzinfo=UTC)
+        earliest_visible = datetime(2026, 1, 9, 2, 8, 43, tzinfo=UTC)
+        event_time = datetime(2026, 2, 19, 2, 33, 49, tzinfo=UTC)
+        partial = self.module.PartialFillEvent(
+            product_id='BTC-PERP-INTX',
+            side='LONG',
+            time=event_time,
+            qty=0.0037,
+            entry_price=78065.248649,
+            exit_price=66825.9,
+            realized_pnl=-41.66,
+            fees=0.0,
+            order_id='443a3b05-a257-40f7-a3bc-807898120c37',
+            open_time=old_open,
+        )
+        earliest_fill = self.module.Fill(
+            'BTC-PERP-INTX',
+            'SELL',
+            0.0018,
+            68000.0,
+            0.0,
+            earliest_visible,
+            'earliest-visible-fill',
+        )
+
+        def patch(name: str, value: Any) -> None:
+            original = getattr(self.module, name)
+            setattr(self.module, name, value)
+            self.addCleanup(lambda name=name, original=original: setattr(self.module, name, original))
+
+        stored_fill_checkpoint: Dict[str, Any] = {}
+
+        patch('fetch_fills', lambda cb, limit=0: [{'dummy': True}])
+        patch('_convert_fill', lambda raw: earliest_fill)
+        patch('_detect_cycles_with_partials', lambda fills: ([], [partial]))
+        patch('_load_checkpoint', lambda: {'last_time': (event_time - timedelta(minutes=1)).isoformat()})
+        patch('_is_new_cycle', lambda cycle, checkpoint, bootstrap_existing: False)
+        patch('_is_new_partial', lambda event, checkpoint, bootstrap_existing: True)
+        patch('_active_positions', lambda cb: {})
+        patch('_breakeven_threshold', lambda: 0.0)
+        patch('compute_mae_mfe_from_history', lambda **kwargs: (None, None))
+        patch('_store_checkpoint', lambda *args, **kwargs: None)
+        patch(
+            '_store_fill_checkpoint',
+            lambda *args, **kwargs: stored_fill_checkpoint.update(
+                {'time': args[0], 'order_id': args[1]}
+            ),
+        )
+
+        self.module._ensure_log_file()
+        self.module._log_tp_sl_once(SimpleNamespace(), limit=1, bootstrap_existing=True)
+
+        log_path = self.module._log_file_path()
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(rows, [])
+        self.assertEqual(stored_fill_checkpoint.get('time'), event_time)
+        self.assertEqual(stored_fill_checkpoint.get('order_id'), partial.order_id)
+
     def test_cycle_to_record_breakeven(self) -> None:
         cycle = self.module._process_product_fills([
             self.module.Fill('SOL-PERP-INTX', 'SELL', 1.0, 50.0, 0.0, datetime(2025, 10, 5, 2, 0, tzinfo=UTC), '21'),
@@ -1378,6 +1440,49 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
             'last_order_id': '42',
         }
         self.assertTrue(self.module._is_new_cycle(cycle, checkpoint_diff, bootstrap_existing=False))
+
+    def test_trim_fills_for_checkpoint_drops_stale_inventory(self) -> None:
+        stale_open = self.module.Fill(
+            'BTC-PERP-INTX',
+            'SELL',
+            0.01,
+            70000.0,
+            0.0,
+            datetime(2025, 8, 27, 19, 7, 51, tzinfo=UTC),
+            'stale-open',
+        )
+        recent_open = self.module.Fill(
+            'BTC-PERP-INTX',
+            'SELL',
+            0.0037,
+            66825.9,
+            0.0,
+            datetime(2026, 2, 19, 2, 33, 49, tzinfo=UTC),
+            'recent-open',
+        )
+        recent_close = self.module.Fill(
+            'BTC-PERP-INTX',
+            'BUY',
+            0.0037,
+            67075.2,
+            0.0,
+            datetime(2026, 2, 19, 6, 50, 23, tzinfo=UTC),
+            'recent-close',
+        )
+        fills = [stale_open, recent_open, recent_close]
+        checkpoint = {'last_time': '2026-02-19T06:50:23.847063+00:00'}
+
+        trimmed = self.module._trim_fills_for_checkpoint(
+            fills,
+            checkpoint,
+            lookback_hours=24.0,
+        )
+
+        self.assertEqual([fill.order_id for fill in trimmed], ['recent-open', 'recent-close'])
+        cycles, _ = self.module._detect_cycles_with_partials(trimmed)
+        btc_cycles = [cycle for cycle in cycles if cycle.product_id == 'BTC-PERP-INTX']
+        self.assertEqual(len(btc_cycles), 1)
+        self.assertEqual(btc_cycles[0].closing_order_id, 'recent-close')
 
     def test_cycle_details_backfill_updates_entry_exit(self) -> None:
         log_path = self.module._log_file_path()
