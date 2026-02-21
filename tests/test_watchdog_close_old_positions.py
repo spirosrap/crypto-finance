@@ -528,6 +528,54 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(rest_kwargs.get('product_id'), 'SEI-PERP-INTX')
         self.assertEqual(rest_kwargs.get('side'), 'SELL')
 
+    def test_close_position_amount_field_error_falls_back_to_rest(self) -> None:
+        rest_kwargs: Dict[str, Any] = {}
+
+        def cancel_all_orders(**kwargs):
+            return None
+
+        def rest_create_order(**kwargs):
+            rest_kwargs.update(kwargs)
+            return {
+                'success': True,
+                'order_id': 'rest-close-amount',
+            }
+
+        client = SimpleNamespace(
+            create_order=rest_create_order,
+            get_order=lambda **kwargs: {},
+            list_fills=lambda **kwargs: {'fills': []},
+        )
+        cb = SimpleNamespace(cancel_all_orders=cancel_all_orders, client=client)
+
+        class DummyExchange:
+            def cancel_all_orders(self, symbol=None):
+                return None
+
+            def create_order(self, *args, **kwargs):
+                raise Exception(
+                    'coinbaseadvanced {"error":"unknown","error_details":"proto: (line 1:85): unknown field \\"amount\\""}'
+                )
+
+        original_exchange = self.module._ensure_ccxt_exchange
+        self.module._ensure_ccxt_exchange = lambda: DummyExchange()
+        self.addCleanup(lambda: setattr(self.module, '_ensure_ccxt_exchange', original_exchange))
+
+        closed, fill_price, order_id, close_path = self.module._close_position(
+            cb,
+            product_id='XTZ-PERP-INTX',
+            net_size=25.0,
+            position_side='LONG',
+            leverage='5',
+        )
+
+        self.assertTrue(closed)
+        self.assertIsNone(fill_price)
+        self.assertEqual(order_id, 'rest-close-amount')
+        self.assertEqual(close_path, 'rest_fallback_close')
+        self.assertEqual(rest_kwargs.get('product_id'), 'XTZ-PERP-INTX')
+        self.assertEqual(rest_kwargs.get('side'), 'SELL')
+
     def test_close_position_rest_object_response_treated_as_success(self) -> None:
         rest_kwargs: Dict[str, Any] = {}
 
