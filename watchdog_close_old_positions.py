@@ -3380,13 +3380,54 @@ def _close_position(
     side = 'BUY' if _position_is_short(position_side, net_size) else 'SELL'
     close_size = abs(net_size)
 
+    def _close_via_rest() -> tuple[bool, Optional[float], Optional[str], str]:
+        order_config = {
+            "market_market_ioc": {
+                "base_size": str(close_size),
+                "reduce_only": True,
+            }
+        }
+        rest_order_id: Optional[str] = None
+        try:
+            response = cb.client.create_order(
+                client_order_id=f"close_{uuid.uuid4().hex[:16]}_{int(time.time())}",
+                product_id=product_id,
+                side=side,
+                order_configuration=order_config,
+                leverage=leverage,
+                margin_type="CROSS",
+            )
+            rest_order_id = _extract_order_id(response)
+            if _order_close_success(response):
+                logger.info(
+                    "Closed %s position via REST %s %s (close_path=rest_fallback_close)",
+                    product_id,
+                    side,
+                    close_size,
+                )
+                return True, None, rest_order_id, "rest_fallback_close"
+            logger.error(
+                "REST close rejected for %s (success=%s, order_id=%s): %s",
+                product_id,
+                _get_value(response, "success"),
+                rest_order_id or "",
+                response,
+            )
+        except Exception as rest_exc:
+            logger.error("REST close failed for %s: %s", product_id, rest_exc)
+        return False, None, rest_order_id, "rest_fallback_close"
+
     # Market IOC close via CCXT
     try:
         exchange = _ensure_ccxt_exchange()
         ccxt_symbol = _product_to_ccxt_symbol(product_id)
     except Exception as exc:
-        logger.error("Unable to initialise CCXT exchange: %s", exc)
-        return False, None, None, "ccxt_init_failed"
+        logger.warning(
+            "Unable to initialise CCXT exchange for %s (%s); falling back to REST close.",
+            product_id,
+            exc,
+        )
+        return _close_via_rest()
 
     # Cancel open orders for this product first (Coinbase REST, then CCXT as fallback)
     try:
@@ -3416,65 +3457,12 @@ def _close_position(
             )
         except Exception as exc:
             msg = str(exc)
-            msg_lower = msg.lower()
-            if (
-                "reduceonly" in msg_lower
-                or "reduce_only" in msg_lower
-                or (
-                    "clientorderid" in msg_lower
-                    and "closeposition" in msg_lower
-                )
-                or (
-                    "unknown field" in msg_lower
-                    and (
-                        "marginmode" in msg_lower
-                        or "timeinforce" in msg_lower
-                    )
-                )
-            ):
-                logger.warning(
-                    "CCXT close failed for %s (%s); falling back to REST close "
-                    "(close_path=rest_fallback_close).",
-                    product_id,
-                    msg,
-                )
-                # REST fallback with reduce_only
-                order_config = {
-                    "market_market_ioc": {
-                        "base_size": str(close_size),
-                        "reduce_only": True,
-                    }
-                }
-                rest_order_id: Optional[str] = None
-                try:
-                    response = cb.client.create_order(
-                        client_order_id=f"close_{uuid.uuid4().hex[:16]}_{int(time.time())}",
-                        product_id=product_id,
-                        side=side,
-                        order_configuration=order_config,
-                        leverage=leverage,
-                        margin_type="CROSS",
-                    )
-                    rest_order_id = _extract_order_id(response)
-                    if _order_close_success(response):
-                        logger.info(
-                            "Closed %s position via REST %s %s (close_path=rest_fallback_close)",
-                            product_id,
-                            side,
-                            close_size,
-                        )
-                        return True, None, rest_order_id, "rest_fallback_close"
-                    logger.error(
-                        "REST close rejected for %s (success=%s, order_id=%s): %s",
-                        product_id,
-                        _get_value(response, "success"),
-                        rest_order_id or "",
-                        response,
-                    )
-                except Exception as rest_exc:
-                    logger.error("REST close failed for %s: %s", product_id, rest_exc)
-                return False, None, rest_order_id, "rest_fallback_close"
-            raise
+            logger.warning(
+                "CCXT close failed for %s (%s); falling back to REST close.",
+                product_id,
+                msg,
+            )
+            return _close_via_rest()
         order_id = _extract_order_id(result)
         fill_price = _extract_avg_filled_price(result)
         if fill_price is None and isinstance(result, dict):
@@ -3492,11 +3480,20 @@ def _close_position(
                 f"price~{fill_price:.6f}" if fill_price is not None else "unknown price",
             )
             return True, fill_price, order_id, "ccxt_close_position"
-        logger.error("Close order did not report success for %s: %s", product_id, result)
-        return False, None, order_id, "ccxt_close_position"
+        logger.warning(
+            "CCXT close did not report success for %s (order_id=%s): %s; falling back to REST close.",
+            product_id,
+            order_id or "",
+            result,
+        )
+        return _close_via_rest()
     except Exception as e:
-        logger.error(f"Error closing position for {product_id} via CCXT: {e}")
-        return False, None, None, "ccxt_close_position"
+        logger.error(
+            "Error closing position for %s via CCXT (%s); falling back to REST close.",
+            product_id,
+            e,
+        )
+        return _close_via_rest()
 
 
 def run_once(
