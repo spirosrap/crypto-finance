@@ -97,6 +97,8 @@ LOG_HEARTBEATS = (
     ("Live snapshot", REPO_ROOT / "logs" / "live_snapshot_update.log", 5 * 60),
 )
 LOG_HEARTBEAT_STALE_MULTIPLIER = 3.0
+POLYMARKET_DIRECTION_PATH = REPO_ROOT / "logs" / "polymarket_direction.json"
+POLYMARKET_CACHE_SCHEMA_VERSION = 2
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -747,6 +749,293 @@ def _time_until_next_utc_midnight() -> str:
     remaining = next_midnight - now
     seconds = max(0.0, remaining.total_seconds())
     return _format_hours_minutes(seconds / 3600.0)
+
+
+def _as_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        if raw.startswith("[") and raw.endswith("]"):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    return []
+
+
+def _normalize_probability(value: Any) -> Optional[float]:
+    parsed = _coerce_float(value)
+    if parsed is None:
+        return None
+    if parsed > 1.0 and parsed <= 100.0:
+        parsed = parsed / 100.0
+    if parsed < 0.0 or parsed > 1.0:
+        return None
+    return float(parsed)
+
+
+def _extract_yes_probability(market: Mapping[str, Any]) -> Optional[float]:
+    for key in ("yes_price", "yesPrice", "yes_probability", "yesProbability"):
+        prob = _normalize_probability(market.get(key))
+        if prob is not None:
+            return prob
+
+    outcomes = [str(item).strip().lower() for item in _as_list(market.get("outcomes"))]
+    prices = _as_list(market.get("outcomePrices"))
+    if outcomes and prices and len(outcomes) == len(prices):
+        for outcome, price in zip(outcomes, prices):
+            if outcome == "yes":
+                prob = _normalize_probability(price)
+                if prob is not None:
+                    return prob
+
+    if len(prices) == 2 and not outcomes:
+        # Polymarket binary markets are typically ordered [Yes, No].
+        prob = _normalize_probability(prices[0])
+        if prob is not None:
+            return prob
+    return None
+
+
+def _market_liquidity_score(market: Mapping[str, Any]) -> float:
+    for key in ("volume24hr", "volume24h", "volume", "liquidity", "openInterest"):
+        value = _coerce_float(market.get(key))
+        if value is not None:
+            return float(value)
+    return 0.0
+
+
+def _is_market_active(market: Mapping[str, Any]) -> bool:
+    for closed_key in ("closed", "isClosed", "archived"):
+        if bool(market.get(closed_key)):
+            return False
+    active_val = market.get("active")
+    if isinstance(active_val, str):
+        if active_val.strip().lower() in {"false", "0", "no"}:
+            return False
+    elif active_val is False:
+        return False
+    return True
+
+
+def _extract_markets_payload(payload: Any) -> List[Dict[str, Any]]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+
+    for key in ("markets", "results", "items", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        if isinstance(value, dict):
+            for nested in ("markets", "results", "items"):
+                nested_val = value.get(nested)
+                if isinstance(nested_val, list):
+                    return [item for item in nested_val if isinstance(item, dict)]
+    return []
+
+
+def _best_polymarket_market(
+    *,
+    query: str,
+    limit: int,
+    timeout_seconds: float,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    binary = shutil.which("polymarket")
+    if not binary:
+        return None, "polymarket CLI not installed"
+
+    cmd = [binary, "-o", "json", "markets", "search", query, "--limit", str(max(1, int(limit)))]
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=max(1.0, float(timeout_seconds)),
+            check=False,
+        )
+    except Exception as exc:
+        return None, f"query failed: {exc}"
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        return None, f"query failed: {stderr or f'rc={proc.returncode}'}"
+
+    try:
+        payload = json.loads(proc.stdout or "[]")
+    except Exception:
+        return None, "invalid JSON output from polymarket CLI"
+
+    markets = _extract_markets_payload(payload)
+    if not markets:
+        return None, "no markets returned"
+
+    candidates: List[Dict[str, Any]] = []
+    for market in markets:
+        if not _is_market_active(market):
+            continue
+        yes_prob = _extract_yes_probability(market)
+        if yes_prob is None:
+            continue
+        candidates.append(
+            {
+                "id": market.get("id"),
+                "question": market.get("question") or market.get("title") or "",
+                "yes_probability": yes_prob,
+                "liquidity_score": _market_liquidity_score(market),
+            }
+        )
+
+    if not candidates:
+        return None, "no active binary markets with yes/no pricing"
+
+    best = max(candidates, key=lambda item: (float(item.get("liquidity_score") or 0.0), float(item.get("yes_probability") or 0.0)))
+    return best, None
+
+
+def _load_polymarket_direction_cache(max_age_seconds: int) -> Optional[Dict[str, Any]]:
+    if max_age_seconds <= 0 or not POLYMARKET_DIRECTION_PATH.exists():
+        return None
+    try:
+        payload = json.loads(POLYMARKET_DIRECTION_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if int(payload.get("schema_version") or 0) != POLYMARKET_CACHE_SCHEMA_VERSION:
+        return None
+    ts_raw = payload.get("timestamp")
+    if not ts_raw:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    else:
+        ts = ts.astimezone(UTC)
+    age = datetime.now(UTC) - ts
+    if age.total_seconds() > max_age_seconds:
+        return None
+    return payload
+
+
+def _save_polymarket_direction_cache(payload: Dict[str, Any]) -> None:
+    try:
+        POLYMARKET_DIRECTION_PATH.parent.mkdir(parents=True, exist_ok=True)
+        POLYMARKET_DIRECTION_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _compute_polymarket_direction() -> Dict[str, Any]:
+    bull_query = str(os.getenv("POLYMARKET_BULL_QUERY", "bitcoin above")).strip()
+    bear_query = str(os.getenv("POLYMARKET_BEAR_QUERY", "bitcoin below")).strip()
+    try:
+        query_limit = int(float(os.getenv("POLYMARKET_QUERY_LIMIT", "8")))
+    except Exception:
+        query_limit = 8
+    try:
+        timeout_seconds = float(os.getenv("POLYMARKET_TIMEOUT_SECONDS", "2"))
+    except Exception:
+        timeout_seconds = 2.0
+    try:
+        neutral_band = float(os.getenv("POLYMARKET_DIRECTION_NEUTRAL_BAND", "0.05"))
+    except Exception:
+        neutral_band = 0.05
+    neutral_band = max(0.0, neutral_band)
+
+    bull_market, bull_error = _best_polymarket_market(
+        query=bull_query,
+        limit=query_limit,
+        timeout_seconds=timeout_seconds,
+    )
+    bear_market, bear_error = _best_polymarket_market(
+        query=bear_query,
+        limit=query_limit,
+        timeout_seconds=timeout_seconds,
+    )
+
+    bull_prob = _coerce_float((bull_market or {}).get("yes_probability"))
+    bear_prob = _coerce_float((bear_market or {}).get("yes_probability"))
+
+    if bull_prob is None and bear_prob is None:
+        reason_parts = list(dict.fromkeys(part for part in (bull_error, bear_error) if part))
+        reason = "; ".join(reason_parts) if reason_parts else "no sentiment data"
+        if "polymarket CLI not installed" in reason:
+            reason = (
+                reason
+                + " (install: curl -sSL https://raw.githubusercontent.com/Polymarket/polymarket-cli/main/install.sh | sh)"
+            )
+        return {
+            "schema_version": POLYMARKET_CACHE_SCHEMA_VERSION,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "status": "unavailable",
+            "direction": "n/a",
+            "score": None,
+            "confidence_pct": None,
+            "bull_query": bull_query,
+            "bear_query": bear_query,
+            "bull_probability": None,
+            "bear_probability": None,
+            "reason": reason,
+        }
+
+    if bull_prob is not None and bear_prob is not None:
+        score = float(bull_prob - bear_prob)
+    elif bull_prob is not None:
+        score = float(bull_prob - 0.5)
+    else:
+        score = float(0.5 - (bear_prob or 0.5))
+
+    if score > neutral_band:
+        direction = "BULLISH"
+    elif score < -neutral_band:
+        direction = "BEARISH"
+    else:
+        direction = "NEUTRAL"
+
+    confidence_pct = min(100.0, abs(score) * 200.0)
+    result = {
+        "schema_version": POLYMARKET_CACHE_SCHEMA_VERSION,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "status": "ok",
+        "direction": direction,
+        "score": round(score, 4),
+        "confidence_pct": round(confidence_pct, 1),
+        "bull_query": bull_query,
+        "bear_query": bear_query,
+        "bull_probability": bull_prob,
+        "bear_probability": bear_prob,
+        "bull_market": bull_market or {},
+        "bear_market": bear_market or {},
+        "reason": None,
+    }
+    return result
+
+
+def _get_polymarket_direction() -> Dict[str, Any]:
+    try:
+        cache_ttl = int(float(os.getenv("POLYMARKET_CACHE_TTL_SECONDS", "900")))
+    except Exception:
+        cache_ttl = 900
+    cache_ttl = max(0, cache_ttl)
+    cached = _load_polymarket_direction_cache(cache_ttl)
+    if cached:
+        return cached
+    fresh = _compute_polymarket_direction()
+    _save_polymarket_direction_cache(fresh)
+    return fresh
 
 
 def _render_status_box(
@@ -2565,6 +2854,25 @@ def main() -> None:
         reg_cols[2].metric("Distance", f"{float(btc_status.get('distance_pct') or 0.0):+.2f}%")
         reg_cols[3].metric("Regime", str(btc_status.get("regime") or "n/a"))
         reg_cols[4].metric("Tilt", str(btc_status.get("recommendation") or "n/a"))
+
+        poly = _get_polymarket_direction()
+        poly_cols = st.columns(4)
+        poly_cols[0].metric("Polymarket direction", str(poly.get("direction") or "n/a"))
+        score_value = _coerce_float(poly.get("score"))
+        poly_cols[1].metric("PM score", f"{score_value:+.3f}" if score_value is not None else "n/a")
+        bull_prob = _coerce_float(poly.get("bull_probability"))
+        bear_prob = _coerce_float(poly.get("bear_probability"))
+        poly_cols[2].metric("Bull query prob", f"{bull_prob * 100:.1f}%" if bull_prob is not None else "n/a")
+        poly_cols[3].metric("Bear query prob", f"{bear_prob * 100:.1f}%" if bear_prob is not None else "n/a")
+        st.caption("PM score uses queried market probabilities (bull vs bear when both exist; otherwise vs a 50% neutral baseline).")
+        reason = str(poly.get("reason") or "").strip()
+        if reason:
+            st.caption(f"Polymarket note: {reason}")
+        else:
+            bull_q = str(poly.get("bull_query") or "").strip()
+            bear_q = str(poly.get("bear_query") or "").strip()
+            if bull_q or bear_q:
+                st.caption(f"Polymarket queries: bull='{bull_q}' | bear='{bear_q}'")
 
         st.subheader("Coinbase Market Overview")
         overview_rows: List[Dict[str, Any]] = []
