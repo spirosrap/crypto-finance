@@ -1,1 +1,2 @@
 trade_id,symbol,product_id,position_side,entry_price,stop_loss,take_profit,partial_tp_pct,partial_tp_rr,partial_tp_price,partial_tp_done,partial_tp_move_sl,position_usd,leverage,opened_at,expires_at,status,last_price,last_price_at,unrealized_pnl,unrealized_pct,finder_score,finder_rank,recommended_position_pct,tag,notes
+ef39a25dd6,SEI,SEI-PERP-INTX,SHORT,0.06805,0.06805,0.064784,50.0,0.8,0.066308,True,True,125.0,50.0,2026-02-23T10:32:59Z,2026-02-24T10:32:59Z,OPEN,0.0663,2026-02-24T04:25:02Z,3.21,2.5716,0.0,1,5.0,,
