@@ -1489,6 +1489,80 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         }
         self.assertTrue(self.module._is_new_cycle(cycle, checkpoint_diff, bootstrap_existing=False))
 
+    def test_record_position_close_same_order_does_not_shrink_existing_row(self) -> None:
+        opened_at = datetime(2026, 2, 23, 10, 33, 12, tzinfo=UTC)
+        close_time = datetime(2026, 2, 23, 17, 28, 30, tzinfo=UTC)
+
+        existing = self.module._create_closure_record(
+            product_id='SEI-PERP-INTX',
+            position_side='SHORT',
+            net_size=-1835.0,
+            leverage='',
+            opened_at=opened_at,
+            close_time=close_time,
+            entry_price=0.0679,
+            exit_price=0.0662,
+            pnl=3.1,
+            closure_reason='partial_tp',
+            mae=-1.47,
+            mfe=4.04,
+            order_id='ord-1',
+        )
+        self.module._record_position_close(existing)
+
+        candidate = self.module._create_closure_record(
+            product_id='SEI-PERP-INTX',
+            position_side='SHORT',
+            net_size=-377.0,
+            leverage='',
+            opened_at=opened_at,
+            close_time=close_time,
+            entry_price=0.0679,
+            exit_price=0.0662,
+            pnl=0.62,
+            closure_reason='expired_breakeven',
+            mae=-0.3,
+            mfe=0.83,
+            order_id='ord-1',
+        )
+
+        appended = self.module._record_position_close_if_new(candidate)
+        self.assertFalse(appended)
+
+        log_path = self.module._log_file_path()
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].get('order_id'), 'ord-1')
+        self.assertEqual(rows[0].get('closure_reason'), 'partial_tp')
+        self.assertEqual(rows[0].get('net_size'), '-1835')
+        self.assertEqual(rows[0].get('profit_loss'), '3.1')
+
+    def test_checkpoint_filter_replays_unlogged_cycle_within_fill_window(self) -> None:
+        cycle = self.module._process_product_fills([
+            self.module.Fill('SEI-PERP-INTX', 'SELL', 100.0, 1.0, 0.0, datetime(2026, 2, 23, 10, 33, tzinfo=UTC), 'open'),
+            self.module.Fill('SEI-PERP-INTX', 'BUY', 100.0, 0.98, 0.0, datetime(2026, 2, 24, 9, 35, tzinfo=UTC), 'close'),
+        ])[0]
+        checkpoint = {
+            'last_time': (cycle.end_time + timedelta(hours=2)).isoformat(),
+            'last_order_id': 'later-order',
+        }
+        checkpoint_far = {
+            'last_time': (cycle.end_time + timedelta(hours=30)).isoformat(),
+            'last_order_id': 'later-order',
+        }
+
+        original_cycle_logged = self.module._cycle_logged
+        original_fills_lookback_hours = self.module._fills_lookback_hours
+        self.module._cycle_logged = lambda _cycle: False
+        self.module._fills_lookback_hours = lambda: 24.0
+        self.addCleanup(lambda: setattr(self.module, '_cycle_logged', original_cycle_logged))
+        self.addCleanup(lambda: setattr(self.module, '_fills_lookback_hours', original_fills_lookback_hours))
+
+        self.assertTrue(self.module._is_new_cycle(cycle, checkpoint, bootstrap_existing=False))
+        self.assertFalse(self.module._is_new_cycle(cycle, checkpoint_far, bootstrap_existing=False))
+
     def test_trim_fills_for_checkpoint_drops_stale_inventory(self) -> None:
         stale_open = self.module.Fill(
             'BTC-PERP-INTX',

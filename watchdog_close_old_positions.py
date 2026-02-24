@@ -1704,6 +1704,22 @@ def _record_position_close_if_new(record: Dict[str, str], tolerance_seconds: int
             if existing_order_id and existing_order_id == record_order_id:
                 existing_reason = (row.get('closure_reason') or '').strip().lower()
                 current_reason = (record.get('closure_reason') or '').strip().lower()
+                existing_net = _parse_log_float(row.get('net_size', ''))
+                current_net = _parse_log_float(record.get('net_size', ''))
+                if (
+                    existing_net is not None
+                    and current_net is not None
+                    and abs(current_net) + 1e-9 < abs(existing_net)
+                ):
+                    logging.getLogger(__name__).warning(
+                        "Skipping same-order update for %s (order_id=%s): "
+                        "candidate net_size shrank from %s to %s",
+                        product_id,
+                        record_order_id,
+                        existing_net,
+                        current_net,
+                    )
+                    return False
                 if _reason_priority(current_reason) > _reason_priority(existing_reason):
                     updated = {field: record.get(field, row.get(field, '')) or '' for field in LOG_HEADERS}
                     rows[idx] = updated
@@ -2045,7 +2061,12 @@ def _is_new_cycle(cycle: Cycle, checkpoint: Dict[str, Any], bootstrap_existing: 
         # Treat any differing order_id at the same timestamp as a new cycle to avoid misses.
         return cycle.closing_order_id != last_order_id
     delta = last_time - cycle.end_time
-    if delta <= timedelta(minutes=5) and not _cycle_logged(cycle):
+    # Keep replaying unlogged cycles while their fills are still in the visible lookback window.
+    replay_window = timedelta(minutes=5)
+    lookback_hours = _fills_lookback_hours()
+    if lookback_hours > 0:
+        replay_window = max(replay_window, timedelta(hours=lookback_hours))
+    if delta <= replay_window and not _cycle_logged(cycle):
         return True
     return False
 
