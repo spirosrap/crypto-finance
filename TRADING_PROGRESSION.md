@@ -10,8 +10,23 @@
 - [June 2025](#june-2025)
 
 ## February 2026
-**State at a glance (February recap):** February started in high-ATR, one-sided conditions, so trade flow was mostly suppressed despite active scans. Regime tilt has been active since `2026-02-03` (BTC EMA20 with 2-day confirm, 70/30) with imbalance suppression; BTC was temporarily excluded from entries and re-enabled on Feb 7 while remaining the trend/range-break anchor. Mid-month volatility cooled and trading resumed gradually from Feb 15, but concurrency stayed below normal (typically ~2-4 vs ~6-7 in stronger conditions). On Feb 19, a false daily-stop came from a stale BTC partial reconstruction; watchdog stale-window handling was tightened and the bad close row was removed. Dashboard observability expanded (Coinbase regime/key levels, optional private portfolio sync), and later the Polymarket metric was reverted to the original PM-score logic with stale-cache invalidation. By Feb 23-24, PF recovered from a brief sub-1 dip back to an acceptable zone, but losses on Feb 25-26 reversed that recovery and pushed PF from near `1.3` back below `1.0`. Results remain mixed and are being judged under the active 50-close checkpoint from `2026-02-03`.
+**State at a glance (February recap):** February started in high-ATR, one-sided conditions, so trade flow was mostly suppressed despite active scans. Regime tilt has been active since `2026-02-03` (BTC EMA20 with 2-day confirm, 70/30) with imbalance suppression; BTC was temporarily excluded from entries and re-enabled on Feb 7 while remaining the trend/range-break anchor. Mid-month volatility cooled and trading resumed gradually from Feb 15, but concurrency stayed below normal (typically ~2-4 vs ~6-7 in stronger conditions). On Feb 19, a false daily-stop came from a stale BTC partial reconstruction; watchdog stale-window handling was tightened and the bad close row was removed. Dashboard observability expanded (Coinbase regime/key levels, optional private portfolio sync), and later the Polymarket metric was reverted to the original PM-score logic with stale-cache invalidation. By Feb 23-24, PF recovered from a brief sub-1 dip back to an acceptable zone, but losses on Feb 25-26 reversed that recovery and pushed PF from near `1.3` back below `1.0`. As a defensive response, TP1 time-stop was enabled in watchdog (12h default, one-shot per position, with SL tighten/optional partial-close paths) for the no-TP1 drag cases. After repeated reliability and execution issues, including a failed manual close sequence on XTZ, trading was stopped on Feb 26 and this phase is closed here.
 **Summary update (Feb 23 checkpoint policy):** The active mini-checkpoint is 50 live closes from `2026-02-03` (regime-tilt start), using the live dashboard full-closed trade view (partials excluded). `PF > 0` alone is not a decision signal. Bands are: `PF >= 1.30` (strong), `PF 1.00-1.29` (meh/hold), `PF < 1.00` (defensive).
+
+## February 26, 2026 - Trading Stopped (Finishes Here)
+- After this, I decided to stop trading.
+- We could not stop the `XTZ-PERP-INTX` trade manually despite repeated close attempts from scripts and watchdog.
+- The closes kept failing/canceling in execution, and Coinbase showed that trade as liquidated to stop.
+- This incident, together with several other reliability/logging/execution issues we had to handle recently, broke confidence in running this live.
+- This is too unreliable to trade with right now.
+- It finishes here for this phase.
+
+## February 26, 2026 - TP1 Time-Stop Implemented (Defensive)
+- Implemented TP1 time-stop in `watchdog_close_old_positions.py` as a defensive control for no-TP1 drag.
+- Default live behavior: after `12h` without a logged `partial_tp`, apply one-shot protection per position window (checkpointed).
+- Added CLI controls: `--tp1-time-stop-enable`, `--tp1-time-stop-hours`, `--tp1-time-stop-action`, `--tp1-time-stop-close-pct`, `--tp1-time-stop-side`, `--tp1-time-stop-grace-minutes`, `--tp1-time-stop-dry-run`, `--tp1-time-stop-underwater-alt`.
+- Current default action is `tighten_sl`; optional `partial_close` is available with bracket resync.
+- Applied `-25%` size descale from this point in the gate-scan pipeline: baseline live size `250 -> 187.5` and baseline position percent `5.0% -> 3.75%`.
 
 ## February 26, 2026 - PF Slipped Back Below 1.0
 - Yesterday trading went really bad, dropping PF from near `1.3` to below `1.0`.
