@@ -25,7 +25,7 @@ baseline_atr_mult: 0.8
 baseline_rr: 1.5
 baseline_atr_mode: clipped
 baseline_expiry: 30d
-baseline_position_pct: 5.0
+baseline_position_pct: 3.75
 baseline_portfolio_usd: 5000.0
-baseline_live_position_usd: 250.0
+baseline_live_position_usd: 187.5
 baseline_leverage: 50.0

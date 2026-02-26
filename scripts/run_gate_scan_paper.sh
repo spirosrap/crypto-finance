@@ -13,6 +13,10 @@ RUN_PAPER_UPDATE=${RUN_PAPER_UPDATE:-1}
 LIVE_DELAY_SECONDS=${LIVE_DELAY_SECONDS:-10}
 LIVE_SLEEP_SECONDS=${LIVE_SLEEP_SECONDS:-2}
 BRACKET_WAIT_SECONDS=${BRACKET_WAIT_SECONDS:-60}
+BASELINE_PORTFOLIO_USD=${BASELINE_PORTFOLIO_USD:-5000}
+# 25% defensive descale from baseline sizing.
+BASELINE_POSITION_PCT=${BASELINE_POSITION_PCT:-3.75}
+BASELINE_LIVE_POSITION_USD=${BASELINE_LIVE_POSITION_USD:-187.5}
 
 cd "${REPO_ROOT}"
 
@@ -98,8 +102,8 @@ SCAN_CMD=(
   --perf-min-trades 5
   --perf-drop-worst 0.25
   --baseline-commands
-  --baseline-portfolio-usd 5000
-  --baseline-position-pct 5
+  --baseline-portfolio-usd "${BASELINE_PORTFOLIO_USD}"
+  --baseline-position-pct "${BASELINE_POSITION_PCT}"
   --baseline-atr-mult 0.8
   --baseline-rr 1.5
   --baseline-atr-mode clipped
@@ -108,7 +112,7 @@ SCAN_CMD=(
   --baseline-partial-tp-rr 0.8
   --baseline-partial-tp-pct 50
   --baseline-partial-tp-move-sl
-  --baseline-live-position-usd 250
+  --baseline-live-position-usd "${BASELINE_LIVE_POSITION_USD}"
   --baseline-paper-command
 )
 

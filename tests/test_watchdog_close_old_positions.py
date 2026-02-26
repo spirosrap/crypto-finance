@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
 
@@ -1674,6 +1675,179 @@ class WatchdogCloseOldPositionsTests(unittest.TestCase):
         self.assertEqual(row['closure_reason'], 'take_profit')
         self.assertEqual(row['mae'], '-2.5')
         self.assertEqual(row['mfe'], '4.5')
+
+    def test_position_has_tp1_hit_matches_open_window(self) -> None:
+        log_path = self.module._ensure_log_file()
+        opened_at = datetime(2026, 2, 25, 10, 0, 0, tzinfo=UTC)
+        close_time = opened_at + timedelta(hours=2)
+        row = self.module._create_closure_record(
+            product_id='BTC-PERP-INTX',
+            position_side='LONG',
+            net_size=0.1,
+            leverage='',
+            opened_at=opened_at,
+            close_time=close_time,
+            entry_price=100.0,
+            exit_price=101.0,
+            pnl=0.1,
+            closure_reason='partial_tp',
+            mae=None,
+            mfe=None,
+            order_id='tp1-a',
+        )
+        self.module._record_position_close(row)
+
+        self.assertTrue(
+            self.module._position_has_tp1_hit(
+                'BTC-PERP-INTX',
+                opened_at + timedelta(seconds=90),
+                tolerance_seconds=180,
+            )
+        )
+        self.assertFalse(
+            self.module._position_has_tp1_hit(
+                'BTC-PERP-INTX',
+                opened_at + timedelta(hours=3),
+                tolerance_seconds=120,
+            )
+        )
+
+        with log_path.open(newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 1)
+
+    def test_run_tp1_time_stop_applies_tighten_sl_and_writes_checkpoint(self) -> None:
+        opened_at = datetime(2026, 2, 25, 10, 0, 0, tzinfo=UTC)
+        now_utc = opened_at + timedelta(hours=13)
+        position = {
+            'product_id': 'BTC-PERP-INTX',
+            'net_size': '1.0',
+            'position_side': 'LONG',
+            'leverage': '5',
+            'entry_price': '100.0',
+            'mark_price': '99.0',
+            'created_time': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        }
+
+        checkpoint_path = Path(self.temp_dir.name) / 'watchdog_tp1_time_stop_checkpoint.json'
+        original_checkpoint_path = self.module.TP1_TIME_STOP_CHECKPOINT_PATH
+        self.module.TP1_TIME_STOP_CHECKPOINT_PATH = checkpoint_path
+        self.addCleanup(lambda: setattr(self.module, 'TP1_TIME_STOP_CHECKPOINT_PATH', original_checkpoint_path))
+
+        def patch(name: str, value: Any) -> None:
+            original = getattr(self.module, name)
+            setattr(self.module, name, value)
+            self.addCleanup(lambda name=name, original=original: setattr(self.module, name, original))
+
+        calls: Dict[str, int] = {'tighten': 0}
+        patch('_ensure_ccxt_exchange', lambda: SimpleNamespace())
+        patch(
+            '_get_positions_with_entry',
+            lambda cb: {
+                'BTC-PERP-INTX': {
+                    'net_size': 1.0,
+                    'entry_price': 100.0,
+                    'side': 'LONG',
+                    'leverage': 5.0,
+                }
+            },
+        )
+        patch('_position_has_tp1_hit', lambda *args, **kwargs: False)
+        patch('_latest_filled_order_time', lambda *args, **kwargs: None)
+
+        def fake_tighten(*args: Any, **kwargs: Any) -> bool:
+            calls['tighten'] += 1
+            return True
+
+        patch('_move_sl_to_entry_for_position', fake_tighten)
+
+        applied = self.module._run_tp1_time_stop_once(
+            SimpleNamespace(),
+            portfolio_uuid='uuid',
+            positions=[position],
+            now_utc=now_utc,
+            max_age_hours=24.0,
+            product_filter=None,
+            tp1_time_stop_hours=12.0,
+            tp1_time_stop_action='tighten_sl',
+            tp1_time_stop_close_pct=50.0,
+            tp1_time_stop_side='both',
+            tp1_time_stop_grace_minutes=60,
+            tp1_time_stop_dry_run=False,
+            tp1_time_stop_underwater_alt=False,
+        )
+
+        self.assertEqual(applied, 1)
+        self.assertEqual(calls['tighten'], 1)
+        data = self.module._load_tp1_time_stop_checkpoint()
+        processed = data.get('processed_positions', [])
+        self.assertEqual(len(processed), 1)
+        self.assertTrue(processed[0].startswith('BTC-PERP-INTX|'))
+
+    def test_run_tp1_time_stop_underwater_alt_switches_to_partial_close(self) -> None:
+        opened_at = datetime(2026, 2, 25, 10, 0, 0, tzinfo=UTC)
+        now_utc = opened_at + timedelta(hours=13)
+        position = {
+            'product_id': 'BTC-PERP-INTX',
+            'net_size': '1.0',
+            'position_side': 'LONG',
+            'leverage': '5',
+            'entry_price': '100.0',
+            'mark_price': '90.0',
+            'created_time': opened_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        }
+
+        checkpoint_path = Path(self.temp_dir.name) / 'watchdog_tp1_time_stop_checkpoint.json'
+        original_checkpoint_path = self.module.TP1_TIME_STOP_CHECKPOINT_PATH
+        self.module.TP1_TIME_STOP_CHECKPOINT_PATH = checkpoint_path
+        self.addCleanup(lambda: setattr(self.module, 'TP1_TIME_STOP_CHECKPOINT_PATH', original_checkpoint_path))
+
+        def patch(name: str, value: Any) -> None:
+            original = getattr(self.module, name)
+            setattr(self.module, name, value)
+            self.addCleanup(lambda name=name, original=original: setattr(self.module, name, original))
+
+        calls: Dict[str, int] = {'partial': 0}
+        patch('_ensure_ccxt_exchange', lambda: SimpleNamespace())
+        patch(
+            '_get_positions_with_entry',
+            lambda cb: {
+                'BTC-PERP-INTX': {
+                    'net_size': 1.0,
+                    'entry_price': 100.0,
+                    'side': 'LONG',
+                    'leverage': 5.0,
+                }
+            },
+        )
+        patch('_position_has_tp1_hit', lambda *args, **kwargs: False)
+        patch('_latest_filled_order_time', lambda *args, **kwargs: None)
+        patch('_move_sl_to_entry_for_position', lambda *args, **kwargs: False)
+
+        def fake_partial(*args: Any, **kwargs: Any) -> bool:
+            calls['partial'] += 1
+            return True
+
+        patch('_partial_close_position_for_time_stop', fake_partial)
+
+        applied = self.module._run_tp1_time_stop_once(
+            SimpleNamespace(),
+            portfolio_uuid='uuid',
+            positions=[position],
+            now_utc=now_utc,
+            max_age_hours=24.0,
+            product_filter=None,
+            tp1_time_stop_hours=12.0,
+            tp1_time_stop_action='tighten_sl',
+            tp1_time_stop_close_pct=50.0,
+            tp1_time_stop_side='both',
+            tp1_time_stop_grace_minutes=60,
+            tp1_time_stop_dry_run=False,
+            tp1_time_stop_underwater_alt=True,
+        )
+
+        self.assertEqual(applied, 1)
+        self.assertEqual(calls['partial'], 1)
 
 
 if __name__ == '__main__':

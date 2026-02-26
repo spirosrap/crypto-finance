@@ -99,6 +99,7 @@ LOG_HEARTBEATS = (
 LOG_HEARTBEAT_STALE_MULTIPLIER = 3.0
 POLYMARKET_DIRECTION_PATH = REPO_ROOT / "logs" / "polymarket_direction.json"
 POLYMARKET_CACHE_SCHEMA_VERSION = 2
+LIVE_PHASE_START_DEFAULT = os.getenv("WATCHDOG_LIVE_PHASE_START_DATE", "2026-02-03")
 
 
 API_KEY_PERPS, API_SECRET_PERPS = get_perps_credentials()
@@ -716,6 +717,13 @@ def _parse_date_value(value: Optional[str]) -> Optional[date]:
     try:
         return date.fromisoformat(str(value))
     except (TypeError, ValueError):
+        return None
+
+
+def _default_live_phase_start_date() -> Optional[date]:
+    try:
+        return date.fromisoformat(str(LIVE_PHASE_START_DEFAULT))
+    except Exception:
         return None
 
 
@@ -2024,6 +2032,8 @@ def main() -> None:
         persisted_preset = "Custom"
     persisted_start = _parse_date_value(persisted_filters.get("start"))
     persisted_end = _parse_date_value(persisted_filters.get("end"))
+    if source_mode == "live" and persisted_start is None and persisted_end is None:
+        persisted_start = _default_live_phase_start_date()
 
     date_preset = st.sidebar.selectbox(
         "Date preset",
@@ -2303,6 +2313,14 @@ def main() -> None:
         summary_notes.append(f"Preset window: {date_preset}")
     elif start_str or end_str:
         summary_notes.append("Custom date window")
+    window_source = filtered if not filtered.empty else pnl_filtered
+    if not window_source.empty and "closed_at" in window_source.columns:
+        window_start = pd.to_datetime(window_source["closed_at"], utc=True, errors="coerce").min()
+        window_end = pd.to_datetime(window_source["closed_at"], utc=True, errors="coerce").max()
+        if pd.notna(window_start) and pd.notna(window_end):
+            summary_notes.append(
+                f"Window: {window_start.date().isoformat()} to {window_end.date().isoformat()} UTC"
+            )
     if summary_notes:
         st.caption(" | ".join(summary_notes))
 

@@ -86,6 +86,7 @@ LOG_HEADERS = [
 
 CHECKPOINT_PATH = Path('trade_logs') / 'watchdog_tp_sl_checkpoint.json'
 SL_MOVE_CHECKPOINT_PATH = Path('trade_logs') / 'watchdog_sl_move_checkpoint.json'
+TP1_TIME_STOP_CHECKPOINT_PATH = Path('trade_logs') / 'watchdog_tp1_time_stop_checkpoint.json'
 UTC = timezone.utc
 
 
@@ -185,6 +186,31 @@ def _load_sl_move_checkpoint() -> Dict[str, Any]:
 def _store_sl_move_checkpoint(data: Dict[str, Any]) -> None:
     """Store checkpoint of processed partial fills."""
     path = SL_MOVE_CHECKPOINT_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
+
+
+def _load_tp1_time_stop_checkpoint() -> Dict[str, Any]:
+    """Load checkpoint of positions already processed by TP1 time-stop."""
+    path = TP1_TIME_STOP_CHECKPOINT_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        return {"processed_positions": []}
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return {"processed_positions": []}
+    if not isinstance(data, dict):
+        return {"processed_positions": []}
+    processed = data.get("processed_positions")
+    if not isinstance(processed, list):
+        data["processed_positions"] = []
+    return data
+
+
+def _store_tp1_time_stop_checkpoint(data: Dict[str, Any]) -> None:
+    """Store checkpoint of TP1 time-stop processed position keys."""
+    path = TP1_TIME_STOP_CHECKPOINT_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2))
 
@@ -576,6 +602,115 @@ def _select_tp_from_brackets(
     return min(candidates, key=lambda item: item[0])
 
 
+def _select_sl_from_brackets(
+    stop_orders: List[Dict[str, Any]],
+    side: str,
+) -> Optional[Tuple[float, Optional[str]]]:
+    candidates: List[Tuple[float, Optional[str]]] = []
+    for order in stop_orders:
+        cfg = _extract_trigger_bracket_config(order)
+        if not cfg:
+            continue
+        sl_price = _coerce_numeric(cfg.get("stop_trigger_price"))
+        if sl_price is None:
+            sl_price = _coerce_numeric(cfg.get("stop_price"))
+        if sl_price is None:
+            continue
+        end_time = cfg.get("end_time")
+        candidates.append((float(sl_price), end_time if isinstance(end_time, str) else None))
+
+    if not candidates:
+        return None
+
+    if side == "LONG":
+        # Keep the tightest long stop (highest stop level below market).
+        return max(candidates, key=lambda item: item[0])
+    # Keep the tightest short stop (lowest stop level above market).
+    return min(candidates, key=lambda item: item[0])
+
+
+def _tp1_time_stop_key(product_id: str, opened_at: Optional[datetime]) -> str:
+    opened_utc = _as_utc(opened_at)
+    opened_iso = opened_utc.isoformat() if opened_utc else "unknown"
+    return f"{(product_id or '').upper()}|{opened_iso}"
+
+
+def _tp1_time_stop_side_allowed(position_side: str, configured_side: str) -> bool:
+    configured = (configured_side or "both").strip().lower()
+    normalized = (position_side or "").strip().upper()
+    if configured in {"both", "all", "*"}:
+        return True
+    if configured in {"long", "longs"}:
+        return normalized == "LONG"
+    if configured in {"short", "shorts"}:
+        return normalized == "SHORT"
+    return True
+
+
+def _normalize_tp1_time_stop_action(action: str) -> str:
+    normalized = (action or "tighten_sl").strip().lower()
+    if normalized in {"tighten_sl", "partial_close"}:
+        return normalized
+    return "tighten_sl"
+
+
+def _tp1_time_stop_action_for_position(
+    *,
+    base_action: str,
+    underwater_alt: bool,
+    position_side: str,
+    entry_price: Optional[float],
+    mark_price: Optional[float],
+) -> str:
+    action = _normalize_tp1_time_stop_action(base_action)
+    if not underwater_alt:
+        return action
+    if entry_price is None or mark_price is None:
+        return action
+    side = (position_side or "").upper()
+    underwater = (side == "LONG" and mark_price < entry_price) or (
+        side == "SHORT" and mark_price > entry_price
+    )
+    return "partial_close" if underwater else "tighten_sl"
+
+
+def _position_has_tp1_hit(
+    product_id: str,
+    opened_at: Optional[datetime],
+    tolerance_seconds: int = 300,
+) -> bool:
+    if opened_at is None:
+        return False
+
+    path = _log_file_path()
+    if not path.exists():
+        return False
+
+    opened_utc = _as_utc(opened_at)
+    if opened_utc is None:
+        return False
+
+    tolerance = max(0, int(tolerance_seconds))
+    try:
+        with path.open(newline='') as handle:
+            reader = csv.DictReader(handle)
+            for row in reader:
+                if str(row.get("product_id") or "").upper() != str(product_id or "").upper():
+                    continue
+                if str(row.get("closure_reason") or "").strip().lower() != "partial_tp":
+                    continue
+                row_open = _parse_log_datetime(row.get("opened_at", ""))
+                row_open_utc = _as_utc(row_open)
+                if row_open_utc is None:
+                    continue
+                if abs((row_open_utc - opened_utc).total_seconds()) <= tolerance:
+                    return True
+    except Exception:
+        return False
+
+    return False
+
+
 def _move_sl_to_entry_for_partial(
     cb: CoinbaseService,
     exchange: "ccxt.Exchange",
@@ -692,6 +827,385 @@ def _move_sl_to_entry_for_partial(
             product_id,
         )
     return True
+
+
+def _move_sl_to_entry_for_position(
+    cb: CoinbaseService,
+    exchange: "ccxt.Exchange",
+    *,
+    product_id: str,
+    side: str,
+    net_size: float,
+    entry_price: Optional[float],
+    leverage: Optional[float] = None,
+    opened_at: Optional[datetime] = None,
+    dry_run: bool = False,
+) -> bool:
+    """Move SL to entry for an open position (time-stop path)."""
+    if entry_price is None:
+        logging.getLogger(__name__).warning(
+            "Cannot apply TP1 time-stop tighten_sl for %s: missing entry price.",
+            product_id,
+        )
+        return False
+
+    event = PartialFillEvent(
+        product_id=product_id,
+        side=side,
+        time=datetime.now(UTC),
+        qty=abs(float(net_size)),
+        entry_price=float(entry_price),
+        exit_price=float(entry_price),
+        realized_pnl=0.0,
+        fees=0.0,
+        order_id=f"tp1-time-stop-{int(time.time())}",
+        open_time=opened_at,
+    )
+    position_info = {
+        "net_size": float(net_size),
+        "entry_price": float(entry_price),
+        "side": side,
+        "leverage": leverage,
+    }
+    return _move_sl_to_entry_for_partial(
+        cb,
+        exchange,
+        event,
+        position_info,
+        dry_run=dry_run,
+    )
+
+
+def _partial_close_position_for_time_stop(
+    cb: CoinbaseService,
+    exchange: "ccxt.Exchange",
+    *,
+    product_id: str,
+    side: str,
+    net_size: float,
+    close_pct: float,
+    leverage: Optional[float] = None,
+    dry_run: bool = False,
+) -> bool:
+    """Close a percentage of an open position, then resync bracket sizes."""
+    logger = logging.getLogger(__name__)
+    try:
+        ccxt_symbol = _product_to_ccxt_symbol(product_id)
+    except ValueError as exc:
+        logger.warning("Cannot apply TP1 time-stop partial_close for %s: %s", product_id, exc)
+        return False
+
+    abs_size = abs(float(net_size))
+    close_pct = max(0.0, min(100.0, float(close_pct)))
+    close_qty = abs_size * (close_pct / 100.0)
+    if close_qty <= 0:
+        logger.warning("TP1 time-stop partial_close skipped for %s: close qty is zero.", product_id)
+        return False
+    if close_qty >= abs_size:
+        close_qty = abs_size * 0.5
+    if close_qty <= 0:
+        return False
+
+    stop_orders = _fetch_open_stop_orders(exchange, ccxt_symbol)
+    if not stop_orders:
+        logger.warning(
+            "TP1 time-stop partial_close skipped for %s: no stop/bracket orders found to resync.",
+            product_id,
+        )
+        return False
+
+    tp_selection = _select_tp_from_brackets(stop_orders, side)
+    sl_selection = _select_sl_from_brackets(stop_orders, side)
+    if not tp_selection or not sl_selection:
+        logger.warning(
+            "TP1 time-stop partial_close skipped for %s: could not extract TP/SL from brackets.",
+            product_id,
+        )
+        return False
+
+    tp_price, tp_end_time = tp_selection
+    sl_price, sl_end_time = sl_selection
+    end_time = tp_end_time or sl_end_time
+    close_side = "BUY" if side == "SHORT" else "SELL"
+
+    if dry_run:
+        logger.info(
+            "[DRY RUN] TP1 time-stop partial_close for %s: side=%s qty=%.6f (%.1f%%), "
+            "resync bracket tp=%.6f sl=%.6f",
+            product_id,
+            close_side,
+            close_qty,
+            close_pct,
+            tp_price,
+            sl_price,
+        )
+        return True
+
+    params = {
+        "reduceOnly": True,
+        "clientOrderId": f"tp1-time-stop-partial-{uuid.uuid4().hex[:16]}",
+    }
+    try:
+        result = exchange.create_order(
+            ccxt_symbol,
+            "market",
+            close_side.lower(),
+            close_qty,
+            None,
+            params,
+        )
+    except Exception as exc:
+        logger.warning("TP1 time-stop partial_close order failed for %s: %s", product_id, exc)
+        return False
+
+    if not _order_close_success(result):
+        logger.warning("TP1 time-stop partial_close rejected for %s: %s", product_id, result)
+        return False
+
+    positions_after = _get_positions_with_entry(cb)
+    updated = positions_after.get(product_id)
+    remaining_size = abs(float((updated or {}).get("net_size") or 0.0))
+    if remaining_size <= 1e-9:
+        # Position fully closed; clear old stops.
+        for order in stop_orders:
+            order_id = order.get("id")
+            if not order_id:
+                continue
+            try:
+                exchange.cancel_order(order_id, ccxt_symbol)
+            except Exception as exc:
+                logger.warning(
+                    "TP1 time-stop partial_close: failed to cancel old stop %s for %s: %s",
+                    order_id,
+                    product_id,
+                    exc,
+                )
+        logger.info("TP1 time-stop partial_close fully closed %s; no bracket re-place needed.", product_id)
+        return True
+
+    leverage_use = (updated or {}).get("leverage")
+    if leverage_use is None:
+        leverage_use = leverage
+
+    replace = _place_bracket_order(
+        exchange,
+        ccxt_symbol,
+        product_id,
+        side,
+        remaining_size,
+        tp_price,
+        sl_price,
+        leverage=leverage_use,
+        end_time_override=end_time,
+    )
+    if replace is None:
+        logger.warning(
+            "TP1 time-stop partial_close: replacement bracket failed for %s; old stops retained.",
+            product_id,
+        )
+        return False
+
+    canceled_count = 0
+    for order in stop_orders:
+        order_id = order.get("id")
+        if not order_id:
+            continue
+        try:
+            exchange.cancel_order(order_id, ccxt_symbol)
+            canceled_count += 1
+        except Exception as exc:
+            logger.warning(
+                "TP1 time-stop partial_close: failed cancel old stop %s for %s: %s",
+                order_id,
+                product_id,
+                exc,
+            )
+
+    if canceled_count == 0:
+        logger.warning(
+            "TP1 time-stop partial_close placed replacement bracket for %s but canceled no old stops; manual review advised.",
+            product_id,
+        )
+
+    logger.info(
+        "TP1 time-stop partial_close applied for %s: closed %.6f, remaining %.6f",
+        product_id,
+        close_qty,
+        remaining_size,
+    )
+    return True
+
+
+def _run_tp1_time_stop_once(
+    cb: CoinbaseService,
+    *,
+    portfolio_uuid: str,
+    positions: List[Any],
+    now_utc: datetime,
+    max_age_hours: float,
+    product_filter: Optional[str],
+    tp1_time_stop_hours: float,
+    tp1_time_stop_action: str,
+    tp1_time_stop_close_pct: float,
+    tp1_time_stop_side: str,
+    tp1_time_stop_grace_minutes: int,
+    tp1_time_stop_dry_run: bool,
+    tp1_time_stop_underwater_alt: bool,
+    tp1_time_stop_open_tolerance_seconds: int = 300,
+) -> int:
+    """Apply optional TP1 time-stop actions for eligible open positions."""
+    logger = logging.getLogger(__name__)
+    if not positions:
+        return 0
+    if tp1_time_stop_hours <= 0:
+        logger.warning("TP1 time-stop disabled because hours <= 0.")
+        return 0
+
+    checkpoint = _load_tp1_time_stop_checkpoint()
+    processed = set(checkpoint.get("processed_positions", []))
+    newly_processed: List[str] = []
+
+    positions_with_entry = _get_positions_with_entry(cb)
+    cutoff = now_utc - timedelta(hours=max(0.0, float(max_age_hours)))
+    action_default = _normalize_tp1_time_stop_action(tp1_time_stop_action)
+
+    exchange: Optional["ccxt.Exchange"] = None
+
+    def _ensure_exchange() -> Optional["ccxt.Exchange"]:
+        nonlocal exchange
+        if exchange is not None:
+            return exchange
+        try:
+            exchange = _ensure_ccxt_exchange()
+        except Exception as exc:
+            logger.error("Cannot initialize CCXT for TP1 time-stop: %s", exc)
+            exchange = None
+        return exchange
+
+    applied = 0
+    for pos in positions:
+        product_id, net_size, position_side, leverage = _extract_symbol_and_size(pos)
+        if not product_id or abs(net_size) <= 0:
+            continue
+        if product_filter and product_id != product_filter:
+            continue
+
+        normalized_side = _normalize_side(position_side, net_size)
+        if not _tp1_time_stop_side_allowed(normalized_side, tp1_time_stop_side):
+            continue
+
+        opened_at = _extract_position_open_time(pos)
+        if opened_at is None:
+            opened_at = _infer_open_time_from_orders(cb, portfolio_uuid, product_id, net_size, position_side)
+        if opened_at is None:
+            logger.debug("TP1 time-stop skipped for %s: missing open time.", product_id)
+            continue
+
+        # Let normal expiry logic handle positions already beyond hard max-age.
+        if opened_at <= cutoff:
+            continue
+
+        key = _tp1_time_stop_key(product_id, opened_at)
+        if key in processed:
+            continue
+
+        age_hours = (now_utc - opened_at).total_seconds() / 3600.0
+        if age_hours < tp1_time_stop_hours:
+            continue
+
+        if _position_has_tp1_hit(
+            product_id,
+            opened_at,
+            tolerance_seconds=tp1_time_stop_open_tolerance_seconds,
+        ):
+            logger.info(
+                "TP1 time-stop skipped for %s: TP1 already recorded for this position window.",
+                product_id,
+            )
+            newly_processed.append(key)
+            continue
+
+        latest_fill = _latest_filled_order_time(cb, portfolio_uuid, product_id)
+        if (
+            tp1_time_stop_grace_minutes > 0
+            and latest_fill is not None
+            and now_utc - latest_fill <= timedelta(minutes=tp1_time_stop_grace_minutes)
+        ):
+            logger.info(
+                "TP1 time-stop skipped for %s: recent fill at %s within %sm grace window.",
+                product_id,
+                _format_datetime(latest_fill),
+                tp1_time_stop_grace_minutes,
+            )
+            continue
+
+        position_info = positions_with_entry.get(product_id, {})
+        entry_price = _extract_entry_price(pos)
+        if entry_price is None:
+            entry_price = _coerce_numeric(position_info.get("entry_price"))
+        mark_price = _extract_mark_price(pos)
+        leverage_use = leverage
+        if leverage_use in ("", "1", None):
+            inferred_leverage = _coerce_numeric(position_info.get("leverage"))
+            if inferred_leverage is not None:
+                leverage_use = str(inferred_leverage)
+
+        action = _tp1_time_stop_action_for_position(
+            base_action=action_default,
+            underwater_alt=tp1_time_stop_underwater_alt,
+            position_side=normalized_side,
+            entry_price=entry_price,
+            mark_price=mark_price,
+        )
+
+        exchange_obj = _ensure_exchange()
+        if exchange_obj is None:
+            break
+
+        logger.info(
+            "Applying TP1 time-stop for %s (age=%.2fh, action=%s, side=%s)",
+            product_id,
+            age_hours,
+            action,
+            normalized_side,
+        )
+
+        success = False
+        if action == "partial_close":
+            success = _partial_close_position_for_time_stop(
+                cb,
+                exchange_obj,
+                product_id=product_id,
+                side=normalized_side,
+                net_size=net_size,
+                close_pct=tp1_time_stop_close_pct,
+                leverage=_coerce_numeric(leverage_use),
+                dry_run=tp1_time_stop_dry_run,
+            )
+        else:
+            success = _move_sl_to_entry_for_position(
+                cb,
+                exchange_obj,
+                product_id=product_id,
+                side=normalized_side,
+                net_size=net_size,
+                entry_price=entry_price,
+                leverage=_coerce_numeric(leverage_use),
+                opened_at=opened_at,
+                dry_run=tp1_time_stop_dry_run,
+            )
+
+        if success:
+            applied += 1
+            newly_processed.append(key)
+
+    if newly_processed and not tp1_time_stop_dry_run:
+        merged = list(processed) + newly_processed
+        # Keep only recent keys to avoid unbounded growth.
+        checkpoint["processed_positions"] = merged[-500:]
+        _store_tp1_time_stop_checkpoint(checkpoint)
+
+    return applied
 
 
 def _process_sl_moves_after_tp1(
@@ -3523,6 +4037,14 @@ def run_once(
     log_closures: bool = True,
     recent_order_grace_minutes: int = 30,
     dust_notional_usd: float = 0.0,
+    tp1_time_stop_enable: bool = False,
+    tp1_time_stop_hours: float = 12.0,
+    tp1_time_stop_action: str = "tighten_sl",
+    tp1_time_stop_close_pct: float = 50.0,
+    tp1_time_stop_side: str = "both",
+    tp1_time_stop_grace_minutes: int = 60,
+    tp1_time_stop_dry_run: bool = False,
+    tp1_time_stop_underwater_alt: bool = False,
 ) -> None:
     logger = logging.getLogger(__name__)
     cb = CoinbaseService(API_KEY_PERPS, API_SECRET_PERPS)
@@ -3556,6 +4078,29 @@ def run_once(
     now_utc = datetime.now(UTC)
     cutoff = now_utc - timedelta(hours=max_age_hours)
     logger.info(f"Closing positions opened before {_format_datetime(cutoff)}")
+
+    if tp1_time_stop_enable:
+        applied = _run_tp1_time_stop_once(
+            cb,
+            portfolio_uuid=portfolio_uuid,
+            positions=list(positions),
+            now_utc=now_utc,
+            max_age_hours=float(max_age_hours),
+            product_filter=product_filter,
+            tp1_time_stop_hours=float(tp1_time_stop_hours),
+            tp1_time_stop_action=tp1_time_stop_action,
+            tp1_time_stop_close_pct=float(tp1_time_stop_close_pct),
+            tp1_time_stop_side=tp1_time_stop_side,
+            tp1_time_stop_grace_minutes=int(tp1_time_stop_grace_minutes),
+            tp1_time_stop_dry_run=bool(tp1_time_stop_dry_run),
+            tp1_time_stop_underwater_alt=bool(tp1_time_stop_underwater_alt),
+        )
+        if applied:
+            logger.info(
+                "TP1 time-stop applied to %d position(s)%s.",
+                applied,
+                " [DRY RUN]" if tp1_time_stop_dry_run else "",
+            )
 
     for pos in positions:
         symbol, net_size, position_side, leverage = _extract_symbol_and_size(pos)
@@ -3786,6 +4331,24 @@ def main() -> None:
                     help="Move stop-loss to entry price after TP1 partial fill is detected")
     ap.add_argument("--move-sl-dry-run", action="store_true",
                     help="Dry run mode for --move-sl-after-tp1 (log actions without executing)")
+    ap.add_argument("--tp1-time-stop-enable", action="store_true",
+                    help="Enable TP1 time-stop protection for open positions that have not hit TP1")
+    ap.add_argument("--tp1-time-stop-hours", type=float, default=12.0,
+                    help="Hours since entry before TP1 time-stop may trigger (default 12)")
+    ap.add_argument("--tp1-time-stop-action", type=str, default="tighten_sl",
+                    choices=["tighten_sl", "partial_close"],
+                    help="Action when TP1 time-stop triggers")
+    ap.add_argument("--tp1-time-stop-close-pct", type=float, default=50.0,
+                    help="Percent to close when action=partial_close (default 50)")
+    ap.add_argument("--tp1-time-stop-side", type=str, default="both",
+                    choices=["both", "longs", "shorts"],
+                    help="Apply TP1 time-stop only to selected side")
+    ap.add_argument("--tp1-time-stop-grace-minutes", type=int, default=60,
+                    help="Skip TP1 time-stop if latest fill is within grace window (default 60m)")
+    ap.add_argument("--tp1-time-stop-dry-run", action="store_true",
+                    help="Dry run mode for TP1 time-stop actions")
+    ap.add_argument("--tp1-time-stop-underwater-alt", action="store_true",
+                    help="If enabled: underwater trades use partial_close, otherwise tighten_sl")
     ap.add_argument("--no-log-closures", action="store_true",
                     help="Skip writing age-based closure rows to watchdog_closed_positions.csv")
     ap.add_argument("--recent-order-grace-minutes", type=int, default=30,
@@ -3844,6 +4407,14 @@ def main() -> None:
                     log_closures=log_closures,
                     recent_order_grace_minutes=args.recent_order_grace_minutes,
                     dust_notional_usd=args.dust_notional_usd,
+                    tp1_time_stop_enable=bool(args.tp1_time_stop_enable),
+                    tp1_time_stop_hours=float(args.tp1_time_stop_hours),
+                    tp1_time_stop_action=str(args.tp1_time_stop_action),
+                    tp1_time_stop_close_pct=float(args.tp1_time_stop_close_pct),
+                    tp1_time_stop_side=str(args.tp1_time_stop_side),
+                    tp1_time_stop_grace_minutes=int(args.tp1_time_stop_grace_minutes),
+                    tp1_time_stop_dry_run=bool(args.tp1_time_stop_dry_run),
+                    tp1_time_stop_underwater_alt=bool(args.tp1_time_stop_underwater_alt),
                 )
             except Exception as e:
                 logging.getLogger(__name__).error(f"Watchdog iteration error: {e}")
@@ -3855,6 +4426,14 @@ def main() -> None:
             log_closures=log_closures,
             recent_order_grace_minutes=args.recent_order_grace_minutes,
             dust_notional_usd=args.dust_notional_usd,
+            tp1_time_stop_enable=bool(args.tp1_time_stop_enable),
+            tp1_time_stop_hours=float(args.tp1_time_stop_hours),
+            tp1_time_stop_action=str(args.tp1_time_stop_action),
+            tp1_time_stop_close_pct=float(args.tp1_time_stop_close_pct),
+            tp1_time_stop_side=str(args.tp1_time_stop_side),
+            tp1_time_stop_grace_minutes=int(args.tp1_time_stop_grace_minutes),
+            tp1_time_stop_dry_run=bool(args.tp1_time_stop_dry_run),
+            tp1_time_stop_underwater_alt=bool(args.tp1_time_stop_underwater_alt),
         )
 
 
